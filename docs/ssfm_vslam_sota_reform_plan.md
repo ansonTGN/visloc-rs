@@ -566,13 +566,51 @@ not coverage-starved.** The isolated 768-920 subrange builds to 0.56 cm rmse /
 0.94 cm max, and the full model restricted to the same window scores 0.32 cm
 rmse / 1.51 m max -- i.e. the region's internal geometry is sound even inside
 the full model. The 2.26 m only appears under the full-sequence global Sim(3)
-alignment, and the full model's local step-length ratios in 840-855 are wildly
-non-uniform (std 663-2048 vs ~1 for the isolated subrange). **Conclusion: the
-outlier is a local scale-gauge inconsistency accumulated by the full-sequence
-global composition of the monocular hierarchy, not a frontend matching defect.**
-This redirects the fix lever from frontend pair selection toward global scale
-consistency (seam Sim(3) scale accumulation, loop-anchored scale fixation, or
-explicit gauge regularization in the second global BA).
+alignment, and frame 855's window-local max grows with window size (0.83 m
+@800-880, 1.51 m @768-920, 2.00 m @700-1000, 2.26 m full). **Trajectory-jump
+evidence:** in the FULL model the consecutive pose steps around 855 literally
+break -- step 839->840 = 87.6, step 854->855 = 72.7, **step 855->856 = 263.4**
+vs a smooth ~3-9 everywhere else (GT ~0.03). The frame-855 pose is isolated
+from both neighbors by the global composition -- this is NOT smooth scale
+drift but a broken pose chain. **Conclusion: the outlier is a global-composition
+artifact of the monocular hierarchy (a pose pulled out of the chain by the
+global pose graph / second global BA), not a frontend matching defect.** Cheap
+discriminator next: rerun full MH_02 with `--no-submap-loop-ba
+--no-submap-loop-closure` (PGO-only, no loop edges) and check whether the
+step-855 jump disappears. This redirects the fix lever from frontend pair
+selection toward global scale/pose consistency (seam Sim(3) scale
+accumulation, loop-anchored scale fixation, gauge regularization in the second
+global BA).
+
+Cross-sequence comparison (08-06): MH_02's 840-855 break is UNIQUE to MH_02.
+Per-pose Sim(3)-aligned error shape across the four full MH runs:
+
+| seq | rmse | max | median | frames >3x median | character |
+| --- | --- | --- | --- | --- | --- |
+| MH_04 | 0.523 | 1.282 | 0.512 | 0.0% | uniform offset (frontend quality) |
+| MH_05 | 0.152 | 0.370 | 0.117 | 0.7% | near-uniform |
+| MH_01 | 0.098 | 0.253 | 0.081 | 0.0% | near-uniform |
+| MH_02 | 0.141 | 2.264 | 0.075 | ~1.2% (16 poses) | single broken pose chain @840-855 |
+
+MH_04/MH_05/MH_01 have NO pose-step jumps (>20x median: 11.6x / 15.2x / 13.9x
+max) whereas MH_02 has a 263.4 step (1000x median). The MH_04/MH_05 high ATE
+is a smooth, whole-trajectory offset -- consistent with the earlier
+frontend-quality diagnosis (dark segments, aggressive motion) and NOT the same
+mechanism as MH_02's local pose break. So the global-composition/scale
+investigation is specific to MH_02; MH_04/MH_05 remain frontend-quality
+problems.
+
+MH_02 outlier discriminator (08-06, in flight): submap 26 (832-920) carries
+many ACCEPTED loop edges to later submaps 137-143 (~frames 2760-3000); GT
+confirms frames 2856-2912 genuinely revisit the 832-920 location (0.04-0.17 m
+min distance), so these are real revisit loops carrying the only long-range
+scale constraints for that region. Hypothesis: a wrong Sim(3) scale on one of
+these loop edges pulls submap 26 (and with it frame 855) out of the pose chain.
+Discriminator run `MH_02\full_noloopba_nolc_discriminator_20260806\` disables
+BOTH loop closure and loop BA (pure chain+banded PGO, `--no-submap-loop-ba`,
+no `--submap-loop-closure`): if the step-855 jump (263.4) disappears, the loop
+edges are the culprit and the fix is loop-scale correctness; if it persists,
+the break is in seam/banded scale accumulation. Expected ~3 h.
 
 S3 — Hard-video robustness
 
