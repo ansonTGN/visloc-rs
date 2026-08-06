@@ -556,13 +556,23 @@ sequences).
 
 MH_02 outlier localization (08-06): the 226 cm max is a single localized
 region at **frames 840-855** (peak frame 855, 2.264 m; 16 poses > 0.5 m),
-inside submap 52 (832-920) overlapping 53 (848-936). No seam merge fired there;
-it is a fast-motion frontend segment (camera_center_step_max 0.798,
-window_drift_ratio 1.63). Three independent runs reproduce it -- the 08-04
-baseline, the 08-05 overlapfix rerun (identical 14.05 cm / same max), and the
-08-05 `--no-submap-loop-ba` rerun (13.95 cm, max 2.215 m) -- so it is not a
-merge or loop-BA artifact. This is the same frontend-coverage weakness as
-MH_04/MH_05, not a mapper defect.
+inside final submap 26 (832-920) overlapping 53 (848-936). No seam merge fired
+there; it is a fast-motion segment (GT forward acceleration 0.29->0.50 m per
+processed frame). Three independent runs reproduce it -- the 08-04 baseline,
+the 08-05 overlapfix rerun (identical 14.05 cm / same max), and the 08-05
+`--no-submap-loop-ba` rerun (13.95 cm, max 2.215 m) -- so it is not a merge or
+loop-BA artifact. **Root-cause diagnosis (08-06): the FRONTEND here is healthy,
+not coverage-starved.** The isolated 768-920 subrange builds to 0.56 cm rmse /
+0.94 cm max, and the full model restricted to the same window scores 0.32 cm
+rmse / 1.51 m max -- i.e. the region's internal geometry is sound even inside
+the full model. The 2.26 m only appears under the full-sequence global Sim(3)
+alignment, and the full model's local step-length ratios in 840-855 are wildly
+non-uniform (std 663-2048 vs ~1 for the isolated subrange). **Conclusion: the
+outlier is a local scale-gauge inconsistency accumulated by the full-sequence
+global composition of the monocular hierarchy, not a frontend matching defect.**
+This redirects the fix lever from frontend pair selection toward global scale
+consistency (seam Sim(3) scale accumulation, loop-anchored scale fixation, or
+explicit gauge regularization in the second global BA).
 
 S3 — Hard-video robustness
 
