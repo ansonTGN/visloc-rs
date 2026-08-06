@@ -598,7 +598,11 @@ is a smooth, whole-trajectory offset -- consistent with the earlier
 frontend-quality diagnosis (dark segments, aggressive motion) and NOT the same
 mechanism as MH_02's local pose break. So the global-composition/scale
 investigation is specific to MH_02; MH_04/MH_05 remain frontend-quality
-problems.
+problems. Spatial error profile (08-06): MH_04's mean error is 0.29-0.58 m
+across ALL ten frame-deciles -- uniformly bad everywhere, not one dark region;
+MH_05 is 0.07-0.24 m with a mild peak at frames 1136-1363. This means the
+MH_04/MH_05 lever is a SYSTEMIC frontend/matching-quality improvement, not a
+localized fix.
 
 MH_02 outlier discriminator (08-06, in flight): submap 26 (832-920) carries
 many ACCEPTED loop edges to later submaps 137-143 (~frames 2760-3000); GT
