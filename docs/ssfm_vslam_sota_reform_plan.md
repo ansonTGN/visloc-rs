@@ -602,7 +602,13 @@ problems. Spatial error profile (08-06): MH_04's mean error is 0.29-0.58 m
 across ALL ten frame-deciles -- uniformly bad everywhere, not one dark region;
 MH_05 is 0.07-0.24 m with a mild peak at frames 1136-1363. This means the
 MH_04/MH_05 lever is a SYSTEMIC frontend/matching-quality improvement, not a
-localized fix.
+localized fix. Error-direction profile (08-06): after Sim(3) alignment MH_04's
+per-axis rms is x=0.174 / y=0.374 / z=0.322 m -- lateral (y) and vertical (z)
+dominate forward (x); MH_05 is x=0.088 / y=0.105 / z=0.067 m with y largest.
+A lateral/vertical-dominant error is consistent with a frontend whose matched
+features cluster along the forward axis (weakly constraining the perpendicular
+directions) -- a matching-coverage / feature-distribution hypothesis to test
+in the frontend slice, distinct from MH_02's single-pose break.
 
 MH_02 outlier discriminator (08-06, in flight): submap 26 (832-920) carries
 many ACCEPTED loop edges to later submaps 137-143 (~frames 2760-3000); GT
