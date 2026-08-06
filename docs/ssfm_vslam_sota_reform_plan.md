@@ -610,6 +610,16 @@ features cluster along the forward axis (weakly constraining the perpendicular
 directions) -- a matching-coverage / feature-distribution hypothesis to test
 in the frontend slice, distinct from MH_02's single-pose break.
 
+MH_02 local-scale measurement (08-06): the full model's LOCAL scale (model
+step / GT step, median over ranges) is 106.7 before the break (100-800), 180.6
+after (1000-2800), and **326.8 in the broken 840-850 span** -- a 3.06x local
+scale over-expansion vs before. So the MH_02 outlier is not just a single pose
+flung out of the chain: the trajectory around 855 is locally stretched at ~3x
+the surrounding scale. This is exactly what a wrong Sim(3) scale on a loop edge
+incident on submap 26 would produce (the loop's target-from-source scale is
+the only independent scale signal into the pose graph for that region), and
+it is consistent with the in-flight discriminator run (loop closure OFF).
+
 MH_02 outlier discriminator (08-06, in flight): submap 26 (832-920) carries
 many ACCEPTED loop edges to later submaps 137-143 (~frames 2760-3000); GT
 confirms frames 2856-2912 genuinely revisit the 832-920 location (0.04-0.17 m
