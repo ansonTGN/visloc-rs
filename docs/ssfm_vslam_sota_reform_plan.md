@@ -618,9 +618,12 @@ flung out of the chain: the trajectory around 855 is locally stretched at ~3x
 the surrounding scale. This is exactly what a wrong Sim(3) scale on a loop edge
 incident on submap 26 would produce (the loop's target-from-source scale is
 the only independent scale signal into the pose graph for that region), and
-it is consistent with the in-flight discriminator run (loop closure OFF).
+it is consistent with the in-flight discriminator run (loop closure OFF). The
+discriminator has since REJECTED the loop-scale hypothesis (see below): the
+855 break persists without any loop edge, so the over-expansion is seam/banded
+scale accumulation, not loop scale.
 
-MH_02 outlier discriminator (08-06, in flight): submap 26 (832-920) carries
+MH_02 outlier discriminator (08-06, COMPLETE): submap 26 (832-920) carries
 many ACCEPTED loop edges to later submaps 137-143 (~frames 2760-3000); GT
 confirms frames 2856-2912 genuinely revisit the 832-920 location (0.04-0.17 m
 min distance), so these are real revisit loops carrying the only long-range
@@ -628,9 +631,20 @@ scale constraints for that region. Hypothesis: a wrong Sim(3) scale on one of
 these loop edges pulls submap 26 (and with it frame 855) out of the pose chain.
 Discriminator run `MH_02\full_noloopba_nolc_discriminator_20260806\` disables
 BOTH loop closure and loop BA (pure chain+banded PGO, `--no-submap-loop-ba`,
-no `--submap-loop-closure`): if the step-855 jump (263.4) disappears, the loop
-edges are the culprit and the fix is loop-scale correctness; if it persists,
-the break is in seam/banded scale accumulation. Expected ~3 h.
+no `--submap-loop-closure`). **Verdict (08-07): LOOP-EDGE HYPOTHESIS
+REJECTED.** The step-855 jump PERSISTS without any loop edge: 854->855 = 76.0,
+855->856 = 275.5 (vs 72.7 / 263.4 with loop closure on -- statistically the
+same size). The discriminator model's Sim(3) ATE is 32.80 cm rmse / max 2.076 m
+(worse than the 14.05 cm with loops, because removing loops also removed the
+only long-range scale anchors -- but the local 855 break is unchanged).
+**Conclusion: the 840-855 pose break is caused by seam/banded Sim(3) scale
+accumulation along the submap chain, NOT by loop-edge scale.** The break is
+present in the pure chain+banded pose graph itself. Fix lever narrows to:
+seam Sim(3) scale estimation/accumulation (why does submap 26's chain-side
+scale over-expand ~3x?), banded-edge scale consistency, and gauge
+regularization in the global PGO/BA. Note the discriminator was ~2.7x slower
+than the 08-04 baseline under concurrent system load (MsMpEng/EpicGames etc.),
+so wall-clock comparisons against archived runs are not meaningful.
 
 S3 — Hard-video robustness
 
