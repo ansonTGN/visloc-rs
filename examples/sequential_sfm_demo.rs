@@ -111,6 +111,63 @@ use visloc_rs::{
 /// A COLMAP-export landmark: world position + `(image, keypoint, pixel)` track.
 type ExportLandmark = (Point3<f64>, Vec<(usize, usize, Point2<f64>)>);
 
+// This is an export-time arbitration threshold, not a new reconstruction
+// acceptance gate. It mirrors the existing default local-submap scale sanity
+// threshold while keeping ordinary overlap ownership byte-identical.
+const EXPORT_OVERLAP_STEP_RATIO_THRESHOLD: f64 = 30.0;
+const EXPORT_OVERLAP_STEP_RATIO_IMPROVEMENT: f64 = 2.0;
+
+#[derive(Debug, Clone)]
+struct ExportPoseCandidate {
+    node_id: u64,
+    pose: Pose,
+    step_outlier_ratio: f64,
+}
+
+fn export_step_outlier_ratio(step_median: f64, step_max: f64) -> f64 {
+    if step_median > 1.0e-9 {
+        step_max / step_median
+    } else if step_max > 1.0e-9 {
+        f64::INFINITY
+    } else {
+        0.0
+    }
+}
+
+/// Keep the historical earliest-submap owner unless it is clearly the
+/// pathological duplicate. Overlapping submaps already contain independent
+/// poses for the same source frame; choosing a healthier duplicate avoids
+/// exporting a single bad pose while preserving the normal path exactly.
+fn choose_export_pose_candidate(candidates: &[ExportPoseCandidate]) -> usize {
+    let Some(earliest) = candidates.first() else {
+        return 0;
+    };
+    let Some((best_index, best)) = candidates
+        .iter()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| {
+            left.step_outlier_ratio
+                .total_cmp(&right.step_outlier_ratio)
+                .then_with(|| left.node_id.cmp(&right.node_id))
+        })
+    else {
+        return 0;
+    };
+    if best_index == 0 || earliest.step_outlier_ratio <= EXPORT_OVERLAP_STEP_RATIO_THRESHOLD {
+        return 0;
+    }
+    let improvement = if best.step_outlier_ratio <= 1.0e-12 {
+        f64::INFINITY
+    } else {
+        earliest.step_outlier_ratio / best.step_outlier_ratio
+    };
+    if improvement >= EXPORT_OVERLAP_STEP_RATIO_IMPROVEMENT {
+        best_index
+    } else {
+        0
+    }
+}
+
 #[derive(Debug, Clone)]
 struct VerifiedPair {
     pairwise: PairwiseMatches,
@@ -153,6 +210,8 @@ struct Args {
     submap_boundary_search_radius: usize,
     submap_min_shared_observations: usize,
     submap_build_threads: usize,
+    submap_widen_budget: usize,
+    submap_seam_merge_budget: usize,
     submap_camera_scale_refinement: bool,
     submap_constraint_band: usize,
     submap_loop_closure: bool,
@@ -168,6 +227,10 @@ struct Args {
 }
 
 fn parse_args() -> Result<Args, String> {
+    parse_args_from(env::args().skip(1).collect())
+}
+
+fn parse_args_from(mut a: Vec<String>) -> Result<Args, String> {
     let mut features_dir = None;
     let mut feature_suffix = String::from("_features.txt");
     let mut image_suffix = String::from(".png");
@@ -204,6 +267,8 @@ fn parse_args() -> Result<Args, String> {
     let mut submap_boundary_search_radius = 16usize;
     let mut submap_min_shared_observations = 2usize;
     let mut submap_build_threads = 2usize;
+    let mut submap_widen_budget = 16usize;
+    let mut submap_seam_merge_budget = 16usize;
     let mut submap_camera_scale_refinement = false;
     let mut submap_constraint_band = 4usize;
     let mut submap_loop_closure = false;
@@ -217,7 +282,6 @@ fn parse_args() -> Result<Args, String> {
     let mut submap_seam_ba_filter_px: Option<f64> = None;
     let mut parallel_ba = false;
 
-    let mut a: Vec<String> = env::args().skip(1).collect();
     let mut i = 0;
     while i < a.len() {
         match a[i].as_str() {
@@ -323,6 +387,12 @@ fn parse_args() -> Result<Args, String> {
             }
             "--submap-build-threads" => {
                 submap_build_threads = a.remove(i + 1).parse().map_err(|e| format!("{e}"))?
+            }
+            "--submap-widen-budget" => {
+                submap_widen_budget = a.remove(i + 1).parse().map_err(|e| format!("{e}"))?
+            }
+            "--submap-seam-merge-budget" => {
+                submap_seam_merge_budget = a.remove(i + 1).parse().map_err(|e| format!("{e}"))?
             }
             "--submap-camera-scale-refinement" => submap_camera_scale_refinement = true,
             "--submap-constraint-band" => {
@@ -439,6 +509,8 @@ fn parse_args() -> Result<Args, String> {
         submap_boundary_search_radius,
         submap_min_shared_observations,
         submap_build_threads,
+        submap_widen_budget,
+        submap_seam_merge_budget,
         submap_camera_scale_refinement,
         submap_constraint_band,
         submap_loop_closure,
@@ -1511,29 +1583,54 @@ fn export_hierarchical_result(
     image_names: &[String],
     result: &HierarchicalSfmResult,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Export every overlap image exactly once, from the earliest submap that
-    // registered it, so COLMAP image/keypoint identity stays unambiguous.
-    let mut owner = BTreeMap::<u64, u64>::new();
-    let mut poses_by_frame = BTreeMap::<u64, Pose>::new();
+    // Export every overlap image exactly once so COLMAP image/keypoint identity
+    // stays unambiguous. The earliest owner remains the default, but a clearly
+    // pathological earliest duplicate may yield to a healthier overlapping
+    // submap using only internal pose-quality evidence.
+    let mut candidates_by_frame = BTreeMap::<u64, Vec<ExportPoseCandidate>>::new();
     for node in result.atlas.hierarchy.nodes() {
         let local_from_atlas = node
             .local_from_atlas
             .as_ref()
             .expect("successful hierarchy leaves every node aligned");
         let atlas_from_local = local_from_atlas.inverse();
+        let step_outlier_ratio = export_step_outlier_ratio(
+            node.submap.quality.camera_center_step_median,
+            node.submap.quality.camera_center_step_max,
+        );
         for frame in &node.submap.frames {
-            if owner.contains_key(&frame.source_frame_id) {
-                continue;
-            }
             let rotation = frame.pose.world_to_camera.rotation * local_from_atlas.rotation;
             let centre_atlas = atlas_from_local.transform_point(&frame.pose.camera_center_world());
             let translation = -(rotation * centre_atlas.coords);
-            owner.insert(frame.source_frame_id, node.id);
-            poses_by_frame.insert(
-                frame.source_frame_id,
-                Pose::from_world_to_camera(rotation, translation),
+            candidates_by_frame
+                .entry(frame.source_frame_id)
+                .or_default()
+                .push(ExportPoseCandidate {
+                    node_id: node.id,
+                    pose: Pose::from_world_to_camera(rotation, translation),
+                    step_outlier_ratio,
+                });
+        }
+    }
+
+    let mut owner = BTreeMap::<u64, u64>::new();
+    let mut poses_by_frame = BTreeMap::<u64, Pose>::new();
+    for (frame_id, candidates) in candidates_by_frame {
+        let selected_index = choose_export_pose_candidate(&candidates);
+        let selected = &candidates[selected_index];
+        if selected_index != 0 {
+            eprintln!(
+                "hierarchical-export-overlap-reselect: frame {frame_id} owner {} -> {} \
+                 earliest_step_ratio={:.4} selected_step_ratio={:.4} candidates={}",
+                candidates[0].node_id,
+                selected.node_id,
+                candidates[0].step_outlier_ratio,
+                selected.step_outlier_ratio,
+                candidates.len(),
             );
         }
+        owner.insert(frame_id, selected.node_id);
+        poses_by_frame.insert(frame_id, selected.pose.clone());
     }
 
     let registered = poses_by_frame.keys().copied().collect::<Vec<_>>();
@@ -1874,6 +1971,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         hierarchical_config.partition.max_images = args.submap_max_images;
         hierarchical_config.partition.overlap_images = args.submap_overlap_images;
         hierarchical_config.partition.boundary_search_radius = args.submap_boundary_search_radius;
+        hierarchical_config.partition.max_widen_merges = args.submap_widen_budget;
+        hierarchical_config.max_degenerate_seam_merges = args.submap_seam_merge_budget;
         // `min_post_widen_overlap_images` is deliberately left at
         // `HierarchicalSfmConfig::default()`'s small constant (see
         // `AdaptiveSubmapPartitionConfig`'s doc comment) rather than mirrored
@@ -2119,6 +2218,91 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn required_cli_args() -> Vec<String> {
+        [
+            "--features-dir",
+            "features",
+            "--out-colmap",
+            "model",
+            "--width",
+            "752",
+            "--height",
+            "480",
+            "--fx",
+            "458.6",
+            "--fy",
+            "457.3",
+            "--cx",
+            "367.2",
+            "--cy",
+            "248.4",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+    }
+
+    #[test]
+    fn submap_widen_budget_cli_preserves_default_and_accepts_override() {
+        let defaults = parse_args_from(required_cli_args()).unwrap();
+        assert_eq!(defaults.submap_widen_budget, 16);
+
+        let mut overridden = required_cli_args();
+        overridden.extend(["--submap-widen-budget".into(), "48".into()]);
+        assert_eq!(parse_args_from(overridden).unwrap().submap_widen_budget, 48);
+    }
+
+    #[test]
+    fn submap_seam_merge_budget_cli_preserves_default_and_accepts_override() {
+        let defaults = parse_args_from(required_cli_args()).unwrap();
+        assert_eq!(defaults.submap_seam_merge_budget, 16);
+
+        let mut overridden = required_cli_args();
+        overridden.extend(["--submap-seam-merge-budget".into(), "48".into()]);
+        assert_eq!(
+            parse_args_from(overridden)
+                .unwrap()
+                .submap_seam_merge_budget,
+            48
+        );
+    }
+
+    fn export_pose_candidate(node_id: u64, step_outlier_ratio: f64) -> ExportPoseCandidate {
+        ExportPoseCandidate {
+            node_id,
+            pose: Pose::from_world_to_camera(
+                UnitQuaternion::identity(),
+                nalgebra::Vector3::zeros(),
+            ),
+            step_outlier_ratio,
+        }
+    }
+
+    #[test]
+    fn overlap_export_keeps_earliest_healthy_owner() {
+        let candidates = vec![export_pose_candidate(3, 2.0), export_pose_candidate(7, 1.5)];
+        assert_eq!(choose_export_pose_candidate(&candidates), 0);
+    }
+
+    #[test]
+    fn overlap_export_reselects_a_clearly_healthier_duplicate() {
+        let candidates = vec![
+            export_pose_candidate(3, 47.0),
+            export_pose_candidate(7, 2.0),
+            export_pose_candidate(8, 2.5),
+        ];
+        assert_eq!(choose_export_pose_candidate(&candidates), 1);
+    }
+
+    #[test]
+    fn overlap_export_does_not_switch_for_a_marginal_improvement() {
+        let candidates = vec![
+            export_pose_candidate(3, 40.0),
+            export_pose_candidate(7, 25.0),
+        ];
+        assert_eq!(choose_export_pose_candidate(&candidates), 0);
+    }
 
     #[test]
     fn pose_only_offset_pairs_are_bounded_sorted_and_strided() {

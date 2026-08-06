@@ -512,7 +512,59 @@ time without further tuning. Export now also welds only R2-inlier local landmark
 groups into one deduplicated multi-view COLMAP track; all unwelded points remain
 submap-owned, so unverified cross-seam observations cannot be merged.
 
-### S3 — Hard-video robustness
+S2 terminal, full MH_03 head-to-head (committed `fcbc95d`, 2026-07-31):
+the frozen 2700-frame monocular policy (trusted 8/12 stride 2, pose-graph
+20/30 stride 2, `--wide-hypothesis --post-refinement-registration
+--structureless-registration`, COLMAP SIFT/Ceres, `--capture-registry`) run with
+the hierarchical + global-consistency stack beats COLMAP 4.1 on both axes:
+**ATE Sim(3) 3.82 cm vs 4.94 cm (-22.7%)** and **wall 4 h 08 m vs 10.36 h
+(2.5x faster)**, 2700/2700 registered under the frozen evaluation protocol
+(Sim(3) primary). Root cause of the earlier 22.41 cm result was segment-
+composition drift: the submap Sim(3) pose graph was a pure spanning tree
+(adjacent edges only, a mathematical no-op). The landed fix ladder -- banded
+submap constraints (`--submap-constraint-band`), submap loop closure
+(`--submap-loop-closure`, `hierarchical_loop_closure.rs`), post-seam-BA Sim(3)
+PGO with loop-landmark welds and a convergence-stopped second global BA
+(`--submap-loop-ba`), and seam BA (`--submap-seam-ba*`) -- gives the pose graph
+real cycles. Evidence (hash-frozen):
+`E:/visloc_archive/sota_s2_hierarchical_mh03_full2700_postfix_20260727/attempt10_loopweld_retri/evaluation/`.
+This closes the S2 gate on the full sequence. All mechanisms are flag-gated,
+off by default; the frozen config without flags is bit-identical.
+
+Full-EuRoC sweep (2026-07-31..08-05, per-sequence attempt-10 config +
+remediation budgets 48, 6 build threads; run books + binary SHA in
+`E:/visloc_archive/sota_full_euroc_sweep_20260731/`):
+
+| seq | frames | ATE Sim(3) RMSE | notes |
+| --- | --- | --- | --- |
+| MH_03 | 2700 | **3.82 cm** | the committed win; light remediation (3 merges) |
+| MH_01 | 3682 | 9.85 cm | PGO-only fallback; loop-BA rerun (08-05) is 9.84 cm -- no loop-BA gain, scale-16 hover pathology persists |
+| MH_05 | 2273 | 15.24 cm | dark segments; ~8 merges + 1 last-resort |
+| MH_04 | 2032 | 52.28 cm | aggressive motion; 13 merges incl. 5 last-resort -- completion bought at accuracy cost |
+| MH_02 | 3040 | 14.05 cm | mean 9.07 / median 7.48 / **max 226 cm**; 7 consensus + 12 drift + 2 last-resort merges |
+
+Central empirical finding: remediation intensity correlates with ATE
+degradation (3 merges -> 3.82 cm MH_03; ~8 -> 15.24 cm MH_05; 13 -> 52.28 cm
+MH_04; 21 -> 14.05 cm MH_02). Seam rejections are true signals of broken
+frontend geometry (dark segments, aggressive motion); forced merges preserve
+registration completeness but stitch distorted geometry. This matches the
+older ETH3D verdict: the COLMAP gap is frontend coverage / view graph, not the
+mapper. Full-sequence COLMAP baselines for MH_01/02/04/05 do NOT exist yet
+(owner approval required before running them; COLMAP already lost the MH_04
+300f held-out 6.51 vs 1.07 cm, so do not assume COLMAP wins the difficult
+sequences).
+
+MH_02 outlier localization (08-06): the 226 cm max is a single localized
+region at **frames 840-855** (peak frame 855, 2.264 m; 16 poses > 0.5 m),
+inside submap 52 (832-920) overlapping 53 (848-936). No seam merge fired there;
+it is a fast-motion frontend segment (camera_center_step_max 0.798,
+window_drift_ratio 1.63). Three independent runs reproduce it -- the 08-04
+baseline, the 08-05 overlapfix rerun (identical 14.05 cm / same max), and the
+08-05 `--no-submap-loop-ba` rerun (13.95 cm, max 2.215 m) -- so it is not a
+merge or loop-BA artifact. This is the same frontend-coverage weakness as
+MH_04/MH_05, not a mapper defect.
+
+S3 — Hard-video robustness
 
 - Add motion/blur/dynamic-region quality scores to edge selection, not to the
   geometry acceptance threshold.
@@ -1126,25 +1178,27 @@ time.
 
 ## 7. Immediate next three slices
 
-1. **S1/S2 terminal evidence:** leave the protected frozen MH_03 2700-frame S1
-   process untouched, validate its complete manifest, accuracy, registration,
-   stage time, and sampled resources at exit, then allow the already-queued
-   clean `03973813` S2 build/run to execute alone. Compare S2 against S1 only
-   after both terminal artifacts pass completeness checks; do not treat the
-   concurrently contaminated S1 wall clock as a pristine headline timing.
-2. **Frozen held-out SSfM:** after S2 exits, allow the queued official archive
-   download and GT-free extraction to finish, then execute the hash-frozen
-   three-sequence serial suite once. Preserve every COLMAP, GLUEMAP, and
-   InstantSfM failure as a DNF cell, verify the deferred-GT transaction and
-   release audit, and keep the SOTA claim false until the independent ORBIT
-   gate and public-release requirements exist.
-3. **R1e then VSLAM:** only after the timing-sensitive S1/S2 controls finish,
-   install the pinned MASt3R-SLAM backend and run the prepared two-process
-   dense-submap gate. Feed a scale edge to R2 only if independent held-out
-   support clears the frozen 0.60 consensus criterion. If it passes, use that
-   independent source (or a visual-only shadow state) for continuous metric
-   coupling before any 11-sequence V4 freeze; if it fails, record the negative
-   and replace the measurement source rather than weakening the gate.
+1. **S1/S2 terminal evidence:** S2 is closed on full MH_03 (see the S2 terminal
+   block above, committed `fcbc95d`). The full-EuRoC sweep (MH_01/02/04/05)
+   has run to completion; the remediation fix-ladder that made it possible
+   (consensus-merge routing, connected-component rebuilds, exponential widen
+   escalation, last-resort merge, component-rebuild remediation,
+   `--submap-seam-merge-budget`, and the loop-BA OOM fix) is committed with
+   this milestone.
+2. **Frontend robustness (the real accuracy lever):** MH_04 52.28 cm,
+   MH_05 15.24 cm, and the MH_02 840-855 outlier are all dark-segment /
+   aggressive-motion frontend failures, not mapper failures. Options to
+   evaluate as a design slice: better low-light matching, motion-adaptive pair
+   selection (DROID-style), and proximity-based loop candidates as a complement
+   to descriptor cosine. A second remediation pass on post-merge outlier
+   regions (flag and re-solve instead of forcing one stitch) is the cheap
+   first candidate.
+3. **Frozen held-out SSfM + COLMAP baselines:** the three-sequence
+   V1_02/V1_03/V2_02 held-out suite and the sweep's missing COLMAP baselines
+   are queued behind owner approval (COLMAP-arms queue was explicitly rejected
+   on 08-03; get fresh approval). MH_02 full is also the natural fresh
+   held-out for the program-level SfM gate (three untouched ordered sequences,
+   one config).
 
 ## 8. Stop rules
 

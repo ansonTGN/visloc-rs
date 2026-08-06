@@ -3868,18 +3868,6 @@ fn solve_step(
         },
         LinearSolver::Sparse => {
             let dim = total_dim;
-            // Collect the structural nonzeros of the reduced system once. Both
-            // back-ends consume the same triplet list; its sparsity pattern is
-            // dictated by which pose pairs share a landmark observation.
-            let mut triplets: Vec<(usize, usize, f64)> = Vec::new();
-            for c in 0..dim {
-                for r in 0..dim {
-                    let v = s[(r, c)];
-                    if v != 0.0 {
-                        triplets.push((r, c, v));
-                    }
-                }
-            }
             let rhs = DMatrix::from_column_slice(dim, 1, b_reduced.as_slice());
 
             // Pose and IMU-bias variables are 6×6 diagonal blocks, so when the
@@ -3891,13 +3879,24 @@ fn solve_step(
             // systems interleave 3-DOF velocities, breaking the uniform tiling,
             // so they fall back to the scalar `CscCholesky` factorization.
             let sol = if v_count == 0 {
+                // The reduced Hessian is already dense. Feed its lower blocks
+                // directly to block Cholesky so a large temporary
+                // Vec<(usize, usize, f64)> is never materialized.
+                let triplets = crate::block_cholesky::DenseBlockTriplets::new(&s, 6);
                 crate::block_cholesky::solve_spd_block(&triplets, dim, 6, &rhs, 0.0)
                     .map_err(|_| BaError::SingularSystem)?
             } else {
                 use nalgebra_sparse::{factorization::CscCholesky, CooMatrix, CscMatrix};
                 let mut coo = CooMatrix::<f64>::new(dim, dim);
-                for &(r, c, v) in &triplets {
-                    coo.push(r, c, v);
+                // The mixed velocity layout cannot use the block backend, but
+                // it still does not need an intermediate triplet Vec.
+                for c in 0..dim {
+                    for r in 0..dim {
+                        let v = s[(r, c)];
+                        if v != 0.0 {
+                            coo.push(r, c, v);
+                        }
+                    }
                 }
                 let csc = CscMatrix::from(&coo);
                 let chol = CscCholesky::factor(&csc).map_err(|_| BaError::SingularSystem)?;

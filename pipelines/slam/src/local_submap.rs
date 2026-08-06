@@ -125,9 +125,10 @@ pub struct LocalSubmapQualityConfig {
     /// evidence directory for the calibration table this default was chosen
     /// from.
     pub max_camera_center_window_drift_ratio: f64,
-    /// Bound on the cheap same-window seed retry (§6(b)): before declaring a
-    /// window's build failed for `ImplausibleScale` specifically, retry with
-    /// the next seed candidate from `seed_candidate_order`'s deterministic
+    /// Bound on the cheap same-window seed retry (§6(b)): before declaring an
+    /// ordinary window's build failed for `ImplausibleScale`, or a
+    /// seam-merged component failed for any quality rejection, retry with the
+    /// next seed candidate from `seed_candidate_order`'s deterministic
     /// descending-match-count order, excluding every seed pair already tried
     /// this build. `0` disables the retry (the first pathological result
     /// fails immediately, still routed to the widen/merge machinery like
@@ -405,6 +406,32 @@ impl LocalSubmapBuilder {
         features: &[FeatureSet],
         pairwise: &[PairwiseMatches],
     ) -> Result<LocalSubmap, LocalSubmapBuildError> {
+        self.build_with_retry_scope(camera, source_frame_ids, features, pairwise, false)
+    }
+
+    /// Build a seam-merged component. Unlike an ordinary planned window,
+    /// every build-time quality rejection is eligible for the existing
+    /// bounded alternate-seed retry before the caller considers widening the
+    /// component. `NoSeedPair` has no candidate to exclude and therefore
+    /// returns immediately for the caller's widen remediation.
+    pub(crate) fn build_merged_component(
+        &self,
+        camera: &Camera,
+        source_frame_ids: &[u64],
+        features: &[FeatureSet],
+        pairwise: &[PairwiseMatches],
+    ) -> Result<LocalSubmap, LocalSubmapBuildError> {
+        self.build_with_retry_scope(camera, source_frame_ids, features, pairwise, true)
+    }
+
+    fn build_with_retry_scope(
+        &self,
+        camera: &Camera,
+        source_frame_ids: &[u64],
+        features: &[FeatureSet],
+        pairwise: &[PairwiseMatches],
+        merged_component: bool,
+    ) -> Result<LocalSubmap, LocalSubmapBuildError> {
         validate_inputs(source_frame_ids, features, pairwise)?;
 
         // (b) cheap same-window seed retry (NOROBUSTFIT_CLUSTER_DIAGNOSIS.md
@@ -412,9 +439,11 @@ impl LocalSubmapBuilder {
         // is retried, up to `max_scale_pathology_seed_retries` times, on the
         // *next* seed candidate in `seed_candidate_order`'s deterministic
         // descending-match-count order rather than being declared a failure
-        // immediately. Every other rejection reason (including a plain
-        // `IncrementalSfmError`, e.g. `NoSeedPair`) is unaffected and still
-        // fails on the first attempt. Bounded and deterministic: each retry
+        // immediately. Merged-component rebuilds extend that same mechanism
+        // to every quality rejection; ordinary windows retain the narrower
+        // scale-pathology policy. A plain `IncrementalSfmError`, e.g.
+        // `NoSeedPair`, is unaffected and fails on the first attempt. Bounded
+        // and deterministic: each retry
         // excludes every seed pair already tried this call, so the sequence
         // of candidates tried is fixed by the input alone.
         let max_retries = self.config.quality.max_scale_pathology_seed_retries;
@@ -438,17 +467,21 @@ impl LocalSubmapBuilder {
                 self.config.quality.camera_center_drift_window_count,
             );
             let reason = rejection_reason(&quality, &self.config.quality);
-            if reason == Some(LocalSubmapRejectionReason::ImplausibleScale) && attempt < max_retries
+            if reason.is_some_and(|reason| quality_rejection_retries_seed(reason, merged_component))
+                && attempt < max_retries
             {
                 attempt += 1;
                 let step_ratio = camera_center_step_outlier_ratio(&quality);
                 let seed_drift_ratio = seed_pair_scale_drift_ratio(&quality);
                 eprintln!(
-                    "hierarchical-scale-pathology-retry: seed=({}, {}) attempt={}/{} \
+                    "hierarchical-scale-pathology-retry: component_rebuild={} reason={:?} \
+                     seed=({}, {}) attempt={}/{} \
                      diameter={:.4} median_step={:.6} max_step={:.6} step_ratio={:.4} \
                      step_threshold={:.4} seed_pair_final_distance={:.6} \
                      seed_drift_ratio={:.4} seed_drift_threshold={:.4}; \
                      retrying with next seed candidate",
+                    merged_component,
+                    reason.expect("retry requires a quality rejection"),
                     result.seed_image_i,
                     result.seed_image_j,
                     attempt,
@@ -468,9 +501,10 @@ impl LocalSubmapBuilder {
                     > self.config.quality.max_camera_center_window_drift_ratio
                 {
                     eprintln!(
-                        "hierarchical-scale-drift-retry: seed=({}, {}) attempt={}/{} \
+                        "hierarchical-scale-drift-retry: component_rebuild={} seed=({}, {}) attempt={}/{} \
                          window_count={} window_drift_ratio={:.4} window_drift_threshold={:.4}; \
                          retrying with next seed candidate",
+                        merged_component,
                         result.seed_image_i,
                         result.seed_image_j,
                         attempt,
@@ -548,6 +582,13 @@ impl LocalSubmapBuilder {
             seed_match_count: result.seed_match_count,
         })
     }
+}
+
+fn quality_rejection_retries_seed(
+    reason: LocalSubmapRejectionReason,
+    merged_component: bool,
+) -> bool {
+    reason == LocalSubmapRejectionReason::ImplausibleScale || merged_component
 }
 
 fn validate_inputs(
@@ -1153,6 +1194,40 @@ mod tests {
             ),
             Some(LocalSubmapRejectionReason::HighLeaveOneOutReprojection)
         );
+    }
+
+    #[test]
+    fn merged_component_quality_failure_advances_to_next_seed_candidate() {
+        // Model the bounded candidate walk used by `build_with_retry_scope`:
+        // candidate zero fails the measured MH_05 gate, candidate one passes.
+        // The policy must advance for a merged component, while an ordinary
+        // window keeps non-scale quality failures on its widening path.
+        let candidates = [
+            Err(LocalSubmapRejectionReason::HighReprojectionError),
+            Ok("next-seed-pass"),
+        ];
+        let mut attempted = 0usize;
+        let result = loop {
+            let candidate = candidates[attempted];
+            attempted += 1;
+            match candidate {
+                Ok(value) => break Ok(value),
+                Err(reason) if attempted <= 3 && quality_rejection_retries_seed(reason, true) => {
+                    continue;
+                }
+                Err(reason) => break Err(reason),
+            }
+        };
+        assert_eq!(result, Ok("next-seed-pass"));
+        assert_eq!(attempted, 2);
+        assert!(!quality_rejection_retries_seed(
+            LocalSubmapRejectionReason::HighReprojectionError,
+            false
+        ));
+        assert!(quality_rejection_retries_seed(
+            LocalSubmapRejectionReason::LowParallax,
+            true
+        ));
     }
 
     /// A relaxed gate config that only lets the scale-sanity check itself
