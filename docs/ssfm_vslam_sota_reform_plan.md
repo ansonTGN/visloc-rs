@@ -799,6 +799,17 @@ scale log (the seam(s) incident on submap 26 should show scale ~0.33 or ~3.0
 vs ~1.0 elsewhere). Next experiment: a full MH_02 run with the seam-scale log
 to read submap 26's incoming/outgoing seam scales.
 
+Coherent-run arbitration FIX (08-07, `f893ba0`): `choose_export_pose_candidates_coherent`
+now arbitrates contiguous overlap runs to one gauge instead of per-frame, so
+adjacent frames cannot strand on different submap gauges (the 855/856
+mechanism). Two unit tests regress the exact 854..857 fragmentation case.
+**Subrange validation (08-07): the coherent-fix build of 768-920 is
+BIT-IDENTICAL to the old binary (0.56 cm / 0.94 cm max, 153/153) -- no
+regression; contiguous runs are unified to one gauge. The remaining gate is a
+FULL MH_02 run with the fixed binary (deferred to a later session), which
+should remove the 855/856 step-855 jump (263.4) and drop the max from 2.264 m
+toward the median ~0.07 m.
+
 Isolated-vs-full Sim(3) scale (08-07): the same frames 768-920 have Sim(3)
 scale 0.1467 in the isolated build vs 0.0078 in the full model (18.8x), both
 reaching rmse < 0.32 cm when aligned within their own gauge. Both are within
