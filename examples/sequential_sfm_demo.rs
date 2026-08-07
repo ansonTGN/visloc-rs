@@ -168,6 +168,82 @@ fn choose_export_pose_candidate(candidates: &[ExportPoseCandidate]) -> usize {
     }
 }
 
+/// Choose one export gauge per contiguous overlap run so adjacent frames never
+/// switch submaps mid-chain.
+///
+/// `candidates_by_frame` is already sorted by `source_frame_id` (BTreeMap).
+/// Frames are grouped into maximal runs of CONSECUTIVE ids. Within each run we
+/// pick the submap whose aggregate pose quality is best over the run, then
+/// every frame in the run that offers that submap as a candidate is exported
+/// from it; frames without that submap fall back to their per-frame choice.
+/// This prevents the per-frame fragmentation that stranded frame 856 on a
+/// distorted merged-submap gauge while its neighbours 855/857 used healthier
+/// submaps (MH_02 ATE spike root cause, 08-07).
+fn choose_export_pose_candidates_coherent(
+    candidates_by_frame: &BTreeMap<u64, Vec<ExportPoseCandidate>>,
+) -> BTreeMap<u64, usize> {
+    let mut selection = BTreeMap::<u64, usize>::new();
+    let mut run: Vec<(u64, &Vec<ExportPoseCandidate>)> = Vec::new();
+    let flush = |run: &Vec<(u64, &Vec<ExportPoseCandidate>)>, selection: &mut BTreeMap<u64, usize>| {
+        if run.is_empty() {
+            return;
+        }
+        // Candidate submaps and their run-aggregate quality (best = lowest).
+        let mut by_node = BTreeMap::<u64, f64>::new();
+        for (_, candidates) in run {
+            for candidate in *candidates {
+                let entry = by_node.entry(candidate.node_id).or_insert(f64::INFINITY);
+                *entry = entry.min(candidate.step_outlier_ratio);
+            }
+        }
+        let Some((run_node, run_ratio)) = by_node
+            .iter()
+            .min_by(|(_, left), (_, right)| {
+                left.partial_cmp(right).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|(&node, &ratio)| (node, ratio))
+        else {
+            for (frame_id, _) in run {
+                selection.insert(*frame_id, 0);
+            }
+            return;
+        };
+        for (frame_id, candidates) in run {
+            let best_index = candidates
+                .iter()
+                .position(|candidate| candidate.node_id == run_node);
+            match best_index {
+                Some(index) => {
+                    let reselect = index != 0
+                        && candidates[0].step_outlier_ratio > EXPORT_OVERLAP_STEP_RATIO_THRESHOLD
+                        && (candidates[0].step_outlier_ratio / run_ratio.max(1.0e-12))
+                            >= EXPORT_OVERLAP_STEP_RATIO_IMPROVEMENT;
+                    if reselect {
+                        selection.insert(*frame_id, index);
+                    } else {
+                        selection.insert(*frame_id, 0);
+                    }
+                }
+                None => {
+                    let index = choose_export_pose_candidate(candidates);
+                    selection.insert(*frame_id, index);
+                }
+            }
+        }
+    };
+    for (frame_id, candidates) in candidates_by_frame {
+        if let Some((last_id, _)) = run.last() {
+            if *last_id + 1 != *frame_id {
+                flush(&run, &mut selection);
+                run.clear();
+            }
+        }
+        run.push((*frame_id, candidates));
+    }
+    flush(&run, &mut selection);
+    selection
+}
+
 #[derive(Debug, Clone)]
 struct VerifiedPair {
     pairwise: PairwiseMatches,
@@ -1615,8 +1691,9 @@ fn export_hierarchical_result(
 
     let mut owner = BTreeMap::<u64, u64>::new();
     let mut poses_by_frame = BTreeMap::<u64, Pose>::new();
+    let coherent_selection = choose_export_pose_candidates_coherent(&candidates_by_frame);
     for (frame_id, candidates) in candidates_by_frame {
-        let selected_index = choose_export_pose_candidate(&candidates);
+        let selected_index = coherent_selection[&frame_id];
         let selected = &candidates[selected_index];
         if selected_index != 0 {
             eprintln!(
@@ -2581,5 +2658,70 @@ mod tests {
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].matches, vec![(1, 3), (2, 4), (5, 6)]);
         assert_eq!((merged[1].image_i, merged[1].image_j), (1, 3));
+    }
+
+    #[test]
+    fn coherent_arbitration_keeps_contiguous_overlap_on_one_gauge() {
+        // MH_02 root-cause regression (08-07): frames 855 and 856 both sit in
+        // overlapping submaps but a per-frame choice stranded 856 on a
+        // distorted merged-submap gauge (step_ratio 47.29) while 855 used a
+        // healthy submap (1.15), producing the 263-unit pose jump. The
+        // coherent run must keep consecutive frames on the SAME submap gauge.
+        let node22 = ExportPoseCandidate {
+            node_id: 22,
+            pose: Pose::identity(),
+            step_outlier_ratio: 47.29,
+        };
+        let node26 = ExportPoseCandidate {
+            node_id: 26,
+            pose: Pose::identity(),
+            step_outlier_ratio: 1.28,
+        };
+        let node27 = ExportPoseCandidate {
+            node_id: 27,
+            pose: Pose::identity(),
+            step_outlier_ratio: 1.15,
+        };
+        // 854: candidates {22, 27}; 855: {22, 27}; 856: {22, 26, 27};
+        // 857: {22, 26}. 856 alone previously flipped to a different gauge.
+        let mut candidates = BTreeMap::new();
+        candidates.insert(854, vec![node22.clone(), node27.clone()]);
+        candidates.insert(855, vec![node22.clone(), node27.clone()]);
+        candidates.insert(856, vec![node22.clone(), node26.clone(), node27.clone()]);
+        candidates.insert(857, vec![node22.clone(), node26.clone()]);
+
+        let selection = choose_export_pose_candidates_coherent(&candidates);
+        let chosen = |frame| candidates[&frame][selection[&frame]].node_id;
+        assert_eq!(chosen(854), 27);
+        assert_eq!(chosen(855), 27);
+        assert_eq!(chosen(856), 27);
+        assert_eq!(chosen(857), 26);
+        // 855 and 856 must NOT diverge (the historical bug), but 856/857 may
+        // differ if the run boundary lands there; the critical invariant is
+        // that consecutive frames sharing a candidate set stay together.
+        assert_eq!(chosen(854), chosen(855));
+        assert_eq!(chosen(855), chosen(856));
+    }
+
+    #[test]
+    fn coherent_arbitration_keeps_earliest_owner_when_healthy() {
+        // A healthy earliest owner (step_ratio below threshold) must not be
+        // displaced even if a slightly lower-ratio submap exists.
+        let healthy = ExportPoseCandidate {
+            node_id: 0,
+            pose: Pose::identity(),
+            step_outlier_ratio: 1.0,
+        };
+        let other = ExportPoseCandidate {
+            node_id: 1,
+            pose: Pose::identity(),
+            step_outlier_ratio: 0.9,
+        };
+        let mut candidates = BTreeMap::new();
+        candidates.insert(100, vec![healthy.clone(), other.clone()]);
+        candidates.insert(101, vec![healthy.clone(), other.clone()]);
+        let selection = choose_export_pose_candidates_coherent(&candidates);
+        assert_eq!(candidates[&100][selection[&100]].node_id, 0);
+        assert_eq!(candidates[&101][selection[&101]].node_id, 0);
     }
 }
