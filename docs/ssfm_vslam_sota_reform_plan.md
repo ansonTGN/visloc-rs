@@ -781,6 +781,24 @@ overlap run across different gauges (coherent-run arbitration), and (b)
 hover segments -- a robust motion-quality proxy should be used for the
 "healthier duplicate" decision.
 
+Final gauge picture (08-07): in the full model, the model/GT scale is
+**304.9 in submap 26's exclusive frames 832-848**, **109.7 in the 26+27
+overlap 848-920**, and **105.4 in submap 27's exclusive 920-936**. So submap
+26's own world-frame transform is ~3x over-expanded while everything it shares
+with submap 27 is normal (arbitrated onto submap 27's gauge). The 3x
+over-expansion lives specifically in submap 26's `local_from_atlas` Sim(3)
+transform, NOT in submap 26's local build (verified smooth standalone). Since
+frames 832-847 (submap-26-only gauge) are stretched ~3x and the overlap is
+normal, the frame ~855/856 discontinuity is the junction where the per-frame
+arbitration switches from submap 27 (normal) to submap 26 (3x-stretched)
+gauges. The actionable defect is now singular: **submap 26's world-frame
+Sim(3) gauge is 3x wrong relative to its neighbors** -- i.e. the seam Sim(3)
+scale entering submap 26 (via seam 25..26 or the merged-component seam) is
+off by ~3x. This is directly measurable with the new `hierarchical-seam-edge`
+scale log (the seam(s) incident on submap 26 should show scale ~0.33 or ~3.0
+vs ~1.0 elsewhere). Next experiment: a full MH_02 run with the seam-scale log
+to read submap 26's incoming/outgoing seam scales.
+
 Isolated-vs-full Sim(3) scale (08-07): the same frames 768-920 have Sim(3)
 scale 0.1467 in the isolated build vs 0.0078 in the full model (18.8x), both
 reaching rmse < 0.32 cm when aligned within their own gauge. Both are within
