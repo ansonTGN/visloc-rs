@@ -1480,6 +1480,12 @@ pub fn optimize_independent_submaps(
                 target_landmark_id: point_match.target_landmark_id,
             });
         }
+        eprintln!(
+            "hierarchical-seam-edge: {source_id}..{target_id} accepted \
+             inlier_count={} scale={:.9}",
+            constraint.inlier_match_indices.len(),
+            constraint.target_from_source.scale,
+        );
         constraints.push(constraint);
     }
 

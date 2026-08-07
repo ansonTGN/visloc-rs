@@ -675,6 +675,23 @@ correct the Sim(3) scale on the seams entering and leaving a submap against an
 independent measurement (camera-centre scale on the shared frames), or
 re-gauge submap 26 after seam composition.
 
+Banded-edge scale-chain analysis (08-07): the logged banded-edge Sim(3) scales
+around submap 26 are **internally consistent** -- banded(24,26)*banded(26,28)
+= 0.5931 vs banded(24,28) = 0.5929 (exact), so the chain of Sim(3) scales is
+transitive as expected. What the banded scales reveal: seams leaving submaps
+26/27 carry scale ~0.37-0.44 while neighboring chains carry ~0.99-1.60
+(banded 26->28=0.370, 27->29=0.444 vs 28->30=1.009, 23->25=0.993), i.e. the
+submap-26/27 chain's local gauge is ~2.3-2.7x SMALLER than the surrounding
+submaps. Combined with the isolated-vs-full comparison (832-848 is 5.43 in the
+isolated build, 304.95 in full), the conclusion is: **submap 26's local build
+has a scale-gauge that is internally consistent but globally inconsistent with
+its neighbors**; the seam Sim(3) faithfully records that ratio, so the
+distortion is in submap 26's local reconstruction scale, not in the seam
+estimation. Next step: compare submap 26's local camera-trajectory scale
+against GT (or against a re-built subrange) to decide whether the local build
+is wrong (frontend/BA scale defect inside the submap) or the world-anchor
+gauge is at fault.
+
 S3 — Hard-video robustness
 
 - Add motion/blur/dynamic-region quality scores to edge selection, not to the
