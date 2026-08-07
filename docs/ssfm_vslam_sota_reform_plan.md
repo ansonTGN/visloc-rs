@@ -646,6 +646,35 @@ regularization in the global PGO/BA. Note the discriminator was ~2.7x slower
 than the 08-04 baseline under concurrent system load (MsMpEng/EpicGames etc.),
 so wall-clock comparisons against archived runs are not meaningful.
 
+Scale-jump localization (08-07): comparing the loop-on and loop-off full models,
+the local scale (model step / GT step) is IDENTICAL in both: ~105-115 normally,
+**304.9/318.2 at frames 832-848 and 193.4/201.7 at 848-864** (3x / 2x over-
+expansion), back to ~108-115 by 864-880. The over-expansion starts EXACTLY at
+frame 832 = the start of final submap 26 (832-920), and matches the 2.60x
+boundary jump measured at the 904-832 seam. Because it is byte-identical with
+and without loop edges, it is produced by the seam/banded Sim(3) composition of
+submap 26, not by any loop. Submap 26's boundary seams (25..26, 26..27) skipped
+the camera-centre scale check (empty `camera_landmark_log_scale_disagreement`),
+so their Sim(3) scale rests only on the landmark RANSAC-Umeyama estimate. Next
+measurement: extract submap 26's incoming/outgoing seam Sim(3) scale values
+(need a code-level log -- currently not printed) and compare against the
+independent camera-centre scale on the shared frames.
+
+Isolated-vs-full gauge comparison (08-07): the SAME frames 832-848 (submap 26
+head) have model-vs-GT local scale **5.43 in the isolated 768-920 subrange
+build but 304.95 in the full model** (a 56x discrepancy); surrounding frames
+are 10-13 vs 105-126. So submap 26's own local gauge is internally consistent
+(its 832-848 span is comparatively SHRUNK), yet the full-sequence composition
+inverts it into a 3x over-expansion. The distortion is introduced exactly at
+submap 26's boundary seams (25..26 in, 26..27 out) when its local gauge is
+transformed into the global frame -- the incoming/outgoing seam Sim(3) scale
+is inconsistent with submap 26's internal scale. (The isolated subrange is
+healthy because it re-estimates a coherent set of local gauges; the full run
+inherits submap 26's gauge from the chain.) This pinpoints the fix: verify /
+correct the Sim(3) scale on the seams entering and leaving a submap against an
+independent measurement (camera-centre scale on the shared frames), or
+re-gauge submap 26 after seam composition.
+
 S3 — Hard-video robustness
 
 - Add motion/blur/dynamic-region quality scores to edge selection, not to the
