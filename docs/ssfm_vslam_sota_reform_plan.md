@@ -692,6 +692,20 @@ against GT (or against a re-built subrange) to decide whether the local build
 is wrong (frontend/BA scale defect inside the submap) or the world-anchor
 gauge is at fault.
 
+Isolated-vs-full Sim(3) scale (08-07): the same frames 768-920 have Sim(3)
+scale 0.1467 in the isolated build vs 0.0078 in the full model (18.8x), both
+reaching rmse < 0.32 cm when aligned within their own gauge. Both are within
+monocular gauge freedom; the decisive fact is the RELATIVE 3x gap between
+submap 26's local scale and its neighbors in the full model, which the seam
+Sim(3) faithfully records (banded 26->28 = 0.370). So submap 26's LOCAL build
+carries a scale ~3x inconsistent with the surrounding chain. Because the
+isolated build's geometry is accurate (0.6 cm) but its gauge is arbitrary, and
+the full model inherits that arbitrary gauge through the seams, the practical
+fix is a scale-anchoring step: after local submap builds, verify each submap's
+internal camera-trajectory scale against a GT-free invariant (e.g. known
+baseline, or the dominant camera-centre step distribution vs neighboring
+submaps) and re-gauge outliers (like submap 26) before seam composition.
+
 S3 — Hard-video robustness
 
 - Add motion/blur/dynamic-region quality scores to edge selection, not to the
