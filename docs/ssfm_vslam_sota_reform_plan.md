@@ -692,6 +692,95 @@ against GT (or against a re-built subrange) to decide whether the local build
 is wrong (frontend/BA scale defect inside the submap) or the world-anchor
 gauge is at fault.
 
+Standalone submap-26 build (08-07): a fresh standalone hierarchical build of
+frames 832-920 (89 frames, 1 submap, 89/89 registered, mean reproj 0.68 px)
+produces a COMPLETELY smooth chain -- consecutive steps 0.37-0.72 everywhere,
+NO jump at 839->840, 854->855, or 855->856. The isolated 768-920 subrange is
+equally smooth (0.07-0.24). Only the FULL-model composition shows the jumps
+(839->840 = 87.6, 854->855 = 72.7, 855->856 = 263.4). **Therefore submap 26's
+local reconstruction is healthy; the frame-855 break is introduced by the
+full-sequence seam/banded Sim(3) composition into the global frame.** Note the
+jump frames (840, 855) both sit inside the 832-904 overlap region shared by
+final submaps 25 (816-904) and 26 (832-920), so the two candidate gauges for
+those frames disagree in the global frame. The mechanism to investigate next is
+how overlapping frames' poses are resolved when the seam Sim(3) between the two
+submaps is applied (duplicate-frame gauge arbitration), which now has the
+new `hierarchical-seam-edge` scale diagnostic to measure directly.
+
+Standalone submap-27 build (08-07): a fresh standalone build of frames
+848-936 (89 frames, 1 submap, 89/89 registered) is also COMPLETELY smooth --
+steps 0.11-0.14, no jump at 854->855 or 855->856. So BOTH submaps that
+contain frame 855 (submap 26 832-920 and submap 27 848-936) are healthy in
+isolation, and the isolated 768-920 subrange is healthy. **The frame-855 break
+exists ONLY in the full-sequence composition.** The overlap-reselect log shows
+frame 855 owner 22 -> 27 (earliest owner 22 = the merged 496-840 submap has
+step_outlier_ratio 47.29, so candidate 27 at 1.15 is chosen). Since every
+constituent local build is smooth, the break must come from the interaction of
+the overlap-frame pose arbitration with the seam Sim(3) gauge transforms in
+the full hierarchy -- i.e. a frame whose pose is selected from one submap while
+neighboring frames' poses come from a submap with a different local_from_atlas
+gauge, producing a discontinuous chain at the seam-arbitration boundary. This
+narrows the fix to the export-time overlap-frame arbitration
+(`choose_export_pose_candidate` in `sequential_sfm_demo.rs`) and/or the seam
+gauge consistency at the 25..26 / 26..27 / 22..26 boundaries, which can now be
+measured with the added `hierarchical-seam-edge` scale log.
+
+Root cause CONFIRMED (08-07) -- gauge-arbitration boundary at 855/856: the
+overlap-reselect log shows frames 840-847 owner 22 -> 26 (submap 26 gauge),
+frames 848-855 owner 22 -> 27 (submap 27 gauge), and NO reselect for frames
+856+ (they stay on the earliest owner, submap 22 -- the merged 496-840
+component whose step_outlier_ratio is 47.29, i.e. a distorted gauge). So in
+the final model frame 855 is transformed with submap 27's healthy
+local_from_atlas gauge while frame 856 is transformed with submap 22's
+distorted gauge; the two gauges disagree by ~263 model units, which IS the
+observed step-855->856 jump. The 839->840 jump is the same phenomenon at the
+submap-22/26 boundary (839 on submap 22, 840 reselected to submap 26). The
+local builds are all healthy (verified standalone); the break is the
+**export-time gauge mix**: overlapping frames are individually re-arbitrated
+per-frame by `choose_export_pose_candidate`, so adjacent frames can end up
+with different submap gauges whose Sim(3) transforms disagree. Fix direction:
+arbitrate gauges COHERENTLY across a contiguous overlap run (not per-frame),
+and/or heal the distorted merged submap 22 gauge (step_ratio 47.29) so it does
+not contaminate the boundary frames.
+
+Gauge-boundary mechanism pinned (08-07): the final submap list shows submap 21
+= images 496-840 (merged), submap 22 = images 768-856, submap 26 = 832-920,
+submap 27 = 848-936. Frames 840-855 all sit in the overlap of 21/22/26/27.
+The reselect log gives owner 22 -> 26 for frames 840-847, owner 22 -> 27 for
+frames 848-855, and NO reselect for frame 856 (the LAST frame of submap 22)
+or 857+ (earliest owner = submap 26, step_ratio below threshold, kept). So the
+final chain is: ... frame 855 (submap 27 gauge) -> frame 856 (submap 22's
+distorted gauge, step_ratio 47.29) -> frame 857 (submap 26 gauge). The 855->856
+jump (263.4) is the submap-27-vs-submap-22 gauge boundary, and the 856->857
+edge is submap-22-vs-submap-26. Submap 22 (768-856) is the only distorted
+participant (step_ratio 47.29 vs ~1.2 for 26/27), and it is the earliest
+candidate for frame 856, so that single frame inherits the bad gauge. **The
+break is a single frame (856) left on a distorted merged-submap gauge while
+its neighbors were re-arbitrated to healthy gauges.** The local builds of 26
+and 27 are verified healthy standalone; the distortion lives in the merged
+submap 22 build. Fix candidates (in order of suspicion): (1) extend the
+overlap reselect so the arbitration is coherent across a contiguous run (frame
+856 would then be pulled onto submap 26/27 too), (2) diagnose why merged
+submap 22 (496-840 + neighbors) has step_ratio 47.29 -- a merged-component
+gauge defect -- and heal it, (3) verify seam Sim(3) scales at the 21..22,
+22..26, 26..27 boundaries with the new `hierarchical-seam-edge` log.
+
+Step-ratio metric is the false positive (08-07): the isolated subrange's own
+submap covering frames 768-856 (submap 0: step_median 0.085, step_max 4.036)
+has the SAME step_outlier_ratio 47.3 -- and that isolated build is healthy
+(88/88, smooth export). The ratio 47.3 is a HOVER->ACCELERATION transition
+(median step near zero during the hover, then a sharp acceleration), which
+`export_step_outlier_ratio` (step_max/step_median) misclassifies as "distorted
+gauge". So submap 22's gauge is NOT actually distorted; it is a normal gauge
+on a hover->accelerate trajectory. The real defect is that this normal-but-
+different gauge was assigned to frame 856 while its neighbors 855/857 were
+arbitrated onto submap 27/26 gauges, creating the boundary jump. Two distinct
+levers, both now precise: (a) the arbitration should not fragment a contiguous
+overlap run across different gauges (coherent-run arbitration), and (b)
+`export_step_outlier_ratio`'s median-in-the-denominator is fragile for
+hover segments -- a robust motion-quality proxy should be used for the
+"healthier duplicate" decision.
+
 Isolated-vs-full Sim(3) scale (08-07): the same frames 768-920 have Sim(3)
 scale 0.1467 in the isolated build vs 0.0078 in the full model (18.8x), both
 reaching rmse < 0.32 cm when aligned within their own gauge. Both are within
