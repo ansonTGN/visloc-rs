@@ -937,6 +937,10 @@ pub(crate) fn imu_factor_whitener(factor: &ImuPreintegrationFactor) -> Matrix9 {
 /// "after the fact" detector M5's own "poisoned forever" failure had no
 /// equivalent of (see `crate::dpvo_vo::DpvoOdometry::rollback_imu_bootstrap`'s
 /// doc for what happens once this trips).
+// The only production consumer is `dpvo_vo`, which is gated behind the
+// optional `onnx-inference` feature. Keep this helper available to that path
+// without making the default feature build report it as unused.
+#[cfg_attr(not(feature = "onnx-inference"), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn imu_factor_nis(
     pose_i: &SE3,
