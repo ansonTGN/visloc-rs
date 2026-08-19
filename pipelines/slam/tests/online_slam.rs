@@ -754,6 +754,115 @@ fn online_slam_runs_local_vi_ba_when_factor_emitted() {
 }
 
 #[test]
+fn sqrt_window_marginalization_matches_dense_end_to_end() {
+    // End-to-end A/B through the full `OnlineSlamPipeline`: the dense boundary prior
+    // (`marginalize_navigation_state`) and the SqrtToSqrt square-root route must drive the
+    // same `NavigationStatePrior` for the next `ba` window, and the sqrt route must carry a
+    // `SqrtNavMarginal`. Requires a 3-keyframe run so the carry actually crosses a window
+    // shift inside `run_local_vi_ba` (the second shift consumes the first marginal).
+    use visloc_slam::OnlineSlamLocalBaConfig;
+
+    let build_slam = |sqrt: bool, map: VisualMap| {
+        OnlineSlamPipeline::new(
+            map,
+            Tracker::new(LocalizationPipeline::default(), TrackingConfig::default()),
+            LocalMappingPipeline::default(),
+            OnlineSlamConfig {
+                apply_map_updates: true,
+                loop_closure: LoopClosureConfig {
+                    min_frame_id_gap: 5,
+                    min_shared_landmarks: 4,
+                    min_shared_landmark_ratio_percent: 50,
+                    ..LoopClosureConfig::default()
+                },
+                imu: Some(OnlineSlamImuConfig {
+                    gravity_world: Vector3::zeros(),
+                    ..OnlineSlamImuConfig::default()
+                }),
+                local_vi_ba: Some(OnlineSlamLocalBaConfig {
+                    gravity_world: Vector3::zeros(),
+                    marginalize_navigation_state: true,
+                    use_sqrt_window_marginalization: sqrt,
+                    bias_random_walk_weights: Some((10.0, 10.0)),
+                    initial_navigation_prior_std_devs: Some((1.0, 0.01, 0.1)),
+                    ..OnlineSlamLocalBaConfig::default()
+                }),
+                covisibility_local_ba: None,
+                sparse_factor_graph: None,
+                vi_init: None,
+                vi_motion_init: None,
+                keep_pre_promotion_imu_factors: false,
+                pose_graph_refinement: None,
+                relocalization: None,
+            },
+        )
+    };
+
+    let run = |sqrt: bool| -> (
+        Option<visloc_slam::NavigationStatePrior>,
+        Option<visloc_slam::SqrtNavMarginal>,
+    ) {
+        let (map, first_frame) = map_and_frame_with_extra_landmarks(10, 1, Vector3::zeros());
+        let (_, second_frame) =
+            map_and_frame_with_extra_landmarks(30, 1, Vector3::new(1.5, 0.0, 0.0));
+        let (_, third_frame) =
+            map_and_frame_with_extra_landmarks(50, 1, Vector3::new(3.0, 0.0, 0.0));
+        let mut slam = build_slam(sqrt, map);
+
+        slam.process_frame(&first_frame, []);
+        for _ in 0..10 {
+            slam.push_imu_measurement(Vector3::zeros(), Vector3::zeros(), 0.1);
+        }
+        slam.process_frame(&second_frame, []); // closes KF10→KF30 window (no carried prior)
+        for _ in 0..10 {
+            slam.push_imu_measurement(Vector3::zeros(), Vector3::zeros(), 0.1);
+        }
+        slam.process_frame(&third_frame, []); // closes KF30→KF50 window (carried prior consumed)
+
+        let state = slam
+            .local_vi_ba_state
+            .as_ref()
+            .expect("local_vi_ba configured");
+        let prior = state.navigation_prior.clone();
+        let sqrt_carried = state.sqrt_nav_marginal.clone();
+        assert!(prior.is_some(), "navigation prior must be populated");
+        (prior, sqrt_carried)
+    };
+
+    let (dense_prior, dense_sqrt) = run(false);
+    let (sqrt_prior, sqrt_sqrt) = run(true);
+
+    // The sqrt route carries a marginal; the dense route does not.
+    assert!(
+        sqrt_sqrt.is_some(),
+        "sqrt route must carry a SqrtNavMarginal"
+    );
+    assert!(
+        dense_sqrt.is_none(),
+        "dense route must not carry a SqrtNavMarginal"
+    );
+
+    // The boundary priors fed to the next `ba` slot are the same up to the documented
+    // first-window infinite-fix approximation (tracked against the second-window carry).
+    let info_diff = (dense_prior.as_ref().unwrap().information.clone()
+        - sqrt_prior.as_ref().unwrap().information.clone())
+    .iter()
+    .fold(0.0_f64, |acc, v| acc.max(v.abs()));
+    let grad_diff = (dense_prior.as_ref().unwrap().gradient.clone()
+        - sqrt_prior.as_ref().unwrap().gradient.clone())
+    .iter()
+    .fold(0.0_f64, |acc, v| acc.max(v.abs()));
+    assert!(
+        info_diff < 1e-5,
+        "end-to-end sqrt vs dense boundary prior info diff: {info_diff}"
+    );
+    assert!(
+        grad_diff < 1e-5,
+        "end-to-end sqrt vs dense boundary prior gradient diff: {grad_diff}"
+    );
+}
+
+#[test]
 fn online_slam_runs_covisibility_local_ba_on_new_keyframe_trigger() {
     let (map, first_frame) = map_and_frame_with_extra_landmarks(10, 1, Vector3::zeros());
     let (_, second_frame) = map_and_frame_with_extra_landmarks(30, 1, Vector3::new(1.5, 0.0, 0.0));

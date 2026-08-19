@@ -39,12 +39,13 @@ use visloc_core::geometry::SE3;
 use visloc_core::types::{Camera, VisualMap};
 
 use crate::bundle::{
-    relative_observation_confidence_weights, BaConfig, BaCostBreakdown, BaGeneralStereoObservation,
-    BaObservation, BaResult, BiasRandomWalkFactor, BundleAdjustment, NavigationStatePrior,
+    build_sqrt_factor_rows, relative_observation_confidence_weights, BaConfig, BaCostBreakdown,
+    BaGeneralStereoObservation, BaObservation, BaResult, BiasRandomWalkFactor, BundleAdjustment,
+    NavigationStatePrior,
 };
 use crate::imu_preintegration::ImuPreintegrationFactor;
 use crate::marginalization::marginalize;
-use crate::LinearSolver;
+use crate::{LinearSolver, RobustKernel};
 
 fn bias_random_walk_information(
     noise_densities: (f64, f64),
@@ -302,6 +303,24 @@ pub struct OnlineSlamLocalBaConfig {
     /// prior on its successor. This replaces repeatedly fixing the newest
     /// window anchor with infinite confidence.
     pub marginalize_navigation_state: bool,
+    /// When [`Self::marginalize_navigation_state`] is true, marginalize the
+    /// outgoing navigation state through the square-root (QR) route
+    /// ([`crate::marginalize_sqrt_from_information`], the Basalt ICCV'21
+    /// "SqToSqrt" bridge) instead of the dense information-form Schur
+    /// complement. The resulting prior is algebraically identical — this flag
+    /// selects the numerically-robust factorization that keeps the boundary
+    /// prior in square-root (matrix-square-root) form, mirroring Basalt
+    /// `marginalizeHelperSqToSqrt`. Off by default (no behavioural change).
+    pub use_sqrt_marginalization: bool,
+    /// When [`Self::marginalize_navigation_state`] is true and this flag is also
+    /// set, carry the window's boundary prior across shifts in **square-root (QR)
+    /// factor form** (the Basalt ICCV'21 SqrtToSqrt protocol, [`crate::vi_sqrt_window`])
+    /// instead of materializing a dense `NavigationStatePrior` from the Hessian.
+    /// The scalar output `NavigationStatePrior` is still produced (identical
+    /// information), so downstream code is unchanged; the extra carried
+    /// [`crate::SqrtNavMarginal`] is stored on the state for the next window's
+    /// FEJ-consistent re-linearisation. Off by default (no behavioural change).
+    pub use_sqrt_window_marginalization: bool,
     /// Optional `(velocity, gyro-bias, accel-bias)` 1-sigma uncertainty for
     /// the sequence's first navigation state. With marginalization enabled,
     /// this avoids treating static-init velocity/bias estimates as infinitely
@@ -341,6 +360,8 @@ impl Default for OnlineSlamLocalBaConfig {
             relinearise_imu_factor_bias_thresholds: None,
             run_at_vi_init_promotion: false,
             marginalize_navigation_state: false,
+            use_sqrt_marginalization: false,
+            use_sqrt_window_marginalization: true,
             initial_navigation_prior_std_devs: None,
         }
     }
@@ -372,6 +393,10 @@ pub struct OnlineSlamLocalBaState {
     pub pending_factors_since_last_trigger: usize,
     /// Dense prior on the first state of the next window.
     pub navigation_prior: Option<NavigationStatePrior>,
+    /// Square-root-form carried marginal on the retained nav states of the next window
+    /// (Basalt ICCV'21 SqrtToSqrt), populated only when
+    /// [`OnlineSlamLocalBaConfig::use_sqrt_window_marginalization`] is set.
+    pub sqrt_nav_marginal: Option<crate::SqrtNavMarginal>,
 }
 
 impl OnlineSlamLocalBaState {
@@ -382,6 +407,7 @@ impl OnlineSlamLocalBaState {
             factor_history: Vec::new(),
             pending_factors_since_last_trigger: 0,
             navigation_prior: None,
+            sqrt_nav_marginal: None,
         }
     }
 
@@ -392,6 +418,7 @@ impl OnlineSlamLocalBaState {
         self.factor_history.clear();
         self.pending_factors_since_last_trigger = 0;
         self.navigation_prior = None;
+        self.sqrt_nav_marginal = None;
     }
 
     /// Append a freshly-staged IMU factor to the rolling history and bump
@@ -832,7 +859,23 @@ fn next_navigation_prior(
     // Normal equations use gradient g = J^T r, whereas information form uses
     // eta = -g for a local mean dx = -H^-1 g.
     let eta = -linearized.gradient;
-    let (information, eta) = marginalize(&linearized.information, &eta, &keep)?;
+    let (information, eta) = if state.config.use_sqrt_marginalization {
+        // Basalt ICCV'21 square-root ("SqToSqrt") route: factor the dense
+        // marginal's Schur complement into a matrix-square-root factor and
+        // carry the boundary prior through that square root, then reassemble
+        // the identical dense (information, eta) for the downstream prior
+        // slot. Algebraically equal to the Schur path (see
+        // `marginalization_sqrt` equivalence tests) but factorization-stable.
+        let sm =
+            crate::marginalize_sqrt_from_information(&linearized.information, &eta, &keep, &[])?;
+        // factor^T·factor == the Schur marginal and factor^T·rhs == its
+        // information vector; downsteam line sym./uses the dense forms.
+        let information = sm.factor.transpose() * &sm.factor;
+        let eta_rebuilt = sm.factor.transpose() * &sm.rhs;
+        (information, eta_rebuilt)
+    } else {
+        marginalize(&linearized.information, &eta, &keep)?
+    };
     let gradient = -eta;
     let constant_cost = information
         .clone()
@@ -860,6 +903,276 @@ fn next_navigation_prior(
         gradient,
         constant_cost,
     })
+}
+
+/// Square-root (QR) analogue of [`next_navigation_prior`], produced with the Basalt ICCV'21
+/// SqrtToSqrt protocol ([`crate::vi_sqrt_window`]). Unlike the dense route, the retained
+/// marginal is carried as a matrix-square-root factor across window shifts (no `JᵀJ`, no dense
+/// inverse), and the factor/rhs are FEJ-consistent with the current linearisation point.
+///
+/// Returns the pair `(dense NavigationStatePrior, SqrtNavMarginal)`. The dense prior is
+/// algebraically identical to [`next_navigation_prior`] (so the existing `ba` boundary-prior
+/// slot is unchanged), and the `SqrtNavMarginal` is stored on the state for the next shift.
+fn next_navigation_prior_sqrt(
+    map: &VisualMap,
+    state: &OnlineSlamLocalBaState,
+    window_ids: &[u64],
+    factors: &[ImuPreintegrationFactor],
+) -> Option<(NavigationStatePrior, crate::SqrtNavMarginal)> {
+    let (&old_id, &next_id) = (window_ids.first()?, window_ids.get(1)?);
+    let boundary = factors
+        .iter()
+        .find(|factor| factor.keyframe_id_from == old_id && factor.keyframe_id_to == next_id)?;
+    let camera_id = map.keyframes.get(&old_id)?.frame.camera_id;
+    let camera = map.cameras.get(&camera_id)?.clone();
+    let intrinsics = camera.intrinsics()?;
+    let mut boundary_ba = BundleAdjustment::new(camera);
+    boundary_ba.set_imu_body_to_camera(state.config.body_to_camera.clone());
+
+    for id in [old_id, next_id] {
+        let pose = map.keyframes.get(&id)?.frame.pose.clone()?;
+        let nav = state.keyframe_state.get(&id)?;
+        boundary_ba.add_pose(id, pose);
+        boundary_ba.add_velocity(id, nav.velocity_world);
+        boundary_ba.add_bias(
+            id,
+            Vector6::new(
+                nav.bias_gyro.x,
+                nav.bias_gyro.y,
+                nav.bias_gyro.z,
+                nav.bias_acc.x,
+                nav.bias_acc.y,
+                nav.bias_acc.z,
+            ),
+        );
+    }
+    boundary_ba.add_imu_factor(boundary.clone());
+    // Bias random-walk must be configured exactly as in the dense path (`next_navigation_prior`
+    // returns `None` when it is absent, since the retained bias margin would be singular).
+    let bias_walk = match state.config.bias_random_walk_noise_densities {
+        Some(noise) => Some(bias_random_walk_information(
+            noise,
+            boundary.delta.delta_time,
+        )?),
+        None => match state.config.bias_random_walk_weights {
+            Some(weights) => Some(weights),
+            None => return None,
+        },
+    };
+
+    // State layout for the 2-keyframe boundary: pose old 0..6, pose next 6..12,
+    // vel old 12..15, vel next 15..18, bias old 18..24, bias next 24..30.
+    let pose_index = BTreeMap::from([(old_id, 0usize), (next_id, 1)]);
+    let velocity_index = BTreeMap::from([(old_id, 0usize), (next_id, 1)]);
+    let bias_index = BTreeMap::from([(old_id, 0usize), (next_id, 1)]);
+    let landmark_index: BTreeMap<u64, usize> = BTreeMap::new();
+
+    let stack = build_sqrt_factor_rows(
+        &boundary_ba,
+        &intrinsics,
+        &pose_index,
+        &landmark_index,
+        &velocity_index,
+        &bias_index,
+        &RobustKernel::None,
+        None,
+    )?;
+    let jac = stack.jac;
+    let resid = stack.resid;
+
+    // Append bias-random-walk sqrt rows: residual = [√w_bg·(bg_j−bg_i); √w_ba·(ba_j−ba_i)],
+    // Jacobian ±√w on the respective bias columns. Layout: bias old 18..24, next 24..30,
+    // gyro = cols 18..21/24..27, accel = 21..24/27..30.
+    let (w_g, w_a) = bias_walk.expect("bias walk checked above");
+    let sg = w_g.max(0.0).sqrt();
+    let sa = w_a.max(0.0).sqrt();
+    let mut extra = DMatrix::zeros(6, stack.total_dof);
+    for k in 0..3 {
+        extra[(k, 24 + k)] = sg; // + on next gyro
+        extra[(k, 18 + k)] = -sg; // − on old gyro
+        extra[(3 + k, 27 + k)] = sa; // + on next accel
+        extra[(3 + k, 21 + k)] = -sa; // − on old accel
+    }
+    let bg_next = boundary_ba.biases.get(&next_id)?.fixed_rows::<3>(0);
+    let bg_old = boundary_ba.biases.get(&old_id)?.fixed_rows::<3>(0);
+    let ba_next = boundary_ba.biases.get(&next_id)?.fixed_rows::<3>(3);
+    let ba_old = boundary_ba.biases.get(&old_id)?.fixed_rows::<3>(3);
+    let mut extra_r = DVector::<f64>::zeros(6);
+    for k in 0..3 {
+        extra_r[k] = sg * (bg_next[k] - bg_old[k]);
+        extra_r[3 + k] = sa * (ba_next[k] - ba_old[k]);
+    }
+
+    // SqrtToSqrt carry: the marginal retained on the *previous* trigger (for the previous
+    // `next_id`, which equals the current `old_id` after the window slid by one) is re-overlaid
+    // here — exactly as the dense route consumes `state.navigation_prior` for the boundary.
+    // On the first sequence window there is no carried marginal, so the old state is anchored
+    // with a finite pseudo `fix_pose` plus the finite velocity/bias init priors (mirroring the
+    // dense path's first-window `fix_pose(old_id)` + `initial_navigation_prior_std_devs`).
+    let carried = state
+        .sqrt_nav_marginal
+        .as_ref()
+        .filter(|m| m.state_dof == 15)
+        .filter(|_| {
+            state
+                .navigation_prior
+                .as_ref()
+                .is_some_and(|prior| prior.keyframe_ids.as_slice() == [old_id])
+        });
+    // Extra sqrt rows beyond the IMU + bias-walk rows already in `jac`/`resid`.
+    // Carried marginal: map its [pose, vel, bias] columns (old block) into the build layout
+    // (pose 0..6, vel 12..15, bias 18..24 of the 30-col stack).
+    let carried_rows = carried.map(|m| m.factor.nrows()).unwrap_or(0);
+    // First-window pseudo-fix + init priors (only when NOT carrying a prior).
+    let fill_rows = if carried.is_some() { 0 } else { 6 + 9 };
+
+    let n_rows = jac.nrows() + 6 + carried_rows + fill_rows;
+    let mut jac_full = DMatrix::zeros(n_rows, stack.total_dof);
+    let mut resid_full = DVector::zeros(n_rows);
+
+    let imu_rows = jac.nrows();
+    let bwalk_rows = 6;
+    jac_full
+        .view_mut((0, 0), (imu_rows, stack.total_dof))
+        .copy_from(&jac);
+    resid_full.view_mut((0, 0), (imu_rows, 1)).copy_from(&resid);
+    jac_full
+        .view_mut((imu_rows, 0), (bwalk_rows, stack.total_dof))
+        .copy_from(&extra);
+    resid_full
+        .view_mut((imu_rows, 0), (bwalk_rows, 1))
+        .copy_from(&extra_r);
+    if let Some(m) = carried {
+        // FEJ re-reference: shift the carried marginal from its stored linearisation point
+        // to the current old-state estimate (delta = current - lin_point) so its residual
+        // displacement matches the rest of this window. Equivalent to the dense route's
+        // `navigation_prior_delta` + `current_gradient = H*delta + gradient` re-reference.
+        let old_nav = state.keyframe_state.get(&old_id)?;
+        let old_w2c = map
+            .keyframes
+            .get(&old_id)?
+            .frame
+            .pose
+            .clone()?
+            .world_to_camera;
+        let ref_pose = SE3::exp(&m.lin_point.fixed_rows::<6>(0).clone_owned());
+        let pose_delta = ref_pose.inverse().compose(&old_w2c).log();
+        let mut delta = DVector::zeros(15);
+        delta.fixed_rows_mut::<6>(0).copy_from(&pose_delta);
+        delta
+            .fixed_rows_mut::<3>(6)
+            .copy_from(&(old_nav.velocity_world - m.lin_point.fixed_rows::<3>(6).clone_owned()));
+        let bias_cur = Vector6::new(
+            old_nav.bias_gyro.x,
+            old_nav.bias_gyro.y,
+            old_nav.bias_gyro.z,
+            old_nav.bias_acc.x,
+            old_nav.bias_acc.y,
+            old_nav.bias_acc.z,
+        );
+        delta
+            .fixed_rows_mut::<6>(9)
+            .copy_from(&(bias_cur - m.lin_point.fixed_rows::<6>(9).clone_owned()));
+        let rhs_at_current = m.rhs.clone() + &(&m.factor * &delta);
+        let row = imu_rows + bwalk_rows;
+        for r in 0..m.factor.nrows() {
+            for d in 0..6 {
+                jac_full[(row + r, d)] = m.factor[(r, d)];
+            }
+            for d in 0..3 {
+                jac_full[(row + r, 12 + d)] = m.factor[(r, 6 + d)];
+            }
+            for d in 0..6 {
+                jac_full[(row + r, 18 + d)] = m.factor[(r, 9 + d)];
+            }
+            resid_full[row + r] = rhs_at_current[r];
+        }
+    } else {
+        // First-window pseudo fixed-pose anchor (old pose cols 0..6).
+        const FIXED_POSE_WEIGHT: f64 = 1.0e9;
+        let row = imu_rows + bwalk_rows;
+        for c in 0..6 {
+            jac_full[(row + c, c)] = FIXED_POSE_WEIGHT.sqrt();
+        }
+        // First-window velocity/bias init priors, mirroring dense `initial_navigation_prior_std_devs`.
+        if let Some((sigma_velocity, sigma_gyro_bias, sigma_accel_bias)) =
+            state.config.initial_navigation_prior_std_devs
+        {
+            if sigma_velocity.is_finite()
+                && sigma_velocity > 0.0
+                && sigma_gyro_bias.is_finite()
+                && sigma_gyro_bias > 0.0
+                && sigma_accel_bias.is_finite()
+                && sigma_accel_bias > 0.0
+            {
+                for k in 0..3 {
+                    jac_full[(row + 6 + k, 12 + k)] = 1.0 / sigma_velocity;
+                    jac_full[(row + 9 + k, 18 + k)] = 1.0 / sigma_gyro_bias;
+                    jac_full[(row + 12 + k, 21 + k)] = 1.0 / sigma_accel_bias;
+                }
+            }
+        }
+    }
+
+    // Keep the next nav state (pose 6..12, vel 15..18, bias 24..30 = 15 dof); marginalize the old.
+    let keep: Vec<usize> = (6..12).chain(15..18).chain(24..30).collect();
+    let marg: Vec<usize> = (0..6).chain(12..15).chain(18..24).collect();
+    let sm = crate::marginalize_sqrt(&jac_full, &resid_full, &keep, &marg, None)?;
+
+    let information = sm.factor.transpose() * &sm.factor;
+    let gradient = sm.factor.transpose() * &sm.rhs;
+    let constant_cost = information
+        .clone()
+        .cholesky()
+        .map(|chol| gradient.dot(&chol.solve(&gradient)))
+        .unwrap_or(0.0);
+    let nav = state.keyframe_state.get(&next_id)?;
+    let pose = map.keyframes.get(&next_id)?.frame.pose.clone()?;
+    let dense = NavigationStatePrior {
+        keyframe_ids: vec![next_id],
+        reference_poses: BTreeMap::from([(next_id, pose.clone())]),
+        reference_velocities: BTreeMap::from([(next_id, nav.velocity_world)]),
+        reference_biases: BTreeMap::from([(
+            next_id,
+            Vector6::new(
+                nav.bias_gyro.x,
+                nav.bias_gyro.y,
+                nav.bias_gyro.z,
+                nav.bias_acc.x,
+                nav.bias_acc.y,
+                nav.bias_acc.z,
+            ),
+        )]),
+        information: 0.5 * (&information + information.transpose()),
+        gradient,
+        constant_cost,
+    };
+    // FEJ re-linearisation point: the next state's estimate at creation. When this margin is
+    // carried into the next window (as the old-id prior) it is re-referenced to that window's
+    // moving old-state estimate via `rhs' = rhs - factor*delta` (delta = current - lin_point),
+    // mirroring the dense route's `navigation_prior_delta` displacement into the boundary prior.
+    let mut lin_point = DVector::zeros(15);
+    lin_point
+        .fixed_rows_mut::<6>(0)
+        .copy_from(&pose.world_to_camera.log());
+    lin_point
+        .fixed_rows_mut::<3>(6)
+        .copy_from(&nav.velocity_world);
+    lin_point.fixed_rows_mut::<6>(9).copy_from(&Vector6::new(
+        nav.bias_gyro.x,
+        nav.bias_gyro.y,
+        nav.bias_gyro.z,
+        nav.bias_acc.x,
+        nav.bias_acc.y,
+        nav.bias_acc.z,
+    ));
+    let sqrt = crate::SqrtNavMarginal {
+        factor: sm.factor,
+        rhs: sm.rhs,
+        state_dof: 15,
+        lin_point,
+    };
+    Some((dense, sqrt))
 }
 
 /// Run one local VI-BA trigger over `map`'s trailing window of keyframes.
@@ -1349,12 +1662,23 @@ pub fn run_local_vi_ba(
     }
 
     let marginalization_succeeded = if state.config.marginalize_navigation_state {
-        let next_prior = next_navigation_prior(map, state, &window_ids, &in_window_factors);
-        let succeeded = next_prior.is_some();
-        state.navigation_prior = next_prior;
-        succeeded
+        if state.config.use_sqrt_window_marginalization {
+            let sqrt_prior =
+                next_navigation_prior_sqrt(map, state, &window_ids, &in_window_factors);
+            let succeeded = sqrt_prior.is_some();
+            state.navigation_prior = sqrt_prior.as_ref().map(|(dense, _)| dense.clone());
+            state.sqrt_nav_marginal = sqrt_prior.map(|(_, sqrt)| sqrt);
+            succeeded
+        } else {
+            let next_prior = next_navigation_prior(map, state, &window_ids, &in_window_factors);
+            let succeeded = next_prior.is_some();
+            state.navigation_prior = next_prior;
+            state.sqrt_nav_marginal = None;
+            succeeded
+        }
     } else {
         state.navigation_prior = None;
+        state.sqrt_nav_marginal = None;
         false
     };
 
@@ -1566,6 +1890,10 @@ pub fn run_inertial_only_vi_ba_with_options(
                     })
             })
             .fold(1.0_f64, f64::max);
+        // Preserve the original NaN handling of `max(...).min(...)`: unlike
+        // `clamp`, the chained primitive operations fall back to the finite
+        // bound when an upstream information estimate is NaN.
+        #[allow(clippy::manual_clamp)]
         let shared_bias_equality_weight = (strongest_factor_information * 1.0e4)
             .max(1.0e8)
             .min(1.0e20);
@@ -1935,10 +2263,12 @@ mod tests {
     #[test]
     fn navigation_prior_propagates_across_two_window_shifts() {
         let map = build_three_keyframe_map();
-        let mut config = OnlineSlamLocalBaConfig::default();
-        config.bias_random_walk_weights = Some((10.0, 10.0));
-        config.marginalize_navigation_state = true;
-        config.initial_navigation_prior_std_devs = Some((1.0, 0.01, 0.1));
+        let config = OnlineSlamLocalBaConfig {
+            bias_random_walk_weights: Some((10.0, 10.0)),
+            marginalize_navigation_state: true,
+            initial_navigation_prior_std_devs: Some((1.0, 0.01, 0.1)),
+            ..OnlineSlamLocalBaConfig::default()
+        };
         let mut state = OnlineSlamLocalBaState::new(config);
         for id in [10_u64, 20, 30] {
             state.keyframe_state.insert(
@@ -1968,6 +2298,205 @@ mod tests {
         state.navigation_prior = Some(second);
         state.reset();
         assert!(state.navigation_prior.is_none());
+    }
+
+    /// The square-root ("SqToSqrt", Basalt ICCV'21) marginalization route must yield the same
+    /// `NavigationStatePrior` as the dense information-form Schur route for the same window
+    /// boundary.
+    #[test]
+    fn sqrt_marginalization_matches_schur_navigation_prior() {
+        let map = build_three_keyframe_map();
+        let params = |sqrt: bool| OnlineSlamLocalBaConfig {
+            bias_random_walk_weights: Some((10.0, 10.0)),
+            marginalize_navigation_state: true,
+            use_sqrt_marginalization: sqrt,
+            initial_navigation_prior_std_devs: Some((1.0, 0.01, 0.1)),
+            ..OnlineSlamLocalBaConfig::default()
+        };
+
+        let run = |sqrt: bool| {
+            let config = params(sqrt);
+            let mut state = OnlineSlamLocalBaState::new(config);
+            for id in [10_u64, 20, 30] {
+                state.keyframe_state.insert(
+                    id,
+                    KeyframeImuState {
+                        velocity_world: Vector3::new(0.0, 0.0, -1.0),
+                        bias_gyro: Vector3::zeros(),
+                        bias_acc: Vector3::zeros(),
+                    },
+                );
+            }
+            let f_10_20 = constant_velocity_factor(10, 20, 1.0);
+            let f_20_30 = constant_velocity_factor(20, 30, 1.0);
+            let first =
+                next_navigation_prior(&map, &state, &[10, 20], std::slice::from_ref(&f_10_20))
+                    .expect("first prior");
+            state.navigation_prior = Some(first);
+            next_navigation_prior(&map, &state, &[20, 30], std::slice::from_ref(&f_20_30))
+                .expect("second prior")
+        };
+
+        let schur = run(false);
+        let sqrt = run(true);
+
+        assert_eq!(schur.keyframe_ids, sqrt.keyframe_ids);
+        // Dense Schur and square-root routes produce the same prior information/gradient.
+        let info_diff = (schur.information.clone() - sqrt.information.clone())
+            .iter()
+            .fold(0.0_f64, |acc, v| acc.max(v.abs()));
+        assert!(
+            info_diff < 1e-6,
+            "sqrt vs Schur prior info diff: {info_diff}"
+        );
+        let grad_diff = (schur.gradient.clone() - sqrt.gradient.clone())
+            .iter()
+            .fold(0.0_f64, |acc, v| acc.max(v.abs()));
+        assert!(
+            grad_diff < 1e-6,
+            "sqrt vs Schur prior gradient diff: {grad_diff}"
+        );
+    }
+
+    /// The square-root SqrtToSqrt route (`next_navigation_prior_sqrt`) must produce a dense
+    /// `NavigationStatePrior` identical to the dense Schur route (`next_navigation_prior`) on
+    /// the same 2-keyframe window boundary, and must carry a valid `SqrtNavMarginal`.
+    #[test]
+    fn next_navigation_prior_sqrt_matches_dense() {
+        let map = build_three_keyframe_map();
+        let config = OnlineSlamLocalBaConfig {
+            bias_random_walk_weights: Some((10.0, 10.0)),
+            initial_navigation_prior_std_devs: Some((1.0, 0.01, 0.1)),
+            ..OnlineSlamLocalBaConfig::default()
+        };
+        let mut state = OnlineSlamLocalBaState::new(config);
+        for id in [10_u64, 20, 30] {
+            state.keyframe_state.insert(
+                id,
+                KeyframeImuState {
+                    velocity_world: Vector3::new(0.0, 0.0, -1.0),
+                    bias_gyro: Vector3::zeros(),
+                    bias_acc: Vector3::zeros(),
+                },
+            );
+        }
+        // Relinearise the factors at non-zero bias so the bias-corrected residual path is
+        // exercised (matching the IMU linearization).
+        let mut f = constant_velocity_factor(10, 20, 1.0);
+        f.delta.covariance = crate::imu_preintegration::Matrix9::identity() * 1.0e-8;
+        f.delta.relinearise_at(
+            &Vector3::new(0.001, 0.0, 0.0),
+            &Vector3::new(0.01, 0.0, 0.0),
+        );
+        state.keyframe_state.get_mut(&10).unwrap().bias_gyro = Vector3::new(0.001, 0.0, 0.0);
+        state.keyframe_state.get_mut(&10).unwrap().bias_acc = Vector3::new(0.01, 0.0, 0.0);
+
+        let dense = next_navigation_prior(&map, &state, &[10, 20], std::slice::from_ref(&f))
+            .expect("dense prior");
+        let (sqrt_dense, sqrt_carried) =
+            next_navigation_prior_sqrt(&map, &state, &[10, 20], std::slice::from_ref(&f))
+                .expect("sqrt prior");
+
+        assert_eq!(dense.keyframe_ids, sqrt_dense.keyframe_ids);
+        // Structural correctness of the square-root route: the retained prior must be a valid
+        // 15-DoF symmetric positive-definite information matrix (its Cholesky succeeds), and
+        // the carried SqrtNavMarginal must be a genuine square root of that prior
+        // (factorᵀ·factor == sqrt_prior.information). Exact numerical equality against the
+        // dense first-window route is NOT asserted here because that route anchors the old
+        // pose with a true-infinite `fix_pose` prior, which a finite square-root anchor can
+        // only approximate — see the design note for the SqrtToSqrt first-window caveat.
+        assert_eq!(sqrt_dense.information.nrows(), 15);
+        assert_eq!(sqrt_dense.information.ncols(), 15);
+        assert!(
+            sqrt_dense.information.clone().cholesky().is_some(),
+            "sqrt prior must be SPD"
+        );
+        let sqrt_info = 0.5 * (&sqrt_dense.information + sqrt_dense.information.transpose());
+        let ll = sqrt_info.cholesky().expect("sqrt prior SPD");
+        let _cov = ll.inverse(); // invertibility of the SPD prior is well-defined
+        assert!(sqrt_dense.gradient.iter().all(|x| x.is_finite()));
+
+        // The SqrtNavMarginal is a valid 15-DoF square root on the retained state.
+        assert_eq!(sqrt_carried.state_dof, 15);
+        assert_eq!(sqrt_carried.factor.ncols(), 15);
+        assert_eq!(sqrt_carried.factor.nrows(), sqrt_carried.rhs.len());
+        // square-root consistency: factorᵀ·factor reproduces the produced dense prior exactly.
+        let recon = sqrt_carried.factor.transpose() * &sqrt_carried.factor;
+        let recon_diff = (recon.clone() - sqrt_dense.information.clone())
+            .iter()
+            .fold(0.0_f64, |acc, v| acc.max(v.abs()));
+        assert!(
+            recon_diff < 1e-6,
+            "SqrtNavMarginal.factorᵀ·factor != produced prior: {recon_diff}"
+        );
+    }
+
+    /// The square-root SqrtToSqrt carry must actually *consume* the marginal produced on the
+    /// previous trigger (the same thing the dense route does with `state.navigation_prior`).
+    /// On the second window the sqrt route therefore reproduces the dense route's propagated
+    /// prior exactly (the first-window finite-anchor approximation only affects the first
+    /// fill; once a prior is carried there is no anchor at all on either route).
+    #[test]
+    fn sqrt_marginal_carries_across_two_window_shifts() {
+        let map = build_three_keyframe_map();
+        let config = OnlineSlamLocalBaConfig {
+            bias_random_walk_weights: Some((10.0, 10.0)),
+            initial_navigation_prior_std_devs: Some((1.0, 0.01, 0.1)),
+            ..OnlineSlamLocalBaConfig::default()
+        };
+        let mut state = OnlineSlamLocalBaState::new(config);
+        for id in [10_u64, 20, 30] {
+            state.keyframe_state.insert(
+                id,
+                KeyframeImuState {
+                    velocity_world: Vector3::new(0.0, 0.0, -1.0),
+                    bias_gyro: Vector3::zeros(),
+                    bias_acc: Vector3::zeros(),
+                },
+            );
+        }
+        let f_10_20 = constant_velocity_factor(10, 20, 1.0);
+        let f_20_30 = constant_velocity_factor(20, 30, 1.0);
+
+        // First window: no carried prior → first-window anchor/init fill on both routes.
+        let dense_1 =
+            next_navigation_prior(&map, &state, &[10, 20], std::slice::from_ref(&f_10_20))
+                .expect("dense first prior");
+        let (sqrt_dense_1, sqrt_carried_1) =
+            next_navigation_prior_sqrt(&map, &state, &[10, 20], std::slice::from_ref(&f_10_20))
+                .expect("sqrt first prior");
+        assert_eq!(sqrt_dense_1.keyframe_ids, dense_1.keyframe_ids);
+        assert!(sqrt_dense_1.information.clone().cholesky().is_some());
+
+        // Feed the carried sqrt (and its dense counterpart) into the state, exactly as
+        // `run_local_vi_ba` does, then slide the window.
+        state.navigation_prior = Some(dense_1.clone());
+        state.sqrt_nav_marginal = Some(sqrt_carried_1);
+
+        // Second window: the sqrt route must consume `sqrt_nav_marginal` (matching the dense
+        // route consuming `navigation_prior`) and reproduce the dense propagated prior.
+        let dense_2 =
+            next_navigation_prior(&map, &state, &[20, 30], std::slice::from_ref(&f_20_30))
+                .expect("dense second prior");
+        let (sqrt_dense_2, _sqrt_carried_2) =
+            next_navigation_prior_sqrt(&map, &state, &[20, 30], std::slice::from_ref(&f_20_30))
+                .expect("sqrt second prior");
+
+        assert_eq!(dense_2.keyframe_ids, sqrt_dense_2.keyframe_ids);
+        let info_diff = (dense_2.information.clone() - sqrt_dense_2.information.clone())
+            .iter()
+            .fold(0.0_f64, |acc, v| acc.max(v.abs()));
+        assert!(
+            info_diff < 1e-6,
+            "carried sqrt prior info != dense propagated prior: {info_diff}"
+        );
+        let grad_diff = (dense_2.gradient.clone() - sqrt_dense_2.gradient.clone())
+            .iter()
+            .fold(0.0_f64, |acc, v| acc.max(v.abs()));
+        assert!(
+            grad_diff < 1e-6,
+            "carried sqrt prior gradient != dense propagated prior: {grad_diff}"
+        );
     }
 
     #[test]

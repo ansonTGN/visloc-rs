@@ -700,6 +700,9 @@ struct CliArgs {
     /// Schur-marginalize the outgoing navigation state into a dense FEJ prior
     /// on the next window anchor.
     local_vi_ba_marginalization: bool,
+    /// Use the square-root (SqrtToSqrt) sliding-window marginalization (Basalt
+    /// ICCV'21). Default on. Disable with `--no-sqrt-window-marginalization`.
+    local_vi_ba_use_sqrt_window_marginalization: bool,
     /// Optional finite initialization uncertainty `(velocity, gyro bias,
     /// accel bias)` used by the first marginal prior.
     local_vi_ba_initial_prior_std_devs: Option<(f64, f64, f64)>,
@@ -1565,6 +1568,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut local_vi_ba_enabled: bool = false;
     let mut observation_confidence_ba_enabled: bool = false;
     let mut local_vi_ba_marginalization: bool = false;
+    let mut local_vi_ba_use_sqrt_window_marginalization: bool = true;
     let mut local_vi_ba_initial_prior_std_devs: Option<(f64, f64, f64)> = None;
     let mut local_vi_ba_freeze_biases_above: Option<f64> = None;
     let mut local_vi_ba_reject_writeback_above: Option<f64> = None;
@@ -1889,6 +1893,14 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--local-vi-ba-marginalization" => {
                 local_vi_ba_marginalization = true;
+                args.remove(i);
+            }
+            "--use-sqrt-window-marginalization" => {
+                local_vi_ba_use_sqrt_window_marginalization = true;
+                args.remove(i);
+            }
+            "--no-sqrt-window-marginalization" => {
+                local_vi_ba_use_sqrt_window_marginalization = false;
                 args.remove(i);
             }
             "--local-vi-ba-initial-prior-std-devs" => {
@@ -3331,6 +3343,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         local_vi_ba_enabled,
         observation_confidence_ba_enabled,
         local_vi_ba_marginalization,
+        local_vi_ba_use_sqrt_window_marginalization,
         local_vi_ba_initial_prior_std_devs,
         local_vi_ba_freeze_biases_above,
         local_vi_ba_reject_writeback_above,
@@ -4840,7 +4853,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
             relinearise_imu_factor_bias_thresholds: args.relinearise_imu_factor_bias_thresholds,
             run_at_vi_init_promotion: args.run_local_vi_ba_at_vi_init_promotion,
-            marginalize_navigation_state: args.local_vi_ba_marginalization,
+            marginalize_navigation_state: args.local_vi_ba_marginalization
+                || args.local_vi_ba_use_sqrt_window_marginalization,
+            use_sqrt_window_marginalization: args.local_vi_ba_use_sqrt_window_marginalization,
             initial_navigation_prior_std_devs: args.local_vi_ba_initial_prior_std_devs,
             use_observation_confidence_weights: args.observation_confidence_ba_enabled,
             ..OnlineSlamLocalBaConfig::default()
@@ -8028,6 +8043,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          motion_vi_init_status_final={final_motion_vi_status:?}\n\
          local_vi_ba_enabled={local_vi_ba_enabled}\n\
          local_vi_ba_marginalization={local_vi_ba_marginalization}\n\
+         local_vi_ba_use_sqrt_window_marginalization={local_vi_ba_use_sqrt_window_marginalization}\n\
          local_vi_ba_general_stereo=true\n\
          local_vi_ba_initial_prior_std_devs={local_vi_ba_initial_prior_std_devs:?}\n\
          local_vi_ba_freeze_biases_above={local_vi_ba_freeze:?}\n\
@@ -8430,6 +8446,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         local_vi_ba_enabled = args.local_vi_ba_enabled,
         observation_confidence_ba_enabled = args.observation_confidence_ba_enabled,
         local_vi_ba_marginalization = args.local_vi_ba_marginalization,
+        local_vi_ba_use_sqrt_window_marginalization = args
+            .local_vi_ba_use_sqrt_window_marginalization,
         local_vi_ba_initial_prior_std_devs = args.local_vi_ba_initial_prior_std_devs,
         local_vi_ba_freeze = args.local_vi_ba_freeze_biases_above,
         local_vi_ba_reject_writeback = args.local_vi_ba_reject_writeback_above,

@@ -3,11 +3,11 @@
 //! Optimizes camera poses jointly with landmark positions to minimize the
 //! sum of squared 2D reprojection residuals. Pinhole intrinsics are held
 //! fixed; the variables are pose `T_world_to_camera` (6 DoF, right
-//! perturbation `T ← T · Exp(ξ)` with `ξ = [ρ; ω]`) per non-fixed pose
+//! perturbation `T 竊・T ﾂｷ Exp(ﾎｾ)` with `ﾎｾ = [ﾏ・ ﾏ云`) per non-fixed pose
 //! and `X_w` (3 DoF) per non-fixed landmark.
 //!
 //! The Schur complement of the block-diagonal landmark Hessian `H_LL`
-//! reduces the linear system to one of pose-only size `(6P) × (6P)` per
+//! reduces the linear system to one of pose-only size `(6P) ﾃ・(6P)` per
 //! iteration, regardless of how many landmarks the scene has, then
 //! back-substitutes for the landmark updates. Each iteration is a
 //! Levenberg-Marquardt step with optional cost-rejection.
@@ -16,8 +16,8 @@
 //! gauge freedom (6 SE(3) + 1 scale). At minimum fix the first pose
 //! (anchor) and one of the following to remove scale: a second pose, a
 //! second landmark, or a known-distance pair. Rectified-stereo BA (any
-//! [`BaStereoObservation`] present) has only 6 DoF gauge freedom — the
-//! baseline anchors metric scale — so a single fixed pose is enough.
+//! [`BaStereoObservation`] present) has only 6 DoF gauge freedom 窶・the
+//! baseline anchors metric scale 窶・so a single fixed pose is enough.
 //!
 //! # Parallelism
 //!
@@ -28,27 +28,27 @@
 //!
 //! - **Assembly** (`build_normal_equations`'s monocular observation loop):
 //!   each observation's residual/Jacobian is a pure function of the current
-//!   pose and landmark estimate — it touches no shared state — so it is
+//!   pose and landmark estimate 窶・it touches no shared state 窶・so it is
 //!   computed on the rayon pool in fixed-size chunks
 //!   ([`PARALLEL_OBSERVATION_CHUNK`]), collected into a plain per-chunk
 //!   `Vec`; the actual `+=` scatter into `h_pp` / `b_p` / the per-landmark
 //!   blocks stays a single serial pass over each chunk's precomputed
 //!   contributions, *in the original per-observation order*.
-//! - **Schur reduction** (`solve_step`'s per-landmark `S -= H_PL H_LL⁻¹
-//!   H_PLᵀ` loop): each landmark's `3×3` factorization is independent and
+//! - **Schur reduction** (`solve_step`'s per-landmark `S -= H_PL H_LL竅ｻﾂｹ
+//!   H_PL盞` loop): each landmark's `3ﾃ・` factorization is independent and
 //!   computed directly in parallel (disjoint output slots, no merge needed);
 //!   the pose-pair contributions it produces are computed the same chunked
 //!   way as assembly, collecting each landmark's `(Vec<(p,q,block)>,
 //!   Vec<(p,upd)>)` pair per chunk and then flattening/merging into the
 //!   shared reduced system `s` / `b_reduced` by a serial pass over each
 //!   chunk, in landmark-ascending order.
-//! - **Back-substitution** (`solve_step`'s per-landmark `δ_L` loop): each
+//! - **Back-substitution** (`solve_step`'s per-landmark `ﾎｴ_L` loop): each
 //!   landmark writes only its own 3 rows of `delta_l`, so this is
 //!   embarrassingly parallel with no merge step at all.
 //!
-//! Unlike [`crate::block_cholesky`]'s intra-column path — which reassociates
+//! Unlike [`crate::block_cholesky`]'s intra-column path 窶・which reassociates
 //! a floating-point sum across contributors and is therefore only
-//! deterministic *to rounding* — every merge here reproduces the exact
+//! deterministic *to rounding* 窶・every merge here reproduces the exact
 //! summation order the serial code would have used, so the parallel path is
 //! bit-identical to the serial one at any thread count or chunk size; the
 //! chunk constants below exist only to cap peak memory (a full-sequence BA
@@ -60,7 +60,7 @@
 //! matching `block_cholesky`'s `PARALLEL_MIN_BLOCKS` precedent.
 //!
 //! Not parallelized: [`BundleAdjustment::optimize_joint_intrinsics`]'s own
-//! Schur reduction (a separate, less-used code path — self-calibration BA is
+//! Schur reduction (a separate, less-used code path 窶・self-calibration BA is
 //! opt-in and typically run on far smaller problems than a full-sequence
 //! pose/structure solve) and the cost-evaluation passes (`robust_cost_weighted`
 //! / `reprojection_squared_residuals`, shared by many callers beyond the LM
@@ -178,7 +178,7 @@ pub struct BaObservation {
 ///
 /// Compared with two independent [`BaObservation`]s for the left and right
 /// pixel, a single [`BaStereoObservation`] (i) avoids carrying a separate
-/// right-camera pose (it is implicitly the left's translated by `b·x̂`) and
+/// right-camera pose (it is implicitly the left's translated by `bﾂｷxﾌＡ) and
 /// (ii) couples the two residuals through the same landmark variable, which
 /// is the standard rectified-stereo BA formulation.
 #[derive(Debug, Clone, PartialEq)]
@@ -210,7 +210,7 @@ pub struct BaGeneralStereoObservation {
 
 /// Rotation-alignment gravity prior on every non-fixed pose.
 ///
-/// Adds a 3-vector residual `r = R_wc · g_world − g_camera_observed` per
+/// Adds a 3-vector residual `r = R_wc ﾂｷ g_world 竏・g_camera_observed` per
 /// pose, where `R_wc` is the pose's world-to-camera rotation and the two
 /// gravity vectors are caller-supplied. The most common use is a level
 /// prior: set both vectors to the same down-direction (e.g.
@@ -221,15 +221,15 @@ pub struct BaGeneralStereoObservation {
 /// This prior constrains ROTATION only. Pure-translation drift (such as
 /// the structural vertical bias on KITTI sequence 08, where the camera
 /// rotation already matches ground truth) is NOT corrected by this
-/// prior — that would require a translation/altitude prior fed from
+/// prior 窶・that would require a translation/altitude prior fed from
 /// IMU velocity or GNSS, which lives outside [`BundleAdjustment`] in
 /// its current form.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GravityPrior {
     /// Gravity direction in world frame. Magnitude defines the
-    /// residual's natural scale; using the physical 9.81 m/s² keeps the
+    /// residual's natural scale; using the physical 9.81 m/sﾂｲ keeps the
     /// per-pose residual in the same order of magnitude as a pixel
-    /// reprojection residual, so a default Huber `delta ≈ 3` does not
+    /// reprojection residual, so a default Huber `delta 竕・3` does not
     /// over- or under-weight the prior.
     pub g_world: Vector3<f64>,
     /// Gravity direction observed (or assumed) in camera frame for
@@ -237,9 +237,9 @@ pub struct GravityPrior {
     /// direction of `g_world` at the anchor pose, e.g. `(0, 9.81, 0)`.
     pub g_camera_observed: Vector3<f64>,
     /// Scalar weight applied to the gravity contribution. The cost
-    /// added per pose is `weight · ‖r‖²` and the normal-equations
-    /// contribution is `weight · Jᵀ J` / `weight · Jᵀ r`. A weight of
-    /// `1.0` makes a 9.81 m/s² gravity residual count comparably to a
+    /// added per pose is `weight ﾂｷ 窶睦窶鳴ｲ` and the normal-equations
+    /// contribution is `weight ﾂｷ J盞 J` / `weight ﾂｷ J盞 r`. A weight of
+    /// `1.0` makes a 9.81 m/sﾂｲ gravity residual count comparably to a
     /// single 9.81 px reprojection residual; lower this for a softer
     /// prior, raise it for a stiffer one.
     pub weight: f64,
@@ -247,18 +247,18 @@ pub struct GravityPrior {
 
 /// Per-keyframe observation of the gravity direction in camera
 /// coordinates. Each entry constrains
-/// `R_wc · g_world ≈ g_camera_observed` at the named keyframe; the
+/// `R_wc ﾂｷ g_world 竕・g_camera_observed` at the named keyframe; the
 /// residual and Jacobian shape are identical to [`GravityPrior`]'s
 /// global pose-independent variant, except the observation is sourced
 /// per-keyframe rather than shared across all poses.
 ///
 /// The intended source of `g_camera_observed` is an accelerometer
 /// sample (or a low-pass-filtered window of samples) at the keyframe
-/// timestamp, rotated into the camera frame via the body→camera
+/// timestamp, rotated into the camera frame via the body竊団amera
 /// extrinsic. Unlike [`PositionPrior`], which can leak ground-truth
 /// poses when fed from GNSS/INS-fused trajectories, a properly-
 /// generated per-keyframe gravity prior is a true online sensor
-/// observation — the same signal a deployed VIO would consume.
+/// observation 窶・the same signal a deployed VIO would consume.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PerPoseGravityObservation {
     /// Keyframe whose pose rotation is being constrained. The pose
@@ -268,7 +268,7 @@ pub struct PerPoseGravityObservation {
     pub keyframe_id: u64,
     /// Observed gravity direction in camera frame at this keyframe.
     /// Magnitude should match [`PerPoseGravityPrior::g_world`] (e.g.
-    /// `9.81 m/s²` for a physical accelerometer-derived observation),
+    /// `9.81 m/sﾂｲ` for a physical accelerometer-derived observation),
     /// so the per-pose residual stays in the same order of magnitude
     /// as a pixel reprojection residual.
     pub g_camera_observed: Vector3<f64>,
@@ -300,7 +300,7 @@ impl PerPoseGravityObservation {
 /// gravity vector and stiffness.
 ///
 /// This is the online-friendly companion to [`GravityPrior`] (single
-/// observation shared across all poses) — it accepts per-keyframe
+/// observation shared across all poses) 窶・it accepts per-keyframe
 /// observations rather than baking in a single "level-world" assumption.
 /// Use it when the body's pitch/roll varies meaningfully along the
 /// trajectory (climbing/descending on a slope, banking on a curve,
@@ -323,7 +323,7 @@ pub struct PerPoseGravityPrior {
     /// Global scalar weight applied to every observation's
     /// contribution, multiplied with each observation's
     /// [`PerPoseGravityObservation::weight`]. `weight = 1.0` plus
-    /// per-obs `1.0` makes a 9.81 m/s² gravity residual count
+    /// per-obs `1.0` makes a 9.81 m/sﾂｲ gravity residual count
     /// comparably to a single 9.81 px reprojection residual; lower
     /// the global scale for a softer prior, raise for a stiffer one.
     /// The per-observation field stays neutral unless the upstream
@@ -347,9 +347,9 @@ impl PerPoseGravityPrior {
 
 /// One absolute position measurement for a single keyframe. The
 /// expected world-frame camera centre is compared against the BA's
-/// current estimate of `−Rᵀ · t`. Designed for translation-domain
-/// priors fed from GNSS, an external altimeter, or — in evaluation
-/// scenarios — ground-truth poses; the prior constrains TRANSLATION
+/// current estimate of `竏坦盞 ﾂｷ t`. Designed for translation-domain
+/// priors fed from GNSS, an external altimeter, or 窶・in evaluation
+/// scenarios 窶・ground-truth poses; the prior constrains TRANSLATION
 /// only, complementing [`GravityPrior`] which constrains ROTATION
 /// only.
 ///
@@ -368,7 +368,7 @@ pub struct PositionPriorObservation {
     /// y-down camera this is the same coordinate frame as
     /// `pose.camera_center_world()`.
     pub camera_center_world: Point3<f64>,
-    /// Per-axis weights in the cost `Σ wᵢ · (Cᵢ − targetᵢ)²` and the
+    /// Per-axis weights in the cost `ﾎ｣ w盞｢ ﾂｷ (C盞｢ 竏・target盞｢)ﾂｲ` and the
     /// normal-equations contribution. A zero entry removes that axis
     /// from the prior entirely; mixed positive entries pin a subset of
     /// axes with different stiffnesses (`(0, w, 0)` for altitude-only).
@@ -380,18 +380,18 @@ pub struct PositionPriorObservation {
 /// pose-graph edge being lifted into BA.
 ///
 /// At convergence the measurement equals the BA-implied relative pose
-/// `T_j · T_iⁱ` (`world_to_camera_j` of the "to" keyframe composed with
+/// `T_j ﾂｷ T_i竅ｱ` (`world_to_camera_j` of the "to" keyframe composed with
 /// the inverse of the "from" keyframe). The residual is the SE(3) log
 /// of the disagreement:
 ///
 /// ```text
-/// r = log(measurement⁻¹ · T_j · T_iⁱ)  ∈ ℝ⁶
+/// r = log(measurement竅ｻﾂｹ ﾂｷ T_j ﾂｷ T_i竅ｱ)  竏・邃昶・
 /// ```
 ///
-/// Jacobians under right-perturbation `T ← T · exp(δ)`:
+/// Jacobians under right-perturbation `T 竊・T ﾂｷ exp(ﾎｴ)`:
 ///
-/// - `∂r / ∂δ_j =  Ad(T_i)`
-/// - `∂r / ∂δ_i = −Ad(T_i)`
+/// - `竏Ｓ / 竏ばｴ_j =  Ad(T_i)`
+/// - `竏Ｓ / 竏ばｴ_i = 竏但d(T_i)`
 ///
 /// This is the same Jacobian shape used by
 /// `PoseGraph::optimize_se3_iterative`; the factor lifts those edges
@@ -399,7 +399,7 @@ pub struct PositionPriorObservation {
 /// pose deltas can be jointly optimised in a single LM solve. Full
 /// IMU pre-integration with velocity/bias states is a future
 /// extension; this v1 factor assumes the pre-integrator has already
-/// produced a single `(Δp, ΔR)` pair plus a scalar weight.
+/// produced a single `(ﾎ廃, ﾎ燃)` pair plus a scalar weight.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PairwisePoseFactor {
     /// "From" keyframe id (the one Ad(T_from) is computed about).
@@ -407,19 +407,19 @@ pub struct PairwisePoseFactor {
     /// "To" keyframe id.
     pub keyframe_id_to: u64,
     /// Measured relative pose `T_meas` such that, at convergence,
-    /// `T_meas = T_j · T_iⁱ` where `T_i` and `T_j` are the BA poses
+    /// `T_meas = T_j ﾂｷ T_i竅ｱ` where `T_i` and `T_j` are the BA poses
     /// for `keyframe_id_from` and `keyframe_id_to` respectively.
     pub measurement: Pose,
     /// Scalar weight (sqrt-information squared). The cost added is
-    /// `weight · ‖r‖²` so `weight = 1 / σ²` for an isotropic
-    /// measurement with standard deviation `σ` (per-axis). Anisotropic
-    /// 6×6 sqrt-information matrices are deferred to a future
+    /// `weight ﾂｷ 窶睦窶鳴ｲ` so `weight = 1 / ﾏδｲ` for an isotropic
+    /// measurement with standard deviation `ﾏチ (per-axis). Anisotropic
+    /// 6ﾃ・ sqrt-information matrices are deferred to a future
     /// extension.
     pub weight: f64,
 }
 
 /// Bias random-walk factor between two keyframes' 6-vector IMU
-/// biases. Adds the residual `r = b_j − b_i` with independent gyro and
+/// biases. Adds the residual `r = b_j 竏・b_i` with independent gyro and
 /// accelerometer weights. Use this to keep neighbouring
 /// keyframes' biases close to each other when the IMU factor's data-
 /// driven Jacobian leaves some bias DoFs unobservable in isolation
@@ -427,21 +427,21 @@ pub struct PairwisePoseFactor {
 ///
 /// Both endpoint biases must be registered via
 /// [`BundleAdjustment::add_bias`] for the factor to contribute. If
-/// either side has a non-fixed bias slot, the factor adds its 6×6
-/// Jacobian (`J_i = −I`, `J_j = I`) to the normal equations; fully-
+/// either side has a non-fixed bias slot, the factor adds its 6ﾃ・
+/// Jacobian (`J_i = 竏棚`, `J_j = I`) to the normal equations; fully-
 /// fixed endpoints still contribute to the cost report but no
 /// Jacobian rows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BiasRandomWalkFactor {
-    /// "From" keyframe id (the bias on the `−I` side of the Jacobian).
+    /// "From" keyframe id (the bias on the `竏棚` side of the Jacobian).
     pub keyframe_id_from: u64,
     /// "To" keyframe id (the bias on the `+I` side).
     pub keyframe_id_to: u64,
     /// Gyroscope-bias sqrt-information squared. A typical value is
-    /// `1 / (σ_bg² · Δt_ij)` for continuous random-walk density `σ_bg`.
+    /// `1 / (ﾏダbgﾂｲ ﾂｷ ﾎ杯_ij)` for continuous random-walk density `ﾏダbg`.
     pub weight_gyro: f64,
     /// Accelerometer-bias sqrt-information squared. A typical value is
-    /// `1 / (σ_ba² · Δt_ij)` for continuous random-walk density `σ_ba`.
+    /// `1 / (ﾏダbaﾂｲ ﾂｷ ﾎ杯_ij)` for continuous random-walk density `ﾏダba`.
     pub weight_accel: f64,
 }
 
@@ -503,7 +503,7 @@ pub struct BundleAdjustment {
     /// Landmark ids whose `Point3` is held constant during optimization.
     pub fixed_landmarks: BTreeSet<u64>,
     /// Rectified-stereo baseline in metric units. The right camera is at
-    /// `+stereo_baseline · x̂` of the left in the left-camera frame. Required
+    /// `+stereo_baseline ﾂｷ xﾌＡ of the left in the left-camera frame. Required
     /// (positive, finite) when [`Self::stereo_observations`] is non-empty;
     /// ignored otherwise. `None` means "monocular BA".
     pub stereo_baseline: Option<f64>,
@@ -519,8 +519,8 @@ pub struct BundleAdjustment {
     /// world assumption. See [`PerPoseGravityPrior`].
     pub per_pose_gravity_prior: Option<PerPoseGravityPrior>,
     /// Optional per-keyframe absolute position prior. Each observation
-    /// adds an axis-weighted residual `(C_w − target)` with Jacobian
-    /// `[−I | [C_w]_×]` (right perturbation, xi-order `[ρ; ω]`). See
+    /// adds an axis-weighted residual `(C_w 竏・target)` with Jacobian
+    /// `[竏棚 | [C_w]_ﾃ余` (right perturbation, xi-order `[ﾏ・ ﾏ云`). See
     /// [`PositionPrior`].
     pub position_prior: Option<PositionPrior>,
     /// Pairwise relative-pose factors. Each factor lifts an external
@@ -538,7 +538,7 @@ pub struct BundleAdjustment {
     /// [`Self::fixed_poses`] / [`Self::fixed_landmarks`]).
     pub fixed_velocities: BTreeSet<u64>,
     /// On-manifold IMU pre-integration factors. Each factor carries a
-    /// gravity-compensated `(ΔR, Δv, Δp)` produced by
+    /// gravity-compensated `(ﾎ燃, ﾎ牌, ﾎ廃)` produced by
     /// [`crate::imu_preintegration::ImuPreintegrator`] and binds two
     /// keyframes' `(pose, velocity)` states with a 9-vector residual
     /// `[r_R; r_v; r_p]` (Forster 2017 eq. 45-47). The optimiser
@@ -564,7 +564,7 @@ pub struct BundleAdjustment {
     pub fixed_biases: BTreeSet<u64>,
     /// Bias random-walk priors between consecutive keyframes. See
     /// [`BiasRandomWalkFactor`]; the cost contribution is
-    /// `weight · ‖b_j − b_i‖²` and the Jacobian places `±I` against
+    /// `weight ﾂｷ 窶肪_j 竏・b_i窶鳴ｲ` and the Jacobian places `ﾂｱI` against
     /// each non-fixed bias slot.
     pub bias_random_walk_factors: Vec<BiasRandomWalkFactor>,
     /// Dense fixed-lag prior carried from the preceding VI window.
@@ -671,7 +671,7 @@ impl BundleAdjustment {
 
     /// Register an initial world-frame velocity for the given keyframe.
     /// Required for any keyframe referenced by an
-    /// [`ImuPreintegrationFactor`] — the velocity becomes a BA variable
+    /// [`ImuPreintegrationFactor`] 窶・the velocity becomes a BA variable
     /// (unless also passed to [`Self::fix_velocity`]).
     pub fn add_velocity(&mut self, id: u64, velocity: Vector3<f64>) {
         self.velocities.insert(id, velocity);
@@ -787,7 +787,7 @@ impl BundleAdjustment {
         self.stereo_baseline = Some(baseline);
     }
 
-    /// Sum of squared reprojection residuals `Σ ||π(K · T · X_w) − u||²`.
+    /// Sum of squared reprojection residuals `ﾎ｣ ||ﾏ(K ﾂｷ T ﾂｷ X_w) 竏・u||ﾂｲ`.
     /// Observations whose camera-frame point falls behind the camera are
     /// skipped (cost is reported as if those observations are absent).
     /// Equivalent to [`Self::robust_cost`] called with [`RobustKernel::None`].
@@ -845,11 +845,11 @@ impl BundleAdjustment {
         mono.count() + stereo.count() + general_stereo.count()
     }
 
-    /// Robust reprojection cost: `Σ ρ(||r||²)` where `ρ` is the supplied
+    /// Robust reprojection cost: `ﾎ｣ ﾏ・||r||ﾂｲ)` where `ﾏ～ is the supplied
     /// [`RobustKernel`]. With [`RobustKernel::None`] this matches
     /// [`Self::cost`]. Stereo observations contribute a 3-vector residual
-    /// `(u_l_pred − u_l_meas, v_l_pred − v_l_meas, u_r_pred − u_r_meas)`
-    /// where `u_r_pred = u_l_pred − fx · b / Z` (rectified-stereo assumption,
+    /// `(u_l_pred 竏・u_l_meas, v_l_pred 竏・v_l_meas, u_r_pred 竏・u_r_meas)`
+    /// where `u_r_pred = u_l_pred 竏・fx ﾂｷ b / Z` (rectified-stereo assumption,
     /// see [`BaStereoObservation`]).
     pub fn robust_cost(&self, kernel: &RobustKernel) -> f64 {
         self.robust_cost_weighted(kernel, None)
@@ -995,13 +995,13 @@ impl BundleAdjustment {
 
     /// Like [`Self::robust_cost`] but multiplies each reprojection
     /// observation's contribution by an external per-observation weight
-    /// (the Graduated Non-Convexity Black-Rangarajan weight `w ∈ [0,1]`).
+    /// (the Graduated Non-Convexity Black-Rangarajan weight `w 竏・[0,1]`).
     /// `gnc_weights` is indexed monocular-observations-first
     /// (`0 .. observations.len()`), rectified stereo, then general stereo
     /// (`observations.len() .. + stereo_observations.len()`). `None`
     /// reproduces [`Self::robust_cost`] exactly. Structural and inertial
     /// terms (gravity / position priors, pairwise pose, bias random-walk,
-    /// IMU) are never reweighted — only outlier-prone feature
+    /// IMU) are never reweighted 窶・only outlier-prone feature
     /// reprojections are, so a wrong correspondence is the only thing GNC
     /// can switch off.
     fn robust_cost_weighted(&self, kernel: &RobustKernel, gnc_weights: Option<&[f64]>) -> f64 {
@@ -1085,7 +1085,7 @@ impl BundleAdjustment {
                 // Gravity prior uses an L2 (non-robust) contribution: the
                 // measurement is global per pose, not a per-feature
                 // outlier-prone observation, so a robust kernel here would
-                // hide rather than down-weight prior–data conflicts.
+                // hide rather than down-weight prior窶電ata conflicts.
                 total += prior.weight * s;
             }
         }
@@ -1112,7 +1112,7 @@ impl BundleAdjustment {
                 };
                 let c_world = pose.camera_center_world();
                 let r_vec = c_world - obs.camera_center_world;
-                // Axis-weighted L2 cost: Σ wᵢ · rᵢ². Zero weight axes
+                // Axis-weighted L2 cost: ﾎ｣ w盞｢ ﾂｷ r盞｢ﾂｲ. Zero weight axes
                 // contribute nothing, so an altitude-only prior with
                 // `axis_weights = (0, w, 0)` is exact.
                 let s = obs.axis_weights.x * r_vec.x * r_vec.x
@@ -1209,13 +1209,13 @@ impl BundleAdjustment {
         }
     }
 
-    /// Per-observation squared reprojection residual `s = ‖r‖²` (pixel²),
+    /// Per-observation squared reprojection residual `s = 窶睦窶鳴ｲ` (pixelﾂｲ),
     /// evaluated at the current state and aligned to the GNC weight layout
     /// used everywhere in this file: monocular observations first
     /// (`0 .. observations.len()`), then rectified stereo, then general
     /// stereo. An observation that cannot
     /// be evaluated now (missing pose / landmark, behind the camera, or
-    /// non-projectable, or — for stereo — no usable baseline) is reported
+    /// non-projectable, or 窶・for stereo 窶・no usable baseline) is reported
     /// as `f64::NAN`, so it neither sets the GNC inlier scale nor is
     /// classified as an inlier or outlier.
     fn reprojection_squared_residuals(&self) -> Vec<f64> {
@@ -1342,22 +1342,22 @@ impl BundleAdjustment {
     ///
     /// This is the difference that matters versus an *alternating* refinement
     /// (update the intrinsics by Gauss-Newton against a *converged* structure,
-    /// then re-solve): there the structure-fixed gradient `∂cost/∂K` is ≈ 0 (the
+    /// then re-solve): there the structure-fixed gradient `竏Ｄost/竏・` is 竕・0 (the
     /// structure has already absorbed any focal error), so it cannot move a wrong
-    /// focal. The joint solve uses the **coupled** gradient — the
-    /// reduced-camera gradient *after* landmark elimination — which is non-zero,
+    /// focal. The joint solve uses the **coupled** gradient 窶・the
+    /// reduced-camera gradient *after* landmark elimination 窶・which is non-zero,
     /// so it pulls the intrinsics and poses together toward the true calibration.
     ///
     /// SfM-only: handles monocular + rectified-stereo reprojection observations
     /// and ignores IMU / velocity / bias / gravity / position-prior factors (which
     /// SfM intrinsics refinement does not use). The intrinsics are always a free
-    /// block; the caller fixes poses (anchor + farthest, or ≥2 stereo observers) to
+    /// block; the caller fixes poses (anchor + farthest, or 竕･2 stereo observers) to
     /// pin the remaining gauge. Writes refined poses, landmarks, and intrinsics
     /// into `self`.
     fn optimize_joint_intrinsics(&mut self, config: &BaConfig) -> Result<BaResult, BaError> {
         let kernel = config.robust_kernel;
 
-        // Variable layout: non-fixed poses occupy `6·p .. 6·p+6`; the 4 shared
+        // Variable layout: non-fixed poses occupy `6ﾂｷp .. 6ﾂｷp+6`; the 4 shared
         // intrinsics occupy the final block `k_off .. k_off+4`. Fixed poses and
         // fixed landmarks contribute residuals but get no variable slot.
         let mut pose_index: BTreeMap<u64, usize> = BTreeMap::new();
@@ -1378,7 +1378,7 @@ impl BundleAdjustment {
         }
         let p_count = pose_index.len();
         let k_off = p_count * 6;
-        // Also self-calibrate radial distortion (k1, k2) when asked — but only on
+        // Also self-calibrate radial distortion (k1, k2) when asked 窶・but only on
         // a monocular reconstruction (rectified stereo is already undistorted, and
         // its baseline term does not carry a distortion model). The two coefficients
         // get appended to the camera block, so `k_dim` is 6 instead of 4.
@@ -1414,7 +1414,7 @@ impl BundleAdjustment {
             );
             debug_assert_eq!(cam_dim_n, cam_dim);
 
-            // Damped Schur reduction (Levenberg I·λ on both the camera and the
+            // Damped Schur reduction (Levenberg Iﾂｷﾎｻ on both the camera and the
             // landmark diagonals, exactly as `solve_step`).
             let mut s = h_cc.clone();
             if lambda > 0.0 {
@@ -1434,11 +1434,11 @@ impl BundleAdjustment {
                 let inv = h_ll.try_inverse();
                 h_ll_inv_cache.push(inv);
                 let Some(inv) = inv else { continue };
-                // S -= Σ cross_a^T · H_ll^{-1} · cross_b ; b += cross_a^T H_ll^{-1} b_l.
+                // S -= ﾎ｣ cross_a^T ﾂｷ H_ll^{-1} ﾂｷ cross_b ; b += cross_a^T H_ll^{-1} b_l.
                 for (cs_a, a) in &lm.cross {
-                    let ah = a * inv; // (rows_a × 3)
+                    let ah = a * inv; // (rows_a ﾃ・3)
                     for (cs_b, b) in &lm.cross {
-                        let block = &ah * b.transpose(); // (rows_a × rows_b)
+                        let block = &ah * b.transpose(); // (rows_a ﾃ・rows_b)
                         for r in 0..a.nrows() {
                             for c in 0..b.nrows() {
                                 s[(cs_a + r, cs_b + c)] -= block[(r, c)];
@@ -1472,7 +1472,7 @@ impl BundleAdjustment {
                 }
             };
 
-            // Back-substitute landmark updates: δ_L = H_ll^{-1}(−b_l − Σ crossᵀ δ_cam).
+            // Back-substitute landmark updates: ﾎｴ_L = H_ll^{-1}(竏鍛_l 竏・ﾎ｣ cross盞 ﾎｴ_cam).
             let mut delta_lm: BTreeMap<u64, Vector3<f64>> = BTreeMap::new();
             for (lm, inv) in lm_blocks.iter().zip(&h_ll_inv_cache) {
                 let Some(inv) = inv else { continue };
@@ -1487,7 +1487,7 @@ impl BundleAdjustment {
                 delta_lm.insert(lm.id, inv * acc);
             }
 
-            // Tentative update (save → apply → cost → accept/reject).
+            // Tentative update (save 竊・apply 竊・cost 竊・accept/reject).
             let saved_poses = self.poses.clone();
             let saved_landmarks = self.landmarks.clone();
             let saved_params = self.camera.params.clone();
@@ -1585,9 +1585,9 @@ impl BundleAdjustment {
     /// [`Self::optimize_joint_intrinsics`]: the camera-block Hessian `H_cc`
     /// (poses then the 4 intrinsics) and gradient `b_c`, plus per-landmark
     /// `{H_ll, b_l, cross}` blocks where `cross` maps each touching camera-block
-    /// column-start to `Jᵀ_cam · J_lm`. Mirrors `build_normal_equations`'
+    /// column-start to `J盞_cam ﾂｷ J_lm`. Mirrors `build_normal_equations`'
     /// reprojection Jacobians, extended with the intrinsics columns
-    /// `J_K = ∂(predicted)/∂(fx, fy, cx, cy)`.
+    /// `J_K = 竏・predicted)/竏・fx, fy, cx, cy)`.
     fn build_joint_intrinsics_system(
         &self,
         pose_index: &BTreeMap<u64, usize>,
@@ -1613,7 +1613,7 @@ impl BundleAdjustment {
             })
             .collect();
 
-        // Accumulate a camera×camera block (rows_a × cols_b) at (row_start, col_start).
+        // Accumulate a cameraﾃ幼amera block (rows_a ﾃ・cols_b) at (row_start, col_start).
         let mut add_cc = |rs: usize, cs: usize, blk: &DMatrix<f64>| {
             for r in 0..blk.nrows() {
                 for c in 0..blk.ncols() {
@@ -1634,8 +1634,8 @@ impl BundleAdjustment {
             let x = xc.x * z_inv;
             let y = xc.y * z_inv;
             let r2 = x * x + y * y;
-            // Radial distortion factor d = 1 + k1·r² + k2·r⁴ and its radial
-            // derivative helper g = k1 + 2·k2·r² (d=1, g=0 when distortion-free).
+            // Radial distortion factor d = 1 + k1ﾂｷrﾂｲ + k2ﾂｷr竅ｴ and its radial
+            // derivative helper g = k1 + 2ﾂｷk2ﾂｷrﾂｲ (d=1, g=0 when distortion-free).
             let (k1, k2) = dist.unwrap_or((0.0, 0.0));
             let d = 1.0 + k1 * r2 + k2 * r2 * r2;
             let g = k1 + 2.0 * k2 * r2;
@@ -1647,9 +1647,9 @@ impl BundleAdjustment {
                 .rotation
                 .to_rotation_matrix()
                 .into_inner();
-            // J_π = diag(fx, fy) · D · ∂(x, y)/∂X_c, where the distortion Jacobian
-            //   D = [[d + 2x²g, 2xyg], [2xyg, d + 2y²g]]  (= I when distortion-free)
-            // and ∂(x, y)/∂X_c = (1/Z)·[[1, 0, -x], [0, 1, -y]].
+            // J_ﾏ = diag(fx, fy) ﾂｷ D ﾂｷ 竏・x, y)/竏９_c, where the distortion Jacobian
+            //   D = [[d + 2xﾂｲg, 2xyg], [2xyg, d + 2yﾂｲg]]  (= I when distortion-free)
+            // and 竏・x, y)/竏９_c = (1/Z)ﾂｷ[[1, 0, -x], [0, 1, -y]].
             let d11 = d + 2.0 * x * x * g;
             let d12 = 2.0 * x * y * g;
             let d22 = d + 2.0 * y * y * g;
@@ -1667,7 +1667,7 @@ impl BundleAdjustment {
                 .copy_from(&(-r_mat * skew(&point.coords)));
             let j_pose: Matrix2x6<f64> = j_pi * dx_dxi;
             let j_lm: Matrix2x3<f64> = j_pi * r_mat;
-            // ∂(predicted)/∂K with K = (fx, fy, cx, cy[, k1, k2]) (2×k_dim).
+            // 竏・predicted)/竏・ with K = (fx, fy, cx, cy[, k1, k2]) (2ﾃ楊_dim).
             let mut j_k = DMatrix::<f64>::zeros(2, k_dim);
             j_k[(0, 0)] = xd;
             j_k[(0, 2)] = 1.0;
@@ -1687,7 +1687,7 @@ impl BundleAdjustment {
 
             // Dynamic-sized residual / pose for the K-coupled products.
             let res2 = DVector::from_column_slice(&[residual.x, residual.y]);
-            let jkt = j_k.transpose(); // k_dim×2
+            let jkt = j_k.transpose(); // k_dimﾃ・
 
             // K-K and K gradient (intrinsics are always variable).
             add_cc(k_off, k_off, &(w * (&jkt * &j_k)));
@@ -1704,7 +1704,7 @@ impl BundleAdjustment {
                 }
                 // pose-K coupling (and its transpose).
                 let jp_dyn = DMatrix::from_iterator(2, 6, j_pose.iter().copied());
-                let hpk = w * (jp_dyn.transpose() * &j_k); // 6×k_dim
+                let hpk = w * (jp_dyn.transpose() * &j_k); // 6ﾃ楊_dim
                 add_cc(p * 6, k_off, &hpk);
                 add_cc(k_off, p * 6, &hpk.transpose());
             }
@@ -1712,7 +1712,7 @@ impl BundleAdjustment {
                 lm_blocks[l].h_ll += w * (j_lm.transpose() * j_lm);
                 lm_blocks[l].b_l += w * (j_lm.transpose() * residual);
                 if let Some(p) = i_pose {
-                    let cr = w * (j_pose.transpose() * j_lm); // 6×3
+                    let cr = w * (j_pose.transpose() * j_lm); // 6ﾃ・
                     add_cross(
                         &mut lm_blocks[l].cross,
                         p * 6,
@@ -1721,7 +1721,7 @@ impl BundleAdjustment {
                     );
                 }
                 let jl_dyn = DMatrix::from_iterator(2, 3, j_lm.iter().copied());
-                let crk = w * (&jkt * &jl_dyn); // k_dim×3
+                let crk = w * (&jkt * &jl_dyn); // k_dimﾃ・
                 add_cross(&mut lm_blocks[l].cross, k_off, k_dim, &crk);
             }
         }
@@ -1767,7 +1767,7 @@ impl BundleAdjustment {
                             .copy_from(&(-r_mat * skew(&point.coords)));
                         let j_pose: Matrix3x6<f64> = j_pi * dx_dxi;
                         let j_lm: Matrix3<f64> = j_pi * r_mat;
-                        // u_r = fx·(X−b)/Z + cx, so ∂u_r/∂fx = (X−b)/Z, ∂u_r/∂cx = 1.
+                        // u_r = fxﾂｷ(X竏鍛)/Z + cx, so 竏Ｖ_r/竏Ｇx = (X竏鍛)/Z, 竏Ｖ_r/竏Ｄx = 1.
                         let mut j_k = Matrix3x4::<f64>::zeros();
                         j_k[(0, 0)] = xc.x * z_inv;
                         j_k[(0, 2)] = 1.0;
@@ -1835,19 +1835,19 @@ impl BundleAdjustment {
     /// down-weights gross reprojection errors *near* the current estimate,
     /// so a cluster of wrong correspondences that the initialisation
     /// already believes can capture the solution in a bad basin. GNC
-    /// instead anneals a control parameter `μ` from a convex surrogate
-    /// (every observation trusted — ordinary least squares) toward the true
+    /// instead anneals a control parameter `ﾎｼ` from a convex surrogate
+    /// (every observation trusted 窶・ordinary least squares) toward the true
     /// non-convex robust cost, recomputing the per-observation
-    /// Black-Rangarajan weight `w ∈ [0,1]` at each level. Each level is a
+    /// Black-Rangarajan weight `w 竏・[0,1]` at each level. Each level is a
     /// bounded weighted-LS solve reusing the same Schur-complement assembly
     /// as [`Self::optimize`] with `RobustKernel::None` (GNC supersedes the
     /// M-estimator). See [`crate::gnc`] for the surrogate math.
     ///
-    /// `config` drives the inner LM solve (linear solver, λ schedule);
-    /// `config.robust_kernel` is ignored — GNC sets the weights. `gnc.c` is
-    /// the inlier reprojection scale **in pixels** (so `c²` is the squared-
+    /// `config` drives the inner LM solve (linear solver, ﾎｻ schedule);
+    /// `config.robust_kernel` is ignored 窶・GNC sets the weights. `gnc.c` is
+    /// the inlier reprojection scale **in pixels** (so `cﾂｲ` is the squared-
     /// residual band): pick it from the expected inlier reprojection error,
-    /// e.g. `c ≈ 3` for ~1 px noise. The returned
+    /// e.g. `c 竕・3` for ~1 px noise. The returned
     /// [`BaGncResult::observation_weights`] gives the final per-observation
     /// weight (monocular, rectified stereo, then general stereo; `NaN` for un-evaluable
     /// observations); near-zero entries are the rejected outliers.
@@ -1862,7 +1862,7 @@ impl BundleAdjustment {
             + self.stereo_observations.len()
             + self.general_stereo_observations.len();
 
-        // GNC inlier scale: largest residual seeds the convex μ₀; the same
+        // GNC inlier scale: largest residual seeds the convex ﾎｼ竄; the same
         // residuals optionally drive the MAD auto-estimate of `c` (with the
         // configured `c` as a floor) so the pixel threshold tracks the actual
         // reprojection noise instead of a hand-set value.
@@ -1884,7 +1884,7 @@ impl BundleAdjustment {
         let mut state = GncState::new(&effective_gnc, s_max);
 
         // Inner solve: a short weighted LM with no M-estimator (the GNC
-        // weights are the only robustification) restarted at each μ level.
+        // weights are the only robustification) restarted at each ﾎｼ level.
         let mut inner = *config;
         inner.robust_kernel = RobustKernel::None;
         inner.max_iterations = gnc.inner_iterations.max(1);
@@ -1894,7 +1894,7 @@ impl BundleAdjustment {
         let mut outer_iterations = 0usize;
         for _ in 0..gnc.max_outer.max(1) {
             outer_iterations += 1;
-            // The terminal level (μ at its recovered extreme) reproduces the
+            // The terminal level (ﾎｼ at its recovered extreme) reproduces the
             // true robust cost; we run it, then stop.
             let terminal_level = state.is_terminal();
             let residuals = self.reprojection_squared_residuals();
@@ -2051,7 +2051,7 @@ impl BundleAdjustment {
         }
         // Velocity slots: non-fixed velocities that appear on at least
         // one IMU factor. We DO NOT add a slot for every registered
-        // velocity — only the ones the factor touches — so a stray
+        // velocity 窶・only the ones the factor touches 窶・so a stray
         // `add_velocity` without a corresponding `add_imu_factor` does
         // not introduce an unconstrained DoF that would singularise the
         // system.
@@ -2084,7 +2084,7 @@ impl BundleAdjustment {
         }
         // Bias slots: non-fixed biases registered on the "from" side of
         // an IMU factor OR on either side of a bias random-walk factor.
-        // Same singularity guard as `velocity_index` — a stray
+        // Same singularity guard as `velocity_index` 窶・a stray
         // `add_bias` without a matching factor does not introduce an
         // unconstrained DoF.
         let mut bias_index: BTreeMap<u64, usize> = BTreeMap::new();
@@ -2142,7 +2142,7 @@ impl BundleAdjustment {
                 config.parallel,
             );
 
-            // Build the reduced (Schur-complement) camera system. λ is added
+            // Build the reduced (Schur-complement) camera system. ﾎｻ is added
             // to both the pose and landmark diagonals before reduction so the
             // augmented system stays SPD when the un-damped one is rank-
             // deficient (as monocular BA generally is).
@@ -2154,18 +2154,20 @@ impl BundleAdjustment {
 
             let (delta_poses, delta_landmarks) = match solve_step(
                 &system,
-                pose_index.len(),
-                landmark_index.len(),
-                velocity_index.len(),
-                bias_index.len(),
-                lambda,
-                config.linear_solver,
-                config.parallel,
+                SolveStepConfig {
+                    p_count: pose_index.len(),
+                    l_count: landmark_index.len(),
+                    v_count: velocity_index.len(),
+                    b_count: bias_index.len(),
+                    lambda,
+                    linear_solver: config.linear_solver,
+                    parallel: config.parallel,
+                },
             ) {
                 Ok(d) => d,
                 Err(BaError::SingularSystem) => {
                     // Treat singular system the same as a rejected LM step:
-                    // bump λ and retry.
+                    // bump ﾎｻ and retry.
                     lambda = (lambda * config.lambda_increase_factor).min(config.max_lambda);
                     iterations.push(BaIterationStats {
                         iteration,
@@ -2341,7 +2343,7 @@ pub struct BaConfig {
     pub relative_cost_tolerance: Option<f64>,
     /// Linear-solver backend for the Schur-reduced pose system. The
     /// landmark elimination is always done analytically via per-landmark
-    /// `3×3` block inversion (since `H_LL` is block-diagonal).
+    /// `3ﾃ・` block inversion (since `H_LL` is block-diagonal).
     pub linear_solver: LinearSolver,
     /// Robust IRLS kernel applied per-observation to its squared
     /// reprojection residual. [`RobustKernel::None`] runs standard
@@ -2352,7 +2354,7 @@ pub struct BaConfig {
     /// Also refine the shared pinhole intrinsics `(fx, fy, cx, cy)` **jointly**:
     /// when set, [`BundleAdjustment::optimize`] carries the 4 intrinsics as extra
     /// unknowns inside the Schur-complement camera system, co-estimated with the
-    /// poses and (eliminated) landmarks — the COLMAP self-calibration formulation.
+    /// poses and (eliminated) landmarks 窶・the COLMAP self-calibration formulation.
     /// This is the lever for unknown / inaccurate calibration: a wrong fixed focal
     /// forces a residual onto the poses, and the joint solve lets the camera absorb
     /// it. (The coupled, landmark-eliminated gradient is what makes this work; an
@@ -2373,8 +2375,8 @@ pub struct BaConfig {
     /// back-substitution loops of [`BundleAdjustment::optimize_weighted`]'s
     /// Levenberg-Marquardt iteration on the `rayon` pool (see the module's
     /// "Parallelism" section). The result is bit-identical to the serial
-    /// path at any thread count — this only changes *how* the normal
-    /// equations are computed, never the summation order — so it is safe to
+    /// path at any thread count 窶・this only changes *how* the normal
+    /// equations are computed, never the summation order 窶・so it is safe to
     /// flip independently of everything else in this config. Small problems
     /// stay serial even when this is set (see `PARALLEL_MIN_OBSERVATIONS` /
     /// `PARALLEL_MIN_LANDMARKS`). Only consumed by `optimize_weighted`
@@ -2450,17 +2452,17 @@ pub struct BaGncResult {
     /// contribute nothing), using the `0.5` weight threshold.
     pub inlier_cost: f64,
     /// The inlier scale `c` (pixels) the solve actually used: the configured
-    /// [`GncConfig::c`] verbatim, or — under [`GncConfig::auto_scale`] — the
+    /// [`GncConfig::c`] verbatim, or 窶・under [`GncConfig::auto_scale`] 窶・the
     /// MAD estimate (floored at the configured `c`).
     pub inlier_scale: f64,
     /// Number of reprojection observations (monocular + stereo) the weight
     /// vector covers.
     pub observation_count: usize,
-    /// GNC outer (μ) levels actually executed.
+    /// GNC outer (ﾎｼ) levels actually executed.
     pub outer_iterations: usize,
-    /// Whether the μ schedule reached its terminal level.
+    /// Whether the ﾎｼ schedule reached its terminal level.
     pub converged: bool,
-    /// Final per-observation Black-Rangarajan weight `w ∈ [0,1]`, indexed
+    /// Final per-observation Black-Rangarajan weight `w 竏・[0,1]`, indexed
     /// monocular, rectified stereo, then general stereo. `NaN` marks an observation that could
     /// not be evaluated at the recovered estimate. Near-zero finite entries
     /// are the rejected outliers.
@@ -2468,7 +2470,7 @@ pub struct BaGncResult {
 }
 
 impl BaGncResult {
-    /// Count of observations classified as inliers (`w ≥ threshold`).
+    /// Count of observations classified as inliers (`w 竕･ threshold`).
     /// `NaN` (un-evaluable) observations are excluded from both counts.
     pub fn inlier_count(&self, threshold: f64) -> usize {
         self.observation_weights
@@ -2511,7 +2513,7 @@ pub enum BaError {
     InvalidObservationWeight(usize),
     /// Confidence-weighted joint intrinsics refinement is not implemented.
     ObservationWeightsWithIntrinsicsRefinement,
-    /// Reduced camera system was singular even after λ damping. Usually
+    /// Reduced camera system was singular even after ﾎｻ damping. Usually
     /// means the gauge is under-fixed (e.g., monocular without enough
     /// fixed poses or landmarks to remove scale).
     SingularSystem,
@@ -2555,15 +2557,15 @@ impl std::error::Error for BaError {}
 
 /// Per-landmark contribution: the `H_ll` block, the `b_l` gradient, and
 /// the `H_pl` cross blocks (one per pose that observed this landmark, in
-/// arbitrary order). This is the only place the cross blocks are stored —
+/// arbitrary order). This is the only place the cross blocks are stored 窶・
 /// there is no full `H_PL` matrix.
 struct LandmarkBlock {
-    /// `3×3` Hessian summed over observations. Includes any λ damping.
+    /// `3ﾃ・` Hessian summed over observations. Includes any ﾎｻ damping.
     h_ll: Matrix3<f64>,
     /// `3-vec` gradient summed over observations.
     b_l: Vector3<f64>,
-    /// `(pose_idx, J_pose^T · J_lm)` per observation that touches a
-    /// non-fixed pose. Shape `6×3`.
+    /// `(pose_idx, J_pose^T ﾂｷ J_lm)` per observation that touches a
+    /// non-fixed pose. Shape `6ﾃ・`.
     cross: Vec<(usize, Matrix6x3<f64>)>,
 }
 
@@ -2577,11 +2579,11 @@ struct JointLandmarkBlock {
     id: u64,
     h_ll: Matrix3<f64>,
     b_l: Vector3<f64>,
-    /// `column_start → Σ_obs Jᵀ_cam · J_lm` (`rows × 3`, `rows ∈ {6, 4}`).
+    /// `column_start 竊・ﾎ｣_obs J盞_cam ﾂｷ J_lm` (`rows ﾃ・3`, `rows 竏・{6, 4}`).
     cross: BTreeMap<usize, DMatrix<f64>>,
 }
 
-/// Accumulate a `rows × 3` cross block into the per-landmark map at `col_start`.
+/// Accumulate a `rows ﾃ・3` cross block into the per-landmark map at `col_start`.
 fn navigation_prior_delta(
     ba: &BundleAdjustment,
     prior: &NavigationStatePrior,
@@ -2626,7 +2628,7 @@ fn add_cross(
 
 /// Output of the per-iteration normal-equations build.
 struct NormalEquationsBa {
-    /// Pose-pose Hessian, dense `(6P) × (6P)`.
+    /// Pose-pose Hessian, dense `(6P) ﾃ・(6P)`.
     h_pp: DMatrix<f64>,
     /// Pose gradient, dense `6P`.
     b_p: DVector<f64>,
@@ -2645,7 +2647,7 @@ struct NormalEquationsBa {
 const PARALLEL_MIN_OBSERVATIONS: usize = 4_096;
 /// Observations computed per rayon chunk in the parallel assembly path.
 /// Bounds the transient `Vec<Option<MonoObsContribution>>` buffer to a few
-/// megabytes regardless of the total observation count — a full-sequence BA
+/// megabytes regardless of the total observation count 窶・a full-sequence BA
 /// can carry tens of millions of observations, so materializing one
 /// contribution per observation up front (rather than chunk by chunk) would
 /// multiply the assembly's peak memory several-fold. The value does not
@@ -2669,7 +2671,7 @@ const PARALLEL_LANDMARK_CHUNK: usize = 16_384;
 /// non-fixed), the weighted `H_ll` / `b_l` block for the observed landmark
 /// (if non-fixed), and their cross term (if both are). `None` when the
 /// observation is skipped exactly as the serial loop in
-/// [`build_normal_equations`] skips it — behind the camera or not
+/// [`build_normal_equations`] skips it 窶・behind the camera or not
 /// projectable. This is the unit of work
 /// [`assemble_mono_observations_parallel`] farms out to the rayon pool: it
 /// is a pure function of the current pose/landmark estimate, so many can be
@@ -2683,7 +2685,7 @@ struct MonoObsContribution {
 /// Compute one observation's [`MonoObsContribution`]. Deliberately kept
 /// byte-for-byte in step with the inline loop body in
 /// [`build_normal_equations`] (same operations in the same order, so the
-/// weighted blocks are bitwise identical to what that loop would compute) —
+/// weighted blocks are bitwise identical to what that loop would compute) 窶・
 /// if the residual/Jacobian model there ever changes, this must change with
 /// it.
 #[allow(clippy::too_many_arguments)]
@@ -2764,7 +2766,7 @@ fn compute_mono_contribution(
 /// Scatter one [`MonoObsContribution`] into the shared accumulators, in
 /// exactly the pose-then-landmark-then-cross order the serial loop in
 /// [`build_normal_equations`] uses. Never called concurrently on the same
-/// `h_pp` / `b_p` / `landmarks` — see the serial merge loop in
+/// `h_pp` / `b_p` / `landmarks` 窶・see the serial merge loop in
 /// [`assemble_mono_observations_parallel`].
 fn apply_mono_contribution(
     contribution: MonoObsContribution,
@@ -2799,21 +2801,34 @@ fn apply_mono_contribution(
 /// chunk's contributions are then scattered into `h_pp` / `b_p` /
 /// `landmarks` by a single serial pass, *in ascending observation-index
 /// order*, before the next chunk starts. Because the scatter order is
-/// therefore always identical to what the plain serial loop would produce —
+/// therefore always identical to what the plain serial loop would produce 窶・
 /// only the (order-independent) computation of each contribution moved to
-/// the pool — the result is bit-identical to the serial path at any thread
+/// the pool 窶・the result is bit-identical to the serial path at any thread
 /// count or chunk size, unlike a reassociating parallel reduction.
-fn assemble_mono_observations_parallel(
-    ba: &BundleAdjustment,
-    intrinsics: &(f64, f64, f64, f64),
-    pose_index: &BTreeMap<u64, usize>,
-    landmark_index: &BTreeMap<u64, usize>,
-    kernel: &RobustKernel,
-    gnc_weights: Option<&[f64]>,
-    h_pp: &mut DMatrix<f64>,
-    b_p: &mut DVector<f64>,
-    landmarks: &mut [LandmarkBlock],
-) {
+struct MonoObservationAssembly<'a> {
+    ba: &'a BundleAdjustment,
+    intrinsics: &'a (f64, f64, f64, f64),
+    pose_index: &'a BTreeMap<u64, usize>,
+    landmark_index: &'a BTreeMap<u64, usize>,
+    kernel: &'a RobustKernel,
+    gnc_weights: Option<&'a [f64]>,
+    h_pp: &'a mut DMatrix<f64>,
+    b_p: &'a mut DVector<f64>,
+    landmarks: &'a mut [LandmarkBlock],
+}
+
+fn assemble_mono_observations_parallel(context: &mut MonoObservationAssembly<'_>) {
+    let MonoObservationAssembly {
+        ba,
+        intrinsics,
+        pose_index,
+        landmark_index,
+        kernel,
+        gnc_weights,
+        h_pp,
+        b_p,
+        landmarks,
+    } = context;
     use rayon::prelude::*;
 
     let mut start = 0;
@@ -2828,7 +2843,7 @@ fn assemble_mono_observations_parallel(
                     ba,
                     intrinsics,
                     kernel,
-                    gnc_weights,
+                    *gnc_weights,
                     pose_index,
                     landmark_index,
                     start + offset,
@@ -2884,17 +2899,18 @@ fn build_normal_equations(
     // thread count, so the branch only changes how the contributions are
     // computed, never the result.
     if parallel && ba.observations.len() >= PARALLEL_MIN_OBSERVATIONS {
-        assemble_mono_observations_parallel(
+        let mut context = MonoObservationAssembly {
             ba,
             intrinsics,
             pose_index,
             landmark_index,
             kernel,
             gnc_weights,
-            &mut h_pp,
-            &mut b_p,
-            &mut landmarks,
-        );
+            h_pp: &mut h_pp,
+            b_p: &mut b_p,
+            landmarks: &mut landmarks,
+        };
+        assemble_mono_observations_parallel(&mut context);
     } else {
         for (obs_idx, obs) in ba.observations.iter().enumerate() {
             let pose = &ba.poses[&obs.keyframe_id];
@@ -2915,8 +2931,8 @@ fn build_normal_equations(
             };
             let residual = Vector2::new(predicted.x - obs.xy.x, predicted.y - obs.xy.y);
 
-            // Projection Jacobian J_π (2×3) at X_c = (X, Y, Z):
-            //   J_π = (1/Z) [[fx, 0, -fx X/Z], [0, fy, -fy Y/Z]]
+            // Projection Jacobian J_ﾏ (2ﾃ・) at X_c = (X, Y, Z):
+            //   J_ﾏ = (1/Z) [[fx, 0, -fx X/Z], [0, fy, -fy Y/Z]]
             let (fx, fy, _, _) = *intrinsics;
             let z_inv = 1.0 / xc.z;
             let mut j_pi = Matrix2x3::<f64>::zeros();
@@ -2928,7 +2944,7 @@ fn build_normal_equations(
             j_pi[(1, 2)] = -fy * xc.y * z_inv * z_inv;
 
             // Right perturbation pose Jacobian:
-            //   ∂X_c / ∂[ρ; ω] = [R, -R · [X_w]_×]   (3×6)
+            //   竏９_c / 竏・ﾏ・ ﾏ云 = [R, -R ﾂｷ [X_w]_ﾃ余   (3ﾃ・)
             let xw_skew = skew(&point.coords);
             let mut dx_dxi = nalgebra::Matrix3x6::<f64>::zeros();
             dx_dxi.fixed_view_mut::<3, 3>(0, 0).copy_from(&r_mat);
@@ -2936,7 +2952,7 @@ fn build_normal_equations(
                 .fixed_view_mut::<3, 3>(0, 3)
                 .copy_from(&(-r_mat * xw_skew));
             let j_pose: Matrix2x6<f64> = j_pi * dx_dxi;
-            // Landmark Jacobian: ∂X_c / ∂X_w = R, so J_lm = J_π · R (2×3).
+            // Landmark Jacobian: 竏９_c / 竏９_w = R, so J_lm = J_ﾏ ﾂｷ R (2ﾃ・).
             let j_lm: Matrix2x3<f64> = j_pi * r_mat;
 
             // IRLS weight applied per-observation. With `RobustKernel::None`
@@ -2973,14 +2989,14 @@ fn build_normal_equations(
     }
 
     // Stereo observations: 3D residual `(u_l, v_l, u_r)` with
-    // `u_r_pred = u_l_pred − fx · b / Z`. Jacobian of the residual w.r.t.
-    // `X_c = (X, Y, Z)` is the 3×3 matrix
-    //   J_π_st = [[fx/Z, 0,    -fx·X/Z²       ],
-    //             [0,    fy/Z, -fy·Y/Z²       ],
-    //             [fx/Z, 0,    -fx·(X-b)/Z²   ]].
-    // The pose / landmark Jacobians have shape 3×6 / 3×3, but the
+    // `u_r_pred = u_l_pred 竏・fx ﾂｷ b / Z`. Jacobian of the residual w.r.t.
+    // `X_c = (X, Y, Z)` is the 3ﾃ・ matrix
+    //   J_ﾏ_st = [[fx/Z, 0,    -fxﾂｷX/Zﾂｲ       ],
+    //             [0,    fy/Z, -fyﾂｷY/Zﾂｲ       ],
+    //             [fx/Z, 0,    -fxﾂｷ(X-b)/Zﾂｲ   ]].
+    // The pose / landmark Jacobians have shape 3ﾃ・ / 3ﾃ・, but the
     // accumulated `H_pp = J^T J` and `H_pl = J^T J_lm` blocks have the
-    // same 6×6 / 6×3 / 3×3 shapes as the monocular path so the rest of
+    // same 6ﾃ・ / 6ﾃ・ / 3ﾃ・ shapes as the monocular path so the rest of
     // the pipeline (Schur complement, back-substitution) is unchanged.
     if !ba.stereo_observations.is_empty() {
         if let Some(baseline) = ba.stereo_baseline {
@@ -3102,11 +3118,11 @@ fn build_normal_equations(
     }
 
     // Optional per-pose absolute-position prior. Residual per
-    // observation: r = C_w − target, where C_w = −Rᵀt is the world
+    // observation: r = C_w 竏・target, where C_w = 竏坦盞t is the world
     // camera centre. From the gravity-prior derivation:
-    //   d C_w / d ρ = −I,   d C_w / d ω = [C_w]_×.
-    // Per-axis stiffness is applied as a 3×3 diagonal scaling so a
-    // zero entry collapses that row to zero — i.e. drops it from the
+    //   d C_w / d ﾏ・= 竏棚,   d C_w / d ﾏ・= [C_w]_ﾃ・
+    // Per-axis stiffness is applied as a 3ﾃ・ diagonal scaling so a
+    // zero entry collapses that row to zero 窶・i.e. drops it from the
     // normal equations entirely.
     if let Some(prior) = &ba.position_prior {
         for obs in &prior.observations {
@@ -3126,7 +3142,7 @@ fn build_normal_equations(
             if prior.couple_rotation {
                 j_pose.fixed_view_mut::<3, 3>(0, 3).copy_from(&c_skew);
             }
-            // Apply √w on each residual row so JᵀJ and Jᵀr come out
+            // Apply 竏嗹 on each residual row so J盞J and J盞r come out
             // axis-weighted exactly as in the cost.
             let sqrt_w_x = obs.axis_weights.x.max(0.0).sqrt();
             let sqrt_w_y = obs.axis_weights.y.max(0.0).sqrt();
@@ -3151,14 +3167,14 @@ fn build_normal_equations(
     }
 
     // Pairwise relative-pose factors. For each factor:
-    //   r = log(meas⁻¹ · T_j · T_iⁱ)
-    //   ∂r/∂δ_j =  Ad(T_i)   (6×6)
-    //   ∂r/∂δ_i = -Ad(T_i)
+    //   r = log(meas竅ｻﾂｹ ﾂｷ T_j ﾂｷ T_i竅ｱ)
+    //   竏Ｓ/竏ばｴ_j =  Ad(T_i)   (6ﾃ・)
+    //   竏Ｓ/竏ばｴ_i = -Ad(T_i)
     // Hessian/gradient contributions per factor (with scalar weight w):
-    //   H[j,j] += w · AdᵀAd     b[j] += w · Adᵀ · r
-    //   H[i,i] += w · AdᵀAd     b[i] -= w · Adᵀ · r
-    //   H[j,i] -= w · AdᵀAd     H[i,j] = (H[j,i])ᵀ
-    // Diagonal block AdᵀAd is shared (same magnitude on both sides);
+    //   H[j,j] += w ﾂｷ Ad盞Ad     b[j] += w ﾂｷ Ad盞 ﾂｷ r
+    //   H[i,i] += w ﾂｷ Ad盞Ad     b[i] -= w ﾂｷ Ad盞 ﾂｷ r
+    //   H[j,i] -= w ﾂｷ Ad盞Ad     H[i,j] = (H[j,i])盞
+    // Diagonal block Ad盞Ad is shared (same magnitude on both sides);
     // the off-diagonal block carries a minus sign because the from
     // Jacobian is the negative of the to Jacobian.
     for factor in &ba.pairwise_pose_factors {
@@ -3211,13 +3227,13 @@ fn build_normal_equations(
 
     // Optional gravity-alignment prior on every non-fixed pose.
     //
-    // Residual per pose: r = R_wc · g_world − g_camera_observed (3-vec).
-    // Under right perturbation T_new = T_old · exp([ρ; ω]):
-    //     R_new = R_old · R(ω) ≈ R_old · (I + [ω]_×)
-    //     R_new · g_w ≈ R_old · g_w − R_old · [g_w]_× · ω
-    // so the Jacobian w.r.t. xi = [ρ; ω] is J = [0_3×3 | −R_old · [g_w]_×].
+    // Residual per pose: r = R_wc ﾂｷ g_world 竏・g_camera_observed (3-vec).
+    // Under right perturbation T_new = T_old ﾂｷ exp([ﾏ・ ﾏ云):
+    //     R_new = R_old ﾂｷ R(ﾏ・ 竕・R_old ﾂｷ (I + [ﾏ云_ﾃ・
+    //     R_new ﾂｷ g_w 竕・R_old ﾂｷ g_w 竏・R_old ﾂｷ [g_w]_ﾃ・ﾂｷ ﾏ・
+    // so the Jacobian w.r.t. xi = [ﾏ・ ﾏ云 is J = [0_3ﾃ・ | 竏坦_old ﾂｷ [g_w]_ﾃ余.
     // Translation does not appear, which leaves the gauge of horizontal
-    // translation completely unconstrained — this prior fixes rotation
+    // translation completely unconstrained 窶・this prior fixes rotation
     // ambiguity only, not translation drift.
     if let Some(prior) = &ba.gravity_prior {
         for (&pose_id, pose) in &ba.poses {
@@ -3232,7 +3248,7 @@ fn build_normal_equations(
             let r_vec: Vector3<f64> = r_mat * prior.g_world - prior.g_camera_observed;
             let g_skew = skew(&prior.g_world);
             let mut j_pose = nalgebra::Matrix3x6::<f64>::zeros();
-            // ∂r/∂ρ = 0, ∂r/∂ω = −R · [g_w]_×.
+            // 竏Ｓ/竏ぱ・= 0, 竏Ｓ/竏ぱ・= 竏坦 ﾂｷ [g_w]_ﾃ・
             j_pose
                 .fixed_view_mut::<3, 3>(0, 3)
                 .copy_from(&(-(r_mat * g_skew)));
@@ -3291,33 +3307,33 @@ fn build_normal_equations(
     // Forster 2017 IMU pre-integration factors.
     //
     // The factor binds (pose, velocity) at keyframe i and j via the
-    // gravity-compensated relative measurement (ΔR, Δv, Δp). Residual
+    // gravity-compensated relative measurement (ﾎ燃, ﾎ牌, ﾎ廃). Residual
     // and Jacobians follow Forster eq. 45-47 with the BA right-perturbation
-    // convention (T_new = T_old · exp([ρ; ω])):
+    // convention (T_new = T_old ﾂｷ exp([ﾏ・ ﾏ云)):
     //
-    //   r_R = log(ΔR.T · R_iᵀ · R_j)            (Forster's R_i = R_wbᵢ)
-    //   r_v = R_bwᵢ · (v_j − v_i − g·Δt) − Δv
-    //   r_p = R_bwᵢ · (B_j − B_i − v_i·Δt − ½ g Δt²) − Δp
+    //   r_R = log(ﾎ燃.T ﾂｷ R_i盞 ﾂｷ R_j)            (Forster's R_i = R_wb盞｢)
+    //   r_v = R_bw盞｢ ﾂｷ (v_j 竏・v_i 竏・gﾂｷﾎ杯) 竏・ﾎ牌
+    //   r_p = R_bw盞｢ ﾂｷ (B_j 竏・B_i 竏・v_iﾂｷﾎ杯 竏・ﾂｽ g ﾎ杯ﾂｲ) 竏・ﾎ廃
     //
-    // Right-perturbation Jacobians (ρ = translation perturbation, ω =
+    // Right-perturbation Jacobians (ﾏ・= translation perturbation, ﾏ・=
     // rotation perturbation, both 3-vec; world body centre
-    // B = −Rᵀt so ∂B/∂ρ = −I, ∂B/∂ω = [B]×). Since
+    // B = 竏坦盞t so 竏・/竏ぱ・= 竏棚, 竏・/竏ぱ・= [B]ﾃ・. Since
     // T_bw = T_bc T_cw, a right perturbation of T_cw is the same right
     // perturbation of T_bw, so no additional adjoint is required:
     //
-    //   ∂r_R/∂ω_i =  Jr_inv(r_R) · R_bwⱼ
-    //   ∂r_R/∂ω_j = −Jr_inv(r_R) · R_bwⱼ
-    //   ∂r_v/∂ω_i = −R_bwᵢ · [v_j − v_i − g·Δt]×
-    //   ∂r_v/∂v_i = −R_bwᵢ
-    //   ∂r_v/∂v_j =  R_bwᵢ
-    //   ∂r_p/∂ρ_i =  R_bwᵢ            ∂r_p/∂ρ_j = −R_bwᵢ
-    //   ∂r_p/∂ω_i = −R_bwᵢ · [B_j − v_i·Δt − ½ g Δt²]×
-    //   ∂r_p/∂ω_j =  R_bwᵢ · [B_j]×
-    //   ∂r_p/∂v_i = −Δt · R_bwᵢ
+    //   竏Ｓ_R/竏ぱ雲i =  Jr_inv(r_R) ﾂｷ R_bw箜ｼ
+    //   竏Ｓ_R/竏ぱ雲j = 竏谷r_inv(r_R) ﾂｷ R_bw箜ｼ
+    //   竏Ｓ_v/竏ぱ雲i = 竏坦_bw盞｢ ﾂｷ [v_j 竏・v_i 竏・gﾂｷﾎ杯]ﾃ・
+    //   竏Ｓ_v/竏Ｗ_i = 竏坦_bw盞｢
+    //   竏Ｓ_v/竏Ｗ_j =  R_bw盞｢
+    //   竏Ｓ_p/竏ぱ＼i =  R_bw盞｢            竏Ｓ_p/竏ぱ＼j = 竏坦_bw盞｢
+    //   竏Ｓ_p/竏ぱ雲i = 竏坦_bw盞｢ ﾂｷ [B_j 竏・v_iﾂｷﾎ杯 竏・ﾂｽ g ﾎ杯ﾂｲ]ﾃ・
+    //   竏Ｓ_p/竏ぱ雲j =  R_bw盞｢ ﾂｷ [B_j]ﾃ・
+    //   竏Ｓ_p/竏Ｗ_i = 竏槻杯 ﾂｷ R_bw盞｢
     //
     // The 9-vector residual is stacked [r_R; r_v; r_p] with axis-wise
     // weights `sqrt(weight_rotation, weight_velocity, weight_position)`
-    // applied as a per-block √w scaling so JᵀJ / Jᵀr come out
+    // applied as a per-block 竏嗹 scaling so J盞J / J盞r come out
     // axis-weighted.
     for factor in &ba.imu_factors {
         let (Some(pose_i), Some(pose_j)) = (
@@ -3381,38 +3397,38 @@ fn build_normal_equations(
         let jr_inv = right_jacobian_inverse_so3(&r_rot);
         let jr_inv_rwc_j = jr_inv * r_wc_j;
 
-        // Build the 9×N Jacobian blocks per side, with √w scaling
-        // baked into each row block so the JᵀJ / Jᵀr accumulation does
+        // Build the 9ﾃ湧 Jacobian blocks per side, with 竏嗹 scaling
+        // baked into each row block so the J盞J / J盞r accumulation does
         // the right axis-weighting automatically.
-        // J_pose_i: 9×6, columns [ρ_i | ω_i].
+        // J_pose_i: 9ﾃ・, columns [ﾏ＼i | ﾏ雲i].
         let mut j_pose_i = nalgebra::Matrix::<f64, nalgebra::U9, nalgebra::U6, _>::zeros();
-        // r_R block: ω_i column = Jr_inv · R_wc_j.
+        // r_R block: ﾏ雲i column = Jr_inv ﾂｷ R_wc_j.
         j_pose_i
             .fixed_view_mut::<3, 3>(0, 3)
             .copy_from(&jr_inv_rwc_j);
-        // r_v block: ω_i column = −R_wcᵢ · [q_diff]×.
+        // r_v block: ﾏ雲i column = 竏坦_wc盞｢ ﾂｷ [q_diff]ﾃ・
         j_pose_i
             .fixed_view_mut::<3, 3>(3, 3)
             .copy_from(&(-r_wc_i * skew(&q_diff)));
-        // r_p block: ρ_i = R_wcᵢ, ω_i = −R_wcᵢ · [q_pos_i]×.
+        // r_p block: ﾏ＼i = R_wc盞｢, ﾏ雲i = 竏坦_wc盞｢ ﾂｷ [q_pos_i]ﾃ・
         j_pose_i.fixed_view_mut::<3, 3>(6, 0).copy_from(&r_wc_i);
         j_pose_i
             .fixed_view_mut::<3, 3>(6, 3)
             .copy_from(&(-r_wc_i * skew(&q_pos_i)));
 
-        // J_pose_j: 9×6, columns [ρ_j | ω_j].
+        // J_pose_j: 9ﾃ・, columns [ﾏ＼j | ﾏ雲j].
         let mut j_pose_j = nalgebra::Matrix::<f64, nalgebra::U9, nalgebra::U6, _>::zeros();
         j_pose_j
             .fixed_view_mut::<3, 3>(0, 3)
             .copy_from(&(-jr_inv_rwc_j));
         // r_v has no R_j / p_j dependence (block stays zero).
-        // r_p block: ρ_j = −R_wcᵢ, ω_j = R_wcᵢ · [C_j]×.
+        // r_p block: ﾏ＼j = 竏坦_wc盞｢, ﾏ雲j = R_wc盞｢ ﾂｷ [C_j]ﾃ・
         j_pose_j.fixed_view_mut::<3, 3>(6, 0).copy_from(&(-r_wc_i));
         j_pose_j
             .fixed_view_mut::<3, 3>(6, 3)
             .copy_from(&(r_wc_i * skew(&c_j)));
 
-        // J_vel_i / J_vel_j: 9×3 each.
+        // J_vel_i / J_vel_j: 9ﾃ・ each.
         let mut j_vel_i = nalgebra::Matrix::<f64, nalgebra::U9, nalgebra::U3, _>::zeros();
         j_vel_i.fixed_view_mut::<3, 3>(3, 0).copy_from(&(-r_wc_i));
         j_vel_i
@@ -3427,16 +3443,16 @@ fn build_normal_equations(
         r_stack.fixed_rows_mut::<3>(3).copy_from(&r_vel);
         r_stack.fixed_rows_mut::<3>(6).copy_from(&r_pos);
 
-        // Bias Jacobian (9×6, columns [δb_g | δb_a]) at keyframe i:
+        // Bias Jacobian (9ﾃ・, columns [ﾎｴb_g | ﾎｴb_a]) at keyframe i:
         //
-        //   ∂r_R/∂δb_g = −Jr⁻¹(r_R) · Exp(−r_R) · J_R_bg
-        //   ∂r_R/∂δb_a = 0
-        //   ∂r_v/∂δb_g = −J_v_bg                 ∂r_v/∂δb_a = −J_v_ba
-        //   ∂r_p/∂δb_g = −J_p_bg                 ∂r_p/∂δb_a = −J_p_ba
+        //   竏Ｓ_R/竏ばｴb_g = 竏谷r竅ｻﾂｹ(r_R) ﾂｷ Exp(竏池_R) ﾂｷ J_R_bg
+        //   竏Ｓ_R/竏ばｴb_a = 0
+        //   竏Ｓ_v/竏ばｴb_g = 竏谷_v_bg                 竏Ｓ_v/竏ばｴb_a = 竏谷_v_ba
+        //   竏Ｓ_p/竏ばｴb_g = 竏谷_p_bg                 竏Ｓ_p/竏ばｴb_a = 竏谷_p_ba
         //
-        // Forster eq. 159 (simplified by dropping the `Jr(J_R · δb)` factor,
+        // Forster eq. 159 (simplified by dropping the `Jr(J_R ﾂｷ ﾎｴb)` factor,
         // which equals identity at the linearisation point and is ~I for
-        // the small `|J_R · δb|` regime where biases live in practice).
+        // the small `|J_R ﾂｷ ﾎｴb|` regime where biases live in practice).
         // The `J_*_b*` matrices are the bias Jacobians stored on the
         // pre-integrated delta (Forster eq. 35-39); see
         // [`crate::imu_preintegration`].
@@ -3582,7 +3598,7 @@ fn build_normal_equations(
             }
         }
 
-        // Bias contributions: J_bias_i (9×6) accumulates against itself
+        // Bias contributions: J_bias_i (9ﾃ・) accumulates against itself
         // and against every other side (pose_i, pose_j, vel_i, vel_j).
         if let (Some(b), Some(jb)) = (i_bias, j_bias_block) {
             let blk: Matrix6<f64> = jb.transpose() * jb;
@@ -3636,12 +3652,12 @@ fn build_normal_equations(
         }
     }
 
-    // Bias random-walk factors: residual `r = b_j − b_i`, Jacobian
-    // `J_i = −I, J_j = I`, with separate gyro/accel weights. The
+    // Bias random-walk factors: residual `r = b_j 竏・b_i`, Jacobian
+    // `J_i = 竏棚, J_j = I`, with separate gyro/accel weights. The
     // factor only touches the bias slots (no pose / velocity coupling),
-    // so `Jᵀ J` lands as `+w · I` on each diagonal bias block, `−w · I`
-    // on the off-diagonal cross block, and `Jᵀ r` distributes
-    // `−w · r` to `b_i` and `+w · r` to `b_j`.
+    // so `J盞 J` lands as `+w ﾂｷ I` on each diagonal bias block, `竏蜘 ﾂｷ I`
+    // on the off-diagonal cross block, and `J盞 r` distributes
+    // `竏蜘 ﾂｷ r` to `b_i` and `+w ﾂｷ r` to `b_j`.
     for factor in &ba.bias_random_walk_factors {
         let (Some(b_i), Some(b_j)) = (
             ba.biases.get(&factor.keyframe_id_from),
@@ -3732,8 +3748,454 @@ fn build_normal_equations(
     }
 }
 
-fn solve_step(
-    system: &NormalEquationsBa,
+/// A square-root (QR-friendly) factor stack of a [`BundleAdjustment`] over the *structural*
+/// (pre-Schur) state layout: pose + velocity + bias + landmark columns in the same order as
+/// `build_normal_equations`. Each row is a whitened (竏嗹) Jacobian row and the matching whitened
+/// residual. `jac盞ﾂｷjac` equals the full structured Hessian and `jac盞ﾂｷresid` the full structured
+/// gradient, so a caller can marginalize any column subset with
+/// [`crate::marginalize_sqrt`] (Basalt Step A: never forming `J盞J`, never inverting a dense
+/// block).
+#[derive(Debug, Clone)]
+pub struct SqrtStack {
+    /// Stacked whitened Jacobian rows (rows = factors, cols = `total_dof`).
+    pub jac: DMatrix<f64>,
+    /// Stacked whitened residuals (one per row).
+    pub resid: DVector<f64>,
+    /// Total pose DoF (6ﾂｷP).
+    pub pose_dof: usize,
+    /// Start column of the velocity block.
+    pub vel_offset: usize,
+    /// Start column of the bias block.
+    pub bias_offset: usize,
+    /// Start column of the landmark block.
+    pub landmark_offset: usize,
+    /// Total state DoF (number of `jac` columns).
+    pub total_dof: usize,
+}
+
+impl SqrtStack {
+    /// Normal equations implied by the stack: `(jac盞ﾂｷjac, jac盞ﾂｷresid)`.
+    pub fn to_normal_equations(&self) -> (DMatrix<f64>, DVector<f64>) {
+        let h = self.jac.transpose() * &self.jac;
+        let b = self.jac.transpose() * &self.resid;
+        (h, b)
+    }
+}
+
+/// Build the square-root factor stack of a [`BundleAdjustment`] over its structural state
+/// layout (pose + velocity + bias + landmark columns, in `build_normal_equations` order).
+///
+/// This mirrors the linearization inside `build_normal_equations`, reusing the exact Jacobian
+/// and whitening computations so that `jac盞ﾂｷjac == build_normal_equations(...).h_pp` (respecting
+/// the landmark block) and `jac盞ﾂｷresid == b_p`. It is intended as the input to a Basalt-step-A
+/// square-root marginalization: unlike the dense `h_pp`/`b_p`, the stack keeps each factor's
+/// whitened row so a leaving block can be dropped by QR without forming `J盞J` or inverting a
+/// block.
+///
+/// Returns `None` when no factor contributes a Jacobian row (empty problem).
+#[allow(clippy::too_many_arguments)]
+pub fn build_sqrt_factor_rows(
+    ba: &BundleAdjustment,
+    intrinsics: &(f64, f64, f64, f64),
+    pose_index: &BTreeMap<u64, usize>,
+    landmark_index: &BTreeMap<u64, usize>,
+    velocity_index: &BTreeMap<u64, usize>,
+    bias_index: &BTreeMap<u64, usize>,
+    kernel: &RobustKernel,
+    gnc_weights: Option<&[f64]>,
+) -> Option<SqrtStack> {
+    let p_count = pose_index.len();
+    let l_count = landmark_index.len();
+    let v_count = velocity_index.len();
+    let b_count = bias_index.len();
+    let pose_dim = p_count * 6;
+    let vel_offset = pose_dim;
+    let bias_offset = pose_dim + v_count * 3;
+    let landmark_offset = pose_dim + v_count * 3 + b_count * 6;
+    let total_dof = landmark_offset + l_count * 3;
+
+    // First pass: compute the number of Jacobian rows to size the matrices exactly.
+    let mut n_rows = 0usize;
+    for obs in &ba.observations {
+        if pose_index.contains_key(&obs.keyframe_id)
+            || landmark_index.contains_key(&obs.landmark_id)
+        {
+            n_rows += 2;
+        }
+    }
+    for _ in &ba.stereo_observations {
+        if ba.stereo_baseline.is_some() {
+            n_rows += 3;
+        }
+    }
+    for obs in &ba.general_stereo_observations {
+        if general_stereo_residual_jacobians(
+            intrinsics,
+            obs,
+            &ba.poses[&obs.keyframe_id],
+            &ba.landmarks[&obs.landmark_id],
+        )
+        .is_some()
+        {
+            n_rows += 4;
+        }
+    }
+    for factor in &ba.imu_factors {
+        if ba.poses.contains_key(&factor.keyframe_id_from)
+            && ba.poses.contains_key(&factor.keyframe_id_to)
+            && ba.velocities.contains_key(&factor.keyframe_id_from)
+            && ba.velocities.contains_key(&factor.keyframe_id_to)
+        {
+            n_rows += 9;
+        }
+    }
+    if n_rows == 0 {
+        return None;
+    }
+
+    let mut jac = DMatrix::zeros(n_rows, total_dof);
+    let mut resid = DVector::zeros(n_rows);
+    let mut row = 0usize;
+
+    let stereo_offset = ba.observations.len();
+    let general_offset = ba.observations.len() + ba.stereo_observations.len();
+
+    for (obs_idx, obs) in ba.observations.iter().enumerate() {
+        let Some(pose) = ba.poses.get(&obs.keyframe_id) else {
+            continue;
+        };
+        let Some(point) = ba.landmarks.get(&obs.landmark_id) else {
+            continue;
+        };
+        let r_mat = pose
+            .world_to_camera
+            .rotation
+            .to_rotation_matrix()
+            .into_inner();
+        let xc = pose.transform_world_point(point);
+        if xc.z <= 0.0 {
+            continue;
+        }
+        let Some(predicted) = project_pinhole(intrinsics, &xc) else {
+            continue;
+        };
+        let residual = Vector2::new(predicted.x - obs.xy.x, predicted.y - obs.xy.y);
+        let (fx, fy, _, _) = *intrinsics;
+        let z_inv = 1.0 / xc.z;
+        let mut j_pi = Matrix2x3::<f64>::zeros();
+        j_pi[(0, 0)] = fx * z_inv;
+        j_pi[(0, 2)] = -fx * xc.x * z_inv * z_inv;
+        j_pi[(1, 1)] = fy * z_inv;
+        j_pi[(1, 2)] = -fy * xc.y * z_inv * z_inv;
+        let xw_skew = skew(&point.coords);
+        let mut dx_dxi = nalgebra::Matrix3x6::<f64>::zeros();
+        dx_dxi.fixed_view_mut::<3, 3>(0, 0).copy_from(&r_mat);
+        dx_dxi
+            .fixed_view_mut::<3, 3>(0, 3)
+            .copy_from(&(-r_mat * xw_skew));
+        let j_pose: Matrix2x6<f64> = j_pi * dx_dxi;
+        let j_lm: Matrix2x3<f64> = j_pi * r_mat;
+        let s = residual.x * residual.x + residual.y * residual.y;
+        let w = kernel.weight(s) * gnc_weights.map_or(1.0, |gw| gw[obs_idx]);
+        let sqrt_w = w.max(0.0).sqrt();
+
+        let i_pose = pose_index.get(&obs.keyframe_id).copied();
+        let i_lm = landmark_index.get(&obs.landmark_id).copied();
+        if let (Some(p), Some(l)) = (i_pose, i_lm) {
+            for r in 0..2 {
+                let mut jr = DVector::<f64>::zeros(total_dof);
+                for c in 0..6 {
+                    jr[p * 6 + c] = sqrt_w * j_pose[(r, c)];
+                }
+                for c in 0..3 {
+                    jr[landmark_offset + l * 3 + c] = sqrt_w * j_lm[(r, c)];
+                }
+                jac.row_mut(row).copy_from(&jr.transpose());
+                resid[row] = sqrt_w * residual[r];
+                row += 1;
+            }
+        }
+    }
+
+    if let Some(baseline) = ba
+        .stereo_baseline
+        .filter(|b| b.is_finite() && *b > 0.0)
+        .filter(|_| !ba.stereo_observations.is_empty())
+    {
+        let (fx, fy, _, _) = *intrinsics;
+        for (st_idx, obs) in ba.stereo_observations.iter().enumerate() {
+            let Some(pose) = ba.poses.get(&obs.keyframe_id) else {
+                continue;
+            };
+            let Some(point) = ba.landmarks.get(&obs.landmark_id) else {
+                continue;
+            };
+            let r_mat = pose
+                .world_to_camera
+                .rotation
+                .to_rotation_matrix()
+                .into_inner();
+            let xc = pose.transform_world_point(point);
+            if xc.z <= 0.0 {
+                continue;
+            }
+            let Some(predicted) = project_pinhole(intrinsics, &xc) else {
+                continue;
+            };
+            let u_r_pred = predicted.x - fx * baseline / xc.z;
+            let residual = Vector3::new(
+                predicted.x - obs.xy.x,
+                predicted.y - obs.xy.y,
+                u_r_pred - obs.u_right,
+            );
+            let z_inv = 1.0 / xc.z;
+            let z_inv2 = z_inv * z_inv;
+            let mut j_pi = Matrix3::<f64>::zeros();
+            j_pi[(0, 0)] = fx * z_inv;
+            j_pi[(0, 2)] = -fx * xc.x * z_inv2;
+            j_pi[(1, 1)] = fy * z_inv;
+            j_pi[(1, 2)] = -fy * xc.y * z_inv2;
+            j_pi[(2, 0)] = fx * z_inv;
+            j_pi[(2, 2)] = -fx * (xc.x - baseline) * z_inv2;
+            let xw_skew = skew(&point.coords);
+            let mut dx_dxi = Matrix3x6::<f64>::zeros();
+            dx_dxi.fixed_view_mut::<3, 3>(0, 0).copy_from(&r_mat);
+            dx_dxi
+                .fixed_view_mut::<3, 3>(0, 3)
+                .copy_from(&(-r_mat * xw_skew));
+            let j_pose: Matrix3x6<f64> = j_pi * dx_dxi;
+            let j_lm: Matrix3<f64> = j_pi * r_mat;
+            let s = residual.norm_squared();
+            let w = kernel.weight(s) * gnc_weights.map_or(1.0, |gw| gw[stereo_offset + st_idx]);
+            let sqrt_w = w.max(0.0).sqrt();
+            let i_pose = pose_index.get(&obs.keyframe_id).copied();
+            let i_lm = landmark_index.get(&obs.landmark_id).copied();
+            if let (Some(p), Some(l)) = (i_pose, i_lm) {
+                for r in 0..3 {
+                    let mut jr = DVector::<f64>::zeros(total_dof);
+                    for c in 0..6 {
+                        jr[p * 6 + c] = sqrt_w * j_pose[(r, c)];
+                    }
+                    for c in 0..3 {
+                        jr[landmark_offset + l * 3 + c] = sqrt_w * j_lm[(r, c)];
+                    }
+                    jac.row_mut(row).copy_from(&jr.transpose());
+                    resid[row] = sqrt_w * residual[r];
+                    row += 1;
+                }
+            }
+        }
+    }
+
+    for (index, obs) in ba.general_stereo_observations.iter().enumerate() {
+        let Some(pose) = ba.poses.get(&obs.keyframe_id) else {
+            continue;
+        };
+        let Some(point) = ba.landmarks.get(&obs.landmark_id) else {
+            continue;
+        };
+        let Some((residual, j_pose, j_lm)) =
+            general_stereo_residual_jacobians(intrinsics, obs, pose, point)
+        else {
+            continue;
+        };
+        let s = residual.norm_squared();
+        let w =
+            kernel.weight(s) * gnc_weights.map_or(1.0, |weights| weights[general_offset + index]);
+        let sqrt_w = w.max(0.0).sqrt();
+        let i_pose = pose_index.get(&obs.keyframe_id).copied();
+        let i_lm = landmark_index.get(&obs.landmark_id).copied();
+        if let (Some(p), Some(l)) = (i_pose, i_lm) {
+            let n = j_pose.nrows();
+            for r in 0..n {
+                let mut jr = DVector::<f64>::zeros(total_dof);
+                for c in 0..6 {
+                    jr[p * 6 + c] = sqrt_w * j_pose[(r, c)];
+                }
+                for c in 0..3 {
+                    jr[landmark_offset + l * 3 + c] = sqrt_w * j_lm[(r, c)];
+                }
+                // Capitalize helper: build row, then add to matching `row` counter; each
+                // general-stereo obs contributes `n` rows (2 or 4).
+                jac.row_mut(row).copy_from(&jr.transpose());
+                resid[row] = sqrt_w * residual[r];
+                row += 1;
+            }
+        }
+    }
+
+    // IMU factors: 9 whitened rows each over [pose_i | pose_j | vel_i | vel_j | bias_i].
+    for factor in &ba.imu_factors {
+        let (Some(pose_i), Some(pose_j)) = (
+            ba.poses.get(&factor.keyframe_id_from),
+            ba.poses.get(&factor.keyframe_id_to),
+        ) else {
+            continue;
+        };
+        let (Some(v_i_w), Some(v_j_w)) = (
+            ba.velocities.get(&factor.keyframe_id_from),
+            ba.velocities.get(&factor.keyframe_id_to),
+        ) else {
+            continue;
+        };
+        let body_i = ba.imu_body_to_camera.compose(&pose_i.world_to_camera);
+        let body_j = ba.imu_body_to_camera.compose(&pose_j.world_to_camera);
+        let r_wc_i = body_i.rotation.to_rotation_matrix().into_inner();
+        let r_wc_j = body_j.rotation.to_rotation_matrix().into_inner();
+        let c_i: Vector3<f64> = body_i.inverse().translation;
+        let c_j: Vector3<f64> = body_j.inverse().translation;
+        let dt = factor.delta.delta_time;
+        let g = factor.gravity_world;
+
+        let r_i_so3 = SO3::from_quaternion(body_i.rotation.inverse());
+        let r_j_so3 = SO3::from_quaternion(body_j.rotation.inverse());
+        let bias_for_factor = ba.biases.get(&factor.keyframe_id_from);
+        let [r_rot, r_vel, r_pos] = if let Some(bias) = bias_for_factor {
+            let bg: Vector3<f64> = bias.fixed_rows::<3>(0).into_owned();
+            let ba_acc: Vector3<f64> = bias.fixed_rows::<3>(3).into_owned();
+            factor.residual_with_bias_correction(
+                &r_i_so3, &c_i, v_i_w, &r_j_so3, &c_j, v_j_w, &bg, &ba_acc,
+            )
+        } else {
+            factor.residual(&r_i_so3, &c_i, v_i_w, &r_j_so3, &c_j, v_j_w)
+        };
+
+        let whitener = factor.covariance_sqrt_information().unwrap_or_else(|| {
+            let mut diagonal = nalgebra::SVector::<f64, 9>::zeros();
+            diagonal
+                .fixed_rows_mut::<3>(0)
+                .fill(factor.weight_rotation.max(0.0).sqrt());
+            diagonal
+                .fixed_rows_mut::<3>(3)
+                .fill(factor.weight_velocity.max(0.0).sqrt());
+            diagonal
+                .fixed_rows_mut::<3>(6)
+                .fill(factor.weight_position.max(0.0).sqrt());
+            crate::imu_preintegration::Matrix9::from_diagonal(&diagonal)
+        });
+
+        let q_diff = v_j_w - v_i_w - g * dt;
+        let q_pos_i = c_j - v_i_w * dt - 0.5 * g * dt * dt;
+        let jr_inv = right_jacobian_inverse_so3(&r_rot);
+        let jr_inv_rwc_j = jr_inv * r_wc_j;
+
+        let mut j_pose_i = nalgebra::Matrix::<f64, nalgebra::U9, nalgebra::U6, _>::zeros();
+        j_pose_i
+            .fixed_view_mut::<3, 3>(0, 3)
+            .copy_from(&jr_inv_rwc_j);
+        j_pose_i
+            .fixed_view_mut::<3, 3>(3, 3)
+            .copy_from(&(-r_wc_i * skew(&q_diff)));
+        j_pose_i.fixed_view_mut::<3, 3>(6, 0).copy_from(&r_wc_i);
+        j_pose_i
+            .fixed_view_mut::<3, 3>(6, 3)
+            .copy_from(&(-r_wc_i * skew(&q_pos_i)));
+
+        let mut j_pose_j = nalgebra::Matrix::<f64, nalgebra::U9, nalgebra::U6, _>::zeros();
+        j_pose_j
+            .fixed_view_mut::<3, 3>(0, 3)
+            .copy_from(&(-jr_inv_rwc_j));
+        j_pose_j.fixed_view_mut::<3, 3>(6, 0).copy_from(&(-r_wc_i));
+        j_pose_j
+            .fixed_view_mut::<3, 3>(6, 3)
+            .copy_from(&(r_wc_i * skew(&c_j)));
+
+        let mut j_vel_i = nalgebra::Matrix::<f64, nalgebra::U9, nalgebra::U3, _>::zeros();
+        j_vel_i.fixed_view_mut::<3, 3>(3, 0).copy_from(&(-r_wc_i));
+        j_vel_i
+            .fixed_view_mut::<3, 3>(6, 0)
+            .copy_from(&(-dt * r_wc_i));
+        let mut j_vel_j = nalgebra::Matrix::<f64, nalgebra::U9, nalgebra::U3, _>::zeros();
+        j_vel_j.fixed_view_mut::<3, 3>(3, 0).copy_from(&r_wc_i);
+
+        let mut r_stack = nalgebra::SVector::<f64, 9>::zeros();
+        r_stack.fixed_rows_mut::<3>(0).copy_from(&r_rot);
+        r_stack.fixed_rows_mut::<3>(3).copy_from(&r_vel);
+        r_stack.fixed_rows_mut::<3>(6).copy_from(&r_pos);
+
+        let i_bias = bias_index.get(&factor.keyframe_id_from).copied();
+        let j_bias_block = if i_bias.is_some() {
+            let neg_r_rot_mat: Matrix3<f64> = nalgebra::Rotation3::from_scaled_axis(-r_rot).into();
+            let lhs_rot = -jr_inv * neg_r_rot_mat;
+            let mut j_bias = nalgebra::Matrix::<f64, nalgebra::U9, nalgebra::U6, _>::zeros();
+            j_bias
+                .fixed_view_mut::<3, 3>(0, 0)
+                .copy_from(&(lhs_rot * factor.delta.j_rotation_bg));
+            j_bias
+                .fixed_view_mut::<3, 3>(3, 0)
+                .copy_from(&(-factor.delta.j_velocity_bg));
+            j_bias
+                .fixed_view_mut::<3, 3>(3, 3)
+                .copy_from(&(-factor.delta.j_velocity_ba));
+            j_bias
+                .fixed_view_mut::<3, 3>(6, 0)
+                .copy_from(&(-factor.delta.j_position_bg));
+            j_bias
+                .fixed_view_mut::<3, 3>(6, 3)
+                .copy_from(&(-factor.delta.j_position_ba));
+            Some(j_bias)
+        } else {
+            None
+        };
+
+        let j_pose_i = whitener * j_pose_i;
+        let j_pose_j = whitener * j_pose_j;
+        let j_vel_i = whitener * j_vel_i;
+        let j_vel_j = whitener * j_vel_j;
+        let j_bias_block = j_bias_block.map(|jb| whitener * jb);
+        let r_stack = whitener * r_stack;
+
+        let i_pose = pose_index.get(&factor.keyframe_id_from).copied();
+        let j_pose = pose_index.get(&factor.keyframe_id_to).copied();
+        let i_vel = velocity_index.get(&factor.keyframe_id_from).copied();
+        let j_vel = velocity_index.get(&factor.keyframe_id_to).copied();
+
+        for r in 0..9 {
+            let mut jr = DVector::<f64>::zeros(total_dof);
+            if let Some(p) = i_pose {
+                for c in 0..6 {
+                    jr[p * 6 + c] += j_pose_i[(r, c)];
+                }
+            }
+            if let Some(p) = j_pose {
+                for c in 0..6 {
+                    jr[p * 6 + c] += j_pose_j[(r, c)];
+                }
+            }
+            if let Some(v) = i_vel {
+                for c in 0..3 {
+                    jr[vel_offset + v * 3 + c] += j_vel_i[(r, c)];
+                }
+            }
+            if let Some(v) = j_vel {
+                for c in 0..3 {
+                    jr[vel_offset + v * 3 + c] += j_vel_j[(r, c)];
+                }
+            }
+            if let (Some(b), Some(jb)) = (i_bias, &j_bias_block) {
+                for c in 0..6 {
+                    jr[bias_offset + b * 6 + c] += jb[(r, c)];
+                }
+            }
+            jac.row_mut(row).copy_from(&jr.transpose());
+            resid[row] = r_stack[r];
+            row += 1;
+        }
+    }
+
+    Some(SqrtStack {
+        jac,
+        resid,
+        pose_dof: pose_dim,
+        vel_offset,
+        bias_offset,
+        landmark_offset,
+        total_dof,
+    })
+}
+
+#[derive(Clone, Copy)]
+struct SolveStepConfig {
     p_count: usize,
     l_count: usize,
     v_count: usize,
@@ -3741,9 +4203,23 @@ fn solve_step(
     lambda: f64,
     linear_solver: LinearSolver,
     parallel: bool,
+}
+
+fn solve_step(
+    system: &NormalEquationsBa,
+    config: SolveStepConfig,
 ) -> Result<(DVector<f64>, DVector<f64>), BaError> {
+    let SolveStepConfig {
+        p_count,
+        l_count,
+        v_count,
+        b_count,
+        lambda,
+        linear_solver,
+        parallel,
+    } = config;
     // Landmark-only BA: H_LL is block-diagonal so each landmark gets an
-    // independent 3×3 solve. No Schur complement needed. Every landmark's
+    // independent 3ﾃ・ solve. No Schur complement needed. Every landmark's
     // solve is independent and writes only its own 3 rows of `delta_l`, so
     // the parallel path is a direct embarrassingly-parallel dispatch with no
     // merge step: bit-identical to the serial loop below at any thread
@@ -3789,7 +4265,7 @@ fn solve_step(
         return Ok((DVector::<f64>::zeros(0), delta_l));
     }
 
-    // λ damping on the joint pose+velocity+bias diagonal. The first 6P
+    // ﾎｻ damping on the joint pose+velocity+bias diagonal. The first 6P
     // rows are pose perturbations; the next 3V are velocity
     // perturbations; the final 6B are bias perturbations.
     let pose_dim = p_count * 6;
@@ -3803,8 +4279,8 @@ fn solve_step(
     let mut b_reduced = -&system.b_p;
 
     // Per-landmark Schur reduction. Each landmark contributes:
-    //   S -= H_PL_l · H_LL_l^{-1} · H_PL_l^T
-    //   b_S -= H_PL_l · H_LL_l^{-1} · b_l
+    //   S -= H_PL_l ﾂｷ H_LL_l^{-1} ﾂｷ H_PL_l^T
+    //   b_S -= H_PL_l ﾂｷ H_LL_l^{-1} ﾂｷ b_l
     // Both updates only touch the rows/cols of S corresponding to poses
     // that observed this landmark, so we never materialize the full H_PL.
     // Flag-gated, work-gated parallel reduction (see the module's
@@ -3833,9 +4309,9 @@ fn solve_step(
                 };
                 // Update S:
                 //   for (p, A) in cross, for (q, B) in cross:
-                //     S[p, q] -= A · h_ll_inv · B^T
+                //     S[p, q] -= A ﾂｷ h_ll_inv ﾂｷ B^T
                 for (p, a) in &landmark.cross {
-                    // Precompute A · h_ll_inv (6×3) once per outer pose.
+                    // Precompute A ﾂｷ h_ll_inv (6ﾃ・) once per outer pose.
                     let a_h: Matrix6x3<f64> = a * h_ll_inv;
                     for (q, b) in &landmark.cross {
                         let block: Matrix6<f64> = a_h * b.transpose();
@@ -3846,8 +4322,8 @@ fn solve_step(
                         }
                     }
                     // Update reduced rhs. Schur derivation:
-                    //   S · δ_p = -g_p + H_PL · H_LL^{-1} · g_l,
-                    // so each landmark `l` contributes `+ A · h_ll_inv · b_l`
+                    //   S ﾂｷ ﾎｴ_p = -g_p + H_PL ﾂｷ H_LL^{-1} ﾂｷ g_l,
+                    // so each landmark `l` contributes `+ A ﾂｷ h_ll_inv ﾂｷ b_l`
                     // to `b_reduced` (which already starts at `-g_p = -b_p`).
                     let upd: Vector6<f64> = a_h * landmark.b_l;
                     for k in 0..6 {
@@ -3870,11 +4346,11 @@ fn solve_step(
             let dim = total_dim;
             let rhs = DMatrix::from_column_slice(dim, 1, b_reduced.as_slice());
 
-            // Pose and IMU-bias variables are 6×6 diagonal blocks, so when the
+            // Pose and IMU-bias variables are 6ﾃ・ diagonal blocks, so when the
             // system carries no 3-DOF velocity blocks (the common pure-visual
-            // BA case) the reduced matrix tiles cleanly into 6×6 blocks and the
-            // block Cholesky back-end — the same one the pose graph uses —
-            // factors it without the scalar gather/scatter bookkeeping. λ is
+            // BA case) the reduced matrix tiles cleanly into 6ﾃ・ blocks and the
+            // block Cholesky back-end 窶・the same one the pose graph uses 窶・
+            // factors it without the scalar gather/scatter bookkeeping. ﾎｻ is
             // already folded into `s`, so we pass `lambda = 0`. Visual-inertial
             // systems interleave 3-DOF velocities, breaking the uniform tiling,
             // so they fall back to the scalar `CscCholesky` factorization.
@@ -3907,10 +4383,10 @@ fn solve_step(
     };
 
     // Back-substitute landmark updates:
-    //   δ_L[l] = h_ll_inv · (-b_l - Σ_p H_pl^T · δ_p)
+    //   ﾎｴ_L[l] = h_ll_inv ﾂｷ (-b_l - ﾎ｣_p H_pl^T ﾂｷ ﾎｴ_p)
     // Each landmark writes only its own 3 rows of `delta_l` and only reads
     // the (already solved, read-only from here on) `delta_p` and its own
-    // cache entries, so — like the landmark-only branch above — the
+    // cache entries, so 窶・like the landmark-only branch above 窶・the
     // parallel path is a direct embarrassingly-parallel dispatch with no
     // merge step: bit-identical to the serial loop below at any thread
     // count.
@@ -3962,21 +4438,21 @@ fn solve_step(
 
 /// Parallel counterpart of the per-landmark Schur reduction in
 /// [`solve_step`] (the `p_count > 0` branch's main loop). Fills
-/// `h_ll_inv_cache` / `b_l_cache` directly in parallel — each landmark's
-/// `3×3` factorization only touches its own output slot, no merge needed —
+/// `h_ll_inv_cache` / `b_l_cache` directly in parallel 窶・each landmark's
+/// `3ﾃ・` factorization only touches its own output slot, no merge needed 窶・
 /// then updates `s` / `b_reduced` from fixed-size landmark chunks
 /// ([`PARALLEL_LANDMARK_CHUNK`]) the same way
 /// [`assemble_mono_observations_parallel`] updates the assembly
 /// accumulators: within a chunk, every landmark's pose-pair contributions
-/// (its `S[p, q] -= …` blocks and its `b_reduced[p] += …` update) are
-/// computed concurrently — a pure function of that landmark's cached
+/// (its `S[p, q] -= 窶ｦ` blocks and its `b_reduced[p] += 窶ｦ` update) are
+/// computed concurrently 窶・a pure function of that landmark's cached
 /// inverse, `b_l`, and cross blocks, collected into a `(Vec<(p, q, block)>,
-/// Vec<(p, upd)>)` pair per landmark — and then folded into `s` /
+/// Vec<(p, upd)>)` pair per landmark 窶・and then folded into `s` /
 /// `b_reduced` by a single serial pass, landmark by landmark in ascending
 /// index order, before the next chunk starts. `s` and `b_reduced` are
 /// disjoint arrays, so grouping a landmark's `S` updates before its
 /// `b_reduced` update (rather than interleaving them per pose as the serial
-/// loop does) does not change either accumulator's own summation order —
+/// loop does) does not change either accumulator's own summation order 窶・
 /// only operations that target the *same* memory location are
 /// order-sensitive for floating point, and each one's order here is exactly
 /// the serial loop's. The result is therefore bit-identical to the serial
@@ -4142,16 +4618,16 @@ fn skew(v: &Vector3<f64>) -> Matrix3<f64> {
     Matrix3::new(0.0, -v.z, v.y, v.z, 0.0, -v.x, -v.y, v.x, 0.0)
 }
 
-/// Right-Jacobian inverse on SO(3): Jr⁻¹(φ) = I + ½[φ]× + c·[φ]×²,
-/// with `c = (1/θ²) · (1 − (θ/2)·cot(θ/2))` for `θ = ‖φ‖`. At `θ → 0`
-/// falls back to the leading Taylor expansion `I + ½[φ]× + (1/12)·[φ]×²`.
+/// Right-Jacobian inverse on SO(3): Jr竅ｻﾂｹ(ﾏ・ = I + ﾂｽ[ﾏ・ﾃ・+ cﾂｷ[ﾏ・ﾃ猟ｲ,
+/// with `c = (1/ﾎｸﾂｲ) ﾂｷ (1 竏・(ﾎｸ/2)ﾂｷcot(ﾎｸ/2))` for `ﾎｸ = 窶妄・冒. At `ﾎｸ 竊・0`
+/// falls back to the leading Taylor expansion `I + ﾂｽ[ﾏ・ﾃ・+ (1/12)ﾂｷ[ﾏ・ﾃ猟ｲ`.
 /// Used by [`build_normal_equations`] to linearise the SO(3) log
 /// residual of the Forster IMU factor.
 ///
-/// Identity: `Jr_inv(φ) = Jl_inv(−φ)`, which means relative to the
+/// Identity: `Jr_inv(ﾏ・ = Jl_inv(竏佃・`, which means relative to the
 /// `so3_left_jacobian_inverse` formula in [`visloc_core::geometry`]
-/// only the sign of the linear `[φ]×` term flips (the quadratic
-/// `[φ]×²` coefficient stays the same).
+/// only the sign of the linear `[ﾏ・ﾃ輿 term flips (the quadratic
+/// `[ﾏ・ﾃ猟ｲ` coefficient stays the same).
 fn right_jacobian_inverse_so3(phi: &Vector3<f64>) -> Matrix3<f64> {
     let theta_sq = phi.norm_squared();
     let phi_skew = skew(phi);
@@ -4222,7 +4698,7 @@ impl LocalRefiner for BundleAdjustmentRefiner {
         // The local window typically already includes the newly-staged
         // keyframe (the local-mapping pipeline inserts it into a working
         // map before computing the window), so we must skip those when
-        // adding fixed poses — otherwise the BA variable would become a
+        // adding fixed poses 窶・otherwise the BA variable would become a
         // fixed gauge and never move.
         let staged_kf_ids: std::collections::BTreeSet<u64> = staged_update
             .keyframes
@@ -4299,12 +4775,12 @@ impl LocalRefiner for BundleAdjustmentRefiner {
             }
         }
 
-        // No observations to optimize against → nothing to refine.
+        // No observations to optimize against 竊・nothing to refine.
         if ba.observations.is_empty() {
             return LocalRefinementResult::skipped(LocalRefinementReason::Noop);
         }
         // Every variable pose is fixed (or no variable poses exist) AND
-        // every variable landmark is fixed → nothing to optimize. The BA
+        // every variable landmark is fixed 竊・nothing to optimize. The BA
         // would still report `AllPosesFixed`; just skip cleanly.
         let has_variable_pose = ba.poses.keys().any(|id| !ba.fixed_poses.contains(id));
         let has_variable_landmark = ba
@@ -4448,6 +4924,122 @@ mod imu_gradient_tests {
             );
         }
     }
+
+    /// `build_sqrt_factor_rows` must reproduce the full structured Hessian/gradient that
+    /// `build_normal_equations` scatters: `jac盞ﾂｷjac == H` and `jac盞ﾂｷresid == b` over the
+    /// pose+velocity+bias+landmark layout. This proves the emit path is exactly the dense
+    /// path in square-root form, so a Basalt step-A QR marginalization can consume it without
+    /// changing the dense numerics.
+    #[test]
+    fn sqrt_factor_rows_match_dense_normal_equations() {
+        let mut ba = make_problem();
+        // Two landmarks observed by the two keyframes (mono).
+        ba.add_landmark(100, Point3::new(1.2, -0.4, 3.0));
+        ba.add_landmark(101, Point3::new(-0.3, 0.9, 2.6));
+        ba.add_observation(BaObservation {
+            keyframe_id: 10,
+            landmark_id: 100,
+            xy: Point2::new(333.0, 239.0),
+        });
+        ba.add_observation(BaObservation {
+            keyframe_id: 20,
+            landmark_id: 100,
+            xy: Point2::new(340.0, 238.0),
+        });
+        ba.add_observation(BaObservation {
+            keyframe_id: 10,
+            landmark_id: 101,
+            xy: Point2::new(311.0, 246.0),
+        });
+        ba.add_observation(BaObservation {
+            keyframe_id: 20,
+            landmark_id: 101,
+            xy: Point2::new(318.0, 244.0),
+        });
+
+        let pose_index: BTreeMap<u64, usize> = BTreeMap::from([(10, 0), (20, 1)]);
+        let velocity_index: BTreeMap<u64, usize> = BTreeMap::from([(10, 0), (20, 1)]);
+        let bias_index: BTreeMap<u64, usize> = BTreeMap::from([(10, 0), (20, 1)]);
+        let landmark_index: BTreeMap<u64, usize> = BTreeMap::from([(100, 0), (101, 1)]);
+        let intrinsics = (500.0_f64, 500.0_f64, 320.0_f64, 240.0_f64);
+
+        let stack = build_sqrt_factor_rows(
+            &ba,
+            &intrinsics,
+            &pose_index,
+            &landmark_index,
+            &velocity_index,
+            &bias_index,
+            &RobustKernel::None,
+            None,
+        )
+        .expect("stack with observations and IMU");
+        let (h_sqrt, b_sqrt) = stack.to_normal_equations();
+
+        let dense = build_normal_equations(
+            &ba,
+            &intrinsics,
+            &pose_index,
+            &landmark_index,
+            &velocity_index,
+            &bias_index,
+            &RobustKernel::None,
+            None,
+            false,
+        );
+
+        // Assemble the full structured Hessian / gradient from the dense NormalEquationsBa:
+        //   H = [ h_pp        cross^T ]
+        //       [ cross       h_ll    ]
+        // ordering columns as pose(12), vel(6), bias(12), landmark(6).
+        let p = 2usize;
+        let v = 2usize;
+        let b = 2usize;
+        let l = 2usize;
+        let pose_dim = p * 6;
+        let vel_offset = pose_dim;
+        let bias_offset = vel_offset + v * 3;
+        let lm_offset = bias_offset + b * 6;
+        let total = lm_offset + l * 3;
+        let mut h_full = DMatrix::<f64>::zeros(total, total);
+        let mut b_full = DVector::<f64>::zeros(total);
+
+        // h_pp / b_p (pose+vel+bias).
+        h_full
+            .view_mut((0, 0), (lm_offset, lm_offset))
+            .copy_from(&dense.h_pp);
+        b_full
+            .view_mut((0, 0), (lm_offset, 1))
+            .copy_from(&dense.b_p);
+
+        // Landmark block (block-diagonal h_ll) and cross (h_pl).
+        for (l_idx, lm) in dense.landmarks.iter().enumerate() {
+            for a in 0..3 {
+                for c in 0..3 {
+                    h_full[(lm_offset + l_idx * 3 + a, lm_offset + l_idx * 3 + c)] +=
+                        lm.h_ll[(a, c)];
+                }
+                b_full[lm_offset + l_idx * 3 + a] += lm.b_l[a];
+            }
+            for (p_idx, cross) in &lm.cross {
+                for a in 0..6 {
+                    for c in 0..3 {
+                        h_full[(p_idx * 6 + a, lm_offset + l_idx * 3 + c)] += cross[(a, c)];
+                        h_full[(lm_offset + l_idx * 3 + c, p_idx * 6 + a)] += cross[(a, c)];
+                    }
+                }
+            }
+        }
+
+        let max_h = (h_sqrt.clone() - h_full.clone())
+            .iter()
+            .fold(0.0_f64, |acc, x| acc.max(x.abs()));
+        assert!(max_h < 1e-8, "sqrt-jac H mismatch: {max_h}");
+        let max_b = (b_sqrt.clone() - b_full.clone())
+            .iter()
+            .fold(0.0_f64, |acc, x| acc.max(x.abs()));
+        assert!(max_b < 1e-8, "sqrt-jac b mismatch: {max_b}");
+    }
 }
 
 /// Tests for [`BaConfig::parallel`] (see the module's "Parallelism"
@@ -4462,7 +5054,7 @@ mod parallel_ba_tests {
     use super::*;
     use nalgebra::UnitQuaternion;
 
-    /// Deterministic `[0, 1)` pseudo-random value (GLSL-style sine hash) —
+    /// Deterministic `[0, 1)` pseudo-random value (GLSL-style sine hash) 窶・
     /// avoids pulling in a `rand` dependency just to scatter synthetic
     /// points/poses reproducibly.
     fn pseudo_rand(seed: u64) -> f64 {
