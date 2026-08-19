@@ -145,6 +145,11 @@ pub mod marginalization_sqrt;
 pub use marginalization_sqrt::{marginalize_sqrt, marginalize_sqrt_from_information, SqrtMarginal};
 pub mod vi_sqrt_window;
 pub use vi_sqrt_window::{step_window_marginal, NavBlock, SqrtNavMarginal};
+pub mod nonlinear_factor_recovery;
+pub use nonlinear_factor_recovery::{
+    recover_relative_pose_factors, vi_marginal_to_pose_only, RecoveredRelativePoseFactor,
+    VI_POSE_DOF, VI_STATE_DOF, VI_VEL_BIAS_DOF,
+};
 pub mod pcm;
 mod reordering;
 pub mod sparse_factor_graph;
