@@ -107,10 +107,6 @@ pub fn recover_relative_pose_factors(
     let pose_cols: Vec<usize> = (0..n_keyframes)
         .flat_map(|k| (k * VI_STATE_DOF)..(k * VI_STATE_DOF + VI_POSE_DOF))
         .collect();
-    let vb_cols: Vec<usize> = (0..n_keyframes)
-        .flat_map(|k| (k * VI_STATE_DOF + VI_POSE_DOF)..(k * VI_STATE_DOF + VI_STATE_DOF))
-        .collect();
-
     let (lambda_pose, _eta_pose) = marginalize(&lambda_vi, &eta_vi, &pose_cols)?;
 
     // Step 3 — Chow-Liu KL-optimal tree sparsification on the (6·N × 6·N)

@@ -4710,7 +4710,89 @@ where
         if !should_trigger || vi_initialization_pending {
             return None;
         }
-        crate::online_slam_vi_ba::run_local_vi_ba(&mut self.map, state)
+        let result = crate::online_slam_vi_ba::run_local_vi_ba(&mut self.map, state);
+        if result.is_some() {
+            self.maybe_inject_recovered_factors();
+        }
+        result
+    }
+
+    /// After a successful VI-BA window shift, harvest the `SqrtNavMarginal`
+    /// produced by [`crate::nonlinear_factor_recovery`] and inject the resulting
+    /// Chow-Liu relative-pose factors into the pose graph.
+    ///
+    /// No-op when:
+    /// - the sqrt-window marginalization path is disabled,
+    /// - no `sqrt_nav_marginal` is available (first window),
+    /// - there is no active `pose_graph_state`, or
+    /// - there are fewer than 2 retained keyframes (single-node tree has no edges).
+    fn maybe_inject_recovered_factors(&mut self) {
+        let vi_ba_state = match self.local_vi_ba_state.as_ref() {
+            Some(s) => s,
+            None => return,
+        };
+        if !vi_ba_state.config.use_sqrt_window_marginalization {
+            return;
+        }
+        let sqrt_marginal = match vi_ba_state.sqrt_nav_marginal.as_ref() {
+            Some(m) => m,
+            None => return,
+        };
+        let n = sqrt_marginal.factor.ncols() / crate::VI_STATE_DOF;
+        if n < 2 || sqrt_marginal.factor.ncols() % crate::VI_STATE_DOF != 0 {
+            return;
+        }
+        // Reconstruct the window IDs: run_local_vi_ba uses the most-recent N
+        // keyframes in sorted order, same ordering used when building the sqrt factor.
+        let mut all_kf_ids: Vec<u64> = self.map.keyframes.keys().copied().collect();
+        all_kf_ids.sort_unstable();
+        if all_kf_ids.len() < n {
+            return;
+        }
+        let window_ids: Vec<u64> = all_kf_ids[all_kf_ids.len() - n..].to_vec();
+        let pg_state = match self.pose_graph_state.as_mut() {
+            Some(s) => s,
+            None => return,
+        };
+        let recovered = crate::nonlinear_factor_recovery::recover_relative_pose_factors(
+            &sqrt_marginal.factor,
+            &sqrt_marginal.rhs,
+            n,
+        );
+        let factors = match recovered {
+            Some(f) => f,
+            None => return,
+        };
+        for f in factors {
+            let id_i = window_ids[f.block_i];
+            let id_j = window_ids[f.block_j];
+            let (pose_i, pose_j) = match (
+                pg_state.graph.poses.get(&id_i).cloned(),
+                pg_state.graph.poses.get(&id_j).cloned(),
+            ) {
+                (Some(pi), Some(pj)) => (pi, pj),
+                _ => continue,
+            };
+            let relative = relative_world_to_camera(&pose_i, &pose_j);
+            // Convert 6×6 DMatrix → Matrix6<f64>. The omega_relative is ordered
+            // [ρ; ω] (translation first) matching PoseGraph / SE3::log convention.
+            if f.omega_relative.nrows() != 6 || f.omega_relative.ncols() != 6 {
+                continue;
+            }
+            let mut information = nalgebra::Matrix6::<f64>::zeros();
+            for row in 0..6 {
+                for col in 0..6 {
+                    information[(row, col)] = f.omega_relative[(row, col)];
+                }
+            }
+            pg_state.graph.add_edge_with_information(
+                id_i,
+                id_j,
+                relative,
+                PoseGraphEdgeKind::Sequential,
+                information,
+            );
+        }
     }
 
     /// Run visual-only covisibility local BA when a new keyframe has just
@@ -5872,11 +5954,13 @@ mod bias_release_promotion_tests {
         let mut motion_config = OnlineSlamMotionViInitConfig::default();
         motion_config.initializer.gravity_world = seed_gravity;
 
-        let mut config = OnlineSlamConfig::default();
-        config.imu = Some(OnlineSlamImuConfig::default());
-        config.local_vi_ba = Some(OnlineSlamLocalBaConfig::default());
-        config.vi_init = Some(vi_init_config);
-        config.vi_motion_init = Some(motion_config);
+        let config = OnlineSlamConfig {
+            imu: Some(OnlineSlamImuConfig::default()),
+            local_vi_ba: Some(OnlineSlamLocalBaConfig::default()),
+            vi_init: Some(vi_init_config),
+            vi_motion_init: Some(motion_config),
+            ..OnlineSlamConfig::default()
+        };
 
         // Sanity check: the seed config must actually be constructible
         // before we exercise the mutation under test.
