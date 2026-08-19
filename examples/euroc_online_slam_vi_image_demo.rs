@@ -539,14 +539,23 @@ impl SuperPointOfflineExtractor {
         cam0_dir: &std::path::Path,
         cam1_dir: &std::path::Path,
     ) -> Result<Self, String> {
-        let cam0_frames = load_frame_features(cam0_dir)?;
-        let cam1_frames = load_frame_features(cam1_dir)?;
+        let mut cam0_frames = load_frame_features(cam0_dir)?;
+        let mut cam1_frames = load_frame_features(cam1_dir)?;
+        // Allow partially-exported cam1 directories (e.g. during incremental export):
+        // truncate both to the shorter length so the caller can use max_frames to pick a
+        // window within the available frames, rather than requiring exact equality.
         if cam0_frames.len() != cam1_frames.len() {
-            return Err(format!(
-                "SuperPointOfflineExtractor: cam0 ({}) and cam1 ({}) feature counts differ — re-export with the same --frames count",
+            let min_len = cam0_frames.len().min(cam1_frames.len());
+            eprintln!(
+                "SuperPointOfflineExtractor: cam0 ({}) and cam1 ({}) feature counts differ; \
+                 truncating both to {} (use --max-frames ≤ {} to run within available frames)",
                 cam0_frames.len(),
                 cam1_frames.len(),
-            ));
+                min_len,
+                min_len,
+            );
+            cam0_frames.truncate(min_len);
+            cam1_frames.truncate(min_len);
         }
         Ok(Self {
             cam0_frames: std::sync::Arc::new(cam0_frames),
