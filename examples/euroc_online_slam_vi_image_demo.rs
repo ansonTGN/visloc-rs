@@ -1601,10 +1601,13 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         default_adaptive_velocity_gate.max_threshold_mps;
     let mut local_vi_ba_adaptive_velocity_min_references: usize =
         default_adaptive_velocity_gate.min_reference_count;
-    let mut motion_vi_init_max_velocity_mps: Option<f64> = None;
-    let mut motion_vi_init_max_gyro_bias_rad_s: Option<f64> = None;
-    let mut motion_vi_init_max_accel_bias_mps2: Option<f64> = None;
-    let mut motion_vi_init_max_imu_nis_per_dof: Option<f64> = None;
+    // Keep motion-VI-init physically plausible by default. Without these
+    // gates, a numerically-valid but non-physical initialisation can seed
+    // extreme velocity/bias and destabilise downstream VI-BA.
+    let mut motion_vi_init_max_velocity_mps: Option<f64> = Some(8.0);
+    let mut motion_vi_init_max_gyro_bias_rad_s: Option<f64> = Some(0.5);
+    let mut motion_vi_init_max_accel_bias_mps2: Option<f64> = Some(3.0);
+    let mut motion_vi_init_max_imu_nis_per_dof: Option<f64> = Some(50.0);
     let mut motion_vi_init_max_rotation_residual_rms_rad: Option<f64> = None;
     let mut motion_vi_init_max_velocity_residual_rms_mps: Option<f64> = None;
     let mut motion_vi_init_max_position_residual_rms_meters: Option<f64> = None;
