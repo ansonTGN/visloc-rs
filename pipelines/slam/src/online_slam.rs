@@ -4689,13 +4689,32 @@ where
     /// treating Stage A as "no longer pending" here.
     fn vi_initialization_pending(&self) -> bool {
         self.vi_init_state.as_ref().is_some_and(|static_state| {
-            static_state.completed.is_none()
-                && self
-                    .vi_motion_init_state
-                    .as_ref()
-                    .is_none_or(|motion_state| {
-                        motion_state.completed.is_none() && !motion_state.velocity_stage_fired()
-                    })
+            // Static VI init has not yet succeeded.
+            let static_not_done = static_state.completed.is_none();
+            if !static_not_done {
+                return false;
+            }
+            // When the static init gave up, unblock only if there is no motion-init
+            // stage configured (no hope of a better initialisation) OR if the
+            // motion-init stage has already succeeded (velocity + bias are valid).
+            // If motion-init is configured but has not yet succeeded, remain pending
+            // so IMU factors carrying stale biases are not fed into local VI-BA.
+            let static_gave_up = static_state.gave_up.is_some();
+            match self.vi_motion_init_state.as_ref() {
+                None => {
+                    // No motion-init stage: unblock once the static stage gives up.
+                    !static_gave_up
+                }
+                Some(motion_state) => {
+                    if motion_state.completed.is_some() || motion_state.velocity_stage_fired() {
+                        // Motion-init succeeded: unblock regardless of static outcome.
+                        false
+                    } else {
+                        // Motion-init configured but not yet done: stay pending.
+                        true
+                    }
+                }
+            }
         })
     }
 
