@@ -937,6 +937,8 @@ struct CliArgs {
     accept_motion_prior_on_failure: bool,
     /// Cap on consecutive IMU coasts (`None` = unlimited; not recommended).
     max_consecutive_motion_prior_coasts: Option<usize>,
+    /// Temporal re-association of previous inlier landmarks (image-free KLT analogue).
+    temporal_landmark_tracking: bool,
     /// When `true`, scale `--max-pose-jump-meters` by the number of frames
     /// elapsed since the last successful track (capped at
     /// `--pose-jump-gap-scaling-max-multiplier`, floored at 1) before
@@ -1669,6 +1671,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut pose_prior_visual_override: bool = false;
     let mut accept_motion_prior_on_failure: bool = false;
     let mut max_consecutive_motion_prior_coasts: Option<usize> = Some(5);
+    let mut temporal_landmark_tracking: bool = false;
+    let mut temporal_landmark_tracking_overridden: bool = false;
     let mut pose_jump_gap_scaling: bool = false;
     let mut pose_jump_gap_scaling_max_multiplier: usize = 10;
     let mut tracking_min_inliers: usize = 0;
@@ -2375,6 +2379,16 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                 } else {
                     Some(raw.parse()?)
                 };
+                args.remove(i);
+            }
+            "--temporal-landmark-tracking" => {
+                temporal_landmark_tracking = true;
+                temporal_landmark_tracking_overridden = true;
+                args.remove(i);
+            }
+            "--no-temporal-landmark-tracking" => {
+                temporal_landmark_tracking = false;
+                temporal_landmark_tracking_overridden = true;
                 args.remove(i);
             }
             "--pose-jump-gap-scaling" => {
@@ -3220,6 +3234,11 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         // Do NOT default accept-motion-prior-on-failure: gate67 unlimited
         // coast hit tracking=1.0 but collapsed Sim(3) scale to 0.02
         // (626 coasts). Cap+flag remain opt-in for gated A/B.
+        if !temporal_landmark_tracking_overridden {
+            // Image-free temporal track of previous PnP inliers — Basalt
+            // KLT analogue for the SuperPoint descriptor frontend.
+            temporal_landmark_tracking = true;
+        }
         // Do NOT default pose-prior-visual-override: gate58/60 raised
         // tracking but collapsed Sim(3) scale. Keep opt-in.
         // Do NOT default pose-jump-gap-scaling (gate50: scale 0.55) or
@@ -3633,6 +3652,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         pose_prior_visual_override,
         accept_motion_prior_on_failure,
         max_consecutive_motion_prior_coasts,
+        temporal_landmark_tracking,
         pose_jump_gap_scaling,
         pose_jump_gap_scaling_max_multiplier,
         tracking_min_inliers,
@@ -5336,6 +5356,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
         accept_motion_prior_on_failure: args.accept_motion_prior_on_failure,
         max_consecutive_motion_prior_coasts: args.max_consecutive_motion_prior_coasts,
+        temporal_landmark_tracking: args.temporal_landmark_tracking,
         min_inliers: args.tracking_min_inliers,
         min_inlier_ratio: args.tracking_min_inlier_ratio,
         max_mean_reprojection_error: args.tracking_max_reprojection_error,
@@ -8273,6 +8294,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          atlas_welded_landmark_reduction={atlas_welded_landmark_reduction}\n\
          pose_prior_visual_override_count={pose_prior_visual_override_count}\n\
          motion_prior_coast_count={motion_prior_coast_count}\n\
+         temporal_landmark_attempt_count={temporal_landmark_attempt_count}\n\
+         temporal_landmark_success_count={temporal_landmark_success_count}\n\
          imu_samples_consumed={imu_idx}\n\
          vi_init_preseed_samples={vi_init_preseed_samples}\n\
          seed_frame_idx={seed_frame_idx}\n\
@@ -8505,6 +8528,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          max_pose_jump_meters={max_pose_jump:?}\n\
          pose_prior_visual_override={pose_prior_visual_override}\n\
          accept_motion_prior_on_failure={accept_motion_prior_on_failure}\n\
+         temporal_landmark_tracking={temporal_landmark_tracking}\n\
          pose_jump_gap_scaling={pose_jump_gap_scaling}\n\
          pose_jump_gap_scaling_max_multiplier={pose_jump_gap_scaling_max_multiplier}\n\
          tracking_min_inliers={tracking_min_inliers}\n\
@@ -8697,6 +8721,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         pose_prior_visual_override_count = slam.tracker.stats().pose_prior_visual_override_count,
         motion_prior_coast_count = slam.tracker.stats().motion_prior_coast_count,
+        temporal_landmark_attempt_count = slam.tracker.stats().temporal_landmark_attempt_count,
+        temporal_landmark_success_count = slam.tracker.stats().temporal_landmark_success_count,
         undistort = args.undistort,
         stereo_bootstrap_enabled = args.stereo_bootstrap,
         stereo_bootstrap_strict = args.stereo_bootstrap_strict,
@@ -9001,6 +9027,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_pose_jump = args.max_pose_jump_meters,
         pose_prior_visual_override = args.pose_prior_visual_override,
         accept_motion_prior_on_failure = args.accept_motion_prior_on_failure,
+        temporal_landmark_tracking = args.temporal_landmark_tracking,
         pose_jump_gap_scaling = args.pose_jump_gap_scaling,
         pose_jump_gap_scaling_max_multiplier = args.pose_jump_gap_scaling_max_multiplier,
         tracking_min_inliers = args.tracking_min_inliers,

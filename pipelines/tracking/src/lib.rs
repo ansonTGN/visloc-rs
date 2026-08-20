@@ -14,7 +14,7 @@ use std::path::Path;
 use nalgebra::{Matrix3, Point3, Quaternion, Rotation3, UnitQuaternion, Vector3};
 use visloc_core::geometry::{Pose, Sim3, SE3};
 use visloc_core::types::{
-    CameraId, Frame, FrameId, LandmarkDescriptorStore, LocalizationFailureReason,
+    CameraId, Frame, FrameId, LandmarkDescriptorStore, LandmarkId, LocalizationFailureReason,
     LocalizationResult, QueryImage, VisualMap,
 };
 use visloc_localization::{
@@ -105,6 +105,17 @@ pub struct TrackingConfig {
     /// adaptive model can switch / reloc can fire. `None` = unlimited
     /// (gate67: 626 coasts collapsed Sim(3) scale to 0.02 — do not use).
     pub max_consecutive_motion_prior_coasts: Option<usize>,
+    /// When `true`, try matching the current frame against only the
+    /// landmark ids that were inliers on the previous successful track
+    /// before falling back to the full appearance-global / projection
+    /// path. This is the image-free temporal track analogue of Basalt
+    /// KLT: keep associating the same 3D points frame-to-frame via
+    /// descriptors. Off by default.
+    pub temporal_landmark_tracking: bool,
+    /// Minimum retained previous-inlier landmarks required to attempt
+    /// the temporal track stage. Below this, skip straight to the
+    /// normal path.
+    pub temporal_landmark_tracking_min_landmarks: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -266,6 +277,8 @@ impl Default for TrackingConfig {
             projection_guided_tracking: None,
             accept_motion_prior_on_failure: false,
             max_consecutive_motion_prior_coasts: Some(5),
+            temporal_landmark_tracking: false,
+            temporal_landmark_tracking_min_landmarks: 20,
         }
     }
 }

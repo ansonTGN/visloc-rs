@@ -11,6 +11,10 @@ pub struct Tracker<P, M = ConstantPoseMotionModel> {
     state: TrackingState,
     successive_failures: usize,
     consecutive_motion_prior_coasts: usize,
+    /// Landmark ids that were PnP inliers on the last successful visual
+    /// track. Used by `temporal_landmark_tracking` to re-associate the
+    /// same 3D points on the next frame before a full-map search.
+    last_tracked_landmark_ids: Vec<LandmarkId>,
     last_result: Option<TrackingResult>,
     last_successful_frame_id: Option<FrameId>,
     last_successful_pose: Option<Pose>,
@@ -82,6 +86,7 @@ where
             state: TrackingState::Uninitialized,
             successive_failures: 0,
             consecutive_motion_prior_coasts: 0,
+            last_tracked_landmark_ids: Vec::new(),
             last_result: None,
             last_successful_frame_id: None,
             last_successful_pose: None,
@@ -129,6 +134,7 @@ where
         self.state = TrackingState::Uninitialized;
         self.successive_failures = 0;
         self.consecutive_motion_prior_coasts = 0;
+        self.last_tracked_landmark_ids.clear();
         self.last_result = None;
         self.last_successful_frame_id = None;
         self.last_successful_pose = None;
@@ -179,6 +185,9 @@ where
         self.state = TrackingState::Tracking;
         self.successive_failures = 0;
         self.consecutive_motion_prior_coasts = 0;
+        if !result.localization.inlier_landmark_ids.is_empty() {
+            self.last_tracked_landmark_ids = result.localization.inlier_landmark_ids.clone();
+        }
         self.last_successful_frame_id = Some(result.frame_id);
         self.last_successful_pose = result.localization.pose.clone();
         self.last_result = Some(result.clone());
@@ -447,24 +456,71 @@ where
             .as_ref()
             .unwrap_or(descriptor_store);
 
+        // Temporal landmark track (image-free Basalt-KLT analogue): try
+        // matching against only the previous successful inlier landmarks
+        // before the full appearance / projection path.
+        let temporal_store = if self.config.temporal_landmark_tracking
+            && self.last_tracked_landmark_ids.len()
+                >= self.config.temporal_landmark_tracking_min_landmarks
+        {
+            let store = active_descriptor_store.filtered(&self.last_tracked_landmark_ids);
+            if store.len() >= self.config.temporal_landmark_tracking_min_landmarks {
+                Some(store)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Copied out (the config is `Copy`) rather than borrowed, so the
         // widen-retry ladder below can take `&mut self` for its stats
         // bookkeeping without fighting the borrow checker over `self.config`.
         let projection_guided_config = self.config.projection_guided_tracking;
-        let mut localization = match (projection_guided_config, pose_prior.as_ref()) {
-            (Some(projection_config), Some(prior)) => self.run_projection_guided_tracking(
+        let mut localization = if let Some(temporal_store) = temporal_store.as_ref() {
+            self.stats.temporal_landmark_attempt_count += 1;
+            let temporal = self.localize_appearance_global(
                 frame,
                 map,
-                active_descriptor_store,
-                prior,
-                &projection_config,
-            ),
-            _ => self.localize_appearance_global(
-                frame,
-                map,
-                active_descriptor_store,
+                temporal_store,
                 pose_prior.as_ref(),
-            ),
+            );
+            if temporal.success {
+                self.stats.temporal_landmark_success_count += 1;
+                temporal
+            } else {
+                match (projection_guided_config, pose_prior.as_ref()) {
+                    (Some(projection_config), Some(prior)) => self.run_projection_guided_tracking(
+                        frame,
+                        map,
+                        active_descriptor_store,
+                        prior,
+                        &projection_config,
+                    ),
+                    _ => self.localize_appearance_global(
+                        frame,
+                        map,
+                        active_descriptor_store,
+                        pose_prior.as_ref(),
+                    ),
+                }
+            }
+        } else {
+            match (projection_guided_config, pose_prior.as_ref()) {
+                (Some(projection_config), Some(prior)) => self.run_projection_guided_tracking(
+                    frame,
+                    map,
+                    active_descriptor_store,
+                    prior,
+                    &projection_config,
+                ),
+                _ => self.localize_appearance_global(
+                    frame,
+                    map,
+                    active_descriptor_store,
+                    pose_prior.as_ref(),
+                ),
+            }
         };
 
         if localization.success {
@@ -517,6 +573,9 @@ where
         }
         if localization.success && !coasted {
             self.consecutive_motion_prior_coasts = 0;
+            if !localization.inlier_landmark_ids.is_empty() {
+                self.last_tracked_landmark_ids = localization.inlier_landmark_ids.clone();
+            }
         } else if coasted {
             self.consecutive_motion_prior_coasts += 1;
         } else {
@@ -1765,6 +1824,10 @@ pub struct TrackingStats {
     /// Number of frames accepted by substituting the motion-model prior
     /// after visual localization / quality gates failed.
     pub motion_prior_coast_count: usize,
+    /// Temporal-landmark-track attempts (previous-inlier descriptor store).
+    pub temporal_landmark_attempt_count: usize,
+    /// Temporal-landmark-track attempts that produced a successful pose.
+    pub temporal_landmark_success_count: usize,
     pub total_inlier_count: usize,
     pub total_correspondence_count: usize,
     pub covisibility_local_map_used_count: usize,
