@@ -5246,10 +5246,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_pose_prior_translation_error: args.max_pose_jump_meters,
         pose_prior_visual_override: args.pose_prior_visual_override.then(|| {
             if args.motion_vi_init_enabled {
-                // Gate58 soft bar (50 inl / 5× → 1.0 m) fired 61 overrides
-                // but collapsed Sim(3) scale 0.79 → 0.28. Gate54 PPT fails
-                // with ≥80 inl cluster at ~0.35 m innovation; keep opt-in
-                // override inside that band (80 inl / 2× → 0.4 m).
+                // Gate58 (50/5×) and gate60 (80/0.30/2×) both raised
+                // tracking but collapsed Sim(3) scale (→0.28 / →0.19).
+                // Gate59 (80/0.5/2×) never fired (PPT≥80 ratio p50≈0.45).
+                // Keep a conservative opt-in bar; do not default — the
+                // 0.2 m jump lock is what preserves metric scale.
                 PosePriorVisualOverrideConfig {
                     min_inliers: 80,
                     min_inlier_ratio: 0.50,
