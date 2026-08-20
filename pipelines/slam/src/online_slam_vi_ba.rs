@@ -210,6 +210,19 @@ pub struct OnlineSlamLocalBaConfig {
     /// Reject the whole local solve when any keyframe rotation changes by
     /// more than this many radians relative to the pre-solve map.
     pub reject_writeback_when_pose_rotation_above_radians: Option<f64>,
+    /// Reject writeback when the window has fewer than this many visual
+    /// observations. IMU-only (or nearly IMU-only) solves can zero the
+    /// IMU residual by spinning poses tens of degrees. `None` preserves
+    /// legacy behaviour.
+    pub reject_writeback_when_observation_count_below: Option<usize>,
+    /// When the pose-correction gate rejects a solve but every other
+    /// writeback gate passes, still write refined velocities/biases into
+    /// `OnlineSlamLocalBaState::keyframe_state` (and leave map poses /
+    /// landmarks untouched). Softening the pose gate itself (gate43)
+    /// admitted late 0.5–0.9 m jumps that blew rigid ATE; this keeps the
+    /// hard pose lock while still letting safe IMU-state updates land.
+    /// Default `false` preserves legacy all-or-nothing writeback.
+    pub writeback_navigation_state_despite_pose_gate: bool,
     /// Physical bias-magnitude writeback gate: reject the whole local solve
     /// when any in-window keyframe's refined `||bias_gyro||` exceeds this
     /// bound (rad/s).
@@ -354,6 +367,8 @@ impl Default for OnlineSlamLocalBaConfig {
             reject_writeback_when_velocity_norm_above_mps: None,
             reject_writeback_when_pose_translation_above_meters: None,
             reject_writeback_when_pose_rotation_above_radians: None,
+            reject_writeback_when_observation_count_below: None,
+            writeback_navigation_state_despite_pose_gate: false,
             reject_gyro_bias_above_rad_s: None,
             reject_accel_bias_above_mps2: None,
             adaptive_velocity_gate: None,
@@ -523,6 +538,16 @@ pub struct OnlineSlamLocalBaStats {
     /// gate rejected this trigger.
     pub velocity_gate_rejected: bool,
     pub pose_correction_gate_rejected: bool,
+    /// `true` when
+    /// [`OnlineSlamLocalBaConfig::reject_writeback_when_observation_count_below`]
+    /// rejected this trigger because the window was too visually sparse.
+    pub observation_count_gate_rejected: bool,
+    /// `true` when map pose/landmark writeback was blocked by the pose
+    /// correction gate, but refined velocities/biases were still written
+    /// into the local VI-BA state table because
+    /// [`OnlineSlamLocalBaConfig::writeback_navigation_state_despite_pose_gate`]
+    /// was enabled and every non-pose gate passed.
+    pub navigation_state_partially_written: bool,
     /// `true` when either
     /// [`OnlineSlamLocalBaConfig::reject_gyro_bias_above_rad_s`] or
     /// [`OnlineSlamLocalBaConfig::reject_accel_bias_above_mps2`] rejected
@@ -1722,6 +1747,10 @@ pub fn run_local_vi_ba(
             .config
             .reject_writeback_when_pose_rotation_above_radians
             .is_some_and(|threshold| max_pose_rotation_correction_radians > threshold);
+    let observation_count_gate_rejected = state
+        .config
+        .reject_writeback_when_observation_count_below
+        .is_some_and(|minimum| observation_count < minimum);
     let bias_magnitude_gate_rejected = state
         .config
         .reject_gyro_bias_above_rad_s
@@ -1732,13 +1761,17 @@ pub fn run_local_vi_ba(
             .is_some_and(|threshold| max_refined_accel_bias_norm_mps2 > threshold);
     let adaptive_velocity_gate_rejected = adaptive_velocity_gate_threshold_mps
         .is_some_and(|threshold| max_refined_velocity_norm_mps > threshold);
-    let quality_gate_rejected = cost_ratio_gate_rejected
+    let hard_quality_gate_rejected = cost_ratio_gate_rejected
         || imu_nis_gate_rejected
         || velocity_gate_rejected
-        || pose_correction_gate_rejected
+        || observation_count_gate_rejected
         || bias_magnitude_gate_rejected
         || adaptive_velocity_gate_rejected;
-    if quality_gate_rejected {
+    let quality_gate_rejected = hard_quality_gate_rejected || pose_correction_gate_rejected;
+    let allow_partial_navigation_writeback = pose_correction_gate_rejected
+        && !hard_quality_gate_rejected
+        && state.config.writeback_navigation_state_despite_pose_gate;
+    if quality_gate_rejected && !allow_partial_navigation_writeback {
         return Some(OnlineSlamLocalBaStats {
             window_keyframe_ids: window_ids,
             landmark_count: active_landmarks.len(),
@@ -1761,6 +1794,60 @@ pub fn run_local_vi_ba(
             imu_nis_gate_rejected,
             velocity_gate_rejected,
             pose_correction_gate_rejected,
+            observation_count_gate_rejected,
+            navigation_state_partially_written: false,
+            bias_magnitude_gate_rejected,
+            adaptive_velocity_gate_rejected,
+            relinearised_factor_count,
+            marginalization_prior_applied,
+            marginalization_succeeded: false,
+            recovered_marginal_factors_injected: 0,
+            recovered_marginal_factors_enqueued: 0,
+        });
+    }
+
+    if allow_partial_navigation_writeback {
+        // Pose corrections look unsafe; keep the map frozen but still
+        // absorb refined velocity/bias into the local VI-BA table so the
+        // next window and the IMU motion-model mirror can use them.
+        for kf_id in &window_ids {
+            let Some(slot) = state.keyframe_state.get_mut(kf_id) else {
+                continue;
+            };
+            if let Some(velocity) = ba.velocities.get(kf_id) {
+                slot.velocity_world = *velocity;
+            }
+            if !bias_frozen {
+                if let Some(bias) = ba.biases.get(kf_id) {
+                    slot.bias_gyro = Vector3::new(bias[0], bias[1], bias[2]);
+                    slot.bias_acc = Vector3::new(bias[3], bias[4], bias[5]);
+                }
+            }
+        }
+        return Some(OnlineSlamLocalBaStats {
+            window_keyframe_ids: window_ids,
+            landmark_count: active_landmarks.len(),
+            observation_count,
+            stereo_observation_count,
+            imu_factor_count,
+            ba_result,
+            initial_cost_breakdown,
+            final_cost_breakdown,
+            cost_ratio,
+            max_refined_velocity_norm_mps,
+            max_pose_translation_correction_meters,
+            max_pose_rotation_correction_radians,
+            max_refined_gyro_bias_norm_rad_s,
+            max_refined_accel_bias_norm_mps2,
+            adaptive_velocity_gate_threshold_mps,
+            bias_frozen,
+            quality_gate_rejected: true,
+            cost_ratio_gate_rejected,
+            imu_nis_gate_rejected,
+            velocity_gate_rejected,
+            pose_correction_gate_rejected,
+            observation_count_gate_rejected,
+            navigation_state_partially_written: true,
             bias_magnitude_gate_rejected,
             adaptive_velocity_gate_rejected,
             relinearised_factor_count,
@@ -1859,6 +1946,8 @@ pub fn run_local_vi_ba(
         imu_nis_gate_rejected,
         velocity_gate_rejected,
         pose_correction_gate_rejected,
+        observation_count_gate_rejected,
+        navigation_state_partially_written: false,
         bias_magnitude_gate_rejected,
         adaptive_velocity_gate_rejected,
         relinearised_factor_count,
@@ -3223,9 +3312,63 @@ mod tests {
         let result = run_local_vi_ba(&mut map, &mut state).expect("BA should run");
         assert!(result.quality_gate_rejected);
         assert!(result.pose_correction_gate_rejected);
+        assert!(!result.navigation_state_partially_written);
         assert!(result.max_pose_translation_correction_meters.is_finite());
         assert_eq!(map.keyframes[&20].frame.pose, Some(original_pose_20));
         assert_eq!(map.landmarks[&1].position, original_landmark);
+        assert!(state.navigation_prior.is_none());
+    }
+
+    #[test]
+    fn local_vi_ba_pose_gate_can_partially_write_navigation_state() {
+        let mut map = build_three_keyframe_map();
+        let original_pose_20 = map.keyframes[&20].frame.pose.clone().unwrap();
+        let original_landmark = map.landmarks[&1].position;
+        let mut state = OnlineSlamLocalBaState::new(OnlineSlamLocalBaConfig {
+            gravity_world: Vector3::zeros(),
+            reject_writeback_when_pose_translation_above_meters: Some(f64::NEG_INFINITY),
+            writeback_navigation_state_despite_pose_gate: true,
+            ..OnlineSlamLocalBaConfig::default()
+        });
+        let original_keyframe_state = state.keyframe_state.clone();
+        state
+            .factor_history
+            .push(constant_velocity_factor(10, 20, 0.1));
+        state
+            .factor_history
+            .push(constant_velocity_factor(20, 30, 0.1));
+        let result = run_local_vi_ba(&mut map, &mut state).expect("BA should run");
+        assert!(result.quality_gate_rejected);
+        assert!(result.pose_correction_gate_rejected);
+        assert!(result.navigation_state_partially_written);
+        assert_eq!(map.keyframes[&20].frame.pose, Some(original_pose_20));
+        assert_eq!(map.landmarks[&1].position, original_landmark);
+        assert_ne!(
+            state.keyframe_state, original_keyframe_state,
+            "pose-gated partial writeback must still refresh velocity/bias slots"
+        );
+        assert!(state.navigation_prior.is_none());
+    }
+
+    #[test]
+    fn local_vi_ba_observation_count_gate_rejects_sparse_windows() {
+        let mut map = build_three_keyframe_map();
+        let original_pose_20 = map.keyframes[&20].frame.pose.clone().unwrap();
+        let mut state = OnlineSlamLocalBaState::new(OnlineSlamLocalBaConfig {
+            gravity_world: Vector3::zeros(),
+            reject_writeback_when_observation_count_below: Some(usize::MAX),
+            ..OnlineSlamLocalBaConfig::default()
+        });
+        state
+            .factor_history
+            .push(constant_velocity_factor(10, 20, 0.1));
+        state
+            .factor_history
+            .push(constant_velocity_factor(20, 30, 0.1));
+        let result = run_local_vi_ba(&mut map, &mut state).expect("BA should run");
+        assert!(result.quality_gate_rejected);
+        assert!(result.observation_count_gate_rejected);
+        assert_eq!(map.keyframes[&20].frame.pose, Some(original_pose_20));
         assert!(state.navigation_prior.is_none());
     }
 

@@ -1644,12 +1644,18 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut stereo_landmark_replenish: bool = false;
     let mut stereo_landmark_replenish_no: bool = false;
     let mut stereo_landmark_replenish_max_per_frame: usize = 100;
+    let mut stereo_landmark_replenish_max_per_frame_overridden: bool = false;
     let mut stereo_landmark_replenish_anchor_match_radius_px: Option<f64> = None;
+    let mut stereo_landmark_replenish_anchor_match_radius_px_overridden: bool = false;
     let mut stereo_landmark_replenish_anchor_max_descriptor_distance: Option<f32> = None;
     let mut stereo_landmark_replenish_duplicate_radius_px: Option<f64> = None;
+    let mut stereo_landmark_replenish_duplicate_radius_px_overridden: bool = false;
     let mut stereo_landmark_replenish_min_parallax_deg: Option<f64> = None;
+    let mut stereo_landmark_replenish_min_parallax_deg_overridden: bool = false;
     let mut stereo_landmark_replenish_min_depth_meters: Option<f64> = None;
+    let mut stereo_landmark_replenish_min_depth_meters_overridden: bool = false;
     let mut stereo_landmark_replenish_max_depth_meters: Option<f64> = None;
+    let mut stereo_landmark_replenish_max_depth_meters_overridden: bool = false;
     let mut max_pose_jump_meters: Option<f64> = None;
     let mut pose_prior_visual_override: bool = false;
     let mut pose_jump_gap_scaling: bool = false;
@@ -2291,11 +2297,13 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--stereo-landmark-replenish-max-per-frame" => {
                 stereo_landmark_replenish_max_per_frame = args.remove(i + 1).parse()?;
+                stereo_landmark_replenish_max_per_frame_overridden = true;
                 args.remove(i);
             }
             "--stereo-landmark-replenish-anchor-match-radius-px" => {
                 stereo_landmark_replenish_anchor_match_radius_px =
                     Some(args.remove(i + 1).parse()?);
+                stereo_landmark_replenish_anchor_match_radius_px_overridden = true;
                 args.remove(i);
             }
             "--stereo-landmark-replenish-anchor-max-descriptor-distance" => {
@@ -2305,18 +2313,22 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--stereo-landmark-replenish-duplicate-radius-px" => {
                 stereo_landmark_replenish_duplicate_radius_px = Some(args.remove(i + 1).parse()?);
+                stereo_landmark_replenish_duplicate_radius_px_overridden = true;
                 args.remove(i);
             }
             "--stereo-landmark-replenish-min-parallax-deg" => {
                 stereo_landmark_replenish_min_parallax_deg = Some(args.remove(i + 1).parse()?);
+                stereo_landmark_replenish_min_parallax_deg_overridden = true;
                 args.remove(i);
             }
             "--stereo-landmark-replenish-min-depth-meters" => {
                 stereo_landmark_replenish_min_depth_meters = Some(args.remove(i + 1).parse()?);
+                stereo_landmark_replenish_min_depth_meters_overridden = true;
                 args.remove(i);
             }
             "--stereo-landmark-replenish-max-depth-meters" => {
                 stereo_landmark_replenish_max_depth_meters = Some(args.remove(i + 1).parse()?);
+                stereo_landmark_replenish_max_depth_meters_overridden = true;
                 args.remove(i);
             }
             "--max-pose-jump-meters" => {
@@ -3052,6 +3064,61 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     }
     if local_vi_ba_enabled && stereo_bootstrap && !stereo_landmark_replenish_no {
         stereo_landmark_replenish = true;
+        if motion_vi_init_enabled && !stereo_landmark_replenish_max_per_frame_overridden {
+            // Dense replenishment floods long EuRoC runs with weak points and
+            // destabilizes late-window VI-BA. Keep a conservative default cap
+            // when motion-VI-init + local VI-BA are active together.
+            stereo_landmark_replenish_max_per_frame = 10;
+        }
+        if motion_vi_init_enabled {
+            // Tighten replenishment geometry for motion-VI runs unless users
+            // explicitly override each knob.
+            if !stereo_landmark_replenish_anchor_match_radius_px_overridden {
+                stereo_landmark_replenish_anchor_match_radius_px = Some(2.0);
+            }
+            if !stereo_landmark_replenish_duplicate_radius_px_overridden {
+                stereo_landmark_replenish_duplicate_radius_px = Some(5.0);
+            }
+            if !stereo_landmark_replenish_min_parallax_deg_overridden {
+                stereo_landmark_replenish_min_parallax_deg = Some(1.5);
+            }
+            if !stereo_landmark_replenish_min_depth_meters_overridden {
+                stereo_landmark_replenish_min_depth_meters = Some(0.5);
+            }
+            if !stereo_landmark_replenish_max_depth_meters_overridden {
+                stereo_landmark_replenish_max_depth_meters = Some(15.0);
+            }
+        }
+    }
+    if local_vi_ba_enabled && motion_vi_init_enabled {
+        if local_vi_ba_reject_final_imu_nis_per_dof_above.is_none() {
+            local_vi_ba_reject_final_imu_nis_per_dof_above = motion_vi_init_max_imu_nis_per_dof;
+        }
+        if local_vi_ba_reject_velocity_above_mps.is_none() {
+            // Keep the motion-init velocity ceiling. Softening to 12 m/s
+            // with looser pose gates (gate43) let late 0.5–0.9 m writebacks
+            // through and regressed rigid ATE vs gate42.
+            local_vi_ba_reject_velocity_above_mps = motion_vi_init_max_velocity_mps;
+        }
+        if local_vi_ba_reject_gyro_bias_above_rad_s.is_none() {
+            local_vi_ba_reject_gyro_bias_above_rad_s = motion_vi_init_max_gyro_bias_rad_s;
+        }
+        if local_vi_ba_reject_accel_bias_above_mps2.is_none() {
+            local_vi_ba_reject_accel_bias_above_mps2 = motion_vi_init_max_accel_bias_mps2;
+        }
+        if local_vi_ba_reject_pose_translation_above_meters.is_none() {
+            // Gate42 best: block >0.5 m jumps. Softening to 1.0 m (gate43)
+            // accepted frames 425–480 and blew max rigid ATE to ~61 m.
+            local_vi_ba_reject_pose_translation_above_meters = Some(0.5);
+        }
+        if local_vi_ba_reject_pose_rotation_above_degrees.is_none() {
+            // Gate42 best: block >5°. Softening to 8° admitted 6–7°
+            // corrections that then path-dependently enlarged later steps.
+            local_vi_ba_reject_pose_rotation_above_degrees = Some(5.0);
+        }
+        if local_vi_ba_freeze_biases_above.is_none() {
+            local_vi_ba_freeze_biases_above = Some(0.9);
+        }
     }
     if !motion_vi_init_enabled
         && (motion_vi_init_max_velocity_mps.is_some()
@@ -4877,6 +4944,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             reject_writeback_when_pose_rotation_above_radians: args
                 .local_vi_ba_reject_pose_rotation_above_degrees
                 .map(f64::to_radians),
+            reject_writeback_when_observation_count_below: args
+                .motion_vi_init_enabled
+                .then_some(20),
+            writeback_navigation_state_despite_pose_gate: args.motion_vi_init_enabled,
             reject_gyro_bias_above_rad_s: args.local_vi_ba_reject_gyro_bias_above_rad_s,
             reject_accel_bias_above_mps2: args.local_vi_ba_reject_accel_bias_above_mps2,
             adaptive_velocity_gate: args.local_vi_ba_adaptive_velocity_gate.then_some(
@@ -5533,6 +5604,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut local_vi_ba_imu_nis_gate_rejections: usize = 0;
     let mut local_vi_ba_velocity_gate_rejections: usize = 0;
     let mut local_vi_ba_pose_correction_gate_rejections: usize = 0;
+    let mut local_vi_ba_navigation_state_partial_writebacks: usize = 0;
     let mut local_vi_ba_max_pose_translation_correction_meters: f64 = 0.0;
     let mut local_vi_ba_max_pose_rotation_correction_degrees: f64 = 0.0;
     let mut local_vi_ba_bias_magnitude_gate_rejections: usize = 0;
@@ -6803,6 +6875,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if stats.pose_correction_gate_rejected {
                 local_vi_ba_pose_correction_gate_rejections += 1;
             }
+            if stats.navigation_state_partially_written {
+                local_vi_ba_navigation_state_partial_writebacks += 1;
+            }
             local_vi_ba_max_pose_translation_correction_meters =
                 local_vi_ba_max_pose_translation_correction_meters
                     .max(stats.max_pose_translation_correction_meters);
@@ -6862,7 +6937,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 fmt_optional(final_cost.imu_velocity_residual_rms_mps),
                 fmt_optional(final_cost.imu_position_residual_rms_meters),
             ));
-            if !stats.bias_frozen && !stats.quality_gate_rejected {
+            if !stats.bias_frozen
+                && (!stats.quality_gate_rejected || stats.navigation_state_partially_written)
+            {
                 if let (Some(state), Some(latest_kf)) = (
                     slam.local_vi_ba_state.as_ref(),
                     stats.window_keyframe_ids.last().copied(),
@@ -8430,6 +8507,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          local_vi_ba_imu_nis_gate_rejections={local_vi_ba_imu_nis_gate_rejections}\n\
          local_vi_ba_velocity_gate_rejections={local_vi_ba_velocity_gate_rejections}\n\
          local_vi_ba_pose_correction_gate_rejections={local_vi_ba_pose_correction_gate_rejections}\n\
+         local_vi_ba_navigation_state_partial_writebacks={local_vi_ba_navigation_state_partial_writebacks}\n\
          local_vi_ba_max_pose_translation_correction_meters={local_vi_ba_max_pose_translation_correction_meters:.9}\n\
          local_vi_ba_max_pose_rotation_correction_degrees={local_vi_ba_max_pose_rotation_correction_degrees:.9}\n\
          local_vi_ba_bias_magnitude_gate_rejections={local_vi_ba_bias_magnitude_gate_rejections}\n\
@@ -9056,6 +9134,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         local_vi_ba_velocity_gate_rejections = local_vi_ba_velocity_gate_rejections,
         local_vi_ba_pose_correction_gate_rejections =
             local_vi_ba_pose_correction_gate_rejections,
+        local_vi_ba_navigation_state_partial_writebacks =
+            local_vi_ba_navigation_state_partial_writebacks,
         local_vi_ba_max_pose_translation_correction_meters =
             local_vi_ba_max_pose_translation_correction_meters,
         local_vi_ba_max_pose_rotation_correction_degrees =
