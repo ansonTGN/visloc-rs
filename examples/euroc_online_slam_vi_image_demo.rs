@@ -63,6 +63,11 @@
 //!     --out-dir target/euroc_online_slam_vi_image_demo \
 //!     --max-frames 400
 //! ```
+//! Basalt-faithful VIO knobs (window size / sqrt marg from the checked-in
+//! `configs/basalt/euroc_config.json`):
+//! ```sh
+//! ... --basalt-euroc-profile --motion-vi-init --local-vi-ba
+//! ```
 //! Add `--observation-confidence-ba` to run the same local-BA windows with
 //! relative learned visual weights for a uniform-vs-weighted A/B comparison.
 //!
@@ -712,6 +717,13 @@ struct CliArgs {
     /// Use the square-root (SqrtToSqrt) sliding-window marginalization (Basalt
     /// ICCV'21). Default on. Disable with `--no-sqrt-window-marginalization`.
     local_vi_ba_use_sqrt_window_marginalization: bool,
+    /// Trailing VI-BA keyframe window depth. Defaults to
+    /// `OnlineSlamLocalBaConfig::default().window_size` (5). Basalt EuRoC uses
+    /// `vio_max_kfs = 7` via `--basalt-config`.
+    local_vi_ba_window_size: usize,
+    /// Optional path to Basalt `euroc_config.json` (or compatible). When set,
+    /// applies faithful VIO knobs (`vio_max_kfs`, `vio_sqrt_marg`, …).
+    basalt_config_path: Option<PathBuf>,
     /// Optional finite initialization uncertainty `(velocity, gyro bias,
     /// accel bias)` used by the first marginal prior.
     local_vi_ba_initial_prior_std_devs: Option<(f64, f64, f64)>,
@@ -1586,6 +1598,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut observation_confidence_ba_enabled: bool = false;
     let mut local_vi_ba_marginalization: bool = false;
     let mut local_vi_ba_use_sqrt_window_marginalization: bool = true;
+    let mut local_vi_ba_window_size: usize = OnlineSlamLocalBaConfig::default().window_size;
+    let mut basalt_config_path: Option<PathBuf> = None;
     let mut local_vi_ba_initial_prior_std_devs: Option<(f64, f64, f64)> = None;
     let mut local_vi_ba_freeze_biases_above: Option<f64> = None;
     let mut local_vi_ba_reject_writeback_above: Option<f64> = None;
@@ -1941,6 +1955,22 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--no-sqrt-window-marginalization" => {
                 local_vi_ba_use_sqrt_window_marginalization = false;
+                args.remove(i);
+            }
+            "--local-vi-ba-window-size" => {
+                local_vi_ba_window_size = args.remove(i + 1).parse()?;
+                if local_vi_ba_window_size < 2 {
+                    return Err("--local-vi-ba-window-size must be >= 2".into());
+                }
+                args.remove(i);
+            }
+            "--basalt-config" => {
+                basalt_config_path = Some(PathBuf::from(args.remove(i + 1)));
+                args.remove(i);
+            }
+            "--basalt-euroc-profile" => {
+                // Checked-in verbatim Basalt `data/euroc_config.json`.
+                basalt_config_path = Some(PathBuf::from("configs/basalt/euroc_config.json"));
                 args.remove(i);
             }
             "--local-vi-ba-initial-prior-std-devs" => {
@@ -3565,6 +3595,33 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             );
         }
     }
+    if let Some(path) = basalt_config_path.as_ref() {
+        let loaded = visloc_rs::vision::optical_flow::BasaltVioConfigFile::from_path(path)
+            .map_err(|e| format!("--basalt-config {}: {e}", path.display()))?;
+        let cfg = loaded.value0;
+        // Faithful Basalt EuRoC profile: enable the sliding-window VI-BA path
+        // and map the published knobs 1:1 where we already have plumbing.
+        local_vi_ba_enabled = true;
+        local_vi_ba_marginalization = true;
+        local_vi_ba_use_sqrt_window_marginalization = cfg.vio_sqrt_marg;
+        local_vi_ba_window_size = cfg.vio_max_kfs.max(2) as usize;
+        eprintln!(
+            "basalt profile loaded from {} \
+             (vio_max_kfs={}, vio_sqrt_marg={}, of_levels={}, of_pattern={}, of_grid={})",
+            path.display(),
+            cfg.vio_max_kfs,
+            cfg.vio_sqrt_marg,
+            cfg.optical_flow.optical_flow_levels,
+            cfg.optical_flow.optical_flow_pattern,
+            cfg.optical_flow.optical_flow_detection_grid_size
+        );
+        if cfg.optical_flow.optical_flow_type != "frame_to_frame" {
+            eprintln!(
+                "warning: optical_flow_type={} (only frame_to_frame is implemented)",
+                cfg.optical_flow.optical_flow_type
+            );
+        }
+    }
     Ok(CliArgs {
         euroc_dir,
         out_dir,
@@ -3595,6 +3652,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         observation_confidence_ba_enabled,
         local_vi_ba_marginalization,
         local_vi_ba_use_sqrt_window_marginalization,
+        local_vi_ba_window_size,
+        basalt_config_path,
         local_vi_ba_initial_prior_std_devs,
         local_vi_ba_freeze_biases_above,
         local_vi_ba_reject_writeback_above,
@@ -5118,6 +5177,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             marginalize_navigation_state: args.local_vi_ba_marginalization
                 || args.local_vi_ba_use_sqrt_window_marginalization,
             use_sqrt_window_marginalization: args.local_vi_ba_use_sqrt_window_marginalization,
+            window_size: args.local_vi_ba_window_size,
             initial_navigation_prior_std_devs: args.local_vi_ba_initial_prior_std_devs,
             use_observation_confidence_weights: args.observation_confidence_ba_enabled,
             ..OnlineSlamLocalBaConfig::default()
@@ -8354,6 +8414,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          local_vi_ba_enabled={local_vi_ba_enabled}\n\
          local_vi_ba_marginalization={local_vi_ba_marginalization}\n\
          local_vi_ba_use_sqrt_window_marginalization={local_vi_ba_use_sqrt_window_marginalization}\n\
+         local_vi_ba_window_size={local_vi_ba_window_size}\n\
+         basalt_config_path={basalt_config_path}\n\
          local_vi_ba_general_stereo=true\n\
          local_vi_ba_initial_prior_std_devs={local_vi_ba_initial_prior_std_devs:?}\n\
          local_vi_ba_freeze_biases_above={local_vi_ba_freeze:?}\n\
@@ -8769,6 +8831,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         local_vi_ba_marginalization = args.local_vi_ba_marginalization,
         local_vi_ba_use_sqrt_window_marginalization = args
             .local_vi_ba_use_sqrt_window_marginalization,
+        local_vi_ba_window_size = args.local_vi_ba_window_size,
+        basalt_config_path = format!("{:?}", args.basalt_config_path),
         local_vi_ba_initial_prior_std_devs = args.local_vi_ba_initial_prior_std_devs,
         local_vi_ba_freeze = args.local_vi_ba_freeze_biases_above,
         local_vi_ba_reject_writeback = args.local_vi_ba_reject_writeback_above,
