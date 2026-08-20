@@ -2895,9 +2895,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     if max_pose_jump_meters.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         return Err("--max-pose-jump-meters must be finite and positive".into());
     }
-    if pose_prior_visual_override && max_pose_jump_meters.is_none() {
-        return Err("--pose-prior-visual-override requires --max-pose-jump-meters".into());
-    }
+    // `--pose-prior-visual-override requires --max-pose-jump-meters` is
+    // checked after motion-VI defaults (which may fill the jump gate).
     if let Some(max_reprojection_error) = tracking_max_reprojection_error {
         if !max_reprojection_error.is_finite() || max_reprojection_error <= 0.0 {
             return Err("--tracking-max-reprojection-error must be positive or 'none'".into());
@@ -3162,9 +3161,14 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             // inlier/jump locks). Slower than brute-force, but usable.
             mutual_softmax_matcher = true;
         }
+        // Do NOT default pose-prior-visual-override: gate58 (soft override
+        // min_inl 50 / mult 5×) gained +2pp tracking but collapsed Sim(3)
+        // scale 0.79 → 0.28. Keep opt-in; try tighter bars before defaulting.
         // Do NOT default pose-jump-gap-scaling (gate50: scale 0.55) or
-        // pose-prior-visual-override + covis local map (gate52: tracking
-        // and scale both regressed vs gate45). Keep those as opt-in.
+        // covis local map (gate52). Keep those as opt-in.
+    }
+    if pose_prior_visual_override && max_pose_jump_meters.is_none() {
+        return Err("--pose-prior-visual-override requires --max-pose-jump-meters".into());
     }
     if !motion_vi_init_enabled
         && (motion_vi_init_max_velocity_mps.is_some()
@@ -5242,16 +5246,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_pose_prior_translation_error: args.max_pose_jump_meters,
         pose_prior_visual_override: args.pose_prior_visual_override.then(|| {
             if args.motion_vi_init_enabled {
-                // Default override (100 inl / 0.6 ratio) never fired on
-                // gate51. Lower the bar so strong-but-not-perfect hover
-                // recoveries can widen the 0.2 m gate without admitting
-                // the weak 0–30 inlier teleports that collapsed scale.
+                // Gate58 soft bar (50 inl / 5× → 1.0 m) fired 61 overrides
+                // but collapsed Sim(3) scale 0.79 → 0.28. Gate54 PPT fails
+                // with ≥80 inl cluster at ~0.35 m innovation; keep opt-in
+                // override inside that band (80 inl / 2× → 0.4 m).
                 PosePriorVisualOverrideConfig {
-                    min_inliers: 50,
-                    min_inlier_ratio: 0.35,
-                    max_mean_reprojection_error: Some(3.5),
-                    max_rotation_error_radians: Some(3.0_f64.to_radians()),
-                    max_translation_error_multiplier: 5.0,
+                    min_inliers: 80,
+                    min_inlier_ratio: 0.50,
+                    max_mean_reprojection_error: Some(3.0),
+                    max_rotation_error_radians: Some(2.0_f64.to_radians()),
+                    max_translation_error_multiplier: 2.0,
                     ..PosePriorVisualOverrideConfig::default()
                 }
             } else {
