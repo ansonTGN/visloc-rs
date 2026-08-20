@@ -892,9 +892,9 @@ struct CliArgs {
     /// stereo-matching each frame's cam0 keypoints that tracking did NOT
     /// match to an existing landmark against a freshly loaded/undistorted
     /// cam1 image, triangulating the survivors, and staging them as
-    /// `LandmarkCandidate`s for `process_frame`. Off by default so the
-    /// map stays frozen at the bootstrap landmark count, preserving
-    /// legacy behaviour.
+    /// `LandmarkCandidate`s for `process_frame`. Defaults on whenever
+    /// `--local-vi-ba` and stereo bootstrap are both active (cam1 features
+    /// required); pass `--no-stereo-landmark-replenish` to disable.
     stereo_landmark_replenish: bool,
     /// Cap on new replenishment candidates built per frame. Only
     /// meaningful when `stereo_landmark_replenish` is set.
@@ -1642,6 +1642,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut covisibility_local_ba_max_pose_rotation_correction_deg: Option<f64> = None;
     let mut covisibility_local_ba_anchor_weight: Option<f64> = None;
     let mut stereo_landmark_replenish: bool = false;
+    let mut stereo_landmark_replenish_no: bool = false;
     let mut stereo_landmark_replenish_max_per_frame: usize = 100;
     let mut stereo_landmark_replenish_anchor_match_radius_px: Option<f64> = None;
     let mut stereo_landmark_replenish_anchor_max_descriptor_distance: Option<f32> = None;
@@ -2282,6 +2283,10 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--stereo-landmark-replenish" => {
                 stereo_landmark_replenish = true;
+                args.remove(i);
+            }
+            "--no-stereo-landmark-replenish" => {
+                stereo_landmark_replenish_no = true;
                 args.remove(i);
             }
             "--stereo-landmark-replenish-max-per-frame" => {
@@ -3044,6 +3049,9 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         } else {
             motion_vi_init_estimate_gyro_bias = true;
         }
+    }
+    if local_vi_ba_enabled && stereo_bootstrap && !stereo_landmark_replenish_no {
+        stereo_landmark_replenish = true;
     }
     if !motion_vi_init_enabled
         && (motion_vi_init_max_velocity_mps.is_some()
@@ -5200,6 +5208,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut cfg = KeyframePolicyConfig::default();
         if let Some(m) = args.keyframe_min_translation {
             cfg.min_translation = m;
+        } else if args.motion_vi_init_enabled {
+            // 1.0 m (library default) yields ~20 KFs / 400f on MH_01; gyro
+            // alignment then sits at ~0.3 rad. 0.05 m is dense enough for a
+            // 3-keyframe IMU window before VO rotation drifts.
+            cfg.min_translation = 0.05;
         }
         if let Some(gap) = args.keyframe_min_frame_gap {
             cfg.min_frame_id_gap = gap;
