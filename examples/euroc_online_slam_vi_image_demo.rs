@@ -939,6 +939,8 @@ struct CliArgs {
     max_consecutive_motion_prior_coasts: Option<usize>,
     /// Temporal re-association of previous inlier landmarks (image-free KLT analogue).
     temporal_landmark_tracking: bool,
+    /// How many recent successful inlier sets to union for temporal matching.
+    temporal_landmark_tracking_history_frames: usize,
     /// When `true`, scale `--max-pose-jump-meters` by the number of frames
     /// elapsed since the last successful track (capped at
     /// `--pose-jump-gap-scaling-max-multiplier`, floored at 1) before
@@ -1673,6 +1675,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut max_consecutive_motion_prior_coasts: Option<usize> = Some(5);
     let mut temporal_landmark_tracking: bool = false;
     let mut temporal_landmark_tracking_overridden: bool = false;
+    let mut temporal_landmark_tracking_history_frames: usize = 1;
     let mut pose_jump_gap_scaling: bool = false;
     let mut pose_jump_gap_scaling_max_multiplier: usize = 10;
     let mut tracking_min_inliers: usize = 0;
@@ -2389,6 +2392,10 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             "--no-temporal-landmark-tracking" => {
                 temporal_landmark_tracking = false;
                 temporal_landmark_tracking_overridden = true;
+                args.remove(i);
+            }
+            "--temporal-landmark-tracking-history-frames" => {
+                temporal_landmark_tracking_history_frames = args.remove(i + 1).parse()?;
                 args.remove(i);
             }
             "--pose-jump-gap-scaling" => {
@@ -3237,8 +3244,12 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         if !temporal_landmark_tracking_overridden {
             // Image-free temporal track of previous PnP inliers — Basalt
             // KLT analogue for the SuperPoint descriptor frontend.
+            // Gate70 (history=1): tracking 0.68 / rigid ATE 0.068 m.
+            // Gate71 (history=5): tracking collapsed to 0.24 — stale
+            // landmarks poison the temporal PnP. Keep history=1 default.
             temporal_landmark_tracking = true;
         }
+        // Do NOT default temporal history > 1 (gate71). Keep CLI opt-in.
         // Do NOT default pose-prior-visual-override: gate58/60 raised
         // tracking but collapsed Sim(3) scale. Keep opt-in.
         // Do NOT default pose-jump-gap-scaling (gate50: scale 0.55) or
@@ -3653,6 +3664,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         accept_motion_prior_on_failure,
         max_consecutive_motion_prior_coasts,
         temporal_landmark_tracking,
+        temporal_landmark_tracking_history_frames,
         pose_jump_gap_scaling,
         pose_jump_gap_scaling_max_multiplier,
         tracking_min_inliers,
@@ -5357,6 +5369,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         accept_motion_prior_on_failure: args.accept_motion_prior_on_failure,
         max_consecutive_motion_prior_coasts: args.max_consecutive_motion_prior_coasts,
         temporal_landmark_tracking: args.temporal_landmark_tracking,
+        temporal_landmark_tracking_history_frames: args.temporal_landmark_tracking_history_frames,
         min_inliers: args.tracking_min_inliers,
         min_inlier_ratio: args.tracking_min_inlier_ratio,
         max_mean_reprojection_error: args.tracking_max_reprojection_error,
@@ -8529,6 +8542,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          pose_prior_visual_override={pose_prior_visual_override}\n\
          accept_motion_prior_on_failure={accept_motion_prior_on_failure}\n\
          temporal_landmark_tracking={temporal_landmark_tracking}\n\
+         temporal_landmark_tracking_history_frames={temporal_landmark_history}\n\
          pose_jump_gap_scaling={pose_jump_gap_scaling}\n\
          pose_jump_gap_scaling_max_multiplier={pose_jump_gap_scaling_max_multiplier}\n\
          tracking_min_inliers={tracking_min_inliers}\n\
@@ -9028,6 +9042,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pose_prior_visual_override = args.pose_prior_visual_override,
         accept_motion_prior_on_failure = args.accept_motion_prior_on_failure,
         temporal_landmark_tracking = args.temporal_landmark_tracking,
+        temporal_landmark_history = args.temporal_landmark_tracking_history_frames,
         pose_jump_gap_scaling = args.pose_jump_gap_scaling,
         pose_jump_gap_scaling_max_multiplier = args.pose_jump_gap_scaling_max_multiplier,
         tracking_min_inliers = args.tracking_min_inliers,

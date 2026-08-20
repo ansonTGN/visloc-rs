@@ -116,6 +116,10 @@ pub struct TrackingConfig {
     /// the temporal track stage. Below this, skip straight to the
     /// normal path.
     pub temporal_landmark_tracking_min_landmarks: usize,
+    /// Number of recent successful inlier sets whose landmark ids are
+    /// unioned for the temporal store. `1` is last-frame-only (gate70);
+    /// larger values keep short-term tracks alive across brief dropouts.
+    pub temporal_landmark_tracking_history_frames: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -279,6 +283,7 @@ impl Default for TrackingConfig {
             max_consecutive_motion_prior_coasts: Some(5),
             temporal_landmark_tracking: false,
             temporal_landmark_tracking_min_landmarks: 20,
+            temporal_landmark_tracking_history_frames: 1,
         }
     }
 }

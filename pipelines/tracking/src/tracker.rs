@@ -11,10 +11,14 @@ pub struct Tracker<P, M = ConstantPoseMotionModel> {
     state: TrackingState,
     successive_failures: usize,
     consecutive_motion_prior_coasts: usize,
-    /// Landmark ids that were PnP inliers on the last successful visual
-    /// track. Used by `temporal_landmark_tracking` to re-associate the
-    /// same 3D points on the next frame before a full-map search.
+    /// Landmark ids that were PnP inliers on recent successful visual
+    /// tracks (union of the history ring). Used by
+    /// `temporal_landmark_tracking` to re-associate the same 3D points
+    /// before a full-map search.
     last_tracked_landmark_ids: Vec<LandmarkId>,
+    /// Ring of per-success inlier landmark id sets. Length capped by
+    /// `temporal_landmark_tracking_history_frames`.
+    recent_tracked_landmark_sets: Vec<Vec<LandmarkId>>,
     last_result: Option<TrackingResult>,
     last_successful_frame_id: Option<FrameId>,
     last_successful_pose: Option<Pose>,
@@ -87,6 +91,7 @@ where
             successive_failures: 0,
             consecutive_motion_prior_coasts: 0,
             last_tracked_landmark_ids: Vec::new(),
+            recent_tracked_landmark_sets: Vec::new(),
             last_result: None,
             last_successful_frame_id: None,
             last_successful_pose: None,
@@ -135,6 +140,7 @@ where
         self.successive_failures = 0;
         self.consecutive_motion_prior_coasts = 0;
         self.last_tracked_landmark_ids.clear();
+        self.recent_tracked_landmark_sets.clear();
         self.last_result = None;
         self.last_successful_frame_id = None;
         self.last_successful_pose = None;
@@ -186,7 +192,7 @@ where
         self.successive_failures = 0;
         self.consecutive_motion_prior_coasts = 0;
         if !result.localization.inlier_landmark_ids.is_empty() {
-            self.last_tracked_landmark_ids = result.localization.inlier_landmark_ids.clone();
+            self.push_tracked_landmark_set(result.localization.inlier_landmark_ids.clone());
         }
         self.last_successful_frame_id = Some(result.frame_id);
         self.last_successful_pose = result.localization.pose.clone();
@@ -574,7 +580,7 @@ where
         if localization.success && !coasted {
             self.consecutive_motion_prior_coasts = 0;
             if !localization.inlier_landmark_ids.is_empty() {
-                self.last_tracked_landmark_ids = localization.inlier_landmark_ids.clone();
+                self.push_tracked_landmark_set(localization.inlier_landmark_ids.clone());
             }
         } else if coasted {
             self.consecutive_motion_prior_coasts += 1;
@@ -628,6 +634,24 @@ where
         self.update_history(&continuation_result);
         self.motion_model.observe(&continuation_result);
         result
+    }
+
+    fn push_tracked_landmark_set(&mut self, landmark_ids: Vec<LandmarkId>) {
+        let history = self
+            .config
+            .temporal_landmark_tracking_history_frames
+            .max(1);
+        self.recent_tracked_landmark_sets.push(landmark_ids);
+        while self.recent_tracked_landmark_sets.len() > history {
+            self.recent_tracked_landmark_sets.remove(0);
+        }
+        let mut union = HashSet::new();
+        for set in &self.recent_tracked_landmark_sets {
+            union.extend(set.iter().copied());
+        }
+        let mut merged: Vec<LandmarkId> = union.into_iter().collect();
+        merged.sort_unstable();
+        self.last_tracked_landmark_ids = merged;
     }
 
     /// Today's appearance-global localization path (descriptor search over
