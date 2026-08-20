@@ -205,79 +205,55 @@ impl OpticalFlowTracker {
     }
 
     fn detect_new(&mut self, image: &GrayImage) {
-        let cell = self.config.optical_flow_detection_grid_size.max(8) as usize;
-        let cols = image.width.div_ceil(cell);
-        let rows = image.height.div_ceil(cell);
+        // Basalt `detectKeypoints`: centered grid of PATCH_SIZE cells, skip
+        // cells that already contain a live track, FAST per empty cell.
+        let patch = self.config.optical_flow_detection_grid_size.max(8) as usize;
+        if image.width < patch * 2 || image.height < patch * 2 {
+            return;
+        }
+        let x_start = (image.width % patch) / 2;
+        let y_start = (image.height % patch) / 2;
+        let x_stop = x_start + patch * (image.width / patch - 1);
+        let y_stop = y_start + patch * (image.height / patch - 1);
+        let cols = (image.width / patch) + 1;
+        let rows = (image.height / patch) + 1;
         let mut occupied = vec![false; cols * rows];
         for t in &self.tracks {
-            let cx = (t.x as usize / cell).min(cols.saturating_sub(1));
-            let cy = (t.y as usize / cell).min(rows.saturating_sub(1));
-            occupied[cy * cols + cx] = true;
+            if t.x >= x_start as f32
+                && t.y >= y_start as f32
+                && t.x < (x_stop + patch) as f32
+                && t.y < (y_stop + patch) as f32
+            {
+                let cx = ((t.x as usize - x_start) / patch).min(cols.saturating_sub(1));
+                let cy = ((t.y as usize - y_start) / patch).min(rows.saturating_sub(1));
+                occupied[cy * cols + cx] = true;
+            }
         }
 
-        for cy in 0..rows {
-            for cx in 0..cols {
-                if occupied[cy * cols + cx] {
-                    continue;
+        let mut x = x_start;
+        while x <= x_stop {
+            let mut y = y_start;
+            while y <= y_stop {
+                let cx = (x - x_start) / patch;
+                let cy = (y - y_start) / patch;
+                if !occupied[cy * cols + cx] {
+                    if let Some((bx, by)) =
+                        super::fast::best_fast_in_cell(image, x, y, x + patch, y + patch)
+                    {
+                        let id = self.next_id;
+                        self.next_id += 1;
+                        self.tracks.push(TrackedKeypoint {
+                            id,
+                            x: bx,
+                            y: by,
+                        });
+                    }
                 }
-                let x0 = cx * cell;
-                let y0 = cy * cell;
-                let x1 = (x0 + cell).min(image.width);
-                let y1 = (y0 + cell).min(image.height);
-                if let Some((bx, by)) = strongest_corner(image, x0, y0, x1, y1) {
-                    let id = self.next_id;
-                    self.next_id += 1;
-                    self.tracks.push(TrackedKeypoint {
-                        id,
-                        x: bx,
-                        y: by,
-                    });
-                }
+                y += patch;
             }
+            x += patch;
         }
     }
-}
-
-fn strongest_corner(
-    image: &GrayImage,
-    x0: usize,
-    y0: usize,
-    x1: usize,
-    y1: usize,
-) -> Option<(f32, f32)> {
-    let mut best_score = 0.0f32;
-    let mut best: Option<(f32, f32)> = None;
-    let margin = 4usize;
-    let xs = (x0 + margin)..x1.saturating_sub(margin);
-    let ys = (y0 + margin)..y1.saturating_sub(margin);
-    for y in ys {
-        for x in xs.clone() {
-            let c = image.data[y * image.width + x] as f32;
-            let mut sum = 0.0f32;
-            let mut sum2 = 0.0f32;
-            let mut n = 0.0f32;
-            for dy in -1i32..=1 {
-                for dx in -1i32..=1 {
-                    let v = image.data[(y as i32 + dy) as usize * image.width
-                        + (x as i32 + dx) as usize] as f32;
-                    sum += v;
-                    sum2 += v * v;
-                    n += 1.0;
-                }
-            }
-            let mean = sum / n;
-            let var = (sum2 / n) - mean * mean;
-            let score = var + 0.01 * (c - 128.0).abs();
-            if score > best_score {
-                best_score = score;
-                best = Some((x as f32, y as f32));
-            }
-        }
-    }
-    if best_score < 20.0 {
-        return None;
-    }
-    best
 }
 
 /// Coarse-to-fine LSSD translation tracking (Basalt `trackPoint` layout).

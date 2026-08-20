@@ -5,6 +5,7 @@
 //! of the *interface* and defaults, not a line copy of Basalt C++.
 
 mod config;
+mod fast;
 mod feature_bridge;
 mod lssd;
 mod pyramid;
