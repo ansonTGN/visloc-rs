@@ -932,6 +932,11 @@ struct CliArgs {
     /// Allow a bounded pose-prior gate widening for PnP solutions with at
     /// least 100 inliers, 0.6 inlier ratio, and 3 px mean reprojection error.
     pose_prior_visual_override: bool,
+    /// Accept the motion-model pose prior when visual tracking fails
+    /// (IMU coast). See `TrackingConfig::accept_motion_prior_on_failure`.
+    accept_motion_prior_on_failure: bool,
+    /// Cap on consecutive IMU coasts (`None` = unlimited; not recommended).
+    max_consecutive_motion_prior_coasts: Option<usize>,
     /// When `true`, scale `--max-pose-jump-meters` by the number of frames
     /// elapsed since the last successful track (capped at
     /// `--pose-jump-gap-scaling-max-multiplier`, floored at 1) before
@@ -1662,6 +1667,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut stereo_landmark_replenish_max_depth_meters_overridden: bool = false;
     let mut max_pose_jump_meters: Option<f64> = None;
     let mut pose_prior_visual_override: bool = false;
+    let mut accept_motion_prior_on_failure: bool = false;
+    let mut max_consecutive_motion_prior_coasts: Option<usize> = Some(5);
     let mut pose_jump_gap_scaling: bool = false;
     let mut pose_jump_gap_scaling_max_multiplier: usize = 10;
     let mut tracking_min_inliers: usize = 0;
@@ -2351,6 +2358,23 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--no-pose-prior-visual-override" => {
                 pose_prior_visual_override = false;
+                args.remove(i);
+            }
+            "--accept-motion-prior-on-failure" => {
+                accept_motion_prior_on_failure = true;
+                args.remove(i);
+            }
+            "--no-accept-motion-prior-on-failure" => {
+                accept_motion_prior_on_failure = false;
+                args.remove(i);
+            }
+            "--max-consecutive-motion-prior-coasts" => {
+                let raw = args.remove(i + 1);
+                max_consecutive_motion_prior_coasts = if raw.eq_ignore_ascii_case("none") {
+                    None
+                } else {
+                    Some(raw.parse()?)
+                };
                 args.remove(i);
             }
             "--pose-jump-gap-scaling" => {
@@ -3193,6 +3217,9 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                 pnp_pose_prior_warm_start = true;
             }
         }
+        // Do NOT default accept-motion-prior-on-failure: gate67 unlimited
+        // coast hit tracking=1.0 but collapsed Sim(3) scale to 0.02
+        // (626 coasts). Cap+flag remain opt-in for gated A/B.
         // Do NOT default pose-prior-visual-override: gate58/60 raised
         // tracking but collapsed Sim(3) scale. Keep opt-in.
         // Do NOT default pose-jump-gap-scaling (gate50: scale 0.55) or
@@ -3604,6 +3631,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         stereo_landmark_replenish_max_depth_meters,
         max_pose_jump_meters,
         pose_prior_visual_override,
+        accept_motion_prior_on_failure,
+        max_consecutive_motion_prior_coasts,
         pose_jump_gap_scaling,
         pose_jump_gap_scaling_max_multiplier,
         tracking_min_inliers,
@@ -5305,6 +5334,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 PosePriorVisualOverrideConfig::default()
             }
         }),
+        accept_motion_prior_on_failure: args.accept_motion_prior_on_failure,
+        max_consecutive_motion_prior_coasts: args.max_consecutive_motion_prior_coasts,
         min_inliers: args.tracking_min_inliers,
         min_inlier_ratio: args.tracking_min_inlier_ratio,
         max_mean_reprojection_error: args.tracking_max_reprojection_error,
@@ -8241,6 +8272,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          atlas_aligned_owned_landmark_count={atlas_aligned_owned_landmark_count}\n\
          atlas_welded_landmark_reduction={atlas_welded_landmark_reduction}\n\
          pose_prior_visual_override_count={pose_prior_visual_override_count}\n\
+         motion_prior_coast_count={motion_prior_coast_count}\n\
          imu_samples_consumed={imu_idx}\n\
          vi_init_preseed_samples={vi_init_preseed_samples}\n\
          seed_frame_idx={seed_frame_idx}\n\
@@ -8472,6 +8504,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          pose_graph_refinement_tracker_corrections_applied={pgr_tracker_corrections_applied}\n\
          max_pose_jump_meters={max_pose_jump:?}\n\
          pose_prior_visual_override={pose_prior_visual_override}\n\
+         accept_motion_prior_on_failure={accept_motion_prior_on_failure}\n\
          pose_jump_gap_scaling={pose_jump_gap_scaling}\n\
          pose_jump_gap_scaling_max_multiplier={pose_jump_gap_scaling_max_multiplier}\n\
          tracking_min_inliers={tracking_min_inliers}\n\
@@ -8663,6 +8696,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             0.0
         },
         pose_prior_visual_override_count = slam.tracker.stats().pose_prior_visual_override_count,
+        motion_prior_coast_count = slam.tracker.stats().motion_prior_coast_count,
         undistort = args.undistort,
         stereo_bootstrap_enabled = args.stereo_bootstrap,
         stereo_bootstrap_strict = args.stereo_bootstrap_strict,
@@ -8966,6 +9000,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pgr_tracker_corrections_applied = pose_graph_refinement_tracker_corrections_applied,
         max_pose_jump = args.max_pose_jump_meters,
         pose_prior_visual_override = args.pose_prior_visual_override,
+        accept_motion_prior_on_failure = args.accept_motion_prior_on_failure,
         pose_jump_gap_scaling = args.pose_jump_gap_scaling,
         pose_jump_gap_scaling_max_multiplier = args.pose_jump_gap_scaling_max_multiplier,
         tracking_min_inliers = args.tracking_min_inliers,

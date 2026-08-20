@@ -92,6 +92,19 @@ pub struct TrackingConfig {
     /// because the widen-retry ladder falls back to the existing
     /// appearance-global path if every projection attempt fails.
     pub projection_guided_tracking: Option<ProjectionGuidedTrackingConfig>,
+    /// When `true` and the motion model exposes a predictive prior
+    /// (`allows_pnp_pose_prior_warm_start`), accept that prior as the
+    /// frame pose whenever visual localization / quality gates fail.
+    /// Keeps the IMU strapdown window draining and the trajectory
+    /// continuous through brief visual cliffs without writing a bad
+    /// PnP teleport; keyframe policies should still reject 0-inlier
+    /// coasts. Off by default.
+    pub accept_motion_prior_on_failure: bool,
+    /// Cap on consecutive motion-prior coasts. After this many coasts
+    /// without a visual success, fall back to reporting failure so the
+    /// adaptive model can switch / reloc can fire. `None` = unlimited
+    /// (gate67: 626 coasts collapsed Sim(3) scale to 0.02 — do not use).
+    pub max_consecutive_motion_prior_coasts: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -251,6 +264,8 @@ impl Default for TrackingConfig {
             pose_jump_gap_scaling: false,
             pose_jump_gap_scaling_max_multiplier: 10,
             projection_guided_tracking: None,
+            accept_motion_prior_on_failure: false,
+            max_consecutive_motion_prior_coasts: Some(5),
         }
     }
 }

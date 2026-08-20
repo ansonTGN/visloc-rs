@@ -10,6 +10,7 @@ pub struct Tracker<P, M = ConstantPoseMotionModel> {
     config: TrackingConfig,
     state: TrackingState,
     successive_failures: usize,
+    consecutive_motion_prior_coasts: usize,
     last_result: Option<TrackingResult>,
     last_successful_frame_id: Option<FrameId>,
     last_successful_pose: Option<Pose>,
@@ -80,6 +81,7 @@ where
             config,
             state: TrackingState::Uninitialized,
             successive_failures: 0,
+            consecutive_motion_prior_coasts: 0,
             last_result: None,
             last_successful_frame_id: None,
             last_successful_pose: None,
@@ -126,6 +128,7 @@ where
     pub fn reset(&mut self) {
         self.state = TrackingState::Uninitialized;
         self.successive_failures = 0;
+        self.consecutive_motion_prior_coasts = 0;
         self.last_result = None;
         self.last_successful_frame_id = None;
         self.last_successful_pose = None;
@@ -175,6 +178,7 @@ where
     ) {
         self.state = TrackingState::Tracking;
         self.successive_failures = 0;
+        self.consecutive_motion_prior_coasts = 0;
         self.last_successful_frame_id = Some(result.frame_id);
         self.last_successful_pose = result.localization.pose.clone();
         self.last_result = Some(result.clone());
@@ -472,8 +476,52 @@ where
             );
         }
 
-        let (tracking_failure_reason, continuation_pose) =
+        let (mut tracking_failure_reason, continuation_pose) =
             self.apply_tracking_quality_gate(frame, map, pose_prior.as_ref(), &mut localization);
+
+        // IMU/velocity coast: when visual tracking dies but the motion
+        // model still has a predictive prior, accept that prior so the
+        // strapdown window drains and the trajectory stays continuous.
+        // Constant-pose models deliberately refuse this path (frozen
+        // prior would just stamp the last success forever). Cap the
+        // streak — unlimited coast (gate67) collapsed Sim(3) scale.
+        let mut coasted = false;
+        if !localization.success
+            && self.config.accept_motion_prior_on_failure
+            && self.motion_model.allows_pnp_pose_prior_warm_start()
+        {
+            let within_cap = self
+                .config
+                .max_consecutive_motion_prior_coasts
+                .is_none_or(|cap| self.consecutive_motion_prior_coasts < cap);
+            if within_cap {
+                if let Some(prior) = pose_prior.as_ref() {
+                    localization.success = true;
+                    localization.pose = Some(prior.clone());
+                    localization.failure_reason = None;
+                    localization.inlier_count = 0;
+                    localization.inlier_ratio = 0.0;
+                    localization.inliers.clear();
+                    localization.inlier_query_indices.clear();
+                    localization.inlier_landmark_ids.clear();
+                    localization.inlier_confidences.clear();
+                    localization.inlier_reprojection_errors.clear();
+                    localization.reprojection_error = None;
+                    localization.median_reprojection_error = None;
+                    localization.max_reprojection_error = None;
+                    tracking_failure_reason = None;
+                    self.stats.motion_prior_coast_count += 1;
+                    coasted = true;
+                }
+            }
+        }
+        if localization.success && !coasted {
+            self.consecutive_motion_prior_coasts = 0;
+        } else if coasted {
+            self.consecutive_motion_prior_coasts += 1;
+        } else {
+            self.consecutive_motion_prior_coasts = 0;
+        }
 
         let previous_state = self.state;
         let event = if localization.success {
@@ -1714,6 +1762,9 @@ pub struct TrackingStats {
     /// Number of frames accepted only because a strong visual solution
     /// activated the bounded pose-prior translation-gate widening.
     pub pose_prior_visual_override_count: usize,
+    /// Number of frames accepted by substituting the motion-model prior
+    /// after visual localization / quality gates failed.
+    pub motion_prior_coast_count: usize,
     pub total_inlier_count: usize,
     pub total_correspondence_count: usize,
     pub covisibility_local_map_used_count: usize,
