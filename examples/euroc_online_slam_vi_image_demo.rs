@@ -1684,6 +1684,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut imu_motion_model_carry_forward_velocity: bool = false;
     let mut cross_check_matcher: bool = false;
     let mut mutual_softmax_matcher: bool = false;
+    let mut mutual_softmax_matcher_overridden: bool = false;
     let mut feature_extractor: FeatureExtractorKind = FeatureExtractorKind::Corner;
     let mut hog_max_features: usize = 1500;
     let mut hog_min_corner_score: f32 = 0.05;
@@ -2472,6 +2473,12 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--mutual-softmax-matcher" => {
                 mutual_softmax_matcher = true;
+                mutual_softmax_matcher_overridden = true;
+                args.remove(i);
+            }
+            "--no-mutual-softmax-matcher" => {
+                mutual_softmax_matcher = false;
+                mutual_softmax_matcher_overridden = true;
                 args.remove(i);
             }
             "--feature-extractor" => {
@@ -3148,6 +3155,12 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             // as KFs poisons the map during hover. Keep the local map
             // seeded from well-supported poses only.
             keyframe_min_inliers = Some(80);
+        }
+        if !mutual_softmax_matcher_overridden && !cross_check_matcher {
+            // Gate54: mutual-softmax lifted tracking 0.37 → 0.55 while
+            // keeping Sim(3) scale ~0.79 (vs collapsed 0.01 without the
+            // inlier/jump locks). Slower than brute-force, but usable.
+            mutual_softmax_matcher = true;
         }
         // Do NOT default pose-jump-gap-scaling (gate50: scale 0.55) or
         // pose-prior-visual-override + covis local map (gate52: tracking
