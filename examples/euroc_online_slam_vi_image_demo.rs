@@ -1566,8 +1566,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut motion_vi_init_enabled: bool = false;
     let mut motion_vi_init_after_static_give_up: bool = false;
     let mut motion_vi_init_from_configured_bias: bool = false;
-    let mut motion_vi_init_min_keyframes: usize = 5;
-    let mut motion_vi_init_min_translation_meters: f64 = 0.5;
+    let mut motion_vi_init_min_keyframes: usize = 3;
+    let mut motion_vi_init_min_translation_meters: f64 = 0.15;
     let mut motion_vi_init_recover_scale: bool = false;
     let mut local_vi_ba_enabled: bool = false;
     let mut observation_confidence_ba_enabled: bool = false;

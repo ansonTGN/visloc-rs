@@ -96,11 +96,12 @@ pub struct MotionBasedViInitializerConfig {
     /// VIBA1 fires. Default `2.0`. Set to `0.0` to disable the
     /// translation gate.
     pub min_translation_meters: f64,
-    /// When `Some(n)`, the inertial solve uses only the most recent `n`
+    /// When `Some(n)`, the inertial solve uses only the earliest `n`
     /// registered keyframes (after the min-keyframe / min-translation
-    /// gates pass). `None` uses the full registered set. A short window
-    /// keeps visual-inertial alignment locally consistent after VO scale
-    /// has drifted over a long keyframe history.
+    /// gates pass). `None` uses the full registered set. Early keyframes
+    /// are the least contaminated by later VO scale drift; gyro-bias
+    /// recovery still searches 3–5 keyframe subwindows over the full
+    /// registered history.
     pub max_solve_keyframes: Option<usize>,
     /// World-frame gravity vector. Echoed onto the BA result for
     /// downstream diagnostics; the IMU factors fed into the solve carry
@@ -754,49 +755,55 @@ impl MotionBasedViInitializer {
         // also start from those biases but seed velocity from the
         // inter-keyframe centre displacement and the connecting IMU
         // factor's `delta_time` when available.
-        let mut initial_states: BTreeMap<u64, KeyframeImuState> = BTreeMap::new();
-        let mut kf_ids: Vec<u64> = self.keyframes.iter().map(|(id, _)| *id).collect();
+        let all_kf_ids: Vec<u64> = self.keyframes.iter().map(|(id, _)| *id).collect();
+        let mut kf_ids = all_kf_ids.clone();
         if let Some(max_solve) = self.config.max_solve_keyframes {
             if max_solve >= 2 && kf_ids.len() > max_solve {
-                kf_ids = kf_ids[kf_ids.len() - max_solve..].to_vec();
+                kf_ids = kf_ids[..max_solve].to_vec();
             }
         }
-        for (idx, &kf_id) in kf_ids.iter().enumerate() {
-            let velocity = if idx == 0 {
-                Vector3::zeros()
-            } else {
-                let prev_id = kf_ids[idx - 1];
-                let factor = preintegration_factors
-                    .iter()
-                    .find(|f| f.keyframe_id_from == prev_id && f.keyframe_id_to == kf_id);
-                match factor {
-                    Some(f) if f.delta.delta_time > 0.0 => {
-                        let prev_center = self
-                            .keyframes
-                            .iter()
-                            .find(|(id, _)| *id == prev_id)
-                            .expect("previous solve keyframe is registered")
-                            .1;
-                        let curr_center = self
-                            .keyframes
-                            .iter()
-                            .find(|(id, _)| *id == kf_id)
-                            .expect("current solve keyframe is registered")
-                            .1;
-                        (curr_center - prev_center) / f.delta.delta_time
+
+        let seed_initial_states = |kf_ids: &[u64], bias_gyro: Vector3<f64>| {
+            let mut initial_states: BTreeMap<u64, KeyframeImuState> = BTreeMap::new();
+            for (idx, &kf_id) in kf_ids.iter().enumerate() {
+                let velocity = if idx == 0 {
+                    Vector3::zeros()
+                } else {
+                    let prev_id = kf_ids[idx - 1];
+                    let factor = preintegration_factors
+                        .iter()
+                        .find(|f| f.keyframe_id_from == prev_id && f.keyframe_id_to == kf_id);
+                    match factor {
+                        Some(f) if f.delta.delta_time > 0.0 => {
+                            let prev_center = self
+                                .keyframes
+                                .iter()
+                                .find(|(id, _)| *id == prev_id)
+                                .expect("previous solve keyframe is registered")
+                                .1;
+                            let curr_center = self
+                                .keyframes
+                                .iter()
+                                .find(|(id, _)| *id == kf_id)
+                                .expect("current solve keyframe is registered")
+                                .1;
+                            (curr_center - prev_center) / f.delta.delta_time
+                        }
+                        _ => Vector3::zeros(),
                     }
-                    _ => Vector3::zeros(),
-                }
-            };
-            initial_states.insert(
-                kf_id,
-                KeyframeImuState {
-                    velocity_world: velocity,
-                    bias_gyro: bias_gyro_seed,
-                    bias_acc: bias_acc_seed,
-                },
-            );
-        }
+                };
+                initial_states.insert(
+                    kf_id,
+                    KeyframeImuState {
+                        velocity_world: velocity,
+                        bias_gyro,
+                        bias_acc: bias_acc_seed,
+                    },
+                );
+            }
+            initial_states
+        };
+        let mut initial_states = seed_initial_states(&kf_ids, bias_gyro_seed);
 
         // Validate that all registered keyframes have a pose in `map`.
         for kf_id in &kf_ids {
@@ -822,12 +829,14 @@ impl MotionBasedViInitializer {
         // body), hence T_bw = T_bc * T_cw. This conversion is speculative and
         // exists only on the solver clone; the tracked camera map is never
         // overwritten with body poses.
-        for kf_id in &kf_ids {
-            let pose = candidate_map
+        for kf_id in &all_kf_ids {
+            let Some(pose) = candidate_map
                 .keyframes
                 .get_mut(kf_id)
                 .and_then(|kf| kf.frame.pose.as_mut())
-                .expect("keyframe poses were validated above");
+            else {
+                continue;
+            };
             pose.world_to_camera = self.config.body_to_camera.compose(&pose.world_to_camera);
         }
 
@@ -847,14 +856,14 @@ impl MotionBasedViInitializer {
         let mut effective_bias_gyro = bias_gyro_seed;
         let mut estimated_gyro_bias: Option<Vector3<f64>> = None;
         if self.config.estimate_gyro_bias {
-            let alignment = estimate_gyro_bias(
+            let alignment = estimate_gyro_bias_with_window(
                 &candidate_map,
-                &kf_ids,
+                &all_kf_ids,
                 preintegration_factors,
                 bias_gyro_seed,
             );
-            let alignment = match alignment {
-                Some(alignment) => alignment,
+            let (alignment, window_ids) = match alignment {
+                Some(found) => found,
                 None => {
                     self.last_gyro_bias_alignment = None;
                     let err = MotionBasedViRejectionReason::GyroBiasEstimateDegenerate;
@@ -865,12 +874,12 @@ impl MotionBasedViInitializer {
             // Record the attempt BEFORE the magnitude gate below, mirroring
             // `last_gravity_alignment`'s rationale: a rejected estimate is
             // exactly as diagnostically interesting as an accepted one.
-            self.last_gyro_bias_alignment = Some(alignment);
+            self.last_gyro_bias_alignment = Some(alignment.clone());
             let magnitude_rad_s = alignment.bias_gyro.norm();
             if let Some(limit) = self.config.max_gyro_bias_magnitude_rad_s {
                 if magnitude_rad_s > limit {
                     let err = MotionBasedViRejectionReason::GyroBiasOutOfRange {
-                        kf_id: kf_ids[0],
+                        kf_id: window_ids.first().copied().unwrap_or(kf_ids[0]),
                         magnitude_rad_s,
                         limit_rad_s: limit,
                     };
@@ -878,11 +887,12 @@ impl MotionBasedViInitializer {
                     return Err(err);
                 }
             }
+            if window_ids.len() >= 2 {
+                kf_ids = window_ids;
+            }
             effective_bias_gyro = alignment.bias_gyro;
             estimated_gyro_bias = Some(alignment.bias_gyro);
-            for state in initial_states.values_mut() {
-                state.bias_gyro = effective_bias_gyro;
-            }
+            initial_states = seed_initial_states(&kf_ids, effective_bias_gyro);
         }
 
         // Gravity-direction recovery (`estimate_gravity`): run the linear
@@ -1637,36 +1647,48 @@ pub fn estimate_gyro_bias(
     factors: &[ImuPreintegrationFactor],
     bias_gyro_seed: Vector3<f64>,
 ) -> Option<GyroBiasAlignment> {
+    estimate_gyro_bias_with_window(map, keyframe_ids, factors, bias_gyro_seed)
+        .map(|(alignment, _)| alignment)
+}
+
+fn estimate_gyro_bias_with_window(
+    map: &VisualMap,
+    keyframe_ids: &[u64],
+    factors: &[ImuPreintegrationFactor],
+    bias_gyro_seed: Vector3<f64>,
+) -> Option<(GyroBiasAlignment, Vec<u64>)> {
     const MAX_ALIGNMENT_WINDOW: usize = 5;
     const MIN_ALIGNMENT_WINDOW: usize = 3;
 
     let mut ids: Vec<u64> = keyframe_ids.to_vec();
     ids.sort_unstable();
     ids.dedup();
-    if ids.len() < 2 {
-        return None;
-    }
-    if ids.len() <= MAX_ALIGNMENT_WINDOW {
-        return estimate_gyro_bias_on_ids(map, &ids, factors, bias_gyro_seed);
+    if ids.len() < MIN_ALIGNMENT_WINDOW {
+        let alignment = estimate_gyro_bias_on_ids(map, &ids, factors, bias_gyro_seed)?;
+        return Some((alignment, ids));
     }
 
-    let mut best: Option<GyroBiasAlignment> = None;
-    for w in MIN_ALIGNMENT_WINDOW..=MAX_ALIGNMENT_WINDOW {
+    let max_w = MAX_ALIGNMENT_WINDOW.min(ids.len());
+    let mut best: Option<(GyroBiasAlignment, Vec<u64>)> = None;
+    for w in MIN_ALIGNMENT_WINDOW..=max_w {
         for start in 0..=ids.len() - w {
-            let subset = &ids[start..start + w];
+            let subset = ids[start..start + w].to_vec();
             let Some(alignment) =
-                estimate_gyro_bias_on_ids(map, subset, factors, bias_gyro_seed)
+                estimate_gyro_bias_on_ids(map, &subset, factors, bias_gyro_seed)
             else {
                 continue;
             };
-            if best.as_ref().is_none_or(|current| {
+            if best.as_ref().is_none_or(|(current, _)| {
                 alignment.rotation_residual_rms_after < current.rotation_residual_rms_after
             }) {
-                best = Some(alignment);
+                best = Some((alignment, subset));
             }
         }
     }
-    best.or_else(|| estimate_gyro_bias_on_ids(map, &ids, factors, bias_gyro_seed))
+    best.or_else(|| {
+        let alignment = estimate_gyro_bias_on_ids(map, &ids, factors, bias_gyro_seed)?;
+        Some((alignment, ids))
+    })
 }
 
 fn estimate_gyro_bias_on_ids(
