@@ -806,13 +806,8 @@ struct CliArgs {
     /// ([`visloc_rs::MotionBasedViInitializerConfig::estimate_gyro_bias`]):
     /// estimate the shared gyro bias from rotation-only alignment against
     /// this window's fixed visual poses, BEFORE gravity/velocity alignment
-    /// and before the staged solve — the classical first inertial-init step
-    /// ORB-SLAM3 / VINS-Mono run before gravity alignment. Off by default.
-    /// See `docs/motion_based_vi_alignment.md`'s "Gyro-bias recovery"
-    /// section for the motivating diagnosis: the final fitted IMU rotation
-    /// residual RMS sat at 0.014-0.022 rad against the 0.01 gate,
-    /// bit-identical with/without gravity estimation (the rotation residual
-    /// is gravity-independent).
+    /// and before the staged solve. Defaults on whenever `--motion-vi-init`
+    /// is set; pass `--no-motion-vi-init-estimate-gyro-bias` to disable.
     motion_vi_init_estimate_gyro_bias: bool,
     /// When `Some(n)`, restricts descriptor matching during tracking to
     /// landmarks observed by the reference keyframe and up to `n`
@@ -1571,8 +1566,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut motion_vi_init_enabled: bool = false;
     let mut motion_vi_init_after_static_give_up: bool = false;
     let mut motion_vi_init_from_configured_bias: bool = false;
-    let mut motion_vi_init_min_keyframes: usize = 10;
-    let mut motion_vi_init_min_translation_meters: f64 = 2.0;
+    let mut motion_vi_init_min_keyframes: usize = 5;
+    let mut motion_vi_init_min_translation_meters: f64 = 0.5;
     let mut motion_vi_init_recover_scale: bool = false;
     let mut local_vi_ba_enabled: bool = false;
     let mut observation_confidence_ba_enabled: bool = false;
@@ -1614,8 +1609,10 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut vi_bias_release_min_keyframes: Option<usize> = None;
     let mut vi_bias_release_min_translation_meters: Option<f64> = None;
     let mut motion_vi_init_estimate_gravity: bool = false;
+    let mut motion_vi_init_no_estimate_gravity: bool = false;
     let mut motion_vi_init_max_gravity_norm_deviation: Option<f64> = None;
     let mut motion_vi_init_estimate_gyro_bias: bool = false;
+    let mut motion_vi_init_no_estimate_gyro_bias: bool = false;
     let mut covisibility_local_map_max_keyframes: Option<usize> = None;
     let mut covisibility_local_map_min_shared: usize = 15;
     let mut covisibility_local_ba_enabled: bool = false;
@@ -2087,12 +2084,20 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                 motion_vi_init_estimate_gravity = true;
                 args.remove(i);
             }
+            "--no-motion-vi-init-estimate-gravity" => {
+                motion_vi_init_no_estimate_gravity = true;
+                args.remove(i);
+            }
             "--motion-vi-init-max-gravity-norm-deviation" => {
                 motion_vi_init_max_gravity_norm_deviation = Some(args.remove(i + 1).parse()?);
                 args.remove(i);
             }
             "--motion-vi-init-estimate-gyro-bias" => {
                 motion_vi_init_estimate_gyro_bias = true;
+                args.remove(i);
+            }
+            "--no-motion-vi-init-estimate-gyro-bias" => {
+                motion_vi_init_no_estimate_gyro_bias = true;
                 args.remove(i);
             }
             "--covisibility-local-map-max-keyframes" => {
@@ -3027,6 +3032,18 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         return Err(
             "--pose-graph-refinement-pcm-pairwise-only requires --pose-graph-refinement-pcm".into(),
         );
+    }
+    if motion_vi_init_enabled {
+        if motion_vi_init_no_estimate_gravity {
+            motion_vi_init_estimate_gravity = false;
+        } else {
+            motion_vi_init_estimate_gravity = true;
+        }
+        if motion_vi_init_no_estimate_gyro_bias {
+            motion_vi_init_estimate_gyro_bias = false;
+        } else {
+            motion_vi_init_estimate_gyro_bias = true;
+        }
     }
     if !motion_vi_init_enabled
         && (motion_vi_init_max_velocity_mps.is_some()
@@ -4804,6 +4821,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             initializer: MotionBasedViInitializerConfig {
                 min_keyframes: args.motion_vi_init_min_keyframes,
                 min_translation_meters: args.motion_vi_init_min_translation_meters,
+                max_solve_keyframes: Some(5),
                 gravity_world: args.gravity_world,
                 body_to_camera: body_to_camera.clone(),
                 viba2,

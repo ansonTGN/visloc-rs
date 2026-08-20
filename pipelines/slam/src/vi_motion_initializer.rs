@@ -96,6 +96,12 @@ pub struct MotionBasedViInitializerConfig {
     /// VIBA1 fires. Default `2.0`. Set to `0.0` to disable the
     /// translation gate.
     pub min_translation_meters: f64,
+    /// When `Some(n)`, the inertial solve uses only the most recent `n`
+    /// registered keyframes (after the min-keyframe / min-translation
+    /// gates pass). `None` uses the full registered set. A short window
+    /// keeps visual-inertial alignment locally consistent after VO scale
+    /// has drifted over a long keyframe history.
+    pub max_solve_keyframes: Option<usize>,
     /// World-frame gravity vector. Echoed onto the BA result for
     /// downstream diagnostics; the IMU factors fed into the solve carry
     /// their own gravity already.
@@ -209,6 +215,7 @@ impl Default for MotionBasedViInitializerConfig {
         Self {
             min_keyframes: 10,
             min_translation_meters: 2.0,
+            max_solve_keyframes: None,
             gravity_world: Vector3::new(0.0, 9.81, 0.0),
             body_to_camera: SE3::identity(),
             ba_config: BaConfig {
@@ -748,7 +755,12 @@ impl MotionBasedViInitializer {
         // inter-keyframe centre displacement and the connecting IMU
         // factor's `delta_time` when available.
         let mut initial_states: BTreeMap<u64, KeyframeImuState> = BTreeMap::new();
-        let kf_ids: Vec<u64> = self.keyframes.iter().map(|(id, _)| *id).collect();
+        let mut kf_ids: Vec<u64> = self.keyframes.iter().map(|(id, _)| *id).collect();
+        if let Some(max_solve) = self.config.max_solve_keyframes {
+            if max_solve >= 2 && kf_ids.len() > max_solve {
+                kf_ids = kf_ids[kf_ids.len() - max_solve..].to_vec();
+            }
+        }
         for (idx, &kf_id) in kf_ids.iter().enumerate() {
             let velocity = if idx == 0 {
                 Vector3::zeros()
@@ -759,8 +771,18 @@ impl MotionBasedViInitializer {
                     .find(|f| f.keyframe_id_from == prev_id && f.keyframe_id_to == kf_id);
                 match factor {
                     Some(f) if f.delta.delta_time > 0.0 => {
-                        let prev_center = self.keyframes[idx - 1].1;
-                        let curr_center = self.keyframes[idx].1;
+                        let prev_center = self
+                            .keyframes
+                            .iter()
+                            .find(|(id, _)| *id == prev_id)
+                            .expect("previous solve keyframe is registered")
+                            .1;
+                        let curr_center = self
+                            .keyframes
+                            .iter()
+                            .find(|(id, _)| *id == kf_id)
+                            .expect("current solve keyframe is registered")
+                            .1;
                         (curr_center - prev_center) / f.delta.delta_time
                     }
                     _ => Vector3::zeros(),
@@ -1377,7 +1399,7 @@ pub fn estimate_gravity_and_velocities(
             continue;
         }
         let delta_time = factor.delta.delta_time;
-        if !(delta_time > 0.0) {
+        if delta_time.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             continue;
         }
         let idx_from = *index_of.get(&factor.keyframe_id_from).expect("windowed id");
@@ -1615,24 +1637,53 @@ pub fn estimate_gyro_bias(
     factors: &[ImuPreintegrationFactor],
     bias_gyro_seed: Vector3<f64>,
 ) -> Option<GyroBiasAlignment> {
-    const MAX_ALIGNMENT_WINDOW: usize = 10;
-    const MAX_ITERATIONS: usize = 5;
-    const CONVERGENCE_STEP_NORM: f64 = 1.0e-10;
+    const MAX_ALIGNMENT_WINDOW: usize = 5;
+    const MIN_ALIGNMENT_WINDOW: usize = 3;
 
     let mut ids: Vec<u64> = keyframe_ids.to_vec();
     ids.sort_unstable();
     ids.dedup();
-    if ids.len() > MAX_ALIGNMENT_WINDOW {
-        let start = ids.len() - MAX_ALIGNMENT_WINDOW;
-        ids = ids[start..].to_vec();
+    if ids.len() < 2 {
+        return None;
     }
+    if ids.len() <= MAX_ALIGNMENT_WINDOW {
+        return estimate_gyro_bias_on_ids(map, &ids, factors, bias_gyro_seed);
+    }
+
+    let mut best: Option<GyroBiasAlignment> = None;
+    for w in MIN_ALIGNMENT_WINDOW..=MAX_ALIGNMENT_WINDOW {
+        for start in 0..=ids.len() - w {
+            let subset = &ids[start..start + w];
+            let Some(alignment) =
+                estimate_gyro_bias_on_ids(map, subset, factors, bias_gyro_seed)
+            else {
+                continue;
+            };
+            if best.as_ref().is_none_or(|current| {
+                alignment.rotation_residual_rms_after < current.rotation_residual_rms_after
+            }) {
+                best = Some(alignment);
+            }
+        }
+    }
+    best.or_else(|| estimate_gyro_bias_on_ids(map, &ids, factors, bias_gyro_seed))
+}
+
+fn estimate_gyro_bias_on_ids(
+    map: &VisualMap,
+    ids: &[u64],
+    factors: &[ImuPreintegrationFactor],
+    bias_gyro_seed: Vector3<f64>,
+) -> Option<GyroBiasAlignment> {
+    const MAX_ITERATIONS: usize = 5;
+    const CONVERGENCE_STEP_NORM: f64 = 1.0e-10;
     if ids.len() < 2 {
         return None;
     }
     let in_window: BTreeSet<u64> = ids.iter().copied().collect();
 
     let mut rotation_body_to_world: BTreeMap<u64, UnitQuaternion<f64>> = BTreeMap::new();
-    for id in &ids {
+    for id in ids {
         let pose = map.keyframes.get(id)?.frame.pose.as_ref()?;
         rotation_body_to_world.insert(*id, pose.camera_to_world().rotation);
     }
