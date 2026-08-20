@@ -224,8 +224,8 @@ pub use visloc_vision::pnp::{
 pub use visloc_vision::ransac::{PnPRansac, RansacReport, RobustPoseEstimator};
 pub use visloc_vision::stereo::triangulate_stereo_pixel;
 pub use visloc_vision::stereo_bootstrap::{
-    bootstrap_stereo_landmarks, triangulate_two_view_left_frame, StereoBootstrapConfig,
-    StereoBootstrapLandmark,
+    bootstrap_stereo_landmarks, bootstrap_stereo_landmarks_from_correspondences,
+    triangulate_two_view_left_frame, StereoBootstrapConfig, StereoBootstrapLandmark,
 };
 pub use visloc_vision::stereo_vo::{
     build_stereo_temporal_correspondences, estimate_relative_pose_kabsch_ransac,

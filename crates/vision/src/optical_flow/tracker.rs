@@ -63,12 +63,44 @@ const PATTERN52: [[f32; 2]; 52] = [
     [3.0, -7.0],
 ];
 
-fn pattern51_offsets() -> [(f32, f32); 52] {
-    let mut out = [(0.0f32, 0.0f32); 52];
+/// Pattern51 sample count (Basalt `PATTERN_SIZE`).
+pub const PATTERN51_SIZE: usize = 52;
+
+fn pattern51_offsets() -> [(f32, f32); PATTERN51_SIZE] {
+    let mut out = [(0.0f32, 0.0f32); PATTERN51_SIZE];
     for (i, p) in PATTERN52.iter().enumerate() {
         out[i] = (0.5 * p[0], 0.5 * p[1]);
     }
     out
+}
+
+/// Track a list of points from `from` into `to` (one-shot, no track ids).
+/// Used for Basalt-style left→right stereo optical flow at a shared timestamp.
+pub fn track_points_between(
+    from: &GrayImage,
+    to: &GrayImage,
+    points: &[(f32, f32)],
+    config: &BasaltOpticalFlowConfig,
+) -> Vec<Option<(f32, f32)>> {
+    let levels = config.optical_flow_levels.max(1) as usize;
+    let max_iters = config.optical_flow_max_iterations.max(1) as usize;
+    let max_fb2 = config.optical_flow_max_recovered_dist2;
+    let pattern = pattern51_offsets();
+    let from_pyr = build_pyramid(from, levels);
+    let to_pyr = build_pyramid(to, levels);
+    points
+        .iter()
+        .map(|&(x, y)| {
+            let (xf, yf) = track_point(&from_pyr, &to_pyr, x, y, max_iters, &pattern)?;
+            let (xb, yb) = track_point(&to_pyr, &from_pyr, xf, yf, max_iters, &pattern)?;
+            let dx = xb - x;
+            let dy = yb - y;
+            if dx * dx + dy * dy > max_fb2 {
+                return None;
+            }
+            Some((xf, yf))
+        })
+        .collect()
 }
 
 /// Stable track id (Basalt `KeypointId`).
@@ -94,7 +126,7 @@ pub struct OpticalFlowTracker {
     next_id: KeypointId,
     prev_pyramid: Option<Vec<GrayImage>>,
     tracks: Vec<TrackedKeypoint>,
-    pattern: [(f32, f32); 52],
+    pattern: [(f32, f32); PATTERN51_SIZE],
 }
 
 impl OpticalFlowTracker {
@@ -259,7 +291,7 @@ fn track_point(
     x0: f32,
     y0: f32,
     max_iters: usize,
-    pattern: &[(f32, f32); 52],
+    pattern: &[(f32, f32); PATTERN51_SIZE],
 ) -> Option<(f32, f32)> {
     let levels = from_pyr.len().min(to_pyr.len());
     let scale = 1.0f32 / (1 << (levels - 1)) as f32;
@@ -302,7 +334,7 @@ fn lk_step(
     ty: f32,
     ix: f32,
     iy: f32,
-    pattern: &[(f32, f32); 52],
+    pattern: &[(f32, f32); PATTERN51_SIZE],
 ) -> Option<(f32, f32, bool)> {
     // Inverse compositional: ∇T from the template; residual I(x+Δ) − T(x).
     let mut a11 = 0.0f32;

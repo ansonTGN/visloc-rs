@@ -188,6 +188,79 @@ pub fn bootstrap_stereo_landmarks(
     survivors
 }
 
+/// Triangulate known left→right correspondences (e.g. Basalt stereo optical
+/// flow) without descriptor matching. `correspondences` are
+/// `(left_keypoint_index, right_pixel)` pairs into `left_keypoints`.
+pub fn bootstrap_stereo_landmarks_from_correspondences(
+    left_camera: &Camera,
+    right_camera: &Camera,
+    left_to_right: &SE3,
+    left_keypoints: &[Point2<f64>],
+    correspondences: &[(usize, Point2<f64>)],
+    config: &StereoBootstrapConfig,
+) -> Vec<StereoBootstrapLandmark> {
+    let mut survivors = Vec::with_capacity(correspondences.len());
+    for &(left_keypoint_index, right_keypoint) in correspondences {
+        let Some(left_keypoint) = left_keypoints.get(left_keypoint_index).copied() else {
+            continue;
+        };
+        let Some(point_left) = triangulate_two_view_left_frame(
+            left_camera,
+            right_camera,
+            left_to_right,
+            &left_keypoint,
+            &right_keypoint,
+        ) else {
+            continue;
+        };
+        if !point_left.z.is_finite()
+            || point_left.z < config.min_depth_meters
+            || point_left.z > config.max_depth_meters
+        {
+            continue;
+        }
+        let point_right = left_to_right.transform_point(&point_left);
+        if !point_right.z.is_finite() || point_right.z < config.min_depth_meters {
+            continue;
+        }
+        let Some(left_projected) = left_camera.project(&point_left) else {
+            continue;
+        };
+        let Some(right_projected) = right_camera.project(&point_right) else {
+            continue;
+        };
+        let left_error = (left_projected - left_keypoint).norm();
+        let right_error = (right_projected - right_keypoint).norm();
+        if left_error > config.max_reprojection_error_pixels
+            || right_error > config.max_reprojection_error_pixels
+        {
+            continue;
+        }
+        let Some(point_covariance_left_camera_frame) = propagate_stereo_pixel_covariance(
+            left_camera,
+            right_camera,
+            left_to_right,
+            &left_keypoint,
+            &right_keypoint,
+            config.pixel_stddev_pixels,
+        ) else {
+            continue;
+        };
+        survivors.push(StereoBootstrapLandmark {
+            left_keypoint_index,
+            // Not indexed into a right FeatureSet; callers should keep the
+            // right pixel alongside this list (see optical-flow stereo path).
+            right_keypoint_index: 0,
+            point_left_camera_frame: point_left,
+            left_reprojection_error_pixels: left_error,
+            right_reprojection_error_pixels: right_error,
+            point_covariance_left_camera_frame,
+        });
+    }
+    survivors.sort_by_key(|landmark| landmark.left_keypoint_index);
+    survivors
+}
+
 /// Propagate independent isotropic left/right keypoint noise through the
 /// general two-view DLT triangulator.
 ///

@@ -13,15 +13,15 @@ Target: **Basalt-equivalent VI-SLAM** (`https://github.com/VladyslavUsenko/basal
 | Lever | Status |
 |---|---|
 | `euroc_config.json` imported + Rust bindings | **Done** (`BasaltVioConfig`) |
-| Demo `--basalt-euroc-profile` / `--basalt-config` | **Done** (maps `vio_max_kfs`, sqrt marg) |
+| Demo `--basalt-euroc-profile` / `--basalt-config` | **Done** (maps `vio_max_kfs`, sqrt marg, OF frontend) |
 | SqrtToSqrt window + FEJ carry | **Done** (`vi_sqrt_window`, demo default on) |
-| Frame-to-frame KLT (Pattern51, pyramid, FB gate) | **Scaffold** (`crates/vision/src/optical_flow`) — not yet wired into OnlineSlam |
+| Frame-to-frame KLT → OnlineSlam | **Wired** (`OpticalFlowFeatureExtractor`, track-id descriptors, stereo LK bootstrap) |
+| Track longevity / Basalt FB=0.04 | **Partial** — scaffold relaxes FB + iters; LSSD + Gaussian pyr still TODO (MH_01 smoke: ~2 tracked frames / 33 inliers then drop) |
 | FAST detection + LSSD + stereo epipolar OF | **Todo** |
-| OF tracks → landmarks / VI-BA | **Todo** |
 | NFR → pose graph (mapper_*) | **Partial** (NFR seed exists; not Basalt mapper) |
 
-Honest scoring of the **faithful Basalt port** (not the SuperPoint cliff stack):
-~**35%** (backend sqrt/FEJ + config + OF scaffold; frontend not in the VI loop yet).
+Honest scoring of the **faithful Basalt port**: ~**45%**
+(backend + config + OF in the VI loop; quality gap vs Basalt KLT remains).
 
 
 ## Basalt architecture (the target)

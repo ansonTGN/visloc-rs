@@ -119,7 +119,8 @@ use visloc_rs::vision::features::{
 };
 #[cfg(feature = "image-io")]
 use visloc_rs::vision::stereo_bootstrap::{
-    bootstrap_stereo_landmarks, StereoBootstrapConfig, StereoBootstrapLandmark,
+    bootstrap_stereo_landmarks, bootstrap_stereo_landmarks_from_correspondences,
+    StereoBootstrapConfig, StereoBootstrapLandmark,
 };
 #[cfg(feature = "image-io")]
 use visloc_rs::{
@@ -354,6 +355,8 @@ enum DemoExtractor {
     /// with a clear error message pointing the operator at the
     /// feature flag and the model path.
     SuperPointOnnx(visloc_vision::features::superpoint_onnx::SuperPointOnnxExtractor),
+    /// Basalt-faithful frame-to-frame KLT; track ids become descriptors.
+    OpticalFlow(visloc_rs::vision::optical_flow::OpticalFlowFeatureExtractor),
 }
 
 #[cfg(feature = "image-io")]
@@ -401,6 +404,7 @@ impl FeatureExtractor for DemoExtractor {
                 .extract_deep(image)
                 .map(|deep| deep.into_feature_set())
                 .map_err(|err| err.to_string()),
+            DemoExtractor::OpticalFlow(e) => e.extract(image),
         }
     }
 }
@@ -633,6 +637,9 @@ enum FeatureExtractorKind {
     /// ONNX model with the LightGlue-ONNX-style I/O contract (see
     /// `docs/superpoint_onnx_runtime_plan.md`).
     SuperPointOnnx,
+    /// Basalt-style frame-to-frame optical flow (Pattern51 KLT). Selected
+    /// automatically by `--basalt-euroc-profile` / `--basalt-config`.
+    OpticalFlow,
 }
 
 #[cfg(feature = "image-io")]
@@ -722,8 +729,12 @@ struct CliArgs {
     /// `vio_max_kfs = 7` via `--basalt-config`.
     local_vi_ba_window_size: usize,
     /// Optional path to Basalt `euroc_config.json` (or compatible). When set,
-    /// applies faithful VIO knobs (`vio_max_kfs`, `vio_sqrt_marg`, …).
+    /// applies faithful VIO knobs (`vio_max_kfs`, `vio_sqrt_marg`, …) and
+    /// selects the optical-flow frontend.
     basalt_config_path: Option<PathBuf>,
+    /// Optical-flow knobs used when `feature_extractor == OpticalFlow`
+    /// (from Basalt config or EuRoC defaults).
+    optical_flow_config: visloc_rs::vision::optical_flow::BasaltOpticalFlowConfig,
     /// Optional finite initialization uncertainty `(velocity, gyro bias,
     /// accel bias)` used by the first marginal prior.
     local_vi_ba_initial_prior_std_devs: Option<(f64, f64, f64)>,
@@ -1600,6 +1611,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut local_vi_ba_use_sqrt_window_marginalization: bool = true;
     let mut local_vi_ba_window_size: usize = OnlineSlamLocalBaConfig::default().window_size;
     let mut basalt_config_path: Option<PathBuf> = None;
+    let mut optical_flow_config =
+        visloc_rs::vision::optical_flow::BasaltOpticalFlowConfig::default();
     let mut local_vi_ba_initial_prior_std_devs: Option<(f64, f64, f64)> = None;
     let mut local_vi_ba_freeze_biases_above: Option<f64> = None;
     let mut local_vi_ba_reject_writeback_above: Option<f64> = None;
@@ -2586,9 +2599,12 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                     "hog" => FeatureExtractorKind::Hog,
                     "superpoint-offline" => FeatureExtractorKind::SuperPointOffline,
                     "superpoint-onnx" => FeatureExtractorKind::SuperPointOnnx,
+                    "optical-flow" | "basalt-optical-flow" | "klt" => {
+                        FeatureExtractorKind::OpticalFlow
+                    }
                     other => {
                         return Err(format!(
-                            "--feature-extractor: expected 'corner', 'hog', 'superpoint-offline', or 'superpoint-onnx', got {other:?}"
+                            "--feature-extractor: expected 'corner', 'hog', 'superpoint-offline', 'superpoint-onnx', or 'optical-flow', got {other:?}"
                         )
                         .into());
                     }
@@ -3605,9 +3621,34 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         local_vi_ba_marginalization = true;
         local_vi_ba_use_sqrt_window_marginalization = cfg.vio_sqrt_marg;
         local_vi_ba_window_size = cfg.vio_max_kfs.max(2) as usize;
+        optical_flow_config = cfg.optical_flow.clone();
+        // Scaffold KLT (SSD, no LSSD/SE2 yet) cannot meet Basalt's 0.04 px²
+        // forward-backward gate; keep the published value in the config file
+        // but widen the runtime check until LSSD lands.
+        if optical_flow_config.optical_flow_max_recovered_dist2 < 1.0 {
+            eprintln!(
+                "basalt OF scaffold: relaxing optical_flow_max_recovered_dist2 \
+                 {} -> 4.0 (Basalt 0.04 needs LSSD-quality LK)",
+                optical_flow_config.optical_flow_max_recovered_dist2
+            );
+            optical_flow_config.optical_flow_max_recovered_dist2 = 4.0;
+        }
+        feature_extractor = FeatureExtractorKind::OpticalFlow;
+        // Track-id descriptors are exact matches; mutual-softmax / SuperPoint
+        // cliff defaults do not apply to the Basalt OF frontend.
+        if !mutual_softmax_matcher_overridden {
+            mutual_softmax_matcher = false;
+        }
+        if !tracking_min_inliers_overridden {
+            // Stereo-seeded OF maps start with tens of landmarks, not hundreds.
+            tracking_min_inliers = 12;
+        }
+        // SuperPoint hover gate (80) is unreachable for a ~30-landmark stereo seed.
+        keyframe_min_inliers = Some(12);
         eprintln!(
             "basalt profile loaded from {} \
-             (vio_max_kfs={}, vio_sqrt_marg={}, of_levels={}, of_pattern={}, of_grid={})",
+             (vio_max_kfs={}, vio_sqrt_marg={}, frontend=optical-flow, \
+             of_levels={}, of_pattern={}, of_grid={})",
             path.display(),
             cfg.vio_max_kfs,
             cfg.vio_sqrt_marg,
@@ -3654,6 +3695,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         local_vi_ba_use_sqrt_window_marginalization,
         local_vi_ba_window_size,
         basalt_config_path,
+        optical_flow_config,
         local_vi_ba_initial_prior_std_devs,
         local_vi_ba_freeze_biases_above,
         local_vi_ba_reject_writeback_above,
@@ -4869,6 +4911,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             DemoExtractor::SuperPointOnnx(extractor)
         }
+        FeatureExtractorKind::OpticalFlow => {
+            println!(
+                "using Basalt-style optical-flow frontend (levels={}, pattern={}, grid={}, max_iters={})",
+                args.optical_flow_config.optical_flow_levels,
+                args.optical_flow_config.optical_flow_pattern,
+                args.optical_flow_config.optical_flow_detection_grid_size,
+                args.optical_flow_config.optical_flow_max_iterations,
+            );
+            DemoExtractor::OpticalFlow(
+                visloc_rs::vision::optical_flow::OpticalFlowFeatureExtractor::new(
+                    args.optical_flow_config.clone(),
+                ),
+            )
+        }
     };
     extractor.set_camera(SuperPointCamera::Cam0);
     extractor.set_frame_idx(seed_frame_idx);
@@ -4961,6 +5017,76 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 cam1_image_path.display()
             )
         })?;
+        if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
+            // Basalt stereo: LK each cam0 track into cam1 at the same timestamp
+            // on *raw* pixels, then undistort both sides before triangulation.
+            let DemoExtractor::OpticalFlow(ref of_extractor) = extractor else {
+                unreachable!("OpticalFlow kind requires OpticalFlow extractor");
+            };
+            let left_pts: Vec<(f32, f32)> = seed_features_raw
+                .keypoints
+                .iter()
+                .map(|p| (p.x as f32, p.y as f32))
+                .collect();
+            let tracked = of_extractor.track_points_to(&seed_image, &cam1_image, &left_pts);
+            stereo_cam1_features_count = tracked.iter().filter(|p| p.is_some()).count();
+
+            let mut right_undist_by_raw = vec![None; seed_features_raw.keypoints.len()];
+            for (raw_i, right) in tracked.into_iter().enumerate() {
+                let Some((rx, ry)) = right else {
+                    continue;
+                };
+                right_undist_by_raw[raw_i] = cam1_distortion
+                    .undistort_pixel(cam1_camera, Point2::new(rx as f64, ry as f64));
+            }
+
+            let mut correspondences = Vec::new();
+            let mut left_undist_idx = 0usize;
+            for (raw_i, kp) in seed_features_raw.keypoints.iter().enumerate() {
+                let Some(undist_left) = distortion.undistort_pixel(&camera, *kp) else {
+                    continue;
+                };
+                debug_assert_eq!(
+                    seed_features.keypoints[left_undist_idx], undist_left,
+                    "undistort filter order must match seed_features"
+                );
+                if let Some(undist_right) = right_undist_by_raw[raw_i] {
+                    correspondences.push((left_undist_idx, undist_right));
+                    stereo_right_pixels[left_undist_idx] = Some(undist_right);
+                }
+                left_undist_idx += 1;
+            }
+            stereo_cam1_features_after_undistort_count = correspondences.len();
+            stereo_bootstrap_matches = bootstrap_stereo_landmarks_from_correspondences(
+                &camera,
+                cam1_camera,
+                cam0_to_cam1,
+                &seed_features.keypoints,
+                &correspondences,
+                &StereoBootstrapConfig::default(),
+            );
+            let cam0_pose_camera_to_world = seed_pose.camera_to_world();
+            let rotation_camera_to_world = cam0_pose_camera_to_world
+                .rotation
+                .to_rotation_matrix()
+                .into_inner();
+            for survivor in &stereo_bootstrap_matches {
+                let world_point =
+                    cam0_pose_camera_to_world.transform_point(&survivor.point_left_camera_frame);
+                stereo_world_points[survivor.left_keypoint_index] = Some(world_point);
+                stereo_world_covariances[survivor.left_keypoint_index] = Some(
+                    rotation_camera_to_world
+                        * survivor.point_covariance_left_camera_frame
+                        * rotation_camera_to_world.transpose(),
+                );
+            }
+            println!(
+                "stereo_bootstrap(optical-flow) cam1_seed_idx={cam1_seed_idx} \
+                 lk_survivors={} triangulated_matches={}",
+                stereo_cam1_features_count,
+                stereo_bootstrap_matches.len(),
+            );
+        } else {
         // For the offline-replay path, switch the extractor to cam1
         // and to the cam1 seed frame index. The cam0/cam1 SuperPoint
         // pre-exports are aligned by frame index (the EuRoC streams
@@ -5009,6 +5135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             stereo_cam1_features_after_undistort_count,
             stereo_bootstrap_matches.len(),
         );
+        }
     }
 
     let mut map = bootstrap_map_from_first_frame(
@@ -5499,11 +5626,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
     } else if args.cross_check_matcher {
         DemoMatcher::CrossCheck(CrossCheckMatcher::new(BruteForceMatcher {
-            ratio: localization_config.ratio,
+            ratio: if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
+                None
+            } else {
+                localization_config.ratio
+            },
         }))
     } else {
         DemoMatcher::BruteForce(BruteForceMatcher {
-            ratio: localization_config.ratio,
+            // Track-id descriptors are unique; Lowe ratio is harmful.
+            ratio: if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
+                None
+            } else {
+                localization_config.ratio
+            },
         })
     };
     let atlas_bridge_localizer = LocalizationPipeline::new(
@@ -6037,11 +6173,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
         extractor.set_frame_idx(frame_idx);
-        let features = match extractor.extract(&image) {
-            Ok(features) => undistort_feature_keypoints(&distortion, &camera, &features),
-            Err(err) => {
-                eprintln!("skipping frame_idx={frame_idx} due to feature-extraction error: {err}");
-                continue;
+        let features = if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow)
+            && frame_idx == seed_frame_idx
+        {
+            // Reuse the exact FeatureSet that seeded the map so track-id
+            // descriptors match 1:1. Re-running KLT on the seed image can
+            // drop tracks and mint new ids, zeroing localization.
+            seed_features.clone()
+        } else {
+            match extractor.extract(&image) {
+                Ok(features) => undistort_feature_keypoints(&distortion, &camera, &features),
+                Err(err) => {
+                    eprintln!(
+                        "skipping frame_idx={frame_idx} due to feature-extraction error: {err}"
+                    );
+                    continue;
+                }
             }
         };
         feature_count_sum += features.len();
@@ -9195,6 +9342,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             FeatureExtractorKind::Hog => "hog",
             FeatureExtractorKind::SuperPointOffline => "superpoint-offline",
             FeatureExtractorKind::SuperPointOnnx => "superpoint-onnx",
+            FeatureExtractorKind::OpticalFlow => "optical-flow",
         },
         superpoint_features_dir = args.superpoint_features_dir,
         superpoint_cam1_features_dir = args.superpoint_cam1_features_dir,

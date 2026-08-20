@@ -44,13 +44,13 @@ Key VIO / OF knobs (EuRoC defaults):
 
 ## Missing for faithful parity (ordered)
 
-1. **Optical-flow frontend** (`crates/vision/src/optical_flow/`) matching
-   Basalt frame-to-frame KLT with the table above. Requires grayscale
-   images on the VI path (not descriptor-only SuperPoint frames).
-2. **Basalt profile loader** — deserialize `euroc_config.json` into
-   `BasaltVioConfig` and drive demo / `OnlineSlamLocalBaConfig` /
-   keyframe policy from those numbers (`vio_max_kfs=7`, etc.).
-3. **Wire OF tracks → landmarks / VI-BA** instead of appearance-global PnP.
+1. **Optical-flow frontend** — **wired** into `--basalt-euroc-profile`
+   (`OpticalFlowFeatureExtractor` → track-id descriptors → OnlineSlam;
+   stereo LK bootstrap). MH_01 smoke: ~33 inliers for 1–2 frames, then
+   tracks drop. Next: **LSSD + Gaussian pyramid** so Basalt's
+   `max_recovered_dist2=0.04` holds without scaffold relaxation.
+2. **FAST detection** (replace variance corner seed).
+3. **Stereo epipolar filter** (`optical_flow_epipolar_error=0.005`).
 4. **Mapper / NFR** with Basalt mapper_* knobs (after VIO tracks).
 5. Freeze the SuperPoint “tight-vi-tracking-cliff” stack as an alternate
    profile; do not mix its jump/inlier gates into the Basalt profile.
