@@ -1,10 +1,7 @@
-//! Frame-to-frame KLT with Basalt Pattern51 patch offsets.
-//!
-//! Uses inverse-compositional LK + SSD on Pattern51 samples. Illumination-
-//! invariant LSSD and exact Basalt recovery checks land in follow-up commits;
-//! grid detection / pyramid schedule already match `euroc_config.json`.
+//! Frame-to-frame KLT with Basalt Pattern51 + LSSD.
 
 use super::config::BasaltOpticalFlowConfig;
+use super::lssd::LssdPatch;
 use super::pyramid::{build_pyramid, GrayImage};
 
 /// Basalt Pattern52 raw offsets; Pattern51 = 0.5 × Pattern52.
@@ -66,7 +63,7 @@ const PATTERN52: [[f32; 2]; 52] = [
 /// Pattern51 sample count (Basalt `PATTERN_SIZE`).
 pub const PATTERN51_SIZE: usize = 52;
 
-fn pattern51_offsets() -> [(f32, f32); PATTERN51_SIZE] {
+pub(crate) fn pattern51_offsets() -> [(f32, f32); PATTERN51_SIZE] {
     let mut out = [(0.0f32, 0.0f32); PATTERN51_SIZE];
     for (i, p) in PATTERN52.iter().enumerate() {
         out[i] = (0.5 * p[0], 0.5 * p[1]);
@@ -74,8 +71,12 @@ fn pattern51_offsets() -> [(f32, f32); PATTERN51_SIZE] {
     out
 }
 
+#[cfg(test)]
+pub(crate) fn pattern51_offsets_for_test() -> [(f32, f32); PATTERN51_SIZE] {
+    pattern51_offsets()
+}
+
 /// Track a list of points from `from` into `to` (one-shot, no track ids).
-/// Used for Basalt-style left→right stereo optical flow at a shared timestamp.
 pub fn track_points_between(
     from: &GrayImage,
     to: &GrayImage,
@@ -103,7 +104,6 @@ pub fn track_points_between(
         .collect()
 }
 
-/// Stable track id (Basalt `KeypointId`).
 pub type KeypointId = u64;
 
 #[derive(Debug, Clone, Copy)]
@@ -120,7 +120,6 @@ pub struct OpticalFlowObservation {
     pub y: f32,
 }
 
-/// Stateful frame-to-frame optical-flow tracker.
 pub struct OpticalFlowTracker {
     config: BasaltOpticalFlowConfig,
     next_id: KeypointId,
@@ -148,7 +147,6 @@ impl OpticalFlowTracker {
         self.tracks.len()
     }
 
-    /// Process one grayscale frame; returns surviving (+ newly detected) observations.
     pub fn process(&mut self, image: &GrayImage) -> Vec<OpticalFlowObservation> {
         let levels = self.config.optical_flow_levels.max(1) as usize;
         let pyramid = build_pyramid(image, levels);
@@ -187,7 +185,6 @@ impl OpticalFlowTracker {
             else {
                 continue;
             };
-            // Forward-backward consistency (Basalt recovered-dist gate).
             let Some((xb, yb)) =
                 track_point(curr_pyr, prev_pyr, xf, yf, max_iters, &self.pattern)
             else {
@@ -248,8 +245,6 @@ fn strongest_corner(
     x1: usize,
     y1: usize,
 ) -> Option<(f32, f32)> {
-    // Simple Harris-like score via intensity variance in a 3×3 window; enough
-    // to seed tracks. Basalt uses FAST; swap in when wiring stereo OF.
     let mut best_score = 0.0f32;
     let mut best: Option<(f32, f32)> = None;
     let margin = 4usize;
@@ -285,6 +280,10 @@ fn strongest_corner(
     best
 }
 
+/// Coarse-to-fine LSSD translation tracking (Basalt `trackPoint` layout).
+///
+/// Pyramid layers are `0..=optical_flow_levels`. Any invalid patch / residual
+/// fails the whole track (Basalt `patch_valid &= ...`).
 fn track_point(
     from_pyr: &[GrayImage],
     to_pyr: &[GrayImage],
@@ -293,106 +292,45 @@ fn track_point(
     max_iters: usize,
     pattern: &[(f32, f32); PATTERN51_SIZE],
 ) -> Option<(f32, f32)> {
-    let levels = from_pyr.len().min(to_pyr.len());
-    let scale = 1.0f32 / (1 << (levels - 1)) as f32;
-    let mut x = x0 * scale;
-    let mut y = y0 * scale;
+    let num_layers = from_pyr.len().min(to_pyr.len());
+    if num_layers == 0 {
+        return None;
+    }
+    let max_level = num_layers - 1;
+    let mut x = x0;
+    let mut y = y0;
+    for level in (0..=max_level).rev() {
+        let scale = (1 << level) as f32;
+        x /= scale;
+        y /= scale;
 
-    for level in (0..levels).rev() {
-        let level_scale = 1.0f32 / (1 << level) as f32;
-        let target_x = x0 * level_scale;
-        let target_y = y0 * level_scale;
-        // Coarse init already in (x,y); refine on this level.
-        let _ = (target_x, target_y);
-        let from = &from_pyr[level];
-        let to = &to_pyr[level];
+        let patch = LssdPatch::from_image(&from_pyr[level], (x0 / scale, y0 / scale), pattern);
+        if !patch.valid {
+            return None;
+        }
         for _ in 0..max_iters {
-            let Some((dx, dy, ok)) = lk_step(from, to, target_x, target_y, x, y, pattern) else {
+            let Some((dx, dy)) = patch.track_step(&to_pyr[level], (x, y), pattern) else {
                 return None;
             };
+            // Basalt: transform *= SE2::exp(inc); translation-only → +=.
             x += dx;
             y += dy;
-            if !ok {
-                break;
+            if !to_pyr[level].in_bounds_margin(x, y, 2.0) {
+                return None;
             }
             if dx * dx + dy * dy < 1e-4 {
                 break;
             }
         }
-        if level > 0 {
-            x *= 2.0;
-            y *= 2.0;
-        }
+        x *= scale;
+        y *= scale;
     }
     Some((x, y))
-}
-
-fn lk_step(
-    template: &GrayImage,
-    image: &GrayImage,
-    tx: f32,
-    ty: f32,
-    ix: f32,
-    iy: f32,
-    pattern: &[(f32, f32); PATTERN51_SIZE],
-) -> Option<(f32, f32, bool)> {
-    // Inverse compositional: ∇T from the template; residual I(x+Δ) − T(x).
-    let mut a11 = 0.0f32;
-    let mut a12 = 0.0f32;
-    let mut a22 = 0.0f32;
-    let mut b1 = 0.0f32;
-    let mut b2 = 0.0f32;
-    let mut valid = 0usize;
-
-    for &(ox, oy) in pattern {
-        let px = tx + ox;
-        let py = ty + oy;
-        let Some(t) = template.sample_bilinear(px, py) else {
-            continue;
-        };
-        let Some(t_xm) = template.sample_bilinear(px - 0.5, py) else {
-            continue;
-        };
-        let Some(t_xp) = template.sample_bilinear(px + 0.5, py) else {
-            continue;
-        };
-        let Some(t_ym) = template.sample_bilinear(px, py - 0.5) else {
-            continue;
-        };
-        let Some(t_yp) = template.sample_bilinear(px, py + 0.5) else {
-            continue;
-        };
-        let gx = t_xp - t_xm;
-        let gy = t_yp - t_ym;
-        let Some(i_val) = image.sample_bilinear(ix + ox, iy + oy) else {
-            continue;
-        };
-        let r = i_val - t;
-        a11 += gx * gx;
-        a12 += gx * gy;
-        a22 += gy * gy;
-        b1 += gx * r;
-        b2 += gy * r;
-        valid += 1;
-    }
-
-    if valid < 16 {
-        return None;
-    }
-    let det = a11 * a22 - a12 * a12;
-    if det.abs() < 1e-6 {
-        return Some((0.0, 0.0, false));
-    }
-    // Δ = H⁻¹ Σ ∇T · r  moves the *template* warp; apply −Δ to the image point.
-    let dx = (a22 * b1 - a12 * b2) / det;
-    let dy = (-a12 * b1 + a11 * b2) / det;
-    Some((-dx, -dy, true))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::optical_flow::pyramid::build_pyramid;
     use crate::optical_flow::BasaltOpticalFlowConfig;
 
     fn shift_image(src: &GrayImage, dx: i32, dy: i32) -> GrayImage {
@@ -414,9 +352,8 @@ mod tests {
     }
 
     #[test]
-    fn tracks_integer_shift() {
+    fn tracks_integer_shift_with_lssd() {
         let mut data = vec![40u8; 128 * 96];
-        // Soft Gaussian blob → non-zero Pattern51 gradients at the center.
         let (cx, cy) = (58.0f32, 48.0f32);
         for y in 0..96 {
             for x in 0..128 {
@@ -430,25 +367,60 @@ mod tests {
         let img1 = shift_image(&img0, 3, -2);
 
         let mut cfg = BasaltOpticalFlowConfig::default();
-        cfg.optical_flow_levels = 1;
-        cfg.optical_flow_max_iterations = 12;
-        cfg.optical_flow_max_recovered_dist2 = 2.0;
-        let mut tracker = OpticalFlowTracker::new(cfg);
+        cfg.optical_flow_levels = 3;
+        cfg.optical_flow_max_iterations = 5;
+        cfg.optical_flow_max_recovered_dist2 = 0.04;
+        let mut tracker = OpticalFlowTracker::new(cfg.clone());
         tracker.tracks.push(TrackedKeypoint {
             id: 1,
             x: cx,
             y: cy,
         });
         tracker.next_id = 2;
-        tracker.prev_pyramid = Some(build_pyramid(&img0, 1));
+        tracker.prev_pyramid = Some(build_pyramid(&img0, cfg.optical_flow_levels as usize));
 
         let obs1 = tracker.process(&img1);
-        let hit = obs1.iter().find(|o| o.id == 1).expect("track 1 survived");
+        let hit = obs1.iter().find(|o| o.id == 1).expect("track 1 survived FB=0.04");
         assert!(
-            (hit.x - (cx + 3.0)).abs() < 1.0 && (hit.y - (cy - 2.0)).abs() < 1.0,
+            (hit.x - (cx + 3.0)).abs() < 0.5 && (hit.y - (cy - 2.0)).abs() < 0.5,
             "expected ~(+3,-2) flow, got ({}, {})",
             hit.x,
             hit.y
         );
+    }
+
+    #[test]
+    fn tracks_under_global_gain() {
+        let mut data = vec![40u8; 128 * 96];
+        let (cx, cy) = (58.0f32, 48.0f32);
+        for y in 0..96 {
+            for x in 0..128 {
+                let dx = x as f32 - cx;
+                let dy = y as f32 - cy;
+                let g = (-0.08 * (dx * dx + dy * dy)).exp();
+                data[y * 128 + x] = (40.0 + 120.0 * g) as u8;
+            }
+        }
+        let img0 = GrayImage::from_luma8(128, 96, data).unwrap();
+        let mut shifted = shift_image(&img0, 2, 1);
+        for v in &mut shifted.data {
+            *v = ((*v as f32) * 1.4).min(255.0) as u8;
+        }
+
+        let mut cfg = BasaltOpticalFlowConfig::default();
+        cfg.optical_flow_levels = 2;
+        cfg.optical_flow_max_iterations = 5;
+        cfg.optical_flow_max_recovered_dist2 = 0.25;
+        let mut tracker = OpticalFlowTracker::new(cfg.clone());
+        tracker.tracks.push(TrackedKeypoint {
+            id: 1,
+            x: cx,
+            y: cy,
+        });
+        tracker.next_id = 2;
+        tracker.prev_pyramid = Some(build_pyramid(&img0, cfg.optical_flow_levels as usize));
+        let obs1 = tracker.process(&shifted);
+        let hit = obs1.iter().find(|o| o.id == 1).expect("gain-robust track");
+        assert!((hit.x - (cx + 2.0)).abs() < 1.0 && (hit.y - (cy + 1.0)).abs() < 1.0);
     }
 }

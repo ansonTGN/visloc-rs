@@ -6,6 +6,7 @@
 
 mod config;
 mod feature_bridge;
+mod lssd;
 mod pyramid;
 mod tracker;
 
@@ -14,7 +15,7 @@ pub use feature_bridge::{
     encode_track_id_descriptor, gray_image_from_features_image, OpticalFlowFeatureExtractor,
     TRACK_ID_DESCRIPTOR_DIM,
 };
-pub use pyramid::{build_pyramid, GrayImage};
+pub use pyramid::{build_pyramid, pyramid_layer_count, GrayImage};
 pub use tracker::{
     track_points_between, OpticalFlowObservation, OpticalFlowTracker, TrackedKeypoint,
     PATTERN51_SIZE,

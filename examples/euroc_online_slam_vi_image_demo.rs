@@ -316,6 +316,12 @@ enum DemoMatcher {
     BruteForce(BruteForceMatcher),
     CrossCheck(CrossCheckMatcher<BruteForceMatcher>),
     MutualSoftmax(MutualSoftmaxMatcher),
+    /// Brute-force NN then drop matches above `max_distance` (optical-flow
+    /// track-id descriptors: only distance≈0 is a real association).
+    MaxDistance {
+        inner: BruteForceMatcher,
+        max_distance: f32,
+    },
 }
 
 #[cfg(feature = "image-io")]
@@ -325,6 +331,14 @@ impl Matcher for DemoMatcher {
             DemoMatcher::BruteForce(m) => m.match_descriptors(query, train),
             DemoMatcher::CrossCheck(m) => m.match_descriptors(query, train),
             DemoMatcher::MutualSoftmax(m) => m.match_descriptors(query, train),
+            DemoMatcher::MaxDistance {
+                inner,
+                max_distance,
+            } => inner
+                .match_descriptors(query, train)
+                .into_iter()
+                .filter(|m| m.distance <= *max_distance)
+                .collect(),
         }
     }
 }
@@ -3622,17 +3636,9 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         local_vi_ba_use_sqrt_window_marginalization = cfg.vio_sqrt_marg;
         local_vi_ba_window_size = cfg.vio_max_kfs.max(2) as usize;
         optical_flow_config = cfg.optical_flow.clone();
-        // Scaffold KLT (SSD, no LSSD/SE2 yet) cannot meet Basalt's 0.04 px²
-        // forward-backward gate; keep the published value in the config file
-        // but widen the runtime check until LSSD lands.
-        if optical_flow_config.optical_flow_max_recovered_dist2 < 1.0 {
-            eprintln!(
-                "basalt OF scaffold: relaxing optical_flow_max_recovered_dist2 \
-                 {} -> 4.0 (Basalt 0.04 needs LSSD-quality LK)",
-                optical_flow_config.optical_flow_max_recovered_dist2
-            );
-            optical_flow_config.optical_flow_max_recovered_dist2 = 4.0;
-        }
+        // Keep Basalt's published FB gate (0.04). Softening it for temporal
+        // survival also loosens same-timestamp stereo LK and poisons the
+        // metric seed (seed-frame PnP then falls to ~4 inliers / 62 LMs).
         feature_extractor = FeatureExtractorKind::OpticalFlow;
         // Track-id descriptors are exact matches; mutual-softmax / SuperPoint
         // cliff defaults do not apply to the Basalt OF frontend.
@@ -3640,11 +3646,13 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             mutual_softmax_matcher = false;
         }
         if !tracking_min_inliers_overridden {
-            // Stereo-seeded OF maps start with tens of landmarks, not hundreds.
-            tracking_min_inliers = 12;
+            // Stereo-seeded OF maps start with tens of landmarks; tracks thin
+            // out under FB=0.04. 8 keeps early frames alive without the
+            // SuperPoint cliff (80) defaults.
+            tracking_min_inliers = 8;
         }
-        // SuperPoint hover gate (80) is unreachable for a ~30-landmark stereo seed.
-        keyframe_min_inliers = Some(12);
+        // SuperPoint hover gate (80) is unreachable for a ~50-landmark stereo seed.
+        keyframe_min_inliers = Some(8);
         eprintln!(
             "basalt profile loaded from {} \
              (vio_max_kfs={}, vio_sqrt_marg={}, frontend=optical-flow, \
@@ -5624,22 +5632,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             min_confidence: args.mutual_softmax_min_confidence,
             ..MutualSoftmaxConfig::default()
         }))
+    } else if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
+        // Track-id descriptors are exact; Lowe ratio is harmful and any
+        // non-zero NN latch onto a neighbour id poisons PnP.
+        DemoMatcher::MaxDistance {
+            inner: BruteForceMatcher { ratio: None },
+            max_distance: 1.0e-3,
+        }
     } else if args.cross_check_matcher {
         DemoMatcher::CrossCheck(CrossCheckMatcher::new(BruteForceMatcher {
-            ratio: if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
-                None
-            } else {
-                localization_config.ratio
-            },
+            ratio: localization_config.ratio,
         }))
     } else {
         DemoMatcher::BruteForce(BruteForceMatcher {
-            // Track-id descriptors are unique; Lowe ratio is harmful.
-            ratio: if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
-                None
-            } else {
-                localization_config.ratio
-            },
+            ratio: localization_config.ratio,
         })
     };
     let atlas_bridge_localizer = LocalizationPipeline::new(
@@ -6229,7 +6235,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // so this demo deliberately does not build a second 3D point set for
         // per-loop Sim3 scale estimation.
         let cam1_features_for_frame = if args.stereo_landmark_replenish {
-            if let Some(cam1_setup) = cam1_stereo_setup.as_ref() {
+            if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
+                // The OpticalFlow extractor owns a single cam0-temporal KLT
+                // state. Feeding it cam1 frames (as SuperPoint/corner do)
+                // advances that state across stereo instead of time and
+                // zeroes localization. Stereo LK for OF uses
+                // `track_points_to` (seed path); mid-run replenish/rebootstrap
+                // stay disabled here until that path is wired per-frame.
+                None
+            } else if let Some(cam1_setup) = cam1_stereo_setup.as_ref() {
                 if let Some(cam1_idx) = dataset.cam1_images.iter().position(|entry| {
                     entry.timestamp_nanoseconds == image_entry.timestamp_nanoseconds
                 }) {
