@@ -1661,6 +1661,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut pose_jump_gap_scaling: bool = false;
     let mut pose_jump_gap_scaling_max_multiplier: usize = 10;
     let mut tracking_min_inliers: usize = 0;
+    let mut tracking_min_inliers_overridden: bool = false;
     let mut tracking_min_inlier_ratio: f64 = 0.0;
     let mut tracking_max_reprojection_error: Option<f64> = None;
     let mut pnp_pose_prior_warm_start: bool = false;
@@ -2349,6 +2350,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--tracking-min-inliers" => {
                 tracking_min_inliers = args.remove(i + 1).parse()?;
+                tracking_min_inliers_overridden = true;
                 args.remove(i);
             }
             "--tracking-min-inlier-ratio" => {
@@ -3118,6 +3120,20 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         }
         if local_vi_ba_freeze_biases_above.is_none() {
             local_vi_ba_freeze_biases_above = Some(0.9);
+        }
+    }
+    if motion_vi_init_enabled {
+        if !tracking_min_inliers_overridden {
+            // Gate44 hover: frames 133/137/157 were logged as tracking
+            // successes with 27/31/0 inliers and 0.08–0.73 m jumps. That
+            // inflates path length ~25x vs GT. Keep last-good pose instead.
+            tracking_min_inliers = 30;
+        }
+        if max_pose_jump_meters.is_none() {
+            // Constant-pose prior: this is a per-frame teleport cap.
+            // EuRoC 20 Hz at 2 m/s is 0.1 m/frame; 0.2 m still allows
+            // takeoff while blocking the 0.22–0.73 m hover teleports.
+            max_pose_jump_meters = Some(0.2);
         }
     }
     if !motion_vi_init_enabled
