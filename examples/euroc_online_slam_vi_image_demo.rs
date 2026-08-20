@@ -1083,6 +1083,10 @@ struct CliArgs {
     /// signal under-exploited; mutually exclusive with
     /// `--cross-check-matcher`. Off by default.
     mutual_softmax_matcher: bool,
+    /// Mutual-softmax inverse temperature (higher = peakier). Default 20.
+    mutual_softmax_temperature: f32,
+    /// Mutual-softmax dual-softmax confidence floor in (0, 1]. Default 0.2.
+    mutual_softmax_min_confidence: f32,
     /// Selects the feature extractor backing the per-frame descriptor
     /// stream. `corner` (the default) is the existing
     /// `CornerFeatureExtractor` with raw patch descriptors. `hog` is
@@ -1687,6 +1691,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut cross_check_matcher: bool = false;
     let mut mutual_softmax_matcher: bool = false;
     let mut mutual_softmax_matcher_overridden: bool = false;
+    let mut mutual_softmax_temperature: f32 = 20.0;
+    let mut mutual_softmax_min_confidence: f32 = 0.2;
     let mut feature_extractor: FeatureExtractorKind = FeatureExtractorKind::Corner;
     let mut hog_max_features: usize = 1500;
     let mut hog_min_corner_score: f32 = 0.05;
@@ -2490,6 +2496,14 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                 mutual_softmax_matcher_overridden = true;
                 args.remove(i);
             }
+            "--mutual-softmax-temperature" => {
+                mutual_softmax_temperature = args.remove(i + 1).parse()?;
+                args.remove(i);
+            }
+            "--mutual-softmax-min-confidence" => {
+                mutual_softmax_min_confidence = args.remove(i + 1).parse()?;
+                args.remove(i);
+            }
             "--feature-extractor" => {
                 let kind = args.remove(i + 1);
                 feature_extractor = match kind.as_str() {
@@ -3187,6 +3201,15 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     if pose_prior_visual_override && max_pose_jump_meters.is_none() {
         return Err("--pose-prior-visual-override requires --max-pose-jump-meters".into());
     }
+    if !mutual_softmax_temperature.is_finite() || mutual_softmax_temperature < 0.0 {
+        return Err("--mutual-softmax-temperature must be finite and >= 0".into());
+    }
+    if !mutual_softmax_min_confidence.is_finite()
+        || mutual_softmax_min_confidence <= 0.0
+        || mutual_softmax_min_confidence > 1.0
+    {
+        return Err("--mutual-softmax-min-confidence must be in (0, 1]".into());
+    }
     if !motion_vi_init_enabled
         && (motion_vi_init_max_velocity_mps.is_some()
             || motion_vi_init_max_gyro_bias_rad_s.is_some()
@@ -3606,6 +3629,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         imu_motion_model_carry_forward_velocity,
         cross_check_matcher,
         mutual_softmax_matcher,
+        mutual_softmax_temperature,
+        mutual_softmax_min_confidence,
         feature_extractor,
         hog_max_features,
         hog_min_corner_score,
@@ -5342,7 +5367,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let demo_matcher = if args.mutual_softmax_matcher {
-        DemoMatcher::MutualSoftmax(MutualSoftmaxMatcher::new(MutualSoftmaxConfig::default()))
+        DemoMatcher::MutualSoftmax(MutualSoftmaxMatcher::new(MutualSoftmaxConfig {
+            temperature: args.mutual_softmax_temperature,
+            min_confidence: args.mutual_softmax_min_confidence,
+            ..MutualSoftmaxConfig::default()
+        }))
     } else if args.cross_check_matcher {
         DemoMatcher::CrossCheck(CrossCheckMatcher::new(BruteForceMatcher {
             ratio: localization_config.ratio,
@@ -8482,6 +8511,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          adaptive_motion_final_mode={adaptive_final_mode}\n\
          cross_check_matcher={cross_check}\n\
          mutual_softmax_matcher={mutual_softmax}\n\
+         mutual_softmax_temperature={mutual_softmax_temperature}\n\
+         mutual_softmax_min_confidence={mutual_softmax_min_confidence}\n\
          feature_extractor={feature_extractor_kind}\n\
          superpoint_features_dir={superpoint_features_dir:?}\n\
          superpoint_cam1_features_dir={superpoint_cam1_features_dir:?}\n\
@@ -9016,6 +9047,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         cross_check = args.cross_check_matcher,
         mutual_softmax = args.mutual_softmax_matcher,
+        mutual_softmax_temperature = args.mutual_softmax_temperature,
+        mutual_softmax_min_confidence = args.mutual_softmax_min_confidence,
         feature_extractor_kind = match args.feature_extractor {
             FeatureExtractorKind::Corner => "corner",
             FeatureExtractorKind::Hog => "hog",
