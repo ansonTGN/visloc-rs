@@ -3124,9 +3124,9 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     }
     if motion_vi_init_enabled {
         if !tracking_min_inliers_overridden {
-            // Gate44 hover: frames 133/137/157 were logged as tracking
-            // successes with 27/31/0 inliers and 0.08–0.73 m jumps. That
-            // inflates path length ~25x vs GT. Keep last-good pose instead.
+            // Gate45: rejecting <30-inlier hover poses recovered Sim(3)
+            // scale 0.013 → 0.97 and rigid ATE 1.33 → 0.11 m on MH_01 800f.
+            // Softening to 15 (gate46) path-dependently worsened both.
             tracking_min_inliers = 30;
         }
         if max_pose_jump_meters.is_none() {
