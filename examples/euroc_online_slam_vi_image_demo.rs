@@ -1665,6 +1665,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut tracking_min_inlier_ratio: f64 = 0.0;
     let mut tracking_max_reprojection_error: Option<f64> = None;
     let mut pnp_pose_prior_warm_start: bool = false;
+    let mut pnp_pose_prior_warm_start_overridden: bool = false;
     let mut projection_guided_tracking: bool = false;
     let mut projection_search_radius_px: f64 = 15.0;
     let mut projection_widen_factor: f64 = 2.0;
@@ -1680,6 +1681,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut projection_refinement_max_rotation_correction_deg: Option<f64> = None;
     let mut pnp_reprojection_threshold_px: Option<f64> = None;
     let mut motion_model: MotionModelKind = MotionModelKind::Pose;
+    let mut motion_model_overridden: bool = false;
     let mut imu_extrinsic_from_cam0: bool = false;
     let mut imu_motion_model_carry_forward_velocity: bool = false;
     let mut cross_check_matcher: bool = false;
@@ -2377,6 +2379,12 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--pnp-pose-prior-warm-start" => {
                 pnp_pose_prior_warm_start = true;
+                pnp_pose_prior_warm_start_overridden = true;
+                args.remove(i);
+            }
+            "--no-pnp-pose-prior-warm-start" => {
+                pnp_pose_prior_warm_start = false;
+                pnp_pose_prior_warm_start_overridden = true;
                 args.remove(i);
             }
             "--projection-guided-tracking" => {
@@ -2457,6 +2465,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                         .into());
                     }
                 };
+                motion_model_overridden = true;
                 args.remove(i);
             }
             "--imu-extrinsic-from-cam0" => {
@@ -3161,9 +3170,17 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             // inlier/jump locks). Slower than brute-force, but usable.
             mutual_softmax_matcher = true;
         }
-        // Do NOT default pose-prior-visual-override: gate58 (soft override
-        // min_inl 50 / mult 5×) gained +2pp tracking but collapsed Sim(3)
-        // scale 0.79 → 0.28. Keep opt-in; try tighter bars before defaulting.
+        if !motion_model_overridden {
+            // Gate62: adaptive-imu-pose + MS → tracking 0.56 / scale 0.93
+            // (vs constant-pose gate54 0.55 / 0.79). Pure `--motion-model
+            // imu` (gate61) kept scale but dropped tracking to 0.22.
+            motion_model = MotionModelKind::AdaptiveImuPose;
+            if !pnp_pose_prior_warm_start_overridden {
+                pnp_pose_prior_warm_start = true;
+            }
+        }
+        // Do NOT default pose-prior-visual-override: gate58/60 raised
+        // tracking but collapsed Sim(3) scale. Keep opt-in.
         // Do NOT default pose-jump-gap-scaling (gate50: scale 0.55) or
         // covis local map (gate52). Keep those as opt-in.
     }
