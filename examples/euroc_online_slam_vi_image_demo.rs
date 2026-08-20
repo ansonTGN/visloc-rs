@@ -2340,8 +2340,16 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                 pose_prior_visual_override = true;
                 args.remove(i);
             }
+            "--no-pose-prior-visual-override" => {
+                pose_prior_visual_override = false;
+                args.remove(i);
+            }
             "--pose-jump-gap-scaling" => {
                 pose_jump_gap_scaling = true;
+                args.remove(i);
+            }
+            "--no-pose-jump-gap-scaling" => {
+                pose_jump_gap_scaling = false;
                 args.remove(i);
             }
             "--pose-jump-gap-scaling-max-multiplier" => {
@@ -3135,6 +3143,15 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             // takeoff while blocking the 0.22–0.73 m hover teleports.
             max_pose_jump_meters = Some(0.2);
         }
+        if keyframe_min_inliers.is_none() {
+            // Tracking may succeed at 30 inliers; promoting those frames
+            // as KFs poisons the map during hover. Keep the local map
+            // seeded from well-supported poses only.
+            keyframe_min_inliers = Some(80);
+        }
+        // Do NOT default pose-jump-gap-scaling (gate50: scale 0.55) or
+        // pose-prior-visual-override + covis local map (gate52: tracking
+        // and scale both regressed vs gate45). Keep those as opt-in.
     }
     if !motion_vi_init_enabled
         && (motion_vi_init_max_velocity_mps.is_some()
@@ -5210,9 +5227,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tracking_config = TrackingConfig {
         covisibility_local_map: covisibility_config,
         max_pose_prior_translation_error: args.max_pose_jump_meters,
-        pose_prior_visual_override: args
-            .pose_prior_visual_override
-            .then(PosePriorVisualOverrideConfig::default),
+        pose_prior_visual_override: args.pose_prior_visual_override.then(|| {
+            if args.motion_vi_init_enabled {
+                // Default override (100 inl / 0.6 ratio) never fired on
+                // gate51. Lower the bar so strong-but-not-perfect hover
+                // recoveries can widen the 0.2 m gate without admitting
+                // the weak 0–30 inlier teleports that collapsed scale.
+                PosePriorVisualOverrideConfig {
+                    min_inliers: 50,
+                    min_inlier_ratio: 0.35,
+                    max_mean_reprojection_error: Some(3.5),
+                    max_rotation_error_radians: Some(3.0_f64.to_radians()),
+                    max_translation_error_multiplier: 5.0,
+                    ..PosePriorVisualOverrideConfig::default()
+                }
+            } else {
+                PosePriorVisualOverrideConfig::default()
+            }
+        }),
         min_inliers: args.tracking_min_inliers,
         min_inlier_ratio: args.tracking_min_inlier_ratio,
         max_mean_reprojection_error: args.tracking_max_reprojection_error,
