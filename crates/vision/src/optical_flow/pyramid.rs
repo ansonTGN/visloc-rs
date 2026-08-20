@@ -72,37 +72,83 @@ pub fn pyramid_layer_count(optical_flow_levels: usize) -> usize {
     optical_flow_levels + 1
 }
 
+/// Basalt `ManagedImagePyr::border101` (used on the far side of a tap).
+#[inline]
+fn border101(x: i32, size: i32) -> i32 {
+    size - 1 - (size - 1 - x).abs()
+}
+
+/// Basalt 5-tap binomial `[1,4,6,4,1]` subsample-by-2 (separable, `/256`).
+///
+/// Clean-room port of `ManagedImagePyr::subsample` in basalt-headers.
+fn subsample_binomial(img: &GrayImage) -> GrayImage {
+    const KERNEL: [i32; 5] = [1, 4, 6, 4, 1];
+    let out_w = (img.width / 2).max(1);
+    let out_h = (img.height / 2).max(1);
+    let w = img.width as i32;
+    let h = img.height as i32;
+
+    // Vertical pass → (out_h × width) int accumulator (Basalt `tmp`).
+    let mut tmp = vec![0i32; out_h * img.width];
+    for r in 0..out_h {
+        let r_i = r as i32;
+        // Basalt: abs on the near (top) side, border101 on the far side.
+        let ys = [
+            (2 * r_i - 2).abs(),
+            (2 * r_i - 1).abs(),
+            2 * r_i,
+            border101(2 * r_i + 1, h),
+            border101(2 * r_i + 2, h),
+        ];
+        for c in 0..img.width {
+            let mut acc = 0i32;
+            for k in 0..5 {
+                let y = ys[k] as usize;
+                acc += KERNEL[k] * img.data[y * img.width + c] as i32;
+            }
+            tmp[r * img.width + c] = acc;
+        }
+    }
+
+    // Horizontal pass → (out_h × out_w) u8, round-div 256.
+    let mut data = vec![0u8; out_w * out_h];
+    for r in 0..out_h {
+        for c in 0..out_w {
+            let c_i = c as i32;
+            let xs = [
+                (2 * c_i - 2).abs(),
+                (2 * c_i - 1).abs(),
+                2 * c_i,
+                border101(2 * c_i + 1, w),
+                border101(2 * c_i + 2, w),
+            ];
+            let mut acc = 0i32;
+            for k in 0..5 {
+                let x = xs[k] as usize;
+                acc += KERNEL[k] * tmp[r * img.width + x];
+            }
+            data[r * out_w + c] = ((acc + (1 << 7)) >> 8).clamp(0, 255) as u8;
+        }
+    }
+
+    GrayImage {
+        width: out_w,
+        height: out_h,
+        data,
+    }
+}
+
 /// Build pyramid levels `0..=optical_flow_levels` (Basalt convention).
 ///
-/// Level 0 is full resolution. Downsample is currently 2×2 box (stable);
-/// Basalt's 5×5 binomial Gaussian returns once temporal FB is green.
+/// Level 0 is full resolution; coarser levels use Basalt's 5×5 binomial
+/// Gaussian subsample.
 pub fn build_pyramid(image: &GrayImage, optical_flow_levels: usize) -> Vec<GrayImage> {
     let num_layers = pyramid_layer_count(optical_flow_levels);
     let mut out = Vec::with_capacity(num_layers);
     out.push(image.clone());
     for _ in 1..num_layers {
-        let prev = out.last().unwrap();
-        let w = (prev.width / 2).max(1);
-        let h = (prev.height / 2).max(1);
-        let mut data = vec![0u8; w * h];
-        for y in 0..h {
-            for x in 0..w {
-                let x0 = x * 2;
-                let y0 = y * 2;
-                let x1 = (x0 + 1).min(prev.width - 1);
-                let y1 = (y0 + 1).min(prev.height - 1);
-                let s = prev.data[y0 * prev.width + x0] as u32
-                    + prev.data[y0 * prev.width + x1] as u32
-                    + prev.data[y1 * prev.width + x0] as u32
-                    + prev.data[y1 * prev.width + x1] as u32;
-                data[y * w + x] = (s / 4) as u8;
-            }
-        }
-        out.push(GrayImage {
-            width: w,
-            height: h,
-            data,
-        });
+        let next = subsample_binomial(out.last().unwrap());
+        out.push(next);
     }
     out
 }
@@ -121,5 +167,33 @@ mod tests {
         assert_eq!((pyr[1].width, pyr[1].height), (32, 24));
         assert_eq!((pyr[2].width, pyr[2].height), (16, 12));
         assert_eq!((pyr[3].width, pyr[3].height), (8, 6));
+    }
+
+    #[test]
+    fn binomial_preserves_constant_image() {
+        let img = GrayImage::from_luma8(32, 24, vec![100u8; 32 * 24]).unwrap();
+        let half = subsample_binomial(&img);
+        assert_eq!((half.width, half.height), (16, 12));
+        assert!(
+            half.data.iter().all(|&v| v == 100),
+            "constant field must survive /256 binomial, got {:?}",
+            half.data.iter().copied().max()
+        );
+    }
+
+    #[test]
+    fn binomial_smooths_impulse() {
+        let mut data = vec![0u8; 32 * 32];
+        data[16 * 32 + 16] = 255;
+        let img = GrayImage::from_luma8(32, 32, data).unwrap();
+        let half = subsample_binomial(&img);
+        // Impulse energy spreads; center neighbourhood must be nonzero and
+        // strictly less than 255.
+        let cx = 8usize;
+        let cy = 8usize;
+        let center = half.data[cy * half.width + cx];
+        assert!(center > 0 && center < 255, "center={center}");
+        let sum: u32 = half.data.iter().map(|&v| v as u32).sum();
+        assert!(sum > 0);
     }
 }
