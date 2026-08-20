@@ -261,6 +261,72 @@ pub fn bootstrap_stereo_landmarks_from_correspondences(
     survivors
 }
 
+/// Basalt `filterPoints` epipolar gate for already-undistorted stereo pairs.
+///
+/// Builds `E = [t]_× R` from `left_to_right` and drops correspondences whose
+/// unit-bearing Sampson-style score `|b_rightᵀ E b_left|` exceeds
+/// `max_epipolar_error` (Basalt default `0.005`).
+pub fn filter_correspondences_by_epipolar(
+    left_camera: &Camera,
+    right_camera: &Camera,
+    left_to_right: &SE3,
+    left_keypoints: &[Point2<f64>],
+    correspondences: &[(usize, Point2<f64>)],
+    max_epipolar_error: f64,
+) -> Vec<(usize, Point2<f64>)> {
+    let Some(essential) = essential_from_left_to_right(left_to_right) else {
+        return correspondences.to_vec();
+    };
+    correspondences
+        .iter()
+        .copied()
+        .filter(|&(left_idx, right_px)| {
+            let Some(left_px) = left_keypoints.get(left_idx).copied() else {
+                return false;
+            };
+            let Some(b0) = bearing_from_undistorted_pixel(left_camera, left_px) else {
+                return false;
+            };
+            let Some(b1) = bearing_from_undistorted_pixel(right_camera, right_px) else {
+                return false;
+            };
+            let err = (b1.transpose() * essential * b0).x.abs();
+            err <= max_epipolar_error
+        })
+        .collect()
+}
+
+fn essential_from_left_to_right(left_to_right: &SE3) -> Option<Matrix3<f64>> {
+    let rotation = left_to_right.rotation.to_rotation_matrix().into_inner();
+    let t = left_to_right.translation;
+    if t.norm() < 1e-12 {
+        return None;
+    }
+    Some(skew_symmetric(t) * rotation)
+}
+
+fn skew_symmetric(v: nalgebra::Vector3<f64>) -> Matrix3<f64> {
+    Matrix3::new(0.0, -v.z, v.y, v.z, 0.0, -v.x, -v.y, v.x, 0.0)
+}
+
+/// Ideal-pinhole bearing for an **already undistorted** pixel (no second
+/// radial inversion — OF / SuperPoint bootstrap paths undistort upstream).
+fn bearing_from_undistorted_pixel(
+    camera: &Camera,
+    pixel: Point2<f64>,
+) -> Option<nalgebra::Vector3<f64>> {
+    let (fx, fy, cx, cy) = camera.intrinsics()?;
+    if fx.abs() < 1e-12 || fy.abs() < 1e-12 {
+        return None;
+    }
+    let v = nalgebra::Vector3::new((pixel.x - cx) / fx, (pixel.y - cy) / fy, 1.0);
+    let n = v.norm();
+    if n < 1e-12 {
+        return None;
+    }
+    Some(v / n)
+}
+
 /// Propagate independent isotropic left/right keypoint noise through the
 /// general two-view DLT triangulator.
 ///

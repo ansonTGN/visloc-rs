@@ -1,9 +1,8 @@
 //! Basalt-style LSSD residual (mean-normalized SSD) for translation IC.
 //!
 //! Clean-room port of the illumination model in Basalt `OpticalFlowPatch`
-//! (`data /= mean`, residual = `I/mean_I - T/mean_T`). Translation-only
-//! for the first LSSD landing; SE2 can return once EuRoC temporal FB=0.04
-//! is stable.
+//! (`data /= mean`, residual = `I/mean_I - T/mean_T`). SE(2) Jacobian is
+//! staged separately — full SE2 currently thins EuRoC tracks under FB=0.04.
 
 use super::pyramid::GrayImage;
 use super::tracker::PATTERN51_SIZE;
@@ -121,7 +120,6 @@ impl LssdPatch {
             let (ox, oy) = pattern[i];
             let px = pos.0 + ox;
             let py = pos.1 + oy;
-            // Basalt `residual`: InBounds(p, 2) before interp.
             if !image.in_bounds_margin(px, py, 2.0) {
                 raw[i] = INVALID;
                 continue;

@@ -5065,6 +5065,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 left_undist_idx += 1;
             }
             stereo_cam1_features_after_undistort_count = correspondences.len();
+            let epi_thresh = args
+                .optical_flow_config
+                .optical_flow_epipolar_error
+                .max(0.0) as f64;
+            let before_epi = correspondences.len();
+            let correspondences = visloc_rs::vision::stereo_bootstrap::filter_correspondences_by_epipolar(
+                &camera,
+                cam1_camera,
+                cam0_to_cam1,
+                &seed_features.keypoints,
+                &correspondences,
+                epi_thresh,
+            );
+            if before_epi != correspondences.len() {
+                eprintln!(
+                    "basalt OF stereo epipolar: {before_epi} -> {} (thresh={epi_thresh})",
+                    correspondences.len()
+                );
+            }
+            // Refresh right-pixel slots to epipolar survivors only.
+            for slot in stereo_right_pixels.iter_mut() {
+                *slot = None;
+            }
+            for &(left_idx, right_px) in &correspondences {
+                stereo_right_pixels[left_idx] = Some(right_px);
+            }
             stereo_bootstrap_matches = bootstrap_stereo_landmarks_from_correspondences(
                 &camera,
                 cam1_camera,
