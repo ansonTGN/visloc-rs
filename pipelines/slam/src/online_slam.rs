@@ -2264,6 +2264,33 @@ pub struct OnlineSlamLoopClosureRefinementConfig {
     pub solver: LoopRefinementSolver,
 }
 
+impl OnlineSlamLoopClosureRefinementConfig {
+    /// Pose-graph mirror that registers keyframes for recovered marginal factors
+    /// without ever triggering PGO (Basalt mapper sink).
+    pub fn recovered_factor_sink(camera: Camera) -> Self {
+        Self {
+            camera,
+            verifier_config: LoopClosureVerifierConfig::default(),
+            verifier: LoopRefinementVerifier::EssentialMatrix,
+            pose_graph_config: PoseGraphSe3Config::default(),
+            fixed_loop_edge_weight: None,
+            loop_pose_information: None,
+            gnc: None,
+            pcm: None,
+            covariance_gate: None,
+            pcm_batch_rescreen: false,
+            marginalization_window: None,
+            marginalization_sparsify: false,
+            trigger_every_new_constraints: usize::MAX,
+            appearance_candidates: None,
+            fuse_loop_observations: false,
+            loop_welding_ba: None,
+            propagate_corrections: false,
+            solver: LoopRefinementSolver::Se3,
+        }
+    }
+}
+
 /// Running state for the online loop-closure + pose-graph refinement
 /// stage. Lives on [`OnlineSlamPipeline`] when
 /// [`OnlineSlamConfig::pose_graph_refinement`] is `Some`.
@@ -3091,6 +3118,16 @@ where
             &mut loop_closure_candidates,
             metric_points_camera,
         );
+        if self
+            .local_vi_ba_state
+            .as_ref()
+            .is_some_and(|s| !s.pending_recovered_pose_factors.is_empty())
+        {
+            let injected = self.maybe_inject_recovered_factors();
+            if let Some(ref mut stats) = local_vi_ba.as_mut() {
+                stats.recovered_marginal_factors_injected = injected;
+            }
+        }
 
         OnlineSlamResult {
             tracking,
@@ -4730,9 +4767,6 @@ where
             return None;
         }
         let result = crate::online_slam_vi_ba::run_local_vi_ba(&mut self.map, state);
-        if result.is_some() {
-            self.maybe_inject_recovered_factors();
-        }
         result
     }
 
@@ -4745,56 +4779,38 @@ where
     /// - no `sqrt_nav_marginal` is available (first window),
     /// - there is no active `pose_graph_state`, or
     /// - there are fewer than 2 retained keyframes (single-node tree has no edges).
-    fn maybe_inject_recovered_factors(&mut self) {
-        let vi_ba_state = match self.local_vi_ba_state.as_ref() {
+    fn maybe_inject_recovered_factors(&mut self) -> usize {
+        let vi_ba_state = match self.local_vi_ba_state.as_mut() {
             Some(s) => s,
-            None => return,
+            None => return 0,
         };
         if !vi_ba_state.config.use_sqrt_window_marginalization {
-            return;
+            return 0;
         }
-        let sqrt_marginal = match vi_ba_state.sqrt_nav_marginal.as_ref() {
-            Some(m) => m,
-            None => return,
-        };
-        let n = sqrt_marginal.factor.ncols() / crate::VI_STATE_DOF;
-        if n < 2 || sqrt_marginal.factor.ncols() % crate::VI_STATE_DOF != 0 {
-            return;
+        let pending = std::mem::take(&mut vi_ba_state.pending_recovered_pose_factors);
+        if pending.is_empty() {
+            return 0;
         }
-        // Reconstruct the window IDs: run_local_vi_ba uses the most-recent N
-        // keyframes in sorted order, same ordering used when building the sqrt factor.
-        let mut all_kf_ids: Vec<u64> = self.map.keyframes.keys().copied().collect();
-        all_kf_ids.sort_unstable();
-        if all_kf_ids.len() < n {
-            return;
-        }
-        let window_ids: Vec<u64> = all_kf_ids[all_kf_ids.len() - n..].to_vec();
         let pg_state = match self.pose_graph_state.as_mut() {
             Some(s) => s,
-            None => return,
+            None => {
+                vi_ba_state.pending_recovered_pose_factors = pending;
+                return 0;
+            }
         };
-        let recovered = crate::nonlinear_factor_recovery::recover_relative_pose_factors(
-            &sqrt_marginal.factor,
-            &sqrt_marginal.rhs,
-            n,
-        );
-        let factors = match recovered {
-            Some(f) => f,
-            None => return,
-        };
-        for f in factors {
-            let id_i = window_ids[f.block_i];
-            let id_j = window_ids[f.block_j];
-            let (pose_i, pose_j) = match (
-                pg_state.graph.poses.get(&id_i).cloned(),
-                pg_state.graph.poses.get(&id_j).cloned(),
-            ) {
+        let mut injected = 0usize;
+        let mut retry = Vec::new();
+        for (id_i, id_j, f) in pending {
+            let pose_i = Self::pose_graph_pose_or_map(&self.map, pg_state, id_i);
+            let pose_j = Self::pose_graph_pose_or_map(&self.map, pg_state, id_j);
+            let (pose_i, pose_j) = match (pose_i, pose_j) {
                 (Some(pi), Some(pj)) => (pi, pj),
-                _ => continue,
+                _ => {
+                    retry.push((id_i, id_j, f));
+                    continue;
+                }
             };
             let relative = relative_world_to_camera(&pose_i, &pose_j);
-            // Convert 6×6 DMatrix → Matrix6<f64>. The omega_relative is ordered
-            // [ρ; ω] (translation first) matching PoseGraph / SE3::log convention.
             if f.omega_relative.nrows() != 6 || f.omega_relative.ncols() != 6 {
                 continue;
             }
@@ -4811,7 +4827,23 @@ where
                 PoseGraphEdgeKind::Sequential,
                 information,
             );
+            injected += 1;
         }
+        vi_ba_state.pending_recovered_pose_factors = retry;
+        injected
+    }
+
+    fn pose_graph_pose_or_map(
+        map: &VisualMap,
+        pg_state: &mut OnlineSlamLoopClosureRefinementState,
+        keyframe_id: u64,
+    ) -> Option<Pose> {
+        if let Some(pose) = pg_state.graph.poses.get(&keyframe_id) {
+            return Some(pose.clone());
+        }
+        let pose = map.keyframes.get(&keyframe_id)?.frame.pose.clone()?;
+        pg_state.graph.add_pose(keyframe_id, pose.clone());
+        Some(pose)
     }
 
     /// Run visual-only covisibility local BA when a new keyframe has just

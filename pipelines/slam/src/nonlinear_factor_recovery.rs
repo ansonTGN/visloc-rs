@@ -68,6 +68,45 @@ pub struct RecoveredRelativePoseFactor {
     pub omega_relative: DMatrix<f64>,
 }
 
+/// Remap columns from [`crate::bundle::build_sqrt_factor_rows`] layout (all poses,
+/// then all velocities, then all biases) into per-keyframe 15-DoF blocks expected
+/// by [`recover_relative_pose_factors`]. Pass `landmark_cols = 0` when the stack
+/// has no landmark columns (the 2-keyframe navigation boundary case).
+pub fn permute_sqrt_stack_to_vi_blocks(
+    factor: &DMatrix<f64>,
+    n_keyframes: usize,
+    landmark_cols: usize,
+) -> Option<DMatrix<f64>> {
+    if n_keyframes == 0 {
+        return None;
+    }
+    let pose_dim = n_keyframes * VI_POSE_DOF;
+    let vel_offset = pose_dim;
+    let bias_offset = pose_dim + n_keyframes * 3;
+    let expected_ba_cols = bias_offset + n_keyframes * 6 + landmark_cols;
+    if factor.ncols() != expected_ba_cols {
+        return None;
+    }
+    let vi_cols = n_keyframes * VI_STATE_DOF;
+    let mut out = DMatrix::zeros(factor.nrows(), vi_cols);
+    for k in 0..n_keyframes {
+        let dst_base = k * VI_STATE_DOF;
+        for c in 0..VI_POSE_DOF {
+            out.column_mut(dst_base + c)
+                .copy_from(&factor.column(k * VI_POSE_DOF + c));
+        }
+        for c in 0..3 {
+            out.column_mut(dst_base + VI_POSE_DOF + c)
+                .copy_from(&factor.column(vel_offset + k * 3 + c));
+        }
+        for c in 0..6 {
+            out.column_mut(dst_base + VI_POSE_DOF + 3 + c)
+                .copy_from(&factor.column(bias_offset + k * 6 + c));
+        }
+    }
+    Some(out)
+}
+
 /// Recover sparse relative-pose factors from a VI sliding-window square-root
 /// marginal ([`crate::SqrtNavMarginal`]).
 ///
@@ -118,34 +157,117 @@ pub fn recover_relative_pose_factors(
         return Some(Vec::new());
     }
 
-    // Step 4 — Convert each Chow-Liu tree edge into a RecoveredRelativePoseFactor.
-    let mut factors = Vec::with_capacity(sparse.edges.len());
-    for (bi, bj) in sparse.edges {
+    Some(recovered_factors_from_pose_lambda(
+        &lambda_pose,
+        &sparse.edges,
+    ))
+}
+
+/// Recover relative-pose factors from a pose-only square-root Jacobian
+/// (`factor.ncols() == 6 · N`). Used when the BA stack layout has contiguous
+/// pose columns and velocity/bias Schur is ill-conditioned.
+pub fn recover_relative_pose_factors_pose_only(
+    factor: &DMatrix<f64>,
+    rhs: &DVector<f64>,
+    n_keyframes: usize,
+) -> Option<Vec<RecoveredRelativePoseFactor>> {
+    if n_keyframes == 0 {
+        return None;
+    }
+    let expected_cols = VI_POSE_DOF * n_keyframes;
+    if factor.ncols() != expected_cols || rhs.len() != factor.nrows() {
+        return None;
+    }
+    if n_keyframes <= 1 {
+        return Some(Vec::new());
+    }
+    let lambda_pose = factor.transpose() * factor;
+    if let Some(sparse) = sparsify_chow_liu(
+        &lambda_pose,
+        &DVector::zeros(lambda_pose.nrows()),
+        VI_POSE_DOF,
+    ) {
+        return Some(recovered_factors_from_pose_lambda(
+            &lambda_pose,
+            &sparse.edges,
+        ));
+    }
+    // Sequential-chain fallback when Chow-Liu cannot invert the prior.
+    let edges: Vec<(usize, usize)> = (0..n_keyframes - 1).map(|i| (i, i + 1)).collect();
+    Some(recovered_factors_from_pose_lambda(&lambda_pose, &edges))
+}
+
+/// Recover relative-pose factors from a BA sqrt-stack Jacobian
+/// (`[poses | vels | biases | landmarks]`). Landmarks are square-root
+/// marginalized first so visual information survives into the pose graph.
+pub fn recover_relative_pose_factors_from_ba_stack(
+    factor: &DMatrix<f64>,
+    rhs: &DVector<f64>,
+    n_keyframes: usize,
+) -> Option<Vec<RecoveredRelativePoseFactor>> {
+    if n_keyframes == 0 || rhs.len() != factor.nrows() {
+        return None;
+    }
+    if n_keyframes == 1 {
+        return Some(Vec::new());
+    }
+    let nav_cols = VI_STATE_DOF * n_keyframes;
+    let pose_cols = VI_POSE_DOF * n_keyframes;
+    if factor.ncols() < pose_cols {
+        return None;
+    }
+
+    let pose_only_fallback = |jac: &DMatrix<f64>, residual: &DVector<f64>| {
+        let pose_factor = jac.columns(0, pose_cols).into_owned();
+        recover_relative_pose_factors_pose_only(&pose_factor, residual, n_keyframes)
+    };
+
+    let (nav_factor, nav_rhs) = if factor.ncols() > nav_cols {
+        let keep: Vec<usize> = (0..nav_cols).collect();
+        let marg: Vec<usize> = (nav_cols..factor.ncols()).collect();
+        match crate::marginalize_sqrt(factor, rhs, &keep, &marg, None) {
+            Some(sm) => (sm.factor, sm.rhs),
+            None => return pose_only_fallback(factor, rhs),
+        }
+    } else if factor.ncols() == nav_cols {
+        (factor.clone(), rhs.clone())
+    } else {
+        return pose_only_fallback(factor, rhs);
+    };
+
+    if let Some(permuted) = permute_sqrt_stack_to_vi_blocks(&nav_factor, n_keyframes, 0) {
+        if let Some(recovered) = recover_relative_pose_factors(&permuted, &nav_rhs, n_keyframes) {
+            if !recovered.is_empty() {
+                return Some(recovered);
+            }
+        }
+    }
+    pose_only_fallback(&nav_factor, &nav_rhs)
+}
+
+fn recovered_factors_from_pose_lambda(
+    lambda_pose: &DMatrix<f64>,
+    edges: &[(usize, usize)],
+) -> Vec<RecoveredRelativePoseFactor> {
+    let mut factors = Vec::with_capacity(edges.len());
+    for &(bi, bj) in edges {
         let (i, j) = if bi < bj { (bi, bj) } else { (bj, bi) };
-        // Extract the (12×12) joint information block on [pose_i; pose_j].
         let ri = i * VI_POSE_DOF;
         let rj = j * VI_POSE_DOF;
         let mut omega_joint = DMatrix::zeros(VI_POSE_DOF * 2, VI_POSE_DOF * 2);
-        // [0..6, 0..6] = Λ_pose(i,i)
         omega_joint
             .view_mut((0, 0), (VI_POSE_DOF, VI_POSE_DOF))
             .copy_from(&lambda_pose.view((ri, ri), (VI_POSE_DOF, VI_POSE_DOF)));
-        // [0..6, 6..12] = Λ_pose(i,j)
         omega_joint
             .view_mut((0, VI_POSE_DOF), (VI_POSE_DOF, VI_POSE_DOF))
             .copy_from(&lambda_pose.view((ri, rj), (VI_POSE_DOF, VI_POSE_DOF)));
-        // [6..12, 0..6] = Λ_pose(j,i)
         omega_joint
             .view_mut((VI_POSE_DOF, 0), (VI_POSE_DOF, VI_POSE_DOF))
             .copy_from(&lambda_pose.view((rj, ri), (VI_POSE_DOF, VI_POSE_DOF)));
-        // [6..12, 6..12] = Λ_pose(j,j)
         omega_joint
             .view_mut((VI_POSE_DOF, VI_POSE_DOF), (VI_POSE_DOF, VI_POSE_DOF))
             .copy_from(&lambda_pose.view((rj, rj), (VI_POSE_DOF, VI_POSE_DOF)));
 
-        // Relative-pose information: Ω_rel = Sᵀ(SΩS^{-1})S where S = [-I | I].
-        // Expanded: Ω_rel = Ω_jj − Ω_ji · Ω_ii⁻¹ · Ω_ij  (Schur complement of i in the joint).
-        // This gives the (6×6) information of δT_j given δT_i marginalized out.
         let omega_ii = omega_joint.view((0, 0), (VI_POSE_DOF, VI_POSE_DOF)).into_owned();
         let omega_ij = omega_joint
             .view((0, VI_POSE_DOF), (VI_POSE_DOF, VI_POSE_DOF))
@@ -160,7 +282,15 @@ pub fn recover_relative_pose_factors(
                     + &omega_jj
                     - inv_ij.transpose() * omega_ij.transpose())
             }
-            None => omega_jj,
+            None => {
+                // Ω_rel = S Λ Sᵀ with S = [-I | I].
+                let mut s = DMatrix::zeros(VI_POSE_DOF, VI_POSE_DOF * 2);
+                for k in 0..VI_POSE_DOF {
+                    s[(k, k)] = -1.0;
+                    s[(k, VI_POSE_DOF + k)] = 1.0;
+                }
+                &s * &omega_joint * s.transpose()
+            }
         };
 
         factors.push(RecoveredRelativePoseFactor {
@@ -170,7 +300,7 @@ pub fn recover_relative_pose_factors(
             omega_relative,
         });
     }
-    Some(factors)
+    factors
 }
 
 /// Marginalize velocity+bias columns out of a pose-only subset of the VI information
@@ -352,5 +482,94 @@ mod tests {
                 df.block_j
             );
         }
+    }
+
+    /// Permuting from BA sqrt-stack layout must match direct VI-block recovery.
+    #[test]
+    fn permute_sqrt_stack_matches_vi_block_recovery() {
+        let n = 2;
+        let (lv, ev) = make_vi_marginal(n);
+        let j_vi = lv.clone().cholesky().unwrap().l().transpose();
+        let r = lv.transpose().try_inverse().unwrap() * &ev;
+
+        // Build a synthetic BA-layout Jacobian with the same information.
+        let mut j_ba = DMatrix::zeros(j_vi.nrows(), n * VI_POSE_DOF + n * 3 + n * 6);
+        for k in 0..n {
+            let dst_base = k * VI_STATE_DOF;
+            for c in 0..VI_POSE_DOF {
+                j_ba.column_mut(k * VI_POSE_DOF + c)
+                    .copy_from(&j_vi.column(dst_base + c));
+            }
+            for c in 0..3 {
+                j_ba.column_mut(n * VI_POSE_DOF + k * 3 + c)
+                    .copy_from(&j_vi.column(dst_base + VI_POSE_DOF + c));
+            }
+            for c in 0..6 {
+                j_ba.column_mut(n * VI_POSE_DOF + n * 3 + k * 6 + c)
+                    .copy_from(&j_vi.column(dst_base + VI_POSE_DOF + 3 + c));
+            }
+        }
+
+        let permuted = permute_sqrt_stack_to_vi_blocks(&j_ba, n, 0).unwrap();
+        let diff = (&permuted - &j_vi)
+            .iter()
+            .fold(0.0_f64, |acc, v| acc.max(v.abs()));
+        assert!(diff < 1e-12, "permute must round-trip VI blocks: {diff}");
+
+        let direct = recover_relative_pose_factors(&j_vi, &r, n).unwrap();
+        let via_ba = recover_relative_pose_factors(&permuted, &r, n).unwrap();
+        assert_eq!(direct.len(), via_ba.len());
+        for (a, b) in direct.iter().zip(via_ba.iter()) {
+            assert_eq!(a.block_i, b.block_i);
+            assert_eq!(a.block_j, b.block_j);
+            let od = (&a.omega_relative - &b.omega_relative)
+                .iter()
+                .fold(0.0_f64, |acc, v| acc.max(v.abs()));
+            assert!(od < 1e-8, "omega_relative mismatch: {od}");
+        }
+    }
+
+    #[test]
+    fn pose_only_recovers_when_vel_bias_schur_is_singular() {
+        let n = 2;
+        let pose_cols = VI_POSE_DOF * n;
+        let mut j_ba = DMatrix::zeros(12, n * VI_STATE_DOF);
+        for c in 0..pose_cols {
+            j_ba[(c, c)] = 1.0 + 0.1 * c as f64;
+        }
+        let r = DVector::zeros(12);
+        assert!(
+            recover_relative_pose_factors(&permute_sqrt_stack_to_vi_blocks(&j_ba, n, 0).unwrap(), &r, n)
+                .is_none(),
+            "zero vel/bias columns must make VI Schur fail"
+        );
+        let pose_j = j_ba.columns(0, pose_cols).into_owned();
+        let factors = recover_relative_pose_factors_pose_only(&pose_j, &r, n).unwrap();
+        assert_eq!(factors.len(), 1);
+        assert_eq!(factors[0].block_i, 0);
+        assert_eq!(factors[0].block_j, 1);
+        assert_eq!(factors[0].omega_relative.nrows(), 6);
+    }
+
+    #[test]
+    fn ba_stack_recovers_after_landmark_schur() {
+        let n = 3;
+        let nav_cols = VI_STATE_DOF * n;
+        let landmark_cols = 6;
+        let rows = nav_cols + 8;
+        let j = DMatrix::from_fn(rows, nav_cols + landmark_cols, |i, c| {
+            let x = (i as f64) * 7.1 + (c as f64) * 13.3;
+            (x.sin() * 43758.5453).fract() - 0.5
+        });
+        let r = DVector::from_fn(rows, |i, _| 0.1 * i as f64);
+        let factors = recover_relative_pose_factors_from_ba_stack(&j, &r, n).unwrap();
+        assert_eq!(factors.len(), n - 1);
+        let mut seen = std::collections::BTreeSet::new();
+        for f in &factors {
+            seen.insert(f.block_i);
+            seen.insert(f.block_j);
+            assert_eq!(f.omega_relative.nrows(), 6);
+        }
+        assert_eq!(seen.len(), n);
     }
 }

@@ -863,6 +863,93 @@ fn sqrt_window_marginalization_matches_dense_end_to_end() {
 }
 
 #[test]
+fn recovered_marginal_factors_inject_into_pose_graph_sink() {
+    let camera = Camera::pinhole(1, 640, 480, 500.0, 500.0, 320.0, 240.0);
+    let build_slam = |map: VisualMap| {
+        OnlineSlamPipeline::new(
+            map,
+            Tracker::new(LocalizationPipeline::default(), TrackingConfig::default()),
+            LocalMappingPipeline::default(),
+            OnlineSlamConfig {
+                apply_map_updates: true,
+                loop_closure: LoopClosureConfig {
+                    min_frame_id_gap: 5,
+                    min_shared_landmarks: 4,
+                    min_shared_landmark_ratio_percent: 50,
+                    ..LoopClosureConfig::default()
+                },
+                imu: Some(OnlineSlamImuConfig {
+                    gravity_world: Vector3::zeros(),
+                    ..OnlineSlamImuConfig::default()
+                }),
+                local_vi_ba: Some(OnlineSlamLocalBaConfig {
+                    gravity_world: Vector3::zeros(),
+                    marginalize_navigation_state: true,
+                    use_sqrt_window_marginalization: true,
+                    bias_random_walk_weights: Some((10.0, 10.0)),
+                    initial_navigation_prior_std_devs: Some((1.0, 0.01, 0.1)),
+                    ..OnlineSlamLocalBaConfig::default()
+                }),
+                covisibility_local_ba: None,
+                sparse_factor_graph: None,
+                vi_init: None,
+                vi_motion_init: None,
+                keep_pre_promotion_imu_factors: false,
+                pose_graph_refinement: Some(
+                    OnlineSlamLoopClosureRefinementConfig::recovered_factor_sink(camera.clone()),
+                ),
+                relocalization: None,
+            },
+        )
+    };
+
+    let (map, first_frame) = map_and_frame_with_extra_landmarks(10, 1, Vector3::zeros());
+    let (_, second_frame) =
+        map_and_frame_with_extra_landmarks(30, 1, Vector3::new(1.5, 0.0, 0.0));
+    let (_, third_frame) =
+        map_and_frame_with_extra_landmarks(50, 1, Vector3::new(3.0, 0.0, 0.0));
+    let (_, fourth_frame) =
+        map_and_frame_with_extra_landmarks(70, 1, Vector3::new(4.5, 0.0, 0.0));
+    let mut slam = build_slam(map);
+
+    slam.process_frame(&first_frame, []);
+    for _ in 0..10 {
+        slam.push_imu_measurement(Vector3::zeros(), Vector3::zeros(), 0.1);
+    }
+    slam.process_frame(&second_frame, []);
+    for _ in 0..10 {
+        slam.push_imu_measurement(Vector3::zeros(), Vector3::zeros(), 0.1);
+    }
+    slam.process_frame(&third_frame, []);
+    for _ in 0..10 {
+        slam.push_imu_measurement(Vector3::zeros(), Vector3::zeros(), 0.1);
+    }
+    let result = slam.process_frame(&fourth_frame, []);
+
+    let stats = result
+        .local_vi_ba
+        .as_ref()
+        .expect("third keyframe should trigger local VI-BA");
+    assert!(
+        stats.marginalization_succeeded,
+        "window shift must produce a sqrt marginal"
+    );
+    assert!(
+        stats.recovered_marginal_factors_injected > 0,
+        "sqrt marginal recovery must inject Chow-Liu factors into the pose-graph sink"
+    );
+    let edge_count = slam
+        .pose_graph_state
+        .as_ref()
+        .map(|state| state.graph.edges.len())
+        .unwrap_or(0);
+    assert!(
+        edge_count >= stats.recovered_marginal_factors_injected,
+        "pose graph should carry recovered factors"
+    );
+}
+
+#[test]
 fn online_slam_runs_covisibility_local_ba_on_new_keyframe_trigger() {
     let (map, first_frame) = map_and_frame_with_extra_landmarks(10, 1, Vector3::zeros());
     let (_, second_frame) = map_and_frame_with_extra_landmarks(30, 1, Vector3::new(1.5, 0.0, 0.0));

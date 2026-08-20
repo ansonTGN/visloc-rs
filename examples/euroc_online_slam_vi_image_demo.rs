@@ -1607,7 +1607,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut motion_vi_init_max_velocity_mps: Option<f64> = Some(8.0);
     let mut motion_vi_init_max_gyro_bias_rad_s: Option<f64> = Some(0.5);
     let mut motion_vi_init_max_accel_bias_mps2: Option<f64> = Some(3.0);
-    let mut motion_vi_init_max_imu_nis_per_dof: Option<f64> = Some(50.0);
+    let mut motion_vi_init_max_imu_nis_per_dof: Option<f64> = Some(20_000.0);
     let mut motion_vi_init_max_rotation_residual_rms_rad: Option<f64> = None;
     let mut motion_vi_init_max_velocity_residual_rms_mps: Option<f64> = None;
     let mut motion_vi_init_max_position_residual_rms_meters: Option<f64> = None;
@@ -5024,6 +5024,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             },
         })
+    } else if args.local_vi_ba_marginalization && args.local_vi_ba_use_sqrt_window_marginalization {
+        Some(OnlineSlamLoopClosureRefinementConfig::recovered_factor_sink(
+            camera.clone(),
+        ))
     } else {
         None
     };
@@ -5491,6 +5495,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut local_vi_ba_stereo_observation_total: usize = 0;
     let mut local_vi_ba_marginalization_priors_applied: usize = 0;
     let mut local_vi_ba_marginalization_successes: usize = 0;
+    let mut local_vi_ba_recovered_marginal_factors_injected: usize = 0;
+    let mut local_vi_ba_recovered_marginal_factors_enqueued: usize = 0;
     let mut local_vi_ba_quality_gate_rejections: usize = 0;
     let mut local_vi_ba_cost_ratio_gate_rejections: usize = 0;
     let mut local_vi_ba_imu_nis_gate_rejections: usize = 0;
@@ -6747,6 +6753,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if stats.marginalization_succeeded {
                 local_vi_ba_marginalization_successes += 1;
             }
+            local_vi_ba_recovered_marginal_factors_injected +=
+                stats.recovered_marginal_factors_injected;
+            local_vi_ba_recovered_marginal_factors_enqueued +=
+                stats.recovered_marginal_factors_enqueued;
             if stats.quality_gate_rejected {
                 local_vi_ba_quality_gate_rejections += 1;
             }
@@ -8382,6 +8392,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          local_vi_ba_stereo_observation_total={local_vi_ba_stereo_observation_total}\n\
          local_vi_ba_marginalization_priors_applied={local_vi_ba_marginalization_priors_applied}\n\
          local_vi_ba_marginalization_successes={local_vi_ba_marginalization_successes}\n\
+         local_vi_ba_recovered_marginal_factors_enqueued={local_vi_ba_recovered_marginal_factors_enqueued}\n\
+         local_vi_ba_recovered_marginal_factors_injected={local_vi_ba_recovered_marginal_factors_injected}\n\
          local_vi_ba_quality_gate_rejections={local_vi_ba_quality_gate_rejections}\n\
          local_vi_ba_cost_ratio_gate_rejections={local_vi_ba_cost_ratio_gate_rejections}\n\
          local_vi_ba_imu_nis_gate_rejections={local_vi_ba_imu_nis_gate_rejections}\n\
@@ -9004,6 +9016,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         local_vi_ba_marginalization_priors_applied =
             local_vi_ba_marginalization_priors_applied,
         local_vi_ba_marginalization_successes = local_vi_ba_marginalization_successes,
+        local_vi_ba_recovered_marginal_factors_enqueued =
+            local_vi_ba_recovered_marginal_factors_enqueued,
+        local_vi_ba_recovered_marginal_factors_injected =
+            local_vi_ba_recovered_marginal_factors_injected,
         local_vi_ba_quality_gate_rejections = local_vi_ba_quality_gate_rejections,
         local_vi_ba_cost_ratio_gate_rejections = local_vi_ba_cost_ratio_gate_rejections,
         local_vi_ba_velocity_gate_rejections = local_vi_ba_velocity_gate_rejections,

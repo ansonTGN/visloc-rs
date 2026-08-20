@@ -147,8 +147,10 @@ pub mod vi_sqrt_window;
 pub use vi_sqrt_window::{step_window_marginal, NavBlock, SqrtNavMarginal};
 pub mod nonlinear_factor_recovery;
 pub use nonlinear_factor_recovery::{
-    recover_relative_pose_factors, vi_marginal_to_pose_only, RecoveredRelativePoseFactor,
-    VI_POSE_DOF, VI_STATE_DOF, VI_VEL_BIAS_DOF,
+    permute_sqrt_stack_to_vi_blocks, recover_relative_pose_factors,
+    recover_relative_pose_factors_from_ba_stack, recover_relative_pose_factors_pose_only,
+    vi_marginal_to_pose_only,
+    RecoveredRelativePoseFactor, VI_POSE_DOF, VI_STATE_DOF, VI_VEL_BIAS_DOF,
 };
 pub mod pcm;
 mod reordering;

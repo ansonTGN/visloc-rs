@@ -379,7 +379,7 @@ pub struct KeyframeImuState {
 /// state table plus a small history of recent IMU factors (last
 /// `2 * window_size` so the stage can always rebuild the connecting
 /// factors for the trailing window).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct OnlineSlamLocalBaState {
     pub config: OnlineSlamLocalBaConfig,
     /// Per-keyframe `(velocity, bias)` indexed by keyframe id.
@@ -397,6 +397,20 @@ pub struct OnlineSlamLocalBaState {
     /// (Basalt ICCV'21 SqrtToSqrt), populated only when
     /// [`OnlineSlamLocalBaConfig::use_sqrt_window_marginalization`] is set.
     pub sqrt_nav_marginal: Option<crate::SqrtNavMarginal>,
+    /// Pairwise factors recovered from the latest boundary marginalization step,
+    /// waiting to be injected into the pose-graph mirror after keyframe registration.
+    pub pending_recovered_pose_factors: Vec<(u64, u64, crate::RecoveredRelativePoseFactor)>,
+}
+
+impl PartialEq for OnlineSlamLocalBaState {
+    fn eq(&self, other: &Self) -> bool {
+        self.config == other.config
+            && self.keyframe_state == other.keyframe_state
+            && self.factor_history == other.factor_history
+            && self.pending_factors_since_last_trigger == other.pending_factors_since_last_trigger
+            && self.navigation_prior == other.navigation_prior
+            && self.sqrt_nav_marginal == other.sqrt_nav_marginal
+    }
 }
 
 impl OnlineSlamLocalBaState {
@@ -408,6 +422,7 @@ impl OnlineSlamLocalBaState {
             pending_factors_since_last_trigger: 0,
             navigation_prior: None,
             sqrt_nav_marginal: None,
+            pending_recovered_pose_factors: Vec::new(),
         }
     }
 
@@ -419,6 +434,7 @@ impl OnlineSlamLocalBaState {
         self.pending_factors_since_last_trigger = 0;
         self.navigation_prior = None;
         self.sqrt_nav_marginal = None;
+        self.pending_recovered_pose_factors.clear();
     }
 
     /// Append a freshly-staged IMU factor to the rolling history and bump
@@ -528,6 +544,11 @@ pub struct OnlineSlamLocalBaStats {
     pub marginalization_prior_applied: bool,
     /// Whether this trigger produced the prior for the next shifted window.
     pub marginalization_succeeded: bool,
+    /// Chow-Liu relative-pose factors recovered from the sqrt marginal and
+    /// injected into the pose-graph mirror (Basalt mapper analogue).
+    pub recovered_marginal_factors_injected: usize,
+    /// Factors enqueued this trigger before pose-graph injection.
+    pub recovered_marginal_factors_enqueued: usize,
 }
 
 fn ba_cost_ratio(result: &BaResult) -> f64 {
@@ -905,6 +926,100 @@ fn next_navigation_prior(
     })
 }
 
+/// Enqueue Chow-Liu recovered relative-pose factors from a linearized boundary stack.
+fn enqueue_recovered_boundary_factors(
+    pending: &mut Vec<(u64, u64, crate::RecoveredRelativePoseFactor)>,
+    factor: &DMatrix<f64>,
+    rhs: &DVector<f64>,
+    old_id: u64,
+    next_id: u64,
+) {
+    let recovered = recover_boundary_pose_factors(factor, rhs);
+    pending.extend(recovered.into_iter().map(|factor| {
+        let id_i = if factor.block_i == 0 { old_id } else { next_id };
+        let id_j = if factor.block_j == 0 { old_id } else { next_id };
+        (id_i, id_j, factor)
+    }));
+}
+
+fn recover_boundary_pose_factors(
+    factor: &DMatrix<f64>,
+    rhs: &DVector<f64>,
+) -> Vec<crate::RecoveredRelativePoseFactor> {
+    crate::recover_relative_pose_factors_from_ba_stack(factor, rhs, 2).unwrap_or_default()
+}
+
+fn enqueue_recovered_window_factors(
+    pending: &mut Vec<(u64, u64, crate::RecoveredRelativePoseFactor)>,
+    ba: &BundleAdjustment,
+    window_ids: &[u64],
+    kernel: &RobustKernel,
+) {
+    let n = window_ids.len();
+    if n < 2 {
+        return;
+    }
+    let Some(intrinsics) = ba.camera.intrinsics() else {
+        return;
+    };
+    let mut pose_index = BTreeMap::new();
+    let mut velocity_index = BTreeMap::new();
+    let mut bias_index = BTreeMap::new();
+    let mut landmark_index = BTreeMap::new();
+    for id in window_ids {
+        if ba.poses.contains_key(id) {
+            let idx = pose_index.len();
+            pose_index.insert(*id, idx);
+        }
+        if ba.velocities.contains_key(id) {
+            let idx = velocity_index.len();
+            velocity_index.insert(*id, idx);
+        }
+        if ba.biases.contains_key(id) {
+            let idx = bias_index.len();
+            bias_index.insert(*id, idx);
+        }
+    }
+    if pose_index.len() != n || velocity_index.len() != n || bias_index.len() != n {
+        return;
+    }
+    for id in ba.landmarks.keys() {
+        let idx = landmark_index.len();
+        landmark_index.insert(*id, idx);
+    }
+    let Some(stack) = build_sqrt_factor_rows(
+        ba,
+        &intrinsics,
+        &pose_index,
+        &landmark_index,
+        &velocity_index,
+        &bias_index,
+        kernel,
+        None,
+    ) else {
+        return;
+    };
+    let Some(recovered) =
+        crate::recover_relative_pose_factors_from_ba_stack(&stack.jac, &stack.resid, n)
+    else {
+        return;
+    };
+    let mut ids_by_block = vec![0u64; n];
+    for (&id, &idx) in &pose_index {
+        if idx < n {
+            ids_by_block[idx] = id;
+        }
+    }
+    pending.extend(recovered.into_iter().filter_map(|factor| {
+        let id_i = *ids_by_block.get(factor.block_i)?;
+        let id_j = *ids_by_block.get(factor.block_j)?;
+        if id_i == id_j {
+            return None;
+        }
+        Some((id_i, id_j, factor))
+    }));
+}
+
 /// Square-root (QR) analogue of [`next_navigation_prior`], produced with the Basalt ICCV'21
 /// SqrtToSqrt protocol ([`crate::vi_sqrt_window`]). Unlike the dense route, the retained
 /// marginal is carried as a matrix-square-root factor across window shifts (no `JᵀJ`, no dense
@@ -915,7 +1030,7 @@ fn next_navigation_prior(
 /// slot is unchanged), and the `SqrtNavMarginal` is stored on the state for the next shift.
 fn next_navigation_prior_sqrt(
     map: &VisualMap,
-    state: &OnlineSlamLocalBaState,
+    state: &mut OnlineSlamLocalBaState,
     window_ids: &[u64],
     factors: &[ImuPreintegrationFactor],
 ) -> Option<(NavigationStatePrior, crate::SqrtNavMarginal)> {
@@ -1115,6 +1230,31 @@ fn next_navigation_prior_sqrt(
     }
 
     // Keep the next nav state (pose 6..12, vel 15..18, bias 24..30 = 15 dof); marginalize the old.
+    if state.pending_recovered_pose_factors.is_empty() {
+        let mut newly_recovered = Vec::new();
+        enqueue_recovered_boundary_factors(
+            &mut newly_recovered,
+            &jac_full,
+            &resid_full,
+            old_id,
+            next_id,
+        );
+        if newly_recovered.is_empty() {
+            let core_rows = jac.nrows() + 6;
+            if core_rows > 0 {
+                let jac_core = jac_full.rows(0, core_rows).into_owned();
+                let resid_core = resid_full.rows(0, core_rows).into_owned();
+                enqueue_recovered_boundary_factors(
+                    &mut newly_recovered,
+                    &jac_core,
+                    &resid_core,
+                    old_id,
+                    next_id,
+                );
+            }
+        }
+        state.pending_recovered_pose_factors.extend(newly_recovered);
+    }
     let keep: Vec<usize> = (6..12).chain(15..18).chain(24..30).collect();
     let marg: Vec<usize> = (0..6).chain(12..15).chain(18..24).collect();
     let sm = crate::marginalize_sqrt(&jac_full, &resid_full, &keep, &marg, None)?;
@@ -1626,6 +1766,8 @@ pub fn run_local_vi_ba(
             relinearised_factor_count,
             marginalization_prior_applied,
             marginalization_succeeded: false,
+            recovered_marginal_factors_injected: 0,
+            recovered_marginal_factors_enqueued: 0,
         });
     }
 
@@ -1661,6 +1803,15 @@ pub fn run_local_vi_ba(
         }
     }
 
+    let pending_before = state.pending_recovered_pose_factors.len();
+    if state.config.use_sqrt_window_marginalization {
+        enqueue_recovered_window_factors(
+            &mut state.pending_recovered_pose_factors,
+            &ba,
+            &window_ids,
+            &state.config.ba_config.robust_kernel,
+        );
+    }
     let marginalization_succeeded = if state.config.marginalize_navigation_state {
         if state.config.use_sqrt_window_marginalization {
             let sqrt_prior =
@@ -1681,6 +1832,10 @@ pub fn run_local_vi_ba(
         state.sqrt_nav_marginal = None;
         false
     };
+    let recovered_marginal_factors_enqueued = state
+        .pending_recovered_pose_factors
+        .len()
+        .saturating_sub(pending_before);
 
     Some(OnlineSlamLocalBaStats {
         window_keyframe_ids: window_ids,
@@ -1709,6 +1864,8 @@ pub fn run_local_vi_ba(
         relinearised_factor_count,
         marginalization_prior_applied,
         marginalization_succeeded,
+        recovered_marginal_factors_injected: 0,
+        recovered_marginal_factors_enqueued,
     })
 }
 
@@ -2394,7 +2551,7 @@ mod tests {
         let dense = next_navigation_prior(&map, &state, &[10, 20], std::slice::from_ref(&f))
             .expect("dense prior");
         let (sqrt_dense, sqrt_carried) =
-            next_navigation_prior_sqrt(&map, &state, &[10, 20], std::slice::from_ref(&f))
+            next_navigation_prior_sqrt(&map, &mut state, &[10, 20], std::slice::from_ref(&f))
                 .expect("sqrt prior");
 
         assert_eq!(dense.keyframe_ids, sqrt_dense.keyframe_ids);
@@ -2428,6 +2585,11 @@ mod tests {
         assert!(
             recon_diff < 1e-6,
             "SqrtNavMarginal.factorᵀ·factor != produced prior: {recon_diff}"
+        );
+        assert_eq!(
+            state.pending_recovered_pose_factors.len(),
+            1,
+            "boundary marginal must enqueue one recovered relative-pose factor"
         );
     }
 
@@ -2463,7 +2625,7 @@ mod tests {
             next_navigation_prior(&map, &state, &[10, 20], std::slice::from_ref(&f_10_20))
                 .expect("dense first prior");
         let (sqrt_dense_1, sqrt_carried_1) =
-            next_navigation_prior_sqrt(&map, &state, &[10, 20], std::slice::from_ref(&f_10_20))
+            next_navigation_prior_sqrt(&map, &mut state, &[10, 20], std::slice::from_ref(&f_10_20))
                 .expect("sqrt first prior");
         assert_eq!(sqrt_dense_1.keyframe_ids, dense_1.keyframe_ids);
         assert!(sqrt_dense_1.information.clone().cholesky().is_some());
@@ -2479,7 +2641,7 @@ mod tests {
             next_navigation_prior(&map, &state, &[20, 30], std::slice::from_ref(&f_20_30))
                 .expect("dense second prior");
         let (sqrt_dense_2, _sqrt_carried_2) =
-            next_navigation_prior_sqrt(&map, &state, &[20, 30], std::slice::from_ref(&f_20_30))
+            next_navigation_prior_sqrt(&map, &mut state, &[20, 30], std::slice::from_ref(&f_20_30))
                 .expect("sqrt second prior");
 
         assert_eq!(dense_2.keyframe_ids, sqrt_dense_2.keyframe_ids);
