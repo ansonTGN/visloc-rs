@@ -120,6 +120,12 @@ pub struct TrackingConfig {
     /// unioned for the temporal store. `1` is last-frame-only (gate70);
     /// larger values keep short-term tracks alive across brief dropouts.
     pub temporal_landmark_tracking_history_frames: usize,
+    /// Inlier floor applied only when the temporal landmark stage produced
+    /// the candidate pose. Can be lower than [`Self::min_inliers`] so a
+    /// brief dropout does not discard a still-associated track, without
+    /// softening the full-map appearance path (gate72 softened global
+    /// min_inliers to 20 and path-dependently hurt coverage).
+    pub temporal_landmark_tracking_min_inliers: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -284,6 +290,7 @@ impl Default for TrackingConfig {
             temporal_landmark_tracking: false,
             temporal_landmark_tracking_min_landmarks: 20,
             temporal_landmark_tracking_history_frames: 1,
+            temporal_landmark_tracking_min_inliers: 20,
         }
     }
 }

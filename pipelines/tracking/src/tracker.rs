@@ -483,6 +483,7 @@ where
         // widen-retry ladder below can take `&mut self` for its stats
         // bookkeeping without fighting the borrow checker over `self.config`.
         let projection_guided_config = self.config.projection_guided_tracking;
+        let mut used_temporal_landmark_track = false;
         let mut localization = if let Some(temporal_store) = temporal_store.as_ref() {
             self.stats.temporal_landmark_attempt_count += 1;
             let temporal = self.localize_appearance_global(
@@ -493,6 +494,7 @@ where
             );
             if temporal.success {
                 self.stats.temporal_landmark_success_count += 1;
+                used_temporal_landmark_track = true;
                 temporal
             } else {
                 match (projection_guided_config, pose_prior.as_ref()) {
@@ -538,8 +540,16 @@ where
             );
         }
 
+        let saved_min_inliers = self.config.min_inliers;
+        if used_temporal_landmark_track {
+            self.config.min_inliers = self
+                .config
+                .temporal_landmark_tracking_min_inliers
+                .min(saved_min_inliers);
+        }
         let (mut tracking_failure_reason, continuation_pose) =
             self.apply_tracking_quality_gate(frame, map, pose_prior.as_ref(), &mut localization);
+        self.config.min_inliers = saved_min_inliers;
 
         // IMU/velocity coast: when visual tracking dies but the motion
         // model still has a predictive prior, accept that prior so the
