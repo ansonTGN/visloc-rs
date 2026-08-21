@@ -3636,9 +3636,10 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         local_vi_ba_use_sqrt_window_marginalization = cfg.vio_sqrt_marg;
         local_vi_ba_window_size = cfg.vio_max_kfs.max(2) as usize;
         optical_flow_config = cfg.optical_flow.clone();
-        // Keep Basalt's published FB gate (0.04). Softening it for temporal
-        // survival also loosens same-timestamp stereo LK and poisons the
-        // metric seed (seed-frame PnP then falls to ~4 inliers / 62 LMs).
+        // Stereo LK keeps Basalt FB²=0.04. Temporal gets a looser gate so
+        // velocity-seeded tracks that survive LSSD are not culled by a
+        // sub-pixel FB residual under EuRoC rotation.
+        optical_flow_config.optical_flow_temporal_max_recovered_dist2 = Some(4.0);
         feature_extractor = FeatureExtractorKind::OpticalFlow;
         // Track-id descriptors are exact matches; mutual-softmax / SuperPoint
         // cliff defaults do not apply to the Basalt OF frontend.
@@ -3660,6 +3661,12 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         }
         if rebootstrap_cooldown_frames == 60 {
             rebootstrap_cooldown_frames = 20;
+        }
+        // Motion-VI path caps replenish at 10/frame; OF track turnover needs
+        // a higher mint rate so new stereo LMs replace dying IDs before the
+        // map goes dark in the mid-sequence cliff.
+        if !stereo_landmark_replenish_max_per_frame_overridden {
+            stereo_landmark_replenish_max_per_frame = 40;
         }
         eprintln!(
             "basalt profile loaded from {} \

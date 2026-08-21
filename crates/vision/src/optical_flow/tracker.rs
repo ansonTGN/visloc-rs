@@ -85,15 +85,15 @@ pub fn track_points_between(
 ) -> Vec<Option<(f32, f32)>> {
     let levels = config.optical_flow_levels.max(1) as usize;
     let max_iters = config.optical_flow_max_iterations.max(1) as usize;
-    let max_fb2 = config.optical_flow_max_recovered_dist2;
+    let max_fb2 = config.stereo_max_recovered_dist2();
     let pattern = pattern51_offsets();
     let from_pyr = build_pyramid(from, levels);
     let to_pyr = build_pyramid(to, levels);
     points
         .iter()
         .map(|&(x, y)| {
-            let (xf, yf) = track_point(&from_pyr, &to_pyr, x, y, max_iters, &pattern)?;
-            let (xb, yb) = track_point(&to_pyr, &from_pyr, xf, yf, max_iters, &pattern)?;
+            let (xf, yf) = track_point(&from_pyr, &to_pyr, x, y, x, y, max_iters, &pattern)?;
+            let (xb, yb) = track_point(&to_pyr, &from_pyr, xf, yf, x, y, max_iters, &pattern)?;
             let dx = xb - x;
             let dy = yb - y;
             if dx * dx + dy * dy > max_fb2 {
@@ -111,6 +111,9 @@ pub struct TrackedKeypoint {
     pub id: KeypointId,
     pub x: f32,
     pub y: f32,
+    /// Last accepted displacement (curr − prev). Seeds the next search.
+    pub vx: f32,
+    pub vy: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -176,18 +179,37 @@ impl OpticalFlowTracker {
         curr_pyr: &[GrayImage],
     ) -> Vec<TrackedKeypoint> {
         let max_iters = self.config.optical_flow_max_iterations.max(1) as usize;
-        let max_fb2 = self.config.optical_flow_max_recovered_dist2;
+        let max_fb2 = self.config.temporal_max_recovered_dist2();
         let mut kept = Vec::with_capacity(self.tracks.len());
 
         for track in &self.tracks {
-            let Some((xf, yf)) =
-                track_point(prev_pyr, curr_pyr, track.x, track.y, max_iters, &self.pattern)
-            else {
+            // Constant-velocity seed: start LK near the predicted location so
+            // coarse levels do not have to recover large inter-frame motion
+            // from a zero-flow init (mid-MH_01 rotation bursts).
+            let x_pred = track.x + track.vx;
+            let y_pred = track.y + track.vy;
+            let Some((xf, yf)) = track_point(
+                prev_pyr,
+                curr_pyr,
+                track.x,
+                track.y,
+                x_pred,
+                y_pred,
+                max_iters,
+                &self.pattern,
+            ) else {
                 continue;
             };
-            let Some((xb, yb)) =
-                track_point(curr_pyr, prev_pyr, xf, yf, max_iters, &self.pattern)
-            else {
+            let Some((xb, yb)) = track_point(
+                curr_pyr,
+                prev_pyr,
+                xf,
+                yf,
+                track.x,
+                track.y,
+                max_iters,
+                &self.pattern,
+            ) else {
                 continue;
             };
             let dx = xb - track.x;
@@ -199,6 +221,8 @@ impl OpticalFlowTracker {
                 id: track.id,
                 x: xf,
                 y: yf,
+                vx: xf - track.x,
+                vy: yf - track.y,
             });
         }
         kept
@@ -246,6 +270,8 @@ impl OpticalFlowTracker {
                             id,
                             x: bx,
                             y: by,
+                            vx: 0.0,
+                            vy: 0.0,
                         });
                     }
                 }
@@ -260,11 +286,17 @@ impl OpticalFlowTracker {
 ///
 /// Pyramid layers are `0..=optical_flow_levels`. Any invalid patch / residual
 /// fails the whole track (Basalt `patch_valid &= ...`).
+///
+/// `x_ref,y_ref` locate the template in `from`; `x_init,y_init` seed the
+/// search in `to` (full-resolution). Same-point init recovers identity /
+/// stereo; temporal tracking seeds with the last displacement.
 fn track_point(
     from_pyr: &[GrayImage],
     to_pyr: &[GrayImage],
-    x0: f32,
-    y0: f32,
+    x_ref: f32,
+    y_ref: f32,
+    x_init: f32,
+    y_init: f32,
     max_iters: usize,
     pattern: &[(f32, f32); PATTERN51_SIZE],
 ) -> Option<(f32, f32)> {
@@ -273,14 +305,15 @@ fn track_point(
         return None;
     }
     let max_level = num_layers - 1;
-    let mut x = x0;
-    let mut y = y0;
+    let mut x = x_init;
+    let mut y = y_init;
     for level in (0..=max_level).rev() {
         let scale = (1 << level) as f32;
         x /= scale;
         y /= scale;
 
-        let patch = LssdPatch::from_image(&from_pyr[level], (x0 / scale, y0 / scale), pattern);
+        let patch =
+            LssdPatch::from_image(&from_pyr[level], (x_ref / scale, y_ref / scale), pattern);
         if !patch.valid {
             return None;
         }
@@ -351,6 +384,8 @@ mod tests {
             id: 1,
             x: cx,
             y: cy,
+            vx: 0.0,
+            vy: 0.0,
         });
         tracker.next_id = 2;
         tracker.prev_pyramid = Some(build_pyramid(&img0, cfg.optical_flow_levels as usize));
@@ -360,6 +395,50 @@ mod tests {
         assert!(
             (hit.x - (cx + 3.0)).abs() < 0.5 && (hit.y - (cy - 2.0)).abs() < 0.5,
             "expected ~(+3,-2) flow, got ({}, {})",
+            hit.x,
+            hit.y
+        );
+    }
+
+    #[test]
+    fn velocity_seed_tracks_larger_shift() {
+        let mut data = vec![40u8; 128 * 96];
+        let (cx, cy) = (50.0f32, 48.0f32);
+        for y in 0..96 {
+            for x in 0..128 {
+                let dx = x as f32 - cx;
+                let dy = y as f32 - cy;
+                let g = (-0.08 * (dx * dx + dy * dy)).exp();
+                data[y * 128 + x] = (40.0 + 180.0 * g) as u8;
+            }
+        }
+        let img0 = GrayImage::from_luma8(128, 96, data).unwrap();
+        // 8px shift is hard from a zero seed at FB=0.04; prior velocity helps.
+        let img1 = shift_image(&img0, 8, -4);
+
+        let mut cfg = BasaltOpticalFlowConfig::default();
+        cfg.optical_flow_levels = 3;
+        cfg.optical_flow_max_iterations = 5;
+        cfg.optical_flow_max_recovered_dist2 = 0.04;
+        let mut tracker = OpticalFlowTracker::new(cfg.clone());
+        tracker.tracks.push(TrackedKeypoint {
+            id: 1,
+            x: cx,
+            y: cy,
+            vx: 8.0,
+            vy: -4.0,
+        });
+        tracker.next_id = 2;
+        tracker.prev_pyramid = Some(build_pyramid(&img0, cfg.optical_flow_levels as usize));
+
+        let obs1 = tracker.process(&img1);
+        let hit = obs1
+            .iter()
+            .find(|o| o.id == 1)
+            .expect("velocity-seeded track should survive");
+        assert!(
+            (hit.x - (cx + 8.0)).abs() < 0.75 && (hit.y - (cy - 4.0)).abs() < 0.75,
+            "expected ~(+8,-4) flow, got ({}, {})",
             hit.x,
             hit.y
         );
@@ -392,6 +471,8 @@ mod tests {
             id: 1,
             x: cx,
             y: cy,
+            vx: 0.0,
+            vy: 0.0,
         });
         tracker.next_id = 2;
         tracker.prev_pyramid = Some(build_pyramid(&img0, cfg.optical_flow_levels as usize));

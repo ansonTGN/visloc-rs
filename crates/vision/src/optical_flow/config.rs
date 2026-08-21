@@ -15,11 +15,19 @@ pub struct BasaltOpticalFlowConfig {
     )]
     pub optical_flow_detection_grid_size: i32,
     /// Basalt: `config.optical_flow_max_recovered_dist2` (default 0.04).
+    /// Used for **stereo** same-timestamp LK. Temporal frame-to-frame may
+    /// override via [`Self::optical_flow_temporal_max_recovered_dist2`].
     #[serde(
         default = "default_max_recovered_dist2",
         rename = "config.optical_flow_max_recovered_dist2"
     )]
     pub optical_flow_max_recovered_dist2: f32,
+    /// Optional looser FB² gate for **temporal** tracking only. `None` means
+    /// use [`Self::optical_flow_max_recovered_dist2`]. Not present in Basalt
+    /// JSON — set by the demo profile when EuRoC needs longer track life
+    /// without poisoning stereo triangulation.
+    #[serde(default, skip)]
+    pub optical_flow_temporal_max_recovered_dist2: Option<f32>,
     /// Basalt: `config.optical_flow_pattern` (default 51).
     #[serde(default = "default_pattern", rename = "config.optical_flow_pattern")]
     pub optical_flow_pattern: i32,
@@ -46,12 +54,28 @@ pub struct BasaltOpticalFlowConfig {
     pub optical_flow_skip_frames: i32,
 }
 
+impl BasaltOpticalFlowConfig {
+    /// FB² threshold for frame-to-frame tracking.
+    #[inline]
+    pub fn temporal_max_recovered_dist2(&self) -> f32 {
+        self.optical_flow_temporal_max_recovered_dist2
+            .unwrap_or(self.optical_flow_max_recovered_dist2)
+    }
+
+    /// FB² threshold for same-timestamp stereo LK (always the Basalt value).
+    #[inline]
+    pub fn stereo_max_recovered_dist2(&self) -> f32 {
+        self.optical_flow_max_recovered_dist2
+    }
+}
+
 impl Default for BasaltOpticalFlowConfig {
     fn default() -> Self {
         Self {
             optical_flow_type: default_flow_type(),
             optical_flow_detection_grid_size: default_grid_size(),
             optical_flow_max_recovered_dist2: default_max_recovered_dist2(),
+            optical_flow_temporal_max_recovered_dist2: None,
             optical_flow_pattern: default_pattern(),
             optical_flow_max_iterations: default_max_iterations(),
             optical_flow_epipolar_error: default_epipolar_error(),
