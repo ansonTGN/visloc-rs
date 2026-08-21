@@ -3653,6 +3653,14 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         }
         // SuperPoint hover gate (80) is unreachable for a ~50-landmark stereo seed.
         keyframe_min_inliers = Some(8);
+        // Track-id maps go dark when KLT drops every ID; stereo re-bootstrap
+        // re-seeds metric landmarks under the *current* track ids.
+        if rebootstrap_after_lost_frames.is_none() {
+            rebootstrap_after_lost_frames = Some(5);
+        }
+        if rebootstrap_cooldown_frames == 60 {
+            rebootstrap_cooldown_frames = 20;
+        }
         eprintln!(
             "basalt profile loaded from {} \
              (vio_max_kfs={}, vio_sqrt_marg={}, frontend=optical-flow, \
@@ -4209,6 +4217,75 @@ fn undistort_feature_keypoints(
         keypoints,
         descriptors,
     }
+}
+
+/// Same-timestamp cam0→cam1 LK for OF without touching the temporal tracker.
+///
+/// Returns a cam1 [`FeatureSet`] whose descriptors are copies of the matched
+/// cam0 track-id descriptors so replenish / rebootstrap matcher paths keep
+/// working. Correspondences also pass Basalt's epipolar gate.
+#[cfg(feature = "image-io")]
+#[allow(clippy::too_many_arguments)]
+fn optical_flow_stereo_features_for_frame(
+    of_extractor: &visloc_rs::vision::optical_flow::OpticalFlowFeatureExtractor,
+    cam0_image: &GrayscaleImage,
+    cam1_image: &GrayscaleImage,
+    features_raw: &FeatureSet,
+    features_undist: &FeatureSet,
+    cam0_distortion: &RadialTangential,
+    cam0_camera: &Camera,
+    cam1_distortion: &RadialTangential,
+    cam1_camera: &Camera,
+    cam0_to_cam1: &SE3,
+    epipolar_thresh: f64,
+) -> Option<FeatureSet> {
+    let left_pts: Vec<(f32, f32)> = features_raw
+        .keypoints
+        .iter()
+        .map(|p| (p.x as f32, p.y as f32))
+        .collect();
+    let tracked = of_extractor.track_points_to(cam0_image, cam1_image, &left_pts);
+
+    let mut right_undist_by_raw = vec![None; features_raw.keypoints.len()];
+    for (raw_i, right) in tracked.into_iter().enumerate() {
+        let Some((rx, ry)) = right else {
+            continue;
+        };
+        right_undist_by_raw[raw_i] =
+            cam1_distortion.undistort_pixel(cam1_camera, Point2::new(rx as f64, ry as f64));
+    }
+
+    let mut correspondences = Vec::new();
+    let mut left_undist_idx = 0usize;
+    for (raw_i, kp) in features_raw.keypoints.iter().enumerate() {
+        let Some(undist_left) = cam0_distortion.undistort_pixel(cam0_camera, *kp) else {
+            continue;
+        };
+        debug_assert_eq!(features_undist.keypoints[left_undist_idx], undist_left);
+        if let Some(undist_right) = right_undist_by_raw[raw_i] {
+            correspondences.push((left_undist_idx, undist_right));
+        }
+        left_undist_idx += 1;
+    }
+    let correspondences = visloc_rs::vision::stereo_bootstrap::filter_correspondences_by_epipolar(
+        cam0_camera,
+        cam1_camera,
+        cam0_to_cam1,
+        &features_undist.keypoints,
+        &correspondences,
+        epipolar_thresh,
+    );
+    if correspondences.is_empty() {
+        return None;
+    }
+
+    let mut keypoints = Vec::with_capacity(correspondences.len());
+    let mut descriptors = Vec::with_capacity(correspondences.len());
+    for &(left_idx, right_px) in &correspondences {
+        keypoints.push(right_px);
+        descriptors.push(features_undist.descriptors[left_idx].clone());
+    }
+    FeatureSet::new(keypoints, descriptors).ok()
 }
 
 /// Adapt a [`FeatureSet`] into a [`Frame`] addressed to the cam0 camera id.
@@ -6205,16 +6282,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
         extractor.set_frame_idx(frame_idx);
-        let features = if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow)
+        let (features_raw, features) = if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow)
             && frame_idx == seed_frame_idx
         {
             // Reuse the exact FeatureSet that seeded the map so track-id
             // descriptors match 1:1. Re-running KLT on the seed image can
             // drop tracks and mint new ids, zeroing localization.
-            seed_features.clone()
+            (seed_features_raw.clone(), seed_features.clone())
         } else {
             match extractor.extract(&image) {
-                Ok(features) => undistort_feature_keypoints(&distortion, &camera, &features),
+                Ok(raw) => {
+                    let undist = undistort_feature_keypoints(&distortion, &camera, &raw);
+                    (raw, undist)
+                }
                 Err(err) => {
                     eprintln!(
                         "skipping frame_idx={frame_idx} due to feature-extraction error: {err}"
@@ -6261,15 +6341,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // so this demo deliberately does not build a second 3D point set for
         // per-loop Sim3 scale estimation.
         let cam1_features_for_frame = if args.stereo_landmark_replenish {
-            if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
-                // The OpticalFlow extractor owns a single cam0-temporal KLT
-                // state. Feeding it cam1 frames (as SuperPoint/corner do)
-                // advances that state across stereo instead of time and
-                // zeroes localization. Stereo LK for OF uses
-                // `track_points_to` (seed path); mid-run replenish/rebootstrap
-                // stay disabled here until that path is wired per-frame.
-                None
-            } else if let Some(cam1_setup) = cam1_stereo_setup.as_ref() {
+            if let Some(cam1_setup) = cam1_stereo_setup.as_ref() {
                 if let Some(cam1_idx) = dataset.cam1_images.iter().position(|entry| {
                     entry.timestamp_nanoseconds == image_entry.timestamp_nanoseconds
                 }) {
@@ -6277,19 +6349,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .cam1_image_dir
                         .join(&dataset.cam1_images[cam1_idx].filename);
                     if let Ok(cam1_image) = read_common_image(&cam1_image_path) {
-                        extractor.set_camera(SuperPointCamera::Cam1);
-                        extractor.set_frame_idx(cam1_idx);
-                        let extracted = extractor.extract(&cam1_image);
-                        extractor.set_camera(SuperPointCamera::Cam0);
-                        if let Ok(raw) = extracted {
-                            let cam1_features = undistort_feature_keypoints(
+                        if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
+                            // Stereo LK via track_points_to — does not touch
+                            // the cam0-temporal OF tracker state.
+                            let DemoExtractor::OpticalFlow(ref of_extractor) = extractor else {
+                                unreachable!("OpticalFlow kind requires OpticalFlow extractor");
+                            };
+                            optical_flow_stereo_features_for_frame(
+                                of_extractor,
+                                &image,
+                                &cam1_image,
+                                &features_raw,
+                                &features,
+                                &distortion,
+                                &camera,
                                 &cam1_setup.distortion,
                                 &cam1_setup.camera,
-                                &raw,
-                            );
-                            Some(cam1_features)
+                                &cam1_setup.cam0_to_cam1,
+                                args.optical_flow_config.optical_flow_epipolar_error.max(0.0)
+                                    as f64,
+                            )
                         } else {
-                            None
+                            extractor.set_camera(SuperPointCamera::Cam1);
+                            extractor.set_frame_idx(cam1_idx);
+                            let extracted = extractor.extract(&cam1_image);
+                            extractor.set_camera(SuperPointCamera::Cam0);
+                            if let Ok(raw) = extracted {
+                                let cam1_features = undistort_feature_keypoints(
+                                    &cam1_setup.distortion,
+                                    &cam1_setup.camera,
+                                    &raw,
+                                );
+                                Some(cam1_features)
+                            } else {
+                                None
+                            }
                         }
                     } else {
                         None
