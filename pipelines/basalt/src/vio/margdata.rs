@@ -338,6 +338,8 @@ pub struct OfObservationData {
     pub frame_id: u64,
     pub track_id: u64,
     pub camera_id: u16,
+    /// Optical-flow keypoint center in source-image pixel coordinates.
+    /// This is not a normalized camera bearing.
     pub x: f64,
     pub y: f64,
 }

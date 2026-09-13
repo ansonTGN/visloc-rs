@@ -410,6 +410,10 @@ pub struct BasaltVioEstimator {
     /// active keyframe.  The adapter moves one copied payload into this map;
     /// no image is copied by the solver or by MargData emission.
     of_images: BTreeMap<u64, Vec<OfImageData>>,
+    /// Complete raw feature observations retained alongside each keyframe's
+    /// optical-flow images. These mapper payloads are independent of the
+    /// landmark subset that remains active in the VIO factor graph.
+    of_observations: BTreeMap<u64, Vec<OfObservationData>>,
     window_observations: BTreeMap<TrackId, Vec<StoredObservation>>,
     native_host_order: NativeHostOrder,
     native_host_keys: BTreeMap<(u64, u16), u64>,
@@ -435,9 +439,9 @@ pub struct BasaltVioEstimator {
     /// upstream old-KF policy uses this denominator for its feature ratio.
     num_points_kf: BTreeMap<u64, usize>,
     /// Once explicit no-MargData/no-trace processing starts, older active
-    /// keyframes may not have complete `OfImageData`.  Retaining MargData
-    /// again would therefore emit an incomplete packet, so that transition is
-    /// rejected until the estimator is recreated.
+    /// keyframes may not have complete `OfImageData` or raw feature records.
+    /// Retaining MargData again would therefore emit an incomplete packet, so
+    /// that transition is rejected until the estimator is recreated.
     lean_no_output_mode: bool,
     /// Marginalization bookkeeping exposed in the next MargData artifact.
     last_kf_to_marg: Vec<(u64, u64)>,
@@ -524,6 +528,7 @@ impl BasaltVioEstimator {
             window_poses: Vec::new(),
             window_states: Vec::new(),
             of_images: BTreeMap::new(),
+            of_observations: BTreeMap::new(),
             window_observations: BTreeMap::new(),
             native_host_order: NativeHostOrder::default(),
             native_host_keys: BTreeMap::new(),
@@ -814,7 +819,7 @@ impl BasaltVioEstimator {
     ) -> Result<EstimatorOutput, String> {
         if self.lean_no_output_mode && retain_marg_data {
             return Err(
-                "cannot retain MargData after no-output mode: active keyframes may lack complete OfImageData; recreate the estimator"
+                "cannot retain MargData after no-output mode: active keyframes may lack complete optical-flow payloads; recreate the estimator"
                     .into(),
             );
         }
@@ -1364,6 +1369,8 @@ impl BasaltVioEstimator {
             )
             .collect::<std::collections::BTreeSet<_>>();
         self.of_images
+            .retain(|frame_id, _| active_keyframes.contains(frame_id));
+        self.of_observations
             .retain(|frame_id, _| active_keyframes.contains(frame_id));
         // Commit the one-way mode only after every fallible estimator stage
         // has completed and the output is ready to return.  A failed lean
@@ -1929,6 +1936,21 @@ impl BasaltVioEstimator {
                     bearing: candidate_bearing,
                 });
             }
+        }
+        if is_keyframe && self.of_images.contains_key(&frame_id) {
+            self.of_observations.insert(
+                frame_id,
+                current
+                    .iter()
+                    .map(|(observation, _bearing, _history)| OfObservationData {
+                        frame_id,
+                        track_id: observation.track_id,
+                        camera_id: observation.camera_id,
+                        x: observation.pixel.x,
+                        y: observation.pixel.y,
+                    })
+                    .collect(),
+            );
         }
         if is_keyframe {
             // Basalt's denominator is the number of successful
@@ -3816,30 +3838,11 @@ impl BasaltVioEstimator {
             .collect::<Vec<_>>();
         of_images.sort_by_key(|image| (image.frame_id, image.timestamp_ns, image.camera_id));
 
-        let active_frame_ids = self
-            .window_poses
-            .iter()
-            .map(|pose| pose.frame_id)
-            .chain(self.window_states.iter().map(|state| state.frame_id))
-            .collect::<std::collections::BTreeSet<_>>();
         let of_observations = self
-            .window_observations
+            .of_observations
             .iter()
-            .flat_map(|(track_id, observations)| {
-                observations.iter().filter_map(|observation| {
-                    if !active_frame_ids.contains(&observation.frame_id) {
-                        return None;
-                    }
-                    let bearing = self.camera.unproject(&observation.pixel)?;
-                    Some(OfObservationData {
-                        frame_id: observation.frame_id,
-                        track_id: *track_id,
-                        camera_id: observation.camera_id,
-                        x: bearing.x,
-                        y: bearing.y,
-                    })
-                })
-            })
+            .filter(|(frame_id, _)| image_frame_ids.binary_search(frame_id).is_ok())
+            .flat_map(|(_, observations)| observations.iter().cloned())
             .collect::<Vec<_>>();
 
         let prior = self.prior.as_ref().and_then(|prior| {
@@ -3981,6 +3984,12 @@ impl BasaltVioEstimator {
             .flat_map(|images| images.iter().cloned())
             .collect::<Vec<_>>();
         of_images.sort_by_key(|image| (image.frame_id, image.timestamp_ns, image.camera_id));
+        let of_observations = self
+            .of_observations
+            .iter()
+            .filter(|(frame_id, _)| image_frame_ids.binary_search(frame_id).is_ok())
+            .flat_map(|(_, observations)| observations.iter().cloned())
+            .collect::<Vec<_>>();
         MargData {
             schema_version: MARGDATA_SCHEMA_VERSION,
             aom_sqrt_jacobian: MatrixData::new(rows, state_dof, jacobian_data)
@@ -4007,29 +4016,7 @@ impl BasaltVioEstimator {
                 diagnostics.imu_factor_rows,
                 diagnostics.bias_factor_rows,
             ],
-            of_observations: self
-                .window_observations
-                .iter()
-                .flat_map(|(track_id, observations)| {
-                    observations.iter().filter_map(|observation| {
-                        if !self
-                            .window_states
-                            .iter()
-                            .any(|state| state.frame_id == observation.frame_id)
-                        {
-                            return None;
-                        }
-                        let bearing = self.camera.unproject(&observation.pixel)?;
-                        Some(OfObservationData {
-                            frame_id: observation.frame_id,
-                            track_id: *track_id,
-                            camera_id: observation.camera_id,
-                            x: bearing.x,
-                            y: bearing.y,
-                        })
-                    })
-                })
-                .collect(),
+            of_observations,
             of_images,
             frame_poses_fej,
             frame_states_fej,
@@ -5869,6 +5856,11 @@ mod tests {
                 .collect(),
         );
         let current = obs(&camera, 118, 7, Point3::new(0.1, -0.05, 4.0));
+        let expected_pixel = current.pixel;
+        estimator.of_images.insert(
+            7,
+            vec![OfImageData::new(7, current.timestamp_ns, 0, 1, 1, vec![1]).unwrap()],
+        );
         estimator
             .collect_observations(
                 7,
@@ -5885,6 +5877,9 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![0, 5, 6, 7]
         );
+        assert_eq!(estimator.of_observations[&7].len(), 1);
+        assert_eq!(estimator.of_observations[&7][0].x, expected_pixel.x);
+        assert_eq!(estimator.of_observations[&7][0].y, expected_pixel.y);
     }
 
     #[test]
@@ -6674,6 +6669,16 @@ mod tests {
                     OfImageData::new(frame_id, frame_id as i64 * 10, 1, 1, 1, vec![2]).unwrap(),
                 ],
             );
+            estimator.of_observations.insert(
+                frame_id,
+                vec![OfObservationData {
+                    frame_id,
+                    track_id: 100 + frame_id,
+                    camera_id: 0,
+                    x: frame_id as f64,
+                    y: -(frame_id as f64),
+                }],
+            );
         }
         // Frame 9 is no longer in the post-shift window, but upstream's
         // marginal packet is assembled before erasing the selected keyframe.
@@ -6713,6 +6718,13 @@ mod tests {
                 .map(|image| image.frame_id)
                 .collect::<Vec<_>>(),
             vec![1, 1, 2, 2, 9, 9]
+        );
+        assert_eq!(
+            data.of_observations
+                .iter()
+                .map(|observation| observation.frame_id)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 9]
         );
         assert!(data.validate());
     }
