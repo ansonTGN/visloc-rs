@@ -30,7 +30,7 @@ V2_SCHEMA = Path("benchmarks/basalt/schemas/provenance_manifest_v2.schema.json")
 
 _REQUIRED_CONTRACTS = {
     "config": Path("configs/basalt/euroc_config.json"),
-    "calibration": Path("target/euroc_ds_calib.json"),
+    "calibration": Path("benchmarks/basalt/release_inputs/euroc_ds_calib.json"),
     "protocol": Path("benchmarks/basalt/protocols/basalt_euroc_parity_v1.json"),
     "dataset_manifest": Path("benchmarks/basalt/euroc_dataset_manifest.json"),
     "workspace_cargo_toml": Path("Cargo.toml"),
@@ -41,7 +41,10 @@ _REQUIRED_CONTRACTS = {
     "rust_runner": Path("benchmarks/basalt/rust_wsl_runner.py"),
     "golden_registry": Path("benchmarks/basalt/m11_current_golden_registry_20260830.json"),
     "license_inventory": Path("benchmarks/basalt/cargo_license_inventory_v2.json"),
-    "correctness_certificate": Path("work/m11_release_candidate_final2_correctness_20260831.json"),
+    "correctness_certificate": Path(
+        "benchmarks/basalt/release_inputs/"
+        "m11_release_candidate_final2_correctness_20260831.json"
+    ),
     "benchmark_readme": Path("benchmarks/basalt/README.md"),
     "provenance_audit": Path("benchmarks/basalt/PROVENANCE_AUDIT.md"),
     "provenance_generator": Path("benchmarks/basalt/generate_provenance_manifest_v2.py"),
@@ -226,6 +229,7 @@ def _correctness_summary(
     root: Path,
     record: dict[str, Any],
     contracts: dict[str, Any],
+    source: dict[str, Any],
     executable: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Bind the selected RC certificate and its 52/80/400 exactness claims."""
@@ -257,11 +261,35 @@ def _correctness_summary(
     source_files = source_binding.get("files", []) if isinstance(source_binding, dict) else []
     if not isinstance(source_files, list) or not source_files:
         raise ManifestError("correctness certificate has no source binding")
+    current_source_records = {
+        item["path"]: item
+        for item in source.get("files", [])
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
+    certificate_source_records = {
+        item["path"]: item
+        for item in source_files
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    }
+    if certificate_source_records.keys() != current_source_records.keys():
+        certificate_warnings.append(
+            "certificate production source coverage differs from current source tree"
+        )
     for source_record in source_files:
         if isinstance(source_record, dict):
             errors = _record_errors(root, source_record)
             if errors:
                 certificate_warnings.extend(errors)
+            current_record = current_source_records.get(source_record.get("path"))
+            if current_record is not None and (
+                source_record.get("bytes") != current_record.get("bytes")
+                or str(source_record.get("sha256", "")).lower()
+                != str(current_record.get("sha256", "")).lower()
+            ):
+                certificate_warnings.append(
+                    f"certificate source binding differs from current source: "
+                    f"{source_record.get('path')}"
+                )
 
     input_binding = certificate.get("input_binding", {})
     input_map = {
@@ -483,6 +511,7 @@ def build_candidate(
                 root,
                 correctness_record,
                 contracts,
+                source,
                 (
                     None
                     if not freeze or executable is None
@@ -660,6 +689,11 @@ def validate_candidate(
         if correctness.get("status") != "PASS_CORRECTNESS_ONLY":
             errors.append("correctness certificate status mismatch")
         if status == "frozen":
+            certificate_warnings = correctness.get("certificate_warnings")
+            if not isinstance(certificate_warnings, list) or certificate_warnings:
+                errors.append(
+                    "frozen manifest requires a correctness certificate bound to current sources and inputs"
+                )
             replay_frames = {
                 replay.get("max_frames")
                 for replay in correctness.get("replays", [])

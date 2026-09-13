@@ -18,7 +18,8 @@ exact crate, checksum, SPDX, license-file, and source evidence. The immutable
 as historical evidence and remains byte-unchanged. The
 machine-readable source of truth is
 [`basalt_provenance_manifest_v2.json`](basalt_provenance_manifest_v2.json),
-the current frozen source/executable binding;
+the immutable frozen 2026-08-31 source/executable record (not a binding for
+later source edits);
 [`basalt_provenance_manifest_v1.json`](basalt_provenance_manifest_v1.json) is
 retained as immutable historical evidence;
 `generate_provenance_manifest_v2.py --verify-manifest` checks the current v2
@@ -88,9 +89,13 @@ stable, followed by `python benchmarks/basalt/verify_provenance.py`.
 
 ## Release and GT firewall
 
-`basalt_provenance_manifest_v2.json` is the current frozen source/executable
-binding and has `ground_truth_artifacts: []`; its selected RC executable and
-52/80/400 certificate are evidence bindings, not bundled target payloads.
+`basalt_provenance_manifest_v2.json` is the immutable frozen 2026-08-31
+source/executable record and has `ground_truth_artifacts: []`; its selected RC
+executable and 52/80/400 certificate are evidence bindings, not bundled target
+payloads. A new candidate may reuse the checked-in historical certificate only
+as provenance history: source/input mismatches are emitted as warnings and
+prevent frozen promotion until a fresh current-tree correctness run supplies a
+replacement certificate.
 `basalt_release_manifest_v1.json` contains source, provenance, license, and
 validator metadata artifacts only and has `ground_truth_artifacts: []`. The
 validator rejects GT-named

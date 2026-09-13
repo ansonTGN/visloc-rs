@@ -28,13 +28,16 @@ first parity audit. `configs/basalt/euroc_config.json` is byte-identical to the
 fixed upstream LF checkout; the oracle still uses the upstream path so the
 provenance remains explicit.
 
-The current frozen Rust release binding is
-[`basalt_provenance_manifest_v2.json`](basalt_provenance_manifest_v2.json).
-It binds the checked-out production/test sources, Cargo/config/calibration/
-protocol/dataset inputs, the timing-off/LM-reuse-off RC executable, compiler
-identity, and the 52/80/400 correctness certificate. The v2 verifier is the
-standard-library generator's `--verify-manifest` mode; the v1 manifest below is
-retained as immutable historical evidence.
+The checked-in
+[`basalt_provenance_manifest_v2.json`](basalt_provenance_manifest_v2.json) is
+the immutable frozen record of the 2026-08-31 release candidate; it is not a
+binding for later source edits. New pending candidates use the checked-in
+`release_inputs/` calibration and historical correctness certificate, and
+report certificate warnings when that certificate does not bind the current
+source bytes. A new frozen manifest requires a fresh executable and correctness
+certificate for the current tree; warning-bearing candidates are rejected.
+The v2 verifier is the standard-library generator's `--verify-manifest` mode;
+the v1 manifest below is retained as immutable historical evidence.
 
 The current Cargo dependency/license inventory is
 [`cargo_license_inventory_v2.json`](cargo_license_inventory_v2.json). It
