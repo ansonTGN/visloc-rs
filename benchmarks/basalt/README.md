@@ -76,8 +76,8 @@ trajectory-only output policy.
 
 ## Phase 6 runtime methodology
 
-`phase6_coordinator.py` is a direct-path coordinator.  Its formal all11×3
-population is exactly 66 lean cells (11 sequences × 3 repetitions × the two
+`phase6_coordinator.py` is a direct-path coordinator.  Its formal all11×1
+population is exactly 22 lean cells (11 sequences × 1 repetition × the two
 methods), with `workers=1`, engine `threads=1`, seed `7`, and a fresh output
 root.  A canonical formal gate additionally requires a validated sensor-only
 view and a complete strict GT-absence fingerprint; a physical direct dataset

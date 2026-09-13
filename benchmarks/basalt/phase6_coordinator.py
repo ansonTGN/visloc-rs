@@ -1,4 +1,4 @@
-"""Cache-aware, direct-path EuRoC all11 x 3 coordinator.
+"""Cache-aware, direct-path EuRoC all11 x 1 coordinator.
 
 This coordinator is intentionally separate from :mod:`batch`.  ``batch``
 implements the frozen M10 staged-input contract; this module implements the
@@ -56,7 +56,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROTOCOL = ROOT / "benchmarks" / "basalt" / "protocols" / "basalt_euroc_parity_v1.json"
 DEFAULT_DATASET_MANIFEST = ROOT / "benchmarks" / "basalt" / "euroc_dataset_manifest.json"
 DEFAULT_CONFIG = ROOT / "configs" / "basalt" / "euroc_config.json"
-DEFAULT_CALIBRATION = ROOT / "target" / "euroc_ds_calib.json"
+DEFAULT_CALIBRATION = ROOT / "benchmarks" / "basalt" / "release_inputs" / "euroc_ds_calib.json"
 DEFAULT_RUST_EXECUTABLE = ROOT / "target" / "release" / "examples" / "basalt_euroc_vio_demo.exe"
 DEFAULT_NATIVE_ORACLE_ROOT = "/root/visloc-basalt-clean-m7cr-20260823"
 DEFAULT_NATIVE_BUILD = f"{DEFAULT_NATIVE_ORACLE_ROOT}/build/core-relwithdebinfo/basalt_vio"
@@ -83,7 +83,7 @@ METHOD_RUST = "rust_current"
 METHODS = (METHOD_NATIVE, METHOD_RUST)
 OUTPUT_POLICY_LEAN = "trajectory_only_lean"
 OUTPUT_POLICY_DIAGNOSTIC = "representative_diagnostic"
-DEFAULT_REPETITIONS = 3
+DEFAULT_REPETITIONS = 1
 DEFAULT_POLL_SECONDS = 0.25
 DEFAULT_TIMEOUT_SECONDS = 12 * 60 * 60
 DEFAULT_SEED = 7
@@ -2307,7 +2307,7 @@ def build_plan(
     )
     if full_formal_matrix and expected_formal_cell_count != FORMAL_MATRIX_CELL_COUNT:
         raise CoordinatorError(
-            "formal all11x3 matrix has an invalid expected cell count; refusing a partial denominator"
+            "formal all11x1 matrix has an invalid expected cell count; refusing a partial denominator"
         )
     representative = _normalize_representative(representative)
     if representative is not None:
@@ -2760,7 +2760,7 @@ def build_plan(
         )
     if full_formal_matrix and len(formal_cells) != FORMAL_MATRIX_CELL_COUNT:
         raise CoordinatorError(
-            f"formal all11x3 plan must contain exactly {FORMAL_MATRIX_CELL_COUNT} lean cells"
+            f"formal all11x1 plan must contain exactly {FORMAL_MATRIX_CELL_COUNT} lean cells"
         )
     plan_request = {
         "schema_id": COORDINATOR_SCHEMA_ID,
@@ -2791,7 +2791,8 @@ def build_plan(
         "formal_cell_count": len(formal_cells),
         "formal_expected_cell_count": expected_formal_cell_count,
         "formal_matrix": {
-            "full_all11x3": full_formal_matrix,
+            "full_all11": full_formal_matrix,
+            "formal_repetitions": DEFAULT_REPETITIONS,
             "expected_cell_count": expected_formal_cell_count,
             "actual_cell_count": len(formal_cells),
             "required_full_count": FORMAL_MATRIX_CELL_COUNT,
@@ -2933,7 +2934,8 @@ def build_plan(
             "formal_no_trace": True,
             "formal_cell_count": len(formal_cells),
             "formal_expected_cell_count": expected_formal_cell_count,
-            "formal_full_all11x3": full_formal_matrix,
+            "formal_full_all11": full_formal_matrix,
+            "formal_repetitions": DEFAULT_REPETITIONS,
             "representative": representative,
             "representative_separate_from_formal": True,
             "diagnostic_requires_separate_root": True,
@@ -3109,7 +3111,8 @@ def build_diagnostic_plan(
             "formal_cell_count": 0,
             "formal_expected_cell_count": 0,
             "formal_matrix": {
-                "full_all11x3": False,
+                "full_all11": False,
+                "formal_repetitions": DEFAULT_REPETITIONS,
                 "expected_cell_count": 0,
                 "actual_cell_count": 0,
                 "required_full_count": FORMAL_MATRIX_CELL_COUNT,
@@ -4868,15 +4871,22 @@ def aggregate_gate_report(
             request.get("sequences", [])
         ) * int(request.get("repetitions", 0) or 0)
     formal_count_ok = len(formal_cells) == expected_formal_cell_count
-    full_formal_matrix = bool(matrix.get("full_all11x3"))
+    # ``full_all11x3`` is accepted only when reading historical plans.  New
+    # plans use the repetition-neutral key and carry their required count.
+    full_formal_matrix = bool(matrix.get("full_all11") or matrix.get("full_all11x3"))
+    required_full_count = matrix.get("required_full_count")
+    if not isinstance(required_full_count, int) or required_full_count < 1:
+        required_full_count = FORMAL_MATRIX_CELL_COUNT
     if full_formal_matrix:
-        formal_count_ok = formal_count_ok and len(formal_cells) == FORMAL_MATRIX_CELL_COUNT
+        formal_count_ok = formal_count_ok and len(formal_cells) == required_full_count
     formal_count_contract = {
         "status": "pass" if formal_count_ok else "not_evaluable",
         "actual": len(formal_cells),
         "expected": expected_formal_cell_count,
-        "required_full_count": FORMAL_MATRIX_CELL_COUNT if full_formal_matrix else None,
-        "full_all11x3": full_formal_matrix,
+        "required_full_count": required_full_count if full_formal_matrix else None,
+        "full_all11": full_formal_matrix,
+        "formal_repetitions": matrix.get("formal_repetitions"),
+        "legacy_full_all11x3": bool(matrix.get("full_all11x3")),
         "diagnostic_cells_excluded": len(diagnostic_cells),
     }
     namespace_values = [
