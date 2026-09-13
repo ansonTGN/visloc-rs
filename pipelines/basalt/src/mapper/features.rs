@@ -15,7 +15,7 @@ use std::{
 
 use crate::vio::landmarks::libstdcxx_unordered_keys;
 use nalgebra::{
-    linalg::{Schur, SymmetricEigen, SVD},
+    linalg::{Schur, SVD},
     Complex, DMatrix, DVector, Matrix3, Point2, SMatrix, Vector3, Vector4,
 };
 use thiserror::Error;
@@ -652,7 +652,9 @@ fn stewenius_compose_a(ee: &Matrix9x4) -> Matrix10x20 {
     // `E E^T E - 1/2 trace(E E^T) E = 0`.
     for row in 0..3 {
         for col in 0..3 {
-            let equation_row = row * 3 + col;
+            // OpenGV's generated composeA stores the nine cubic constraints
+            // in Eigen's column-major coefficient order.
+            let equation_row = col * 3 + row;
             let mut polynomial = [0.0_f64; 20];
             for i in 0..3 {
                 for j in 0..3 {
@@ -699,7 +701,7 @@ fn stewenius_nullspace(
     if sample.len() < OPENGV_RANSAC_MINIMAL_SIZE {
         return None;
     }
-    let mut q = SMatrix::<f64, 5, 9>::zeros();
+    let mut q = DMatrix::<f64>::zeros(OPENGV_RANSAC_MINIMAL_SIZE, 9);
     for (row, &match_index) in sample.iter().take(OPENGV_RANSAC_MINIMAL_SIZE).enumerate() {
         let correspondence = matches.get(match_index)?;
         let f1 = left_rays.get(correspondence.left as usize)?;
@@ -713,20 +715,124 @@ fn stewenius_nullspace(
         }
     }
 
-    // OpenGV asks Eigen for the full V of the 5x9 SVD and takes its last four
-    // columns.  Q^T Q has the same nullspace; sorting its symmetric
-    // eigenvectors by ascending eigenvalue gives the equivalent 9x4 basis
-    // without relying on a thin-SVD implementation that omits full V.
-    let eigen = SymmetricEigen::new(q.transpose() * q);
-    let mut order = (0..9).collect::<Vec<_>>();
-    order.sort_by(|&a, &b| eigen.eigenvalues[a].total_cmp(&eigen.eigenvalues[b]));
-    let mut ee = Matrix9x4::zeros();
-    for (column, &eigen_column) in order.iter().take(4).enumerate() {
-        for row in 0..9 {
-            ee[(row, column)] = eigen.eigenvectors[(row, eigen_column)];
+    stewenius_eigen_full_v_last4_f64(&q)
+}
+
+fn stewenius_eigen_col_piv_qr_f64(
+    q: &DMatrix<f64>,
+) -> (DMatrix<f64>, Vec<f64>, Vec<usize>, DMatrix<f64>) {
+    let size = q.nrows();
+    let scale = q.iter().map(|value| value.abs()).fold(0.0_f64, f64::max);
+    let mut qr = q.transpose().map(|value| value / scale);
+    let mut h = vec![0.0_f64; size];
+    let mut cols = vec![0_usize; size];
+    let mut norms = (0..size)
+        .map(|column| qr.column(column).norm())
+        .collect::<Vec<_>>();
+    let mut direct_norms = norms.clone();
+    let norm_downdate_threshold = f64::EPSILON.sqrt();
+    for k in 0..size {
+        let mut pivot = k;
+        for column in k + 1..size {
+            if norms[column] > norms[pivot] {
+                pivot = column;
+            }
+        }
+        cols[k] = pivot;
+        if pivot != k {
+            qr.swap_columns(k, pivot);
+            norms.swap(k, pivot);
+            direct_norms.swap(k, pivot);
+        }
+        let c0 = qr[(k, k)];
+        let tail_sq = (k + 1..9)
+            .map(|row| qr[(row, k)] * qr[(row, k)])
+            .sum::<f64>();
+        if tail_sq <= f64::MIN_POSITIVE {
+            h[k] = 0.0;
+            for row in k + 1..9 {
+                qr[(row, k)] = 0.0;
+            }
+        } else {
+            let mut beta = (c0 * c0 + tail_sq).sqrt();
+            if c0 >= 0.0 {
+                beta = -beta;
+            }
+            for row in k + 1..9 {
+                qr[(row, k)] /= c0 - beta;
+            }
+            h[k] = (beta - c0) / beta;
+            qr[(k, k)] = beta;
+        }
+        for column in k + 1..size {
+            let mut dot = qr[(k, column)];
+            for row in k + 1..9 {
+                dot += qr[(row, k)] * qr[(row, column)];
+            }
+            let update = h[k] * dot;
+            qr[(k, column)] -= update;
+            for row in k + 1..9 {
+                qr[(row, column)] -= qr[(row, k)] * update;
+            }
+        }
+        for column in k + 1..size {
+            if norms[column] != 0.0 {
+                let ratio = qr[(k, column)].abs() / norms[column];
+                let temp = ((1.0 + ratio) * (1.0 - ratio)).max(0.0);
+                let temp2 = temp * (norms[column] / direct_norms[column]).powi(2);
+                if temp2 <= norm_downdate_threshold {
+                    direct_norms[column] = (k + 1..9)
+                        .map(|row| qr[(row, column)] * qr[(row, column)])
+                        .sum::<f64>()
+                        .sqrt();
+                    norms[column] = direct_norms[column];
+                } else {
+                    norms[column] *= temp.sqrt();
+                }
+            }
         }
     }
-    Some(ee)
+    let mut matrix_q = DMatrix::<f64>::identity(9, 9);
+    for k in (0..size).rev() {
+        for column in k..9 {
+            let mut dot = matrix_q[(k, column)];
+            for row in k + 1..9 {
+                dot += qr[(row, k)] * matrix_q[(row, column)];
+            }
+            let update = h[k] * dot;
+            matrix_q[(k, column)] -= update;
+            for row in k + 1..9 {
+                matrix_q[(row, column)] -= qr[(row, k)] * update;
+            }
+        }
+    }
+    let mut permutation = (0..size).collect::<Vec<_>>();
+    for k in 0..size {
+        permutation.swap(k, cols[k]);
+    }
+    (qr, h, permutation, matrix_q)
+}
+
+fn stewenius_eigen_full_v_last4_f64(q: &DMatrix<f64>) -> Option<Matrix9x4> {
+    if q.nrows() != OPENGV_RANSAC_MINIMAL_SIZE
+        || q.ncols() != 9
+        || q.iter().any(|value| !value.is_finite())
+        || q.iter().all(|value| *value == 0.0)
+    {
+        return None;
+    }
+    // Eigen's wide dynamic JacobiSVD scales Q before its default
+    // ColPivHouseholderQR preconditioner. The four trailing columns of the
+    // resulting full Q are already the exact nullspace columns requested by
+    // V.rightCols(4); the later 5x5 Jacobi sweeps never touch them.
+    let (_, _, _, matrix_q) = stewenius_eigen_col_piv_qr_f64(q);
+    let mut result = Matrix9x4::zeros();
+    for row in 0..9 {
+        for column in 0..4 {
+            result[(row, column)] = matrix_q[(row, column + 5)];
+        }
+    }
+    Some(result)
 }
 
 fn stewenius_eigenvectors(matrix: ComplexMatrix10) -> Vec<ComplexVector10> {
@@ -2261,12 +2367,71 @@ mod tests {
     use super::{
         compute_angles, compute_descriptors, descriptor_pattern, opengv_cayley2rot,
         opengv_eigen_dot3, opengv_eigen_mat34_vec4, opengv_eigen_matvec3, opengv_eigen_norm3,
-        opengv_optimize_pose, opengv_qrsolv, opengv_rot2cayley, relative_pose_error, triangulate2,
+        opengv_optimize_pose, opengv_qrsolv, opengv_rot2cayley, relative_pose_error,
+        stewenius_eigen_col_piv_qr_f64, stewenius_eigen_full_v_last4_f64, triangulate2,
         DescriptorMatch, OpenGvMt19937, RelativePoseModel,
     };
     use crate::pyramid::RawU16Image;
     use nalgebra::{DMatrix, DVector, Matrix3, Point2, SMatrix, Vector3, Vector4};
     use serde_json::Value;
+
+    #[test]
+    #[ignore = "requires external native Stewenius QR capture on E"]
+    fn m11_stewenius_col_piv_qr_oracle() {
+        let path = std::env::var("M11_STEWENIUS_NATIVE_JSON").expect("native oracle path");
+        let oracle: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let q_json = oracle["stewenius_q"].as_array().unwrap();
+        let mut q = DMatrix::<f64>::zeros(q_json.len(), 9);
+        for row in 0..q_json.len() {
+            for column in 0..9 {
+                q[(row, column)] = q_json[row][column].as_f64().unwrap();
+            }
+        }
+        let (qr, h, cols, matrix_q) = stewenius_eigen_col_piv_qr_f64(&q);
+        let expected_qr = oracle["stewenius_qr_matrix"].as_array().unwrap();
+        let expected_h = oracle["stewenius_qr_h"].as_array().unwrap();
+        let expected_cols = oracle["stewenius_qr_cols_permutation"].as_array().unwrap();
+        let expected_q = oracle["stewenius_qr_q"].as_array().unwrap();
+        let mut qr_max = 0.0_f64;
+        let mut q_max = 0.0_f64;
+        for row in 0..9 {
+            for column in 0..q_json.len() {
+                qr_max = qr_max
+                    .max((qr[(row, column)] - expected_qr[row][column].as_f64().unwrap()).abs());
+            }
+            for column in 0..9 {
+                q_max = q_max.max(
+                    (matrix_q[(row, column)] - expected_q[row][column].as_f64().unwrap()).abs(),
+                );
+            }
+        }
+        let h_max = h
+            .iter()
+            .enumerate()
+            .map(|(i, value)| (value - expected_h[i].as_f64().unwrap()).abs())
+            .fold(0.0_f64, f64::max);
+        eprintln!(
+            "STEWENIUS_QR qr_max={qr_max:.17e} h_max={h_max:.17e} q_max={q_max:.17e} cols={cols:?}"
+        );
+        assert_eq!(
+            cols,
+            expected_cols
+                .iter()
+                .map(|v| v.as_u64().unwrap() as usize)
+                .collect::<Vec<_>>()
+        );
+        let full_v = stewenius_eigen_full_v_last4_f64(&q).unwrap();
+        let expected_v = oracle["nullspace_v_last4"].as_array().unwrap();
+        let mut v_max = 0.0_f64;
+        for row in 0..9 {
+            for column in 0..4 {
+                v_max = v_max
+                    .max((full_v[(row, column)] - expected_v[row][column].as_f64().unwrap()).abs());
+            }
+        }
+        eprintln!("STEWENIUS_FULL_V max_abs={v_max:.17e}");
+        assert!(v_max < 1e-12);
+    }
 
     #[test]
     fn opengv_mt19937_uniform_stream_crosses_twist_boundary() {
