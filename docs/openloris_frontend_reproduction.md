@@ -76,6 +76,43 @@ Disk cleanup on 2026-09-09 restored about 21 GiB of root free space before the
 next replay. Do not silently move measured outputs to memory-backed storage or
 discard retained evidence to obtain a pass.
 
+### Connected mapping execution (not cold E2E)
+
+`scripts/run_native_mapping.py` now connects the 21 source executions, publishes
+the 23-node manifest only after their reference models pass, then runs stitch,
+tail integration and main integration. Inputs are explicitly bound by
+`benchmarks/electro/m8-native-mapping-bound-inputs-v1.json`: newly extracted dense
+features and regenerated targeted admission, with retained dense matching and
+an already assembled adaptive bank. This is **not** extraction-inclusive E2E.
+
+Use `--help` for required mapper/stitch/integration binaries and `--validate-only`
+to hash-check inputs without creating outputs. Run actual work through
+`scripts/launch_native_measurement.py` (2 GiB cgroup limit, swap disabled), not
+as an uncontained timing claim. Input-spec hashes establish consistency with
+the supplied spec; the caller must establish its provenance and keep all
+scripts, binaries and inputs immutable during execution. Existing output paths
+are rejected; full-pipeline restart is not implemented.
+
+The first measured run, `visloc-native-mapping-bound-v1.service`, stopped after
+its first source: exit 0 and all reference model hashes matched, but the adapter
+incorrectly rejected two auxiliary manifests. The fix permits only
+`components.tsv` and `retrieval-components.txt` beyond the reference file set,
+records their hashes, and still rejects unknown files, missing references and
+changed model contents. Regression tests cover all these cases. The v1 ledger
+is a failed run (46.179 s, sampled aggregate peak RSS 376,044 KiB), not a mapper
+performance result. Its outputs are retained. Run v2 uses fresh output and
+measurement directories; its completion and parity remain unproven until all
+source and atlas reports and the terminal measurement are audited.
+
+Run v2 is now terminal PASS (service exited, MainPID 0). Independent hashing
+confirms all 86 reference files across 21 sources, stitch and both integrations;
+the 23-node manifest resolves to this run's source outputs. The measured
+input-validation-plus-mapping wall is **926.828 s**, with 50 ms sampled aggregate
+peak RSS **572,860 KiB**, cgroup peak 1,182,564,352 bytes and no OOM events.
+Cgroup peak includes cache/kernel memory and is not RSS. The single-run result
+does not close extraction-inclusive E2E, restart, repeats or the failing COLMAP
+trajectory gate. See [independent evidence](../benchmarks/electro/m8-native-mapping-bound-v2.json).
+
 ## Native frontend replay commands
 
 The machine-local diagnostic recipes are:
@@ -295,6 +332,33 @@ A small 32 MiB allocation probe exited zero; a sleeping child hit its deadline
 and returned failure. These are launcher checks, not SfM resource evidence.
 The runner still needs the complete extraction-to-atlas DAG and restart protocol.
 
+For long work, use the detached service launcher instead of keeping the launch
+terminal alive:
+
+```sh
+python3 scripts/launch_native_measurement.py --unit visloc-UNIQUE-LOWERCASE-NAME \
+  --output NEW_MEASUREMENT_DIRECTORY --timeout 7200 -- COMMAND ARGUMENTS
+```
+
+Replace the example unit with an all-lowercase `visloc-` name. The launcher
+copies and hashes the monitor, configures the same memory limits, disables
+systemd argument environment expansion, persists stdout/stderr in `service.log`,
+and returns after service creation. It does not freeze the measured command's
+scripts/binaries/inputs; the executor must do that separately. `launch.json`
+with `launched-not-completed` is not a pass. Check `systemctl --user show UNIT`
+for `Result=success`, `ExecMainStatus=0`, and `SubState=exited`, plus a terminal
+passing `measurement.json`. The service has a runtime deadline and control-group
+cleanup; its retained service result is not a guarantee that cgroup counters
+remain available after exit. Persisted measurement data is still required.
+
+A short detached 32 MiB allocation probe saved its terminal ledger after the
+launch command returned. A 3,700-second low-load probe completed successfully as
+`visloc-durable-long-probe-v1.service`, with artifacts under
+`/home/sasaki/datasets/openloris/m8-durable-long-probe-v1`. The service exited zero
+and the terminal measurement passed after 3700.04 seconds. This addresses
+measurement durability, not extraction performance or the still-failing quality
+gate; the cause of the earlier missing final ledger remains unproven.
+
 The 2026-09-09 post-full-runner preflight found 8,914,128,896 bytes free on
 the dataset filesystem. Fresh base, dense (including loci) and adaptive banks
 alone require 8,332,098,526 logical bytes, leaving only 582,030,370 bytes before
@@ -346,6 +410,133 @@ base SIFT recipe with the frozen image-capable extractor; all four feature files
 (584 keypoints) match the retained base bank byte-for-byte. Evidence:
 `m8-openloris-base-extraction-probe-v1.json`. This does not establish full10k
 extraction parity or E2E performance.
+
+The same script now accepts `--all-images --workers 6`: the full frozen 10k
+image set is split into disjoint balanced partitions, with one Rayon thread per
+worker. Each worker writes distinct feature filenames and its own log/timing;
+the harness compares the complete combined feature membership and hashes after
+all workers exit. Four-image/two-worker parity passed. Full10k six-worker replay
+now passes every feature hash and exact membership, with all six workers exiting
+zero, in `corridor1-1-m8-full-base-extraction-v2`. However, the outer scope report
+remained `running` after the processes/cgroup disappeared: final aggregate RSS
+and cgroup counters were not recovered. This closes full base feature parity,
+not the resource ledger. See `m8-full-base-extraction-v2.json`; validate durable
+detached service measurement before the next long measured run.
+The earlier single-worker v1 was deliberately interrupted, not completed or
+reused as a speed baseline. See `m8-full-base-extraction-transition-v1.json`.
+Use the dedicated 2 GiB scope wrapper for aggregate measurement/enforcement;
+the extraction script alone does not impose that limit. Worker RSS peaks are
+not summed. GNU timeout uses `--foreground` so workers remain in the command
+process group for wrapper timeout cleanup. This remains base extraction only,
+not dense extraction or continuous E2E.
+
+`--variant dense` reuses the same partitioned harness with the already reproduced
+dense extraction recipe, retaining its two orientations, RootSIFT and compatible
+detector/descriptor/orientation/output-order/grayscale flags. Its reference check
+includes both `_features.txt` and `_loci.txt`: four spread-out images/two workers
+match all eight files, and the detached measurement service exited successfully.
+See `m8-dense-parallel-preflight-v1.json`. Full10k dense extraction completed
+with six workers under `visloc-full-dense-extraction-v1.service`, after the long
+durability probe passed and a fresh disk check. Output is at
+`/home/sasaki/datasets/openloris/corridor1-1-m8-full-dense-extraction-v1`;
+measurement is at
+`/home/sasaki/datasets/openloris/m8-full-dense-extraction-measurement-v1`.
+The service enforced 2 GiB memory / zero swap and exited successfully. All six
+workers exited zero; independently rehashing all 20,000 current feature/loci
+files matched both report dictionaries exactly. The measured extraction and
+validation command took 9,789.925 s with sampled aggregate peak RSS 1,776,952 KiB
+(50 ms sampling, monitor included), zero OOM events, and cgroup peak 2 GiB
+(including cache/kernel charges, not RSS). See
+[full dense evidence](../benchmarks/electro/m8-full-dense-extraction-v1.json).
+This is not continuous native E2E or COLMAP speedup/quality parity. Only about
+1 GiB free remained after completion; recheck capacity before another stage.
+The base parity result covers only its 10,000 feature files: new base loci
+sidecars have no retained reference and are not covered by that comparison.
+
+## Full native shared matching on regenerated base features
+
+`run_native_admission.py --stage STAGE --bindings INPUTS.json --binary BINARY
+--output NEW_ROOT` executes one compiled admission recipe. The bindings JSON
+must contain exactly that stage's input placeholder names from
+`build_native_admission_recipe.py` (without braces). File inputs must match
+frozen reference hashes; feature banks must match their manifest and membership.
+The binary is hash-pinned, output must be new, and success requires the frozen
+output snapshot digest. Run through the detached measurement launcher for a
+resource cap. A full repair admission invocation now passes with the newly
+reproduced prefix registration manifest; it does not assemble the complete DAG.
+`--validate-only` checks the same inputs without creating output. This passed
+for repair using `benchmarks/electro/m8-repair-admission-bound-inputs-v1.json`,
+including the newly reproduced prefix registration manifest (SHA-256
+`365d8c3ca344a700d5d4666e19f00e251935e0e5b3ec143db6be49050be4aa83`).
+The snapshots in that binding remain retained replay outputs. Admission output
+generation through this executor now matches the frozen snapshot SHA exactly.
+The externally stored output is `/media/sasaki/aiueo1/visloc-repair-admission-bound-v1`.
+The whole measured command took 9.476 s with sampled aggregate peak RSS
+725,992 KiB and zero OOM events. See
+[repair execution evidence](../benchmarks/electro/m8-repair-admission-bound-v1.json).
+This is not a continuous pipeline or speedup result.
+
+`replay_targeted_selection.py --stage prefix --snapshot NEW_PREFIX.vps
+--features-dir NEW_ADAPTIVE_BANK --output NEW_OUTPUT` now connects the prefix
+admission output to registration used by repair admission. It preserves the
+recorded mapper flags (no deferred-registration prefix flag), uses one Rayon
+thread as in the earlier successful replay, and requires exact full model and
+registration membership/hash parity with that replay. The default targeted
+stage retains its eight-thread recipe and registration/target-selection gate.
+Both stages hash-check their respective snapshot input and validate the adaptive
+feature manifest. The new prefix invocation completed successfully under
+`visloc-prefix-registration-bound-v1.service` using the linked adaptive bank,
+with output at
+`/home/sasaki/datasets/openloris/corridor1-1-m8-prefix-registration-bound-v1`
+and measurement at
+`/home/sasaki/datasets/openloris/m8-prefix-registration-bound-measurement-v1`.
+All model files match the prior replay, including registration membership;
+4,981 frames register and the same 19 repair targets remain. The measured
+command took 147.47 s with sampled aggregate peak RSS 1,023,900 KiB and no
+memory-limit/OOM events. See `m8-prefix-registration-bound-v1.json`. This adapter
+does not by itself assemble or measure the complete native DAG.
+
+`--variant targeted7` binds the retained 14,319 targeted candidate pairs to the
+adaptive bank and recorded min-matches 12 / ratio 0.8 settings. It requires all
+448 shared shards to match replayed legacy records, the frozen merged digest,
+and unchanged completed-resume outputs. Candidate generation and target
+selection remain outside this harness. The input manifest and candidate digest
+preflight passes; full execution and terminal measurement now pass under
+`visloc-targeted-shared-full-v1.service`, with output at
+`/home/sasaki/datasets/openloris/corridor1-1-m8-targeted-shared-full-v1` and
+measurement at
+`/home/sasaki/datasets/openloris/m8-targeted-shared-full-measurement-v1`.
+All 448 shards match, merged bytes match, and completed resume is unchanged.
+Matching plus merge took 96.22 s; the full validation command took 112.78 s
+with sampled aggregate peak RSS 217,480 KiB and no memory-limit/OOM events.
+See `m8-targeted-shared-full-v1.json`. This is not a pipeline speedup claim.
+
+The runner also accepts `--variant adaptive`, preserving the native candidate
+schedule and adaptive matching thresholds. Its default bank is the validated
+immutable linked adaptive bank; `--features-dir` can bind a newly built bank.
+Preflight verified the full bank manifest/membership, native/adaptive schedule
+equality, 2,188 replay reference shards and the frozen merged reference digest.
+Adaptive shared matching itself has not yet been executed. Its per-shard
+reference is the independently replayed legacy output, not the missing original
+adaptive shards; final merged bytes must still match the frozen snapshot.
+
+`replay_full_shared_runner.py --candidate-manifest PATH` can consume a newly
+generated candidate file, but rejects bytes differing from the frozen variant
+reference. It records the resolved input and digest and rechecks the digest
+before every phase. This is a reproduction binding, not a way to evaluate a
+changed retrieval policy; candidate generation remains outside its timing.
+
+`m8-native-shared-full-v1.json` records a successful terminal detached service
+and measurement report. All 2,188 shards from 70,000 retained candidates match
+the legacy decoded records; merged bytes match, and completed resume leaves
+shards and worker log unchanged. Inputs are the regenerated full10k base bank.
+Matching plus merge took 327.79 s. The complete measured validation command
+(including prepare, comparison and completed resume) took 367.40 s with sampled
+aggregate peak RSS 276,100 KiB. Cgroup memory reached its 2 GiB cap with 1,462
+max events and no OOM events; this includes cache/kernel memory, not just RSS.
+This is neither an extraction/retrieval/mapping measurement nor proof of a
+speedup or improved trajectory quality. The long-duration durability probe is
+now a separate passed lifecycle gate, not SfM performance evidence.
 
 ## Empty vocabulary safety
 

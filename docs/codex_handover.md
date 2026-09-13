@@ -1,6 +1,1031 @@
-# visloc-rs COLMAP parity — Codex 引き継ぎ資料
+# visloc-rs COLMAP parity — Codex → Claude 引き継ぎ資料
 
 ## 現在の状態（以下の過去ログより優先）
+
+### 2026-09-14 区切りまとめ（次の担当者はまずここを読む）
+
+branch `feat/m9-learned-retrieval`、HEADはこの節を含むcommit（直前`e75aad4`）、push済み、
+worktree clean。実行中のjob/unitなし。M9 sessionのcommitは`7ebc0ff..`以降。
+
+**採用中の10k development設定（C′）**
+1. base: `benchmark_electro.py --run`（tier-10000 pipeline-sparse7n既存snapshot、58879 pair）
+2. `generalized_rig_sfm` base-only（component-frontier flag）→ 未登録runとrank0登録runそれぞれに
+   run start/8 frameごと/run endの同一frame stereo候補（`build_targeted_rig_candidates.py
+   --max-frame-gap 0`）
+3. SIFT ratio0.95 match → `export_verified_matches_import.py` → 凍結ratio0.8 reverify →
+   既存graphにあるpairを除外 → base先頭でmerge
+4. `generalized_rig_sfm`をcomponent-frontier flag + `--direct-stereo-pnp-max-frame-gap 8
+   --direct-stereo-min-pnp-sensors 1`、`--rank0-pair-prefix`なしでmapping
+結果: 4816/5000 frame、4 component、ATE 0.236m、RPE-10s 0.374m（coverage 0.752）、
+repeat byte一致。証跡`m9-openloris-sparse-stereo-10000-v1.json`。
+
+**現時点の比較（corridor1-1 10k、RPE-10s RMSE / coverage、`score_openloris_rpe.py`）**
+COLMAP 0.305m/0.931、C′ 0.374m/0.752、native E2E 0.428m/0.931、D3 0.943m/0.827。
+COLMAP parityは未達。READMEは未更新（更新しないこと）。
+
+**確定した事実**
+- corridor1-1 baseに同一frame cam1↔cam2 pairがほぼないのは、`--rig-frame-manifest`なしの
+  temporal-pyramidがfile名末尾数字で同期判定しcam1偶数/cam2奇数が一致しないため
+  （`unordered_sfm_demo.rs` rig_camera_timestamp）。`--rig-frame-manifest`で解消し、
+  現在は無指定時に警告を出す。
+- per-component Sim(3) ATEは分割が多いほど有利。比較は必ずRPEとcoverageを併記する。
+- `--rank0-pair-prefix`はrank0をbyte不変に保つ道具として保持（採用設定では不使用）。
+
+**棄却・未達**
+- corridor1-5 holdout（未使用sequence）でC′はgate P2/P3 FAIL。corridor1-5はbase時点で
+  scale崩壊がなく、C′はcorridor1-1固有の欠陥への対処にとどまる。一般化claimなし。
+  corridor1-5はholdoutとして使用済み。
+- arm D/D2/D3（rig-frame-manifest base系）は10k gate FAIL。frame 4589-4999の約409 frame
+  componentがD系で常にscale約0.63-0.65（C′では同frameが0.993）。
+- global descriptor retrieval（v1-v5）は5kで棄却済み。
+
+**未解決課題（優先順）**
+1. frame 4589-4999のscale崩れ。GT非依存にDとC′の該当componentのmodel間Sim(3)と
+   stereo pair差分を比較し、低特徴区間の密stereo pairの誤対応を疑う。新armはその後。
+2. COLMAPとのcoverage差（約18pt）と10s RPE差。component数4→2の統合。
+3. 5kの未登録16 frame（特徴点不足、1920-1979付近）。
+4. 採用変更は未使用holdout corridor1-2（3479 frame/camera、`corridor1-2_5-package.tar`内、
+   calibration一致確認済み）で事前登録gateを通してから。corridor1-1 10kでのarm反復は
+   過学習リスクが高い。
+
+**新規tool**: `scripts/export_verified_matches_import.py`、`scripts/score_openloris_rpe.py`、
+`stage_openloris_corridor.py`の他sequence対応（tar内7z range読み）、
+`build_openloris_rig_manifest.py --timestamp-tolerance-seconds`。
+
+**主要root**（`$R=/home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1`）:
+`$R/openloris-tier10000-all-stereo8-v1{,-repeat}`（C′）、`$R/openloris-tier10000-rigframe-*`
+（D系）、`/home/sasaki/datasets/openloris/corridor1-5-m9-holdout-v1`（holdout）。
+全て上書き・削除禁止、新実験はfresh root。GTはmapping後のscorerのみ。
+
+**証跡一覧**（`benchmarks/electro/`）: `m9-openloris-sparse-stereo-rank0-prefix-5000-v1`、
+`m9-openloris-sparse-stereo-gap46-5000-v1`、`m9-openloris-sparse-stereo-10000-v1`、
+`m9-openloris-corridor1-5-holdout-v1`、`m9-openloris-rig-frame-manifest-base-v1`、
+`m9-openloris-rpe-rescore-v1`、`m9-openloris-rigframe-d2-d3-10000-v1`（各`.json`）。
+
+### 2026-09-14 arm D2/D3（Dの交絡2件を検証）: 両方gate FAIL、C′維持
+
+lead review交絡: (1) Dは同一budgetでstereo約4600 pairが長offset pairを押し出した
+（verified same-sensor gap33-95: 旧base 3120→D 901、cross gap5-95: 1569→167）、
+(2) DはC′の`--direct-stereo-pnp-*` flagなしでmapping。事前登録gate vs C′:
+R1 frame>=4768、R2 RPE-10s RMSE<=0.411m かつ coverage>=0.752、R3 100 frame以上の
+component scale∈[0.9,1.1]、R4 <2GiB。
+- D2（D snapshot + C′ mapper flag）: 4843 frame、RPE-10s 1.265m/0.821、frame 4589-4999
+  componentのscale 0.652 → R2/R3 FAIL。flag交絡は棄却。
+- D3（budget 75000で再base + C′ mapper）: 4854 frame、s33-95は1541まで回復、RPE-10s
+  0.943m/0.827、同componentのscale 0.627 → R2/R3 FAIL。押し出しは一部要因のみ。
+frame 4589-4999はD系で常にscale約0.63-0.65、C′では同じ407-409 frameが0.993。
+D系はそこにbase ratio0.8由来の同一frame stereo約384 pair、C′はstride-8をratio0.95→
+幾何reverifyしたものだけ。次はarmではなく、GT非依存のmodel間Sim(3)とpair差分で
+この区間を診断する。corridor1-1 10kでのarm反復は過学習リスクが増えており、採用変更は
+未使用holdout（corridor1-2）が必須。root: `$R/openloris-tier10000-rigframe-
+{directstereo,budget75k}-v1`。証跡`benchmarks/electro/m9-openloris-rigframe-d2-d3-10000-v1.json`。
+
+### 2026-09-14 分割に依存しないRPE指標を事前登録し既存modelを再採点
+
+`scripts/score_openloris_rpe.py`（既存scorerのGT補間・Sim(3)を再利用、cam1のみ、
+窓1s/10s、同一component内pairのみ評価、coverage=評価可能pair/参照pair）。test 4件PASS、
+既存score.jsonとのATE sanity全一致。mappingは再実行していない。
+
+10k（RPE-10s RMSE / coverage）: COLMAP 0.305m/0.931、C′ 0.374m/0.752、native E2E
+0.428m/0.931、D 1.261m/0.815、B6 3.923m/0.751、A 6.236m/0.295。C′>DはRPEでも維持、
+ただしCOLMAPよりerror大・coverage約18pt低くparity主張なし。Dは1s RMSE 0.412m >
+p95 0.341mで少数の大外れpairが支配（scale 0.649の814 image component等）→次は
+Dのlocal pose jump/driftをGT非依存で診断。5kはD 0.426m/0.826がgap46 3.525m/0.815を
+上回る。corridor1-5ではC′ 1.104mがA 1.048m/B6 1.039mより悪く、holdout FAILと整合。
+証跡`benchmarks/electro/m9-openloris-rpe-rescore-v1.json`。
+
+### 2026-09-14 arm D: `--rig-frame-manifest`でbaseのstereo欠落を修正（10k精度gateはFAIL）
+
+原因: corridor1-1 baseの`benchmark_electro.py --run --pair-source temporal-pyramid
+--rig-local-grouping`は同一frame cross-sensor候補をほぼ生成しない。manifestなしでは
+`examples/unordered_sfm_demo.rs`の`rig_camera_timestamp`がfile名末尾数字でgroup化し、
+cam1(偶数)/cam2(奇数)が一致しない。さらに`build_candidate_command`は
+`--rig-local-grouping`をvlad-unionでしか渡さず黙って捨てる。cross-sensorはVLAD top-32
+頼みで、自己相似の多いcorridor1-1では押し出される（同一frame cross候補/verified:
+5k 1/1、10k 111/111、corridor1-5 780/767）。候補になれば92-100%受理されるので
+verifierは原因ではない。
+
+arm D（事前登録）: 同一base recipeに`--rig-frame-manifest <tier rig manifest>`を追加し、
+component-frontier flagでbase-only mapping。同一frame cross verifiedは5k 2408、
+10k 4686へ回復、rank0 Sim(3) scaleは5k 0.381→1.026、10k 0.045→0.987。
+5kは2475/2500 frame、aggregate RMSE 0.269m/p95 0.508m（stereo probe段なし）。
+10kは4826/5000 frame、3 component、aggregate RMSE 0.888m/p95 2.020m。
+gate vs C′: Q1 PASS（4826>=4768）、Q2 FAIL、Q3 FAIL（814 image componentのscale
+0.649）、Q4 PASS（最大約1.20GiB）。10k dev設定はC′のまま。
+
+注意（claimではない）: per-component Sim(3) aggregateは分割が多いほど有利。Dのrank0は
+6370 imageの1本で区間RMSEが0.16→2.22mへ増えるdriftを含み、C′は同じ軌跡を短い
+componentへ分けて個別alignしている（COLMAP 10kは2 component）。以後の比較の前に
+分割数に依存しない指標（固定窓の相対pose誤差等）を結果を見る前に事前登録すること。
+`--rig-local-grouping`がtemporal-pyramidで黙って無視される点も修正対象。
+
+root: `/home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1/
+openloris-tier{5000,10000}-rigframe-base-v1/`。証跡:
+`benchmarks/electro/m9-openloris-rig-frame-manifest-base-v1.json`。
+
+### 2026-09-13 corridor1-5 holdout: 事前登録gate 2/4 FAIL（C'はdev-set結果のまま）
+
+corridor1-1 10k arm C'（rank0自身にstereo8 bridge、`--rank0-pair-prefix`なし）の
+仮説はB6のGT由来post-hoc観察から着想したためcorridor1-1はdev setとみなし、
+未使用sequence corridor1-5（HF `shixuesong/openloris-scene` commit
+`cbc03108...`、`corridor1-2_5-package.tar`内`corridor1-5.7z`をoffset/sizeで
+Range抽出、4381 frame/camera=8762 image、他corridor1-*中最大の未使用sequence）で
+同一手法・同一gate定義のholdoutを実施（`scripts/stage_openloris_corridor.py`
+commit 5f0508e）。calibration gate（trans_matrix.yaml sha256・cameras.txt
+sha256がcorridor1-1と完全一致、fisheye intrinsicsも一致）はPASS。
+
+逸脱1件（commit afd7c91, mapping前に決定・GT不使用で検証済み）: rig manifestの
+timestamp tolerance を0.001→0.002に拡張。理由はcam2_007012/cam1_007013間の
+露光ずれ1.03msがdefault 1ms閾値を僅かに超えるため（frame_id 3506として統合）。
+inertness: corridor1-1では0.002はheaderのみ変化・default出力とbyte一致、
+corridor1-5では0.002/0.005/0.01でF行が完全一致。
+
+Pipeline: candidate budget 61334（7n）、`--periodic-ba-min-registered-images 8763`
+（N+1）でcorridor1-1 10kと同一。A2（base-only frontier）: 4227/4381 frame
+（96.5%）登録、rank0 sim3_scale**0.896**（corridor1-1の0.045ほど劣化していない）。
+B（unregistered tail向けstride-8、28 target→13件受理、`--rank0-pair-prefix`固定）:
+4237/4381、aggregate RMSE 0.6235m/p95 1.1846m。C'（rank0自身のrun start/every-8/
+run-end targetで200 target→ratio0.95で200件受理→base graphに既存の60 pairを
+GT不使用dedupで除外→140 pair merge、`--rank0-pair-prefix`なし）: 4241/4381、
+aggregate RMSE **0.6368m**（B6比+2.1%、悪化）/p95 **1.0642m**（B6比-10.2%、改善）。
+
+事前登録gate結果: **P1 PASS**（4241>=4237かつ>=3943）、**P2 FAIL**（rmse
+0.6368>=0.6235、p95 1.0642<1.1846だが両方改善が条件のため不合格）、**P3 FAIL**
+（component-001 sim3_scale 0.8713が[0.9,1.1]外——ただしA2の時点で既に0.8751と
+band外であり、C'のstereo8 bridgeが触れていないrank1の pre-existing な問題。
+component-000は0.8959→0.9221とband内に改善）、**P4 PASS**（全stage中の最大RSSは
+pipeline-sparse7n candidate-generation stageの1,223,600 KiB）。
+
+結論: holdout gateが不合格のため、corridor1-5に対する汎化・性能claimは行わない。
+C'はcorridor1-1のdevelopment-set結果のまま。corridor1-1でC'が解消した障害
+（base graphにcross-sensor edgeがほぼ無くrank0 scaleが0.045まで劣化）はcorridor1-5
+には存在しない——base-only A2の時点で既に4227/4381 frame・rank0 scale 0.896と
+健全で、rank0-stereo8候補200件中60件は既にbase graphに存在していた
+（corridor1-1 10kでは244件中13件のみ）。C'の効果はmixed:
+rank0 p95 1.376→1.099m・scale 0.896→0.922と改善する一方、rank0 RMSEは
+0.751→0.782mと悪化。次のstep: なぜcorridor1-1のbase graphにはrank0近傍の
+same-frame cross-sensor pairがほとんど無く、corridor1-5には既にあるのか
+（candidate生成のtemporal-pyramid/rig-local-grouping挙動差）をGT不使用で調査。
+corridor1-5でのCOLMAP controlは未実施、READMEへの昇格は行わない。
+
+Artifact: `benchmarks/electro/m9-openloris-corridor1-5-holdout-v1.json`
+（status: `holdout_gates_failed_no_performance_claim`）。根拠は
+`/home/sasaki/datasets/openloris/corridor1-5-m9-holdout-v1`
+（source-audit.json, calibration-source/, manifests/tier-8762.json,
+feature-extract/timing, official-groundtruth/manifest.json）と同ディレクトリの
+`m9/`配下（pipeline-sparse7n, rig-manifest-v1.txt, component-frontier-v1,
+sparse-stereo8-\*, rank0-frozen-sparse-stereo8-v1, rank0-stereo8-\*,
+all-stereo8-v1）の run.log/time.txt/score.json/sha256sum から直接読み取り、
+groundtruth.txt自体は未読。
+
+### 2026-09-13 10k Phase A/B/C' 追記（rank0 scale drift解消、C'をdev pipelineに採用）
+
+10k tier（tier-10000, 5000 frame/10000 image）で3 phase実施。Phase A（base-only
+frontier, `openloris-tier10000-component-frontier-v1`）: rank0のみ1933/5000 frame
+登録、rank1は"no frame has enough multi-sensor tracks"で即stop。Phase B（B6,
+frozen `--rank0-pair-prefix 58879`＋unregistered tail向けstride-8 stereoブリッジ）:
+4813/5000 frame、4 component、aggregate RMSE 3.400433m/p95 8.328011mとGate
+G1-G5全PASSだが、lead reviewでrank0自身のfitted Sim(3) scaleが0.045（5kの同種rank0-prefix
+armは0.381）まで劣化していると判明。rank1-3（stereo8で新規登録）はscale
+0.968-0.991とほぼmetricなので、aggregate誤差はrank0の（stereo8手法とは無関係な）
+pre-existingなscale driftが支配的と結論。
+
+Phase C'（本追記の主題、事前登録・control=B6）: 同じGT不使用stride-8 stereo
+bridgeをrank0自身の登録済みframe range（A2 component-000のrun start/every-8/
+run-end rule→245 target）にも適用し、`--rank0-pair-prefix`を外して（全rankが
+全pairを見る）mapping。結果: 4816/5000 frame（B6比+3）、aggregate RMSE
+**0.236057m**/p95 **0.459024m**（B6比14.4x/18.1x改善）、そしてrank0自身のsim3_scaleが
+**0.045→0.989**まで回復——lead reviewの仮説（driftはrank0のcross-sensor edge欠如が
+原因でstereo8手法自体の問題ではない）を裏付けた。事前登録gate H1（frame数
+>=4813）H2（rmse/p95双方<B6）H3（追加pair<=245 target）H4（全stage<2GiB）は
+全PASS。Dedup逸脱1件: rank0-stereo8候補245件中244件受理→base-plus-stereo8.vps
+(59242 pair)へmerge試行時に13 pairがoverlap（merge tool側でreject、frame
+392..496、seed_global_frame=488近傍）→matches-import.txtから13 pair除去し
+231/245で再verify・再merge（計59473 pair）。この13 pairはGT不使用で「C4
+pre-dedup pairsとB5 base-plus-stereo8.vpsの交差」として独立に再計算し、
+dropped setとbyte-level一致を確認済み（再現性あり、今後は候補生成時に組み込む
+予定のルールとして記録）。
+
+決定論性repeat: mapperをfresh rootへ`--out-colmap`のみ変えて再実行し、
+model/配下14 file（4 component×{cameras,images,points3D}.txt + components.tsv +
+retrieval-components.txt）全SHA-256完全一致、score.jsonも path文字列以外の数値
+（rmse/p95/median/max/per-segment等）完全一致（差はmapper_seconds/VmHWMの誤差
+範囲のみ）。
+
+Caveat: (a) C'の仮説自体はB6のGT由来post-hoc Sim3 scale観察から着想した
+（candidate/match/admissionはGT不使用のまま）ため、10kは本仮説に関しては
+development setであり、精度主張には未touchのholdoutでの再現が必要。(b)
+aggregateは4 component独立Sim(3)・8940 gt_scored/9632 registeredで、COLMAP
+10k control（2 model・9306 gt_scored/9998 registered、`benchmarks/electro/
+m8-openloris-colmap-10k-control.json` ate_rmse 0.384307m）と同一scorer規約だが
+条件は非同一——COLMAP勝ち主張はしない。(c) 184 frame未登録（C6由来のrun
+list）、componentは4個のままでCOLMAPの2個より多い（未着手のfollow-on）。
+
+Artifact roots（`$R=/home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1`）:
+`openloris-tier10000-component-frontier-v1`（Phase A）、
+`openloris-tier10000-sparse-stereo8-v1-source` / `-sift-ratio95-v1` /
+`-sift-reverify-v1`（Phase B候補/match/reverify）、
+`openloris-tier10000-rank0-frozen-sparse-stereo8-v1`（B6 mapper）、
+`openloris-tier10000-rank0-stereo8-v1-source` / `-sift-ratio95-v1` /
+`-sift-reverify-v1`（Phase C'候補/match/dedup+reverify、pre-dedup系ファイル含む）、
+`openloris-tier10000-all-stereo8-v1`（C' mapper、非公式に"C6"と呼称）、
+`openloris-tier10000-all-stereo8-v1-repeat`（決定論性repeat）。Evidence:
+`benchmarks/electro/m9-openloris-sparse-stereo-10000-v1.json`
+（`followup_arm_c_prime`セクションに全stage command/count/RSS/SHA-256、
+`caveats`に(a)(b)(c)を記載）。
+
+Next steps: (i) 精度主張の前に未touch holdoutでの検証が必須。
+`/home/sasaki/datasets/openloris`直下はcorridor1-1系（-m5/-m6/-m7/-m8*/-m9*、
+全て同一corridor1-1シーケンスのtier/pipeline派生）と`official-groundtruth`の
+みで、ローカルに画像/featureがあるOpenLORISシーケンスはcorridor1-1のみ
+（source-audit.jsonによれば元archiveから"first 5000 frame/camera"のみ選択
+extraction済みで、フルシーケンスはより長い可能性あり）。
+`official-groundtruth/groundtruth.zip`のper-sequenceにはcafe1-1/1-2、
+corridor1-2/1-3/1-4/1-5、home1-1..5、market1-1..3、office1-1..7のGTのみ
+キャッシュ済み（画像は未取得）——holdoutにはcorridor1-1の未使用frame範囲の追加
+extractionか、他シーケンスの画像/feature取得（HF `shixuesong/openloris-scene`
+より）のいずれかが必要（ls確認のみ、未取得）。(ii) 5kでも同じrank0 stereo
+（rank0自身のframeへのstride-8 bridge、no prefix）を適用しconsistency
+check。(iii) 残184 frame未登録とcomponent 4→2への統合。(iv) README更新は
+未実施（今回はしない）。
+
+### 2026-09-13 gap46診断（未回収46 frame中30回収）追記
+
+前段（下記チェックポイント）の未回収46 frame（rank1のunregistered set：frame 1931∪
+1934..1977∪1979、1978のみ既registered）を診断した。原因はtexture starvation:
+1920-1979近傍のSIFT feature数はcam1平均29.05、cam2平均33.47（結合平均31.26/image）で、
+他stretchの100+features/imageより著しく少ない。46 frame中7 frameは前段のstride-8 anchor
+と重複（1931,1934,1942,1950,1958,1966,1974）で、そのうち4本（1942,1950,1958,1974）は
+前段matchで受理pairを得られなかった（残り3本1931,1934,1966は受理pairがあったが未registered）。
+同一pairの再matchは決定論的に同結果なので7 frameとも対象外にした。
+
+残り39 frameへGT不使用でgap=0の同期stereo probeを追加（"gap46" arm）。ratio0.95 matchで
+39→13 pair/205 correspondence受理、凍結ratio0.8 reverifyでも13/205不変。
+`openloris-tier5000-sparse-stereo8-sift-reverify-v1/base-plus-stereo.vps`（31590 pair）
+の後ろへmergeし31603 pairとして同じ`--rank0-pair-prefix 31521`でmapping。結果は独立
+component-003（30 frame/60 image/126 track/689 obs、reprojection 0.716046px、post-hoc
+GT RMSE 0.0313887m、p95 0.0605911m）として新規登録。対象外にしたanchor frameのうち
+1931,1934,1950,1966もcomponent-003へ入った（1942,1958,1974は未登録）。rank0/rank1はbyte-identicalかつ
+RMSE/p95不変（事前登録gate G1-G5全PASS、詳細はevidence JSON）。mapper_secondsは
+148.976s→181.535s（+21.9%、非gate、報告のみ）。fresh rootをforegroundで1回repeatし、
+component-000/001/003の計9 model file + components.tsv + retrieval-components.txtの
+11 fileが全SHA-256完全一致（mapper_seconds/RSSのみ誤差範囲で相違）。
+
+component-003は30 frameの独立Sim(3) gaugeであり、その低RMSEはrank0/rank1と比較可能な
+精度主張ではない。残り16 frameは引き続き未registered、うち5 frame（1949,1956,1958,1962,
+1975）はgap46追加前のbase 31590-pair graphでもverified edgeがゼロだった（feature
+starvationの直接証拠）。
+
+証跡: `benchmarks/electro/m9-openloris-sparse-stereo-gap46-5000-v1.json`。
+
+```text
+output roots:
+/home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1/
+  openloris-tier5000-sparse-stereo-gap46-v1-source/candidates.txt
+  openloris-tier5000-sparse-stereo-gap46-sift-ratio95-v1/
+  openloris-tier5000-sparse-stereo-gap46-sift-reverify-v1/{verified.vps,base-plus-stereo8-plus-gap46.vps}
+  openloris-tier5000-rank0-frozen-sparse-stereo-gap46-v1/
+  openloris-tier5000-rank0-frozen-sparse-stereo-gap46-v1-repeat/
+```
+
+また、`matches-import.txt`（凍結ratio0.8 reverify stageへの生match入力）を候補manifest
++ 検証済み.vps snapshotから再構成する`scripts/export_verified_matches_import.py`を追加
+した（`scripts/tests/test_export_verified_matches_import.py`、8 test全PASS）。stereo8/
+gap46両方のmatches-import.txtをこのtoolで再生成しbyte-identicalを確認済み（旧手順の
+ad hoc再構成スクリプトに依存しない形になった）。matches-import.txtはratio0.95 stage-bの
+`mapping/verified-merged.vps`から再構成する点に注意（最終ratio0.8 verified.vpsからではない）。
+
+次: 残り16 frameはmatcher/mapper policyでなくfeature extraction不足が主因（SIFT
+contrast thresholdを下げる、別detectorを使う等）。閾値調整にGTを使わないこと。10kへは
+未着手。
+
+### 2026-09-13 Claude向け最新チェックポイント
+
+作業branchは`feat/m9-learned-retrieval`。Codex引き継ぎ時点のHEADは`c3012b8`
+（`feat: bound retrieval to reconstruction components`）で、当時未commitだった下記4ファイルは
+Claudeが次の手順4でcommit/push済み。
+
+- `examples/generalized_rig_sfm.rs`: 新しいdefault-off CLI
+  `--rank0-pair-prefix COUNT`。rank 0だけverified pair streamのprefixを使い、rank 1以降は
+  全pairを使う。`--max-models >= 2`必須。追加unit testとrelease clippyはPASS。
+- `examples/learned_retrieval_candidates.rs`
+- `examples/materialize_learned_rig_candidates.rs`
+- `examples/admit_learned_rig_rotation_cycles.rs`
+
+追試（他agentによる独立再現）で以下を確認済み。詳細は
+`benchmarks/electro/m9-openloris-sparse-stereo-rank0-prefix-5000-v1.json`。
+- repeat決定論性: PASS。fresh `-repeat` rootで同一commandを再実行し、
+  component-000/component-001の`cameras.txt`/`images.txt`/`points3D.txt`、
+  `components.tsv`、`retrieval-components.txt`の計8 fileが全てSHA-256完全一致。
+  registered frame/image/track/observation/reprojectionもcomponent単位で完全一致。
+  差分は`mapper_seconds`（148.976s→140.987s）と`peak RSS`（476612→476956KiB）のみで、
+  誤差範囲内。
+- scorer再実行: `scripts/score_openloris_model.py`を推定invocationで再実行し、
+  元runの`score.json`とSHA-256完全一致（byte-identical）。repeat modelへも同invocationを
+  実行し、path欄以外の数値（RMSE/p95/median/max/sim3_scale/aggregate）は全て一致。
+- candidate生成器: `scripts/build_targeted_rig_candidates.py`を同じrig manifestと
+  exact flag（`--target-frames ... --max-frame-gap 0`）で再実行し、`candidates.txt`と
+  byte-identical。
+- merge: `merge_verified_pair_snapshots`をbase→additionの順で再実行し、
+  `base-plus-stereo.vps`とbyte-identical。
+
+後ろ3ファイルはcomponent-aware multi-scale sequence rerank v5の未commit実験。v5はANN
+18.08s、RSS18532KiB、30 rig pairまで絞ったが、post-hoc GTでは30/30が誤対応、5m以内0、
+最短7.199mだった。5kの登録済み対未登録GT機会自体もgap>=64で0.5m/1m以内0、2m以内
+577 pair（該当未登録frame 75）、5m以内14137 pair（同191）で、最短約1.724mは主に
+gap64の順方向継続でありrevisitではない。従って**5kでglobal descriptor retrievalを
+続けない、10kへ上げない、READMEへpromoteしない**。v5 artifactは次にある。
+
+```text
+/home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1/
+  openloris-tier5000-multiscale-component-bridge-v5.tsv
+```
+
+5k base componentの未登録範囲はframe 1931（1 frame）と1934..2499（566 frame）。
+tail 1934..2499だけを凍結base snapshotでreplayすると、5376 pair、267764 match、
+163295 keypoint、confidence track 14032、retained observation 137118だが、
+`metric_anchored_tracks=0`、`metric_seed_candidates=0`、`max_frame_support=0`で
+`NoMetricSeed`。pair graph監査ではbase全31521 pair/2106827 accepted correspondence中、
+同一frame cross-sensor pairはわずか1 pair/77 correspondence、tail内は5376 pair/
+274264 correspondenceだがstereo pair 0。1934境界も5 pair/82 correspondenceが全て
+same-sensorだった。つまり不足bridgeの正体はloop edgeではなく、tailへmetric baselineを
+供給する同期stereo edgeだった。診断ログは`/tmp/visloc-m9-seed-diag.wKJ2EL`と
+`/tmp/visloc-m9-pair-audit.5P9td0`（一時領域なので存在は保証しない）。
+
+そこでGT/poseを選択に使わず、frame 1931と1934..2499へstride 8で同期sensor pairを
+73本だけ置いた。既存SIFT descriptorをratio 0.95でmatchすると69/73 pair、4618
+correspondence、matcher実時間0.4302s、worker wall43.8009s、peak RSS73580KiB。
+受理match listを凍結ratio 0.8 verifierへ再投入し、69 pair/4567 correspondenceを固定した。
+ALIKED+LightGlue 10-pair proofは10/10、1798 correspondenceだったが、base SIFTと異なる
+keypoint空間のためtemporal trackへ接続せず1 frameしか登録できない。今回はdescriptor
+bankを追加せずSIFT sparse stereoを採用した。重要artifactは削除・上書きしないこと。
+
+```text
+/home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1/
+  openloris-tier5000-sparse-stereo8-v1-source/candidates.txt
+  openloris-tier5000-sparse-stereo8-sift-ratio95-v1/
+  openloris-tier5000-sparse-stereo8-sift-reverify-v1/verified.vps
+  openloris-tier5000-sparse-stereo8-sift-reverify-v1/base-plus-stereo.vps
+  openloris-tier5000-rank0-frozen-sparse-stereo8-v1/
+```
+
+tail-only replayは519/566 frame、1038 image、5045 track、67787 observation、reprojection
+0.825215px、mapper21.92s、peak RSS99732KiB。全5kで追加edgeをrank 0にも見せる素朴な
+multi-model replayは2458/2500 frameまで伸びたが、主componentを1937 frameへ変形し
+post-hoc品質を悪化させたため棄却。これを避けるため上記`--rank0-pair-prefix 31521`を実装し、
+凍結base 31521 pairはrank 0だけ、追加69 pairはrank 1以降だけへ渡した最終診断が成功した。
+
+```text
+output root:
+/home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1/
+  openloris-tier5000-rank0-frozen-sparse-stereo8-v1/
+
+rank 0: 1933/2500 frame, 3866 image, 21708 track, 275789 observation,
+        reprojection 0.928522px
+rank 1:  521 frame, 1042 image, 4926 track, 64300 observation,
+        reprojection 0.813195px
+total: 2454/2500 frame, 4908/5000 image, mapper 148.976s,
+       peak RSS 476612KiB
+```
+
+rank 0の`cameras.txt`、`images.txt`、`points3D.txt`は旧
+`openloris-tier5000-component-frontier-v1/model/component-000`とSHA-256完全一致
+（順に`65e29cd8...`、`a01924f...`、`27aeffd0...`）。したがって追加edgeが主componentを
+変えていないことはbyte-levelで確認済み。post-mapでのみGTを使ったper-component Sim(3)
+scoreはrank 0が3174画像、RMSE 3.32470m、p95 6.85824m、rank 1が1042画像、
+RMSE 0.170100m、p95 0.290310m。集約は4216画像、RMSE 2.88597m、p95 6.31110m。
+scoreは上記output rootの`score.json`、scorer SHAは`c0196be5...`。過去記録のrank 0
+RMSE2.02107mとはscorer/集約条件を揃えず直接比較しないこと。rank 0の不変性はmodel SHAを
+正とする。
+
+最終診断のmapper command（release binary）は次。snapshotの先頭31521 pairが凍結base、
+suffix 69 pairがsparse stereoであるという順序が契約なので、merge順を変えない。
+
+```bash
+target/release/examples/generalized_rig_sfm \
+  --manifest /home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1/openloris-tier5000-rig-manifest-v1.txt \
+  --features-dir /home/sasaki/datasets/openloris/corridor1-1-m5/tiers/tier-5000/features256 \
+  --snapshot /home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1/openloris-tier5000-sparse-stereo8-sift-reverify-v1/base-plus-stereo.vps \
+  --out-colmap /home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1/openloris-tier5000-rank0-frozen-sparse-stereo8-v1-repeat/model \
+  --max-models 16 --min-model-frames 10 --rank0-pair-prefix 31521 \
+  --min-pnp-inliers 8 --min-pnp-sensors 2 \
+  --direct-stereo-pnp-max-frame-gap 8 --direct-stereo-min-pnp-sensors 1 \
+  --max-matches-per-pair 96 --max-reprojection-error-px 4 --pnp-max-iterations 512 \
+  --local-ba-every 10 --local-ba-window 40 --local-ba-iterations 8 \
+  --structure-refinement-iterations 5 --pair-confidence-tracks \
+  --complete-tracks-after-registration --track-completion-max-passes 2 \
+  --track-completion-max-reprojection-error-px 1 --final-filter-refinement-passes 2
+```
+
+Claudeの次の作業順は以下。
+
+1. [done] `git diff`を読み、4ファイルの未commit差分を保持する。新CLIのtargeted testとclippyは
+   `cargo test --release --example generalized_rig_sfm rank0_pair_prefix_defers_only_the_suffix_to_remaining_models`
+   と`cargo clippy --release --example generalized_rig_sfm -- -D warnings`で両方PASS確認済み。
+2. [done] 上記commandをfresh `-repeat` rootで1回再実行し、component-000だけでなく
+   component-001も含む8 fileすべてがSHA-256完全一致することを確認した（上記「追試」段落参照）。
+   既存rootへは上書きしていない。
+3. [done] stride-8 candidate生成規則、ratio0.95 match、凍結ratio0.8 reverify、merge順、mapper、
+   post-map scoreを`benchmarks/electro/m9-openloris-sparse-stereo-rank0-prefix-5000-v1.json`
+   へ1本で固定した。candidate生成器・merge tool・scorerはいずれも独立再現でbyte-identical
+   （scorerのみ数値一致、path欄以外）を確認済み。残るgapは「文字通りの過去commandがログに
+   残っていない」点のみ（再現自体は成功しているため実害なし）。
+4. [done] `--rank0-pair-prefix`、関連test、benchmark evidence JSON、この引き継ぎを1 commit、
+   v5 retrieval差分（multi-scale-component-bridge-v5、負の診断として保持）を別commitに分けて
+   push。4 exampleのrelease clippy -D warnings/test、fmt checkはPASS。
+5. [done] 5kで未回収の46 frameを診断した。原因はglobal retrievalの不足ではなくtexture
+   starvation（1920-1979近傍で平均27-32 features/image）。stereo anchorのstride間隙
+   39 frameへ密なgap=0 stereo probeを追加した"gap46" arm（rank 0 SHA非回帰、rank 1
+   RMSE/p95非回帰、bounded pair<=46、RSS<=524273 KiBの4+1 gate、全PASS。GTは
+   選択に未使用、post-hoc scoreのみ）で30/46 frameを独立component-003として回収、
+   残り16 frameはfeature starvation（5 frameはverified edgeゼロ）と特定した。詳細は
+   本節冒頭の「2026-09-13 gap46診断」と
+   `benchmarks/electro/m9-openloris-sparse-stereo-gap46-5000-v1.json`。
+6. その後にのみ未観測10kへ進める。README/COLMAP比較は10kで同条件の登録率・精度・
+   wall/RSSを測って昇格判定後に更新する。ユーザー指示によりREADMEへメモリbefore/after表は
+   書かない。現在READMEは変更していない。
+
+外部model/artifact、既存共有hardlink、既存run rootは削除・上書き禁止。新しい実験はfresh
+rootを使う。GTは候補生成、match、admission、anchor選択に入れず、model公開後のscoreだけに
+隔離する。
+
+M9 component-aware v4は計算量を改善したがretrieval品質で棄却。凍結baseを
+multi-model replayすると主componentは1933/2500 frame、残る567 frameには5378
+verified pairがあるがmulti-sensor metric seedを作れない。登録component 1つと連続
+unregistered run 2つをGTなしでlabel化し、ANN exact rerank前にsame-componentを除外。
+mean poolは1246.30→315.97（-74.6%）、3.06s/RSS18968KiB。rank8の37 survivorを
+degree<=2で20 rig pair/80 image pair/50 incident imageへ固定。SIFTはverified 0。
+ALIKED+LightGlueは47/80、1714 correspondenceだが、各rig pairで2 sensor rotationが
+揃わず固定cycle gate 0、mappingは未実行。post-hoc GT診断では20/20 scorableだが
+最短12.07m、5m以内0で、EigenPlaces単画像の廊下perceptual aliasが原因。5kはv4以降
+development扱い。証跡benchmarks/electro/m9-openloris-component-bridge-5000-dev-v1.json。
+次はcomponent filterを保持し、GT非依存の広いmulti-scale sequence score（短い3-frame
+だけでなく数十frame span）でaliasを落とす。5kで凍結後、新10k intervalでcycle
+admissionが出るまでmappingしない。Python oracleは依然2GiB超なので本番昇格禁止。
+
+M9の凍結v3を未観測5k tierで評価し、quality/runtime昇格を棄却した。EigenPlaces
+2500 rig row生成は676.43s、sample RSS155772KiB、OOM0。radius2 ANNは12.53s、
+RSS17636KiB、66179 candidates→61 rig pairだが、mean rerank pool1246.30は全rowの
+約50%で10k計算量も未合格。既存pair除外後244 image pair/160 incident image。
+streaming SIFTは195 pair/7250 correspondenceを受理したがcycle admission 0。
+ALIKED+LightGlue oracleは244/244、79683 correspondenceを受理したものの、固定3度
+gateを通ったのは2.5k開発時と同じ939↔1003の2 image pairだけで、新5k区間由来は0。
+Python oracleは380.49s/RSS2296036KiBでruntime gate失敗。非空なので同一設定mapper
+A/Bを実施したが、両armとも1933/2500 frame、3866/5000 image、reprojection
+0.883264px、pose header/points3D SHAが完全一致。post-map GTも3174 image、Sim(3)
+RMSE2.02107m/p953.68377mで同一。候補は+0.76s、RSS+30068KiB。従ってv3を10kへ
+進めず、READMEにもpromoteしない。証跡
+benchmarks/electro/m9-openloris-bounded-aliked-lightglue-5000-holdout-v1.json。
+次はGTを使わずbase reconstruction graphのcomponent/frontierをquery集合にし、
+cross-component runだけをbounded learned-local→同じcycle gateへ渡すv4を作る。
+新5k区間のadmissionが0ならmappingせず棄却し、非空時だけA/Bする。
+
+M9 bounded learned-local development oracleで、固定rotation-cycle gateを初めて通過。
+既存SIFTへのCOLMAP-compatible guided matchingは5261→6865 correspondenceへ増えたが
+cycle admission 0で棄却。公式ALIKED n16（1024点）+ LightGlue-ALIKEDを、v3の
+68 incident image/104 pairだけに適用した。2反復でfeature aggregate SHA
+`a6e4fee3...`、matches SHA `4634a420...`が完全一致。Rust full verifierは104/104 pair、
+61949 correspondenceを受理し、rig pair 939↔1003の2 image pairが固定3度gateを通過。
+同pairのsensor rotation dispersionはSIFT 26.05度→learned 0.214度で、local matcher
+bottleneck解消のproof。ただし2.5k generalized mapper controlは既に1250/1250 frame、
+candidateも同じで、pose header/points3D SHA、reprojection 0.859958pxが同一。wall
+60.73→62.51s、RSS211756→231844KiB。さらにPython oracle自体はpeak RSS
+2.07–2.10GiBで2GiB gateを超える。従ってruntime/quality performanceは未promote、
+2.5kはdevelopment setのまま。証跡
+benchmarks/electro/m9-openloris-bounded-aliked-lightglue-2500-dev-v1.json。
+次はv3 shortlistと3度gateを凍結したまま、未観測5k intervalでregistration/trajectory
+winの有無を先に確認。winが出た場合のみALIKED/LightGlueのONNX streaming化へ進む。
+
+M9 geometry-first v3 development armもmapping前に停止。post-hoc GT機会監査では
+scorable 1kに0.5m以内のcomplete 3-frame revisitは0、2.5kにはforward5453/
+reverse5409。GTはretrieval/match/admissionへ未使用だが、2.5kはdevelopment set扱いで
+性能claim不可。公開済みtop32 ANNは0.5m opportunityを持つframeの98.9%をcoverする一方、
+v2 ratio gateはdescriptor pathもあるproximity pair 5件を全落ちさせていた。
+v3はratioをdiagnostic-onlyにし、mutual rank<2/path/degree<=2の26 rig pairを固定。
+104 image pair中96 pair/5261 correspondenceを凍結verifierが受理したが、cycle gateは
+0件。937–940対1001–1004付近はsensor rotation dispersion17–28度で、現SIFT/two-view
+geometryが品質bottleneck。3度gateは緩和せずmapping未実行。証跡
+benchmarks/electro/m9-openloris-rank-path-cycle-2500-dev-v1.json。
+次はbounded shortlistのlocal matcher/two-view evidenceを置換し、同じcycle gateを通す。
+
+M9 ANN radius-2 multi-probeはinfrastructureとしてPASS。default radius1 artifactは
+SHA d85fe62b...でbyte-identical。1k exact-only sweepでrecall@32 floor0.94を満たす
+t12/b14/p14/radius2を固定し、recall0.9470625、strict selected15 pairは完全同一。
+2.5k control/candidate各3反復でmedian wall 4.48→2.98s（1.50x）、median RSS
+10048→9972KiB、mean rerank pool861.86→637.01（-26.1%）。arm内artifactは全repeat
+byte-identical。証跡benchmarks/electro/m9-openloris-ann-radius2-2500-v1.json。
+ただし15 pairは既知の偽loopのままなのでmapping品質claimではない。ANN基盤だけ保持し、
+learned admission policyは停止を維持。次はnon-empty cycle-consistent edgeを生む独立証拠。
+
+M9 fixed learned armの2.5k safety/scaling audit完了、5k前で停止。
+EigenPlaces streamingは1250 rig row/2500画像を313.43s、sample RSS146648KiB、
+OOM0で生成、artifact SHA4142ccf...。固定K32/t12/b9/p9/gap64 ANNは4.06s、
+RSS9868KiB、33062 candidates<=40000、selected15。ただしmean pool861.86は
+全rowの約69%で、10k計算量のsubquadratic性は未証明。15 pairは1kと完全に同じ
+frame307–315対372–379の偽loopで、追加750 row由来は0。60 image pairを凍結matchし
+60/60、3578 correspondence受理後、固定rotation-cycle gateは0/15。empty overlayは
+2.5k base16321 pairとSHA734eb36d...でbyte-identicalのためmappingは重複実行せず。
+これはsafety passでquality winではない。証跡
+benchmarks/electro/m9-openloris-learned-retrieval-2500-safety-v1.json。
+現policyを5k/10kへ進めない。次はquery poolを狭め、1kでnon-empty cycle-consistent
+additionを出せるretrieval設計をmapping/GT前に固定して再開する。
+
+M9 post-verification rig rotation-cycle gateの1k安全性監査はPASS。ただしquality win
+ではない。凍結thresholdはsensor-pair rotation 2本以上、rig frame内dispersion<=3度、
+順/逆3-frame path（radius1）の代表rotation差<=3度。strict-v2の15 rig pair中、単体
+dispersionを通るのは4 pairだがcomplete pathは0、admitted image pairも0。empty VPSを
+baseへmergeした出力SHAはbaseと同一4964cbbe...のためmapper再実行は不要。
+証跡benchmarks/electro/m9-openloris-rotation-cycle-1k-v1.json。utilityは
+examples/admit_learned_rig_rotation_cycles.rs、3 tests/clippy PASS。次は同じ固定policyの
+2.5k non-empty/scaling audit。descriptor 1250 rig rows生成はdetached unit
+visloc-m9-vpr-2500-v1.serviceで進行中。再起動せずterminal measurementを確認し、
+strict-v2 ANN→追加pair materialize→凍結match→cycle gateの順。cycle admissionが空なら
+safety auditで停止、non-emptyの場合だけ凍結recipeのcontrol seedを確定してmapping A/B。
+
+M9 strict-v2も1kで棄却。相互rank<2、両方向cosine-distance ratio<=0.8、
+順/逆3-frame path、frame当たり最大2辺をmapping前固定し、2783→15 rig pair→60
+image pairへ削減したが、凍結verifierは60/60受理。自動seedが26→313へ変わる交絡を
+発見したため、default-off `--seed-frame N`を追加。default pathとseed26 controlは
+凍結model 3 hashを完全再現。両arm seed26固定でも登録1000維持のみで、
+RMSE0.02270→0.10019m、p950.03778→0.16418m、reproj+7.39%、mapper+5.54%、
+RSS+0.68%のためFAIL。15 pairはframe307–315対372–379の一本の偽loop。
+証跡benchmarks/electro/m9-openloris-learned-retrieval-strict-1k-ab-v1.json。
+次はGT/再構成pose不使用のpost-verification rig rotation cycle gate。sensor相対回転を
+rig frameへ変換し、rig pair内multi-sensor dispersionと連続sequence間整合の両方を
+要求する。1kで空ならsafety passのみ（quality win扱い禁止）、2.5kはnon-empty有無を
+auditしてからmappingする。
+
+M9 learned retrievalの最初の全辺armは1k A/Bまで完了し、棄却。
+2783 rig pairを既存pair除外後10958 image pairへatomic materializeし、addition ledgerを
+保存。凍結ratio.8/cross-check/min12 verifierは343/343 shard完了、10919 pair受理。
+base6869 pairと設定hash一致・重複なしでtrack build前mergeし17788 pair。
+default mapperは1000→998登録、RMSE0.02270→0.11772m、p950.03778→0.17203m、
+reproj0.67164→0.74489px、RSS96048→151452KiBでFAIL。pair-confidenceを両armへ
+同条件適用しても登録だけ1000へ戻り、RMSE+33.6%、p95+1.16%、reproj+13.7%、
+mapper wall+55.9%、RSS+72.1%でFAIL。GTはmodel公開後のみ。repeat/2.5k以上は未実施。
+証跡benchmarks/electro/m9-openloris-learned-retrieval-1k-ab-v1.json。
+次はGTで調整せず、descriptor-only rank margin + 双方向連続sequence path + 小さい固定
+per-frame budgetを事前固定し、1k survival curve後に同じfail-fast A/B。現候補集合は再利用・
+大tier昇格しない。
+
+M9 learned retrievalのmodel/export/store/ANN feasibility自体は1kで完了。
+公式MIT EigenPlaces ResNet18/512重みSHA b47ea1ef...、opset17 ONNX
+SHA ab42f8f...（45,754,260bytes）、Rust ORT1.23.2 SHA718c3fb...を外部固定。
+Torch/ORT最大差2.01e-7、dynamic 3解像度PASS。VLVPRD01はmodel/rig順/
+preprocess hashをheader bindingし、各行checksum、partial checkpoint、atomic rename。
+8-row SIGTERM相当timeout後row2からresumeしfreshとSHA一致。1k画像=500 rig rowの
+640x480 CPU生成133.13s、peak RSS146940KiB、artifact1,028,160bytes、
+SHA5b7de21f...。mmap LSH K32/tables12/bits9/probes9/gap64は1.33s、RSS5180KiB、
+exact recall@32=0.982125、13215 candidates<=16000、reciprocal AND隣接query
+2件以上のsequence supportで2783選択。repeat byte-identical SHA270ae4a...。
+証跡benchmarks/electro/m9-openloris-learned-retrieval-1k-v1.json。
+このinfrastructure passは維持するが、上記mapping A/B失敗により性能達成ではない。
+branch feat/m9-learned-retrieval。外部model/artifactはrepoへcommitしない。
+
+連続native E2E診断v1（source c80f45f）はterminal success。
+unit visloc-native-e2e-v1.service、MainPID0/SubState exited/Result success/exit0、
+invocation5118aa2190cc4bc69110d602caa37e25。再実行・再poll不要。
+全17stageが初回連続実行でexit0/completed。終了後に全stage artifact checkpointを
+独立再検証して17/17 PASS。pipeline wall17005.153s、計測wall17006.100s。
+sample aggregate peak RSS1806376KiB（1.72GiB）、cgroup peak2GiB、Swap0、
+memory.events max366806、OOM/oom_kill0。メモリ圧迫なしとは主張しない。
+最終scoreは9998画像/4999frame、RMSE0.388993m、p950.638173m。
+COLMAP比でmapper20.41倍、phase合計比1.13倍、sampled RSS17.0%低いが、
+RMSEはCOLMAP0.384307mより1.22%悪く品質gate未達。
+またOS cache未制御、COLMAP側は連続wallでなくphase和、単発runのため、
+同条件cold E2E性能acceptance・3反復・全SIGKILL restartは未達。
+証跡benchmarks/electro/m8-native-e2e-v1.json。pipeline report SHA375ec7b...、
+measurement SHA9f889ea...、score SHA74e839b...。
+bounded recursive Createは1kで実装・測定後に棄却し、source/CLI変更をrevert済み。
+同一binaryのdefault-OFF controlは旧model 3 filesとSHA完全一致、1000/1000登録。
+candidateも1000/1000だが、RMSE0.0290996→0.0295248m（+1.46%）、
+p950.0436789→0.0444145m（+1.68%）、再投影0.743284→0.757226px（+1.88%）で
+全品質指標が悪化。2.5kへ進めない。candidateは6774 partition/25057観測を公開、
+OOM0。単発mapper/RSS低下はcache非統制かつ品質FAILのため性能主張にしない。
+証跡benchmarks/electro/m8-openloris-dynamic-recursive-create-ab.json、外部raw root
+dataset/corridor1-1-m8-recursive-create-1k-v1。既存correspondence graphのbounded
+ownership変更はこれで打ち切る。
+
+次は独立したlearned long-range identityの固定arm。既存
+GlobalDescriptorOnnxExtractorを再利用するが、EigenPlaces/CosPlace ONNXはrepoに
+存在しない。暗黙download禁止。まずmodel license/SHA/preprocess/output次元をpinし、
+1画像ずつresumable/atomicにglobal descriptorを書き出す。rig-frame単位の
+deterministic mmap ANN（K=32、candidate<=32N、N x N state禁止）をexact cosine 1kで
+recall検証。既存pairを除外し、reciprocal retrieval + 隣接2 query frameの
+descriptor-only sequence consistencyだけでlong-range候補を作る。pose/GT/local
+match数/inlier数を選択へ使わない。凍結local feature/verifierで追加pairだけmatchし、
+既存ANN80kのようなdeferred appendではなくtrack build前のstructure inputへ追加、
+変更ledgerを保存。1k control/candidate/repeatで登録/RMSE/p95/再投影/mapper/RSSの
+全非回帰を要求し、一つでも悪化ならrevert。詳細はdocs/openloris_m8_m10_plan.md冒頭。
+共有化済み既存model/VPSは上書き禁止。新runはfresh root。
+
+M8 model/match共有化完了: apply_m8_duplicate_inventory.py、session60517 exit0。
+固定一覧からsingle-link682filesのみ置換、19277934592bytes（17.95GiB）解放。
+全事前hash/inode/link照合と全事後hash/shared inode確認PASS。
+証跡benchmarks/electro/m8-model-match-dedup-applied-v1.json。全path/bytes保持。
+対象model/VPSは以後上書き禁止、fresh outputまたは独立コピーを使用。
+df空き45G（この操作で説明できる解放量は17.95GiBだけ）。16GiB容量guardは収容可能。
+次は全cold executorの現状レビュー・固定pins確認・測定開始条件確認。
+以下のinventory未適用という記録は過去状態。適用scriptの再実行不要。
+
+容量整理候補を保存: scripts/inventory_m8_duplicates.py（読み取り専用）。
+外部一覧m8-model-match-duplicate-inventory-v1.json、repo同名証跡にSHA固定。
+206groups/888unique inodes、解放候補19277934592bytes。まだ適用していない。
+対象はM8配下1MiB以上のimages.txt/points3D.txt/*.vpsのみ、symlink除外。
+同一user FD監査で候補open0、ただし5process権限拒否あり（再確認sd-pam/sshd）。
+visloc user service稼働0。将来writer排除/完全quiescence証明ではない。
+次は固定一覧の対象レビューと適用前再照合、安全な共有化。inventory test1 PASS。
+
+base-v3の1万特徴を参照実体m5/feature-extract/featuresへhardlink化完了。
+scripts/deduplicate_base_v3.py、監査m8-base-v3-dedup-v1.json。
+全件事前hash/参照symlink実体確認、事後全hash+共有inode確認済み。
+1705103360bytes（約1.59GiB）解放、空き5.5GiB。全cold guard16GiBにはまだ不足。
+両bankは共有inodeなので上書き禁止。編集は独立コピー、新runは新root。
+sidecar/raw/log/計測証跡は変更なし。過去性能を共有化後の状態で再解釈しない。
+helper2tests PASS、apply session90133 exit0。395d537のCI34310596934は直近実行中。
+
+base-v3は正常終了済み（MainPID0/Result success/SubState exited）。再起動不要。
+全6worker exit0。出力1万特徴と参照1万特徴を独立再SHA256照合し、集合・全hash一致。
+証跡: benchmarks/electro/m8-full-base-extraction-v3-audit.json。
+wall4673.225689s、sample aggregate peak RSS1474684KiB、OOM/oom_kill0。
+cgroup peak2147483648bytesで上限到達、max19818（圧迫なしとは言わない）。
+これはbase単体の新しい完走計測。v2の欠損ledgerや全cold E2E/品質gate達成とは別。
+次はこの証跡のレビューとPR反映、全cold用容量確保。以下のbase稼働中記録は過去状態。
+
+最新軽量作業: run_native_pipeline.pyに--resume（通常子exit>0の記録済み失敗限定）。
+native_pipeline_resume.pyでplan/pins/成功prefixの全artifact checkpointを検証後、
+失敗stageのoutput/log/payload/captureをfailed-attempts/<uuid>/へ退避し再実行。
+過去reportも退避、完了済みstageは再実行しない。flockで実行中executorとの競合拒否。
+関連14tests PASS：実child exit7→再開成功・完了inode保持・失敗成果物保持、
+plan差分/未観測失敗/負のsignal終了/実行中lockを拒否。
+SIGKILL/親強制終了/孤児child安全確認は未対応、全目標restart達成ではない。
+保守的16GiB guardはresume時も維持。各attempt wallをcold E2E時間と混同しない。
+base-v3はMainPID4045651で継続中、worker0=163/1667、OOM0、max5180。
+実行中base-v3 script/inputには変更なし。重い実験・buildを追加していない。
+
+最新軽量作業: native_pipeline_checkpoint.pyを追加、全体executorで成功stageの
+output/capture/payload/logの内容checkpointとcompleted=trueを保存するよう変更。
+ファイル・空directory・file symlink（target文字列+参照先hash）を記録。
+directory symlink/特殊fileは拒否。変更/追加/削除/参照先変更を検出。
+関連11tests PASS（実executor完了checkpointと事後log変更検出を含む）。
+これはresume前提の出力検証のみ。--resume/失敗stage退避/whole-pipeline再開は未実装。
+実行中base-v3のscript/inputは変更していない。新しいcheckpointは次の全体run向け。
+base-v3は継続中MainPID4045651、直近worker0=84/1667、memory.events oom/oom_kill0。
+memory.events max4767（圧迫あり）。終端RSS未確定、同unitを追跡し再起動しない。
+
+実行中: visloc-full-base-extraction-v3.service、2GiB/Swap0/timeout22000。
+probe_openloris_base_extraction.py --all-images --workers6 --variant base。
+出力dataset/corridor1-1-m8-full-base-extraction-v3、
+計測dataset/m8-full-base-extraction-measurement-v3。同unitを追跡、再起動禁止。
+目的はv2で欠けた終端aggregate RSS/cgroup/OOM記録の取得。特徴一致だけで完了扱いしない。
+既存frozen extractor extract-3ae253aを使用、出力見積約1.8GiB/開始前空き5.7GiB。
+他の大型run/buildや入力bank変更を並行しない。完了後独立1万特徴hash監査と
+measurement terminalを照合。v2自体の不完全ledgerを後付けPASSに変更しない。
+起動head db9c76c。全cold E2Eではない、#138 base resource gap解消のための再計測。
+
+CI cd1c5fa/run34304912157はglobal_sfm disconnected fixtureでFAIL。
+ローカル別プロセス反復でも再現。fixture HashMap列挙が対応順を毎回変えていた。
+db9c76cでfixtureのみBTreeMap化（本番solver変更なし）、push済み。
+global_sfm19tests PASS（build79020 exit0/2m20s）、対象別process100回PASS、fmt PASS。
+入力順依存の本番一般性を解決したとは主張しない。新head CIは未確認。
+
+最新容量整理: 完了済みfull-dense-extraction-v1/featuresの2万filesを
+dense256x2-full10k-v2/featuresへ全hash確認後hardlink化。
+scripts/deduplicate_dense_extraction.py、plan session84735/apply43516ともexit0完了。
+4,765,159,424bytes（4.44GiB）解放、空き5.7GiB。
+全出力を事後再hashし共有inodeも全件確認。証跡m8-dense-dedup-v1.json、
+外部audit dataset/m8-dense-dedup-applied-v1.json。元reportSHA3fabb11f...不変。
+feature内容/path/manifest/抽出ログ/計測証跡は保持。inode/metadata共有なので
+両feature bankを絶対に上書きしない。編集が必要ならまず独立コピーを作る。
+新抽出は必ず新rootに実行。整理後のcache/共有状態で過去の性能比較を再解釈しない。
+generic merge helper2tests PASS、専用script py_compile+実全2万検証PASS。
+全cold開始guard16GiBには不足（残り約10.3GiB）。次は他の検証済み重複を調べる。
+
+最新: OFF/ON既存phaseログ集計完了、証跡m8-feasible-backtrack-phase-accounting-v1.json。
+main normal_equations/linear_solve event各2804で変化なし（factorization数そのものではない）。
+linear_solve27.038570→26.998891s、tentative_update_and_cost29.963184→109.656562s。
+ON main3430縮小候補/291受理。再solve削減仮説は今回成立せず、棄却を維持。
+容量整理: scripts/deduplicate_atlas_parity.pyで完了済みSchur診断3rootの14filesずつを
+canonical schur-feasibility-v2と全hash確認後hardlink化。42files、929980416bytes解放。
+raw/feature/log/measurement/ONモデルは変更なし。全path/bytes保持、inode metadataは共有。
+完了済みrootのモデルを絶対に上書きしないこと。必要なら独立コピーを作ってから利用。
+監査dataset/m8-schur-dedup-applied-v1.json（phase証跡内SHA）、planも保存。
+dedup helper2tests PASS、実全対象hash検証+終端unit確認+適用完了。空き約1.3GiB。
+全cold pipelineの容量には不足。新しい大型runを開始する根拠にはしない。
+
+最新確定: feasible-backtrack ON v1はterminal success/MainPID0/exited。
+再poll/再実行不要。実験は棄却。RMSE OFF0.3889930047→ON0.3891842840mで悪化。
+p95は0.6381734851→0.6380699612m、登録9998/GT採点9306。
+scorer/manifest/GT/transform/aliases/gapの同一性を確認。pre-ba+camera8hash独立一致。
+integration区間OFF153.3184523s→ON233.9327779s（単発比較、全wallは比較不可）。
+ON計測全wall237.1764653s/sample aggregate RSS560852KiB。
+証跡m8-feasible-backtrack-on-v1.json。既定OFFを維持し同設定再実験・GT閾値調整禁止。
+採点session19580はexit0終了。runner9c25b16、binary37298b3。
+空き386MiB。大型run/build不可。まず保存済みOFF/ON phase timingの内訳を集計し、
+無駄な再solve削減仮説を見直す。次の実験前に検証済み成果物の容量整理が必要。
+raw/feature/reference銀行は削除しない。全目標・COLMAP品質gateは依然未達。
+
+実行中: visloc-feasible-backtrack-on-v1.service（2GiB/Swap0/timeout1000）。
+runner9c25b16 scripts/run_atlas_backtrack_trial.py、同OFF binary37298b3。
+出力dataset/corridor1-1-m8-feasible-backtrack-on-v1、
+計測dataset/m8-feasible-backtrack-on-measurement-v1。同unit追跡、再起動禁止。
+mainでbacktrackログを確認。ON未完走、入力pins対象のscript/JSON/binaryは変更禁止。
+OFF stitchを再利用するため速度比較はintegration stage同士のみ（全wall比較禁止）。
+pre-ba全3filesとmodel/cameras完全一致を要求、post modelはhash記録し品質未評価扱い。
+runner出力validator2tests/既存exact executor3tests PASS。起動時空き683MiB。
+事後scorerはscripts/score_openloris_model.py（SHAc0196be50b4b7ee385bd8db437a8fa6cae508fb0d4a9ecc4038981c94455d5d0）
+--manifest dataset/corridor1-1-m5/manifests/tier-10000.json
+--ground-truth dataset/official-groundtruth/calibration/corridor1-1/groundtruth.txt
+--transform-matrix dataset/official-groundtruth/calibration/corridor1-1/trans_matrix.yaml
+--model-images newroot/integrated/main/model/images.txt とtailも指定、aliasesなし。
+従来scoreはdataset/corridor1-1-m8-atlas-landmarks-v1/connected-filtered-ba-v1/score.json。
+
+最新確定: feasible-backtrack OFF v1はterminal success/MainPID0/exited。
+再poll/再実行不要。14参照hashをsha256sum --checkで独立全一致。
+main/tail backtrackログ0。wall155.1414069s、sample aggregate RSS560748KiB。
+証跡m8-feasible-backtrack-off-v1.json。ON未実行、品質・高速化は未証明。
+CI37298b3/run34303656924はterminal success（ON synthetic test含む）。
+次は同binaryのONを評価。ただし既存probe/execute_atlasはpost model完全一致を
+要求するのでON品質比較にはそのまま使えない。厳密parity runnerのgateを緩めず、
+実験専用runnerでpre-ba一致・出力hash・事後品質採点を扱うこと。
+現在空き684MiB。新build不要、追加runは出力予算を再確認して一件のみ。
+
+実行中: visloc-feasible-backtrack-off-v1.service（2GiB/Swap0/timeout1000）。
+新binary source37298b3、build80812はexit0（1m52s）。
+保存schur-probe-binaries.4WAfOy/integrate-37298b3、
+SHA10b3698d14bbec10c61d35e4ddc25eae8e8d412fa1ffdd39cc46cb42ae20c05c。
+出力dataset/corridor1-1-m8-feasible-backtrack-off-v1、
+計測dataset/m8-feasible-backtrack-off-measurement-v1。
+probe_atlas_schur_diagnostic.py診断なしで実験OFFの14参照hashを検査中。
+同unitを追跡、完走後に独立hash監査。再起動しない。ONは未実行。
+起動直前空き983MiB、過去出力約310MBで今回1件のみ収容可と判断。
+これを全体cold pipeline/ON比較の容量許可と解釈しない。
+CI37298b3/run34303656924は直近rust実行中、他8jobs success。
+
+最新: joint variable pose+point（回転固定）もproduction fixtureへ追加。
+session48581はexit0（release2m51s）。OFF/ON各4 tests PASS。
+jointでalpha0.5拒否/0.25受理、両更新nonzero・step norm一致、回転exact不変。
+4候補尽きた場合のproblem全体exact rollbackも両modeでPASS。
+CIに実験flag ONの別プロセステストを追加。実atlas OFF一致とA/Bは次の未完作業。
+06a21fdまでpush済み、CI34303430195は直近確認時in_progress。
+全体CI成功・性能改善はまだ主張しない。
+
+最新作業: bundle.rsにVISLOC_SFM_BA_FEASIBLE_BACKTRACK=1限定の
+4候補joint pose/landmark step縮小を実装（既定OFF、実データ未適用）。
+pure rig/legacy sparse/LM/velocity+biasなしに限定。追加全体snapshotなし。
+有限cost低下・既存非投影数gate・以前validな全rig観測のvalid維持を要求。
+失敗候補尽きたら強制拒否→既存rollback。受理時step normをalpha倍。
+session56698/23080はexit0完了、再poll不要。generalized_rig_factor_testsは
+OFF/ON別プロセス各4件PASS。production固定pose fixtureでalpha0.5のcost悪化拒否、
+alpha0.25受理、別fixtureの4候補尽きた完全rollback、固定pose不変、step norm一致。
+有限cost/既存valid観測維持predicateもPASS。joint variable pose+point、固定rotation、
+実atlas OFF byte parityは未検証。次はこの不足テストを補い一つの固定armを評価。
+session22417 Clippy --lib --release -D warnings PASS（8.29s）。
+診断step-detailのfeasibility表示もexhaustion込みgateへ修正済み。
+空き973MiB。実データrun禁止、まずテスト契約と容量予算を満たすこと。
+
+2026-09-09 最新確定: feasibility v2はterminal success、再実行不要。
+14参照hash一致、115診断行の全観測が更新前projectable。
+5内部trackの更新前sensor depthは0.000068〜0.038669m。
+証跡m8-schur-feasibility-v2.json。wall209.103801s/RSS550604KiB。
+品質改善ではない（RMSE 0.388993m > COLMAP 0.384307mのまま）。
+次の候補は点削除ではなく有限回のfeasibility-preserving step縮小。
+詳細・棄却条件はopenloris_atlas_bounded_ba.md末尾。未実装。
+空き1.1GiB、追加大型runを開始しない。既存データ削除なし。
+CI adb8fe6/run34302051261はClippy too_many_argumentsでFAIL。
+solve_stepから分離したsolve_step_with_debugの局所allow漏れを修正済み。
+cargo clippy -p visloc-slam --lib --release -j1 -- -D warnings PASS（19.55s）。
+cargo fmt --all -- --check / git diff --check PASS。新headの全体CIは未確認。
+以下のbuild/run稼働中という記録は過去ログ（現在完了済み）。
+
+最新: build39403はexit0完了（1m55s）。保存binary integrate-5def794（既存schur-probe-binaries.4WAfOy内）、
+SHA1539a5d848fcc30553471746781d007821da0bc7108373dbd1d92ba61a19a689。
+unit visloc-schur-feasibility-v2.serviceを2GiB/Swap0/timeout1000で起動。
+出力dataset/corridor1-1-m8-schur-feasibility-v2、計測dataset/m8-schur-feasibility-measurement-v2。
+同v2を追跡し14hash比較とbefore深度/投影可否/stepを監査。v1は終了済み。
+起動前空き1.4GiB、出力見積約310MB。追加大型runを並行起動しない。
+
+実行中: integration release build session39403（source5def794）。同sessionをpoll。
+完了後は新binary名で保存/hash確認し、新probe outputでbefore-depth診断を実行する。
+
+最新: session25100はexit0完了（release2m50s）、generalized_rig_factor_tests全2件PASS。
+before-depth診断ログの実データ検証は未実施。次にintegration binaryをbuildする。
+
+最新: feasibility sampleにbefore_sensor_depth/before_projectable/point_stepを追加中。
+saved_poses/saved_landmarks（既存rollback状態）を利用し追加全体コピーなし。
+受理gate/モデル更新は変更しない。未commit、実ログ未検証。
+cargo test -p visloc-slam --lib generalized_rig_factor_tests --release -j1
+session25100がビルド中。再起動せずpoll。rustfmt/diff check PASS、空き約1.4GiB。
+
+最新: feasibility v1はterminal success/MainPID0/exited、14参照hash独立全一致。
+wall158.972974s/sample aggregate RSS550652KiB。再poll不要。
+main115失敗観測行、内部trackは140/407/578/641/12192の5件、各反復最大12件。
+tail失敗行0。最大消去寄与4266とは異なる。証跡m8-schur-feasibility-v1.json。
+次はこの5trackの更新前後depth/geometryを取得し、受理gateを維持する改善仮説を検討。
+内部ID→COLMAP IDの直接joinは禁止。品質改善・因果はまだ未証明。
+
+最新: build99071はexit0完了、5bb84bbをpush済み。
+新保存binary schur-probe-binaries.4WAfOy/integrate-5bb84bb、
+SHA7194864f91b057878bfec1472f9ddd6ef41e677cf916195fa36219024984372a。
+unit visloc-schur-feasibility-v1.serviceを2GiB/Swap0/timeout1000で開始。
+出力dataset/corridor1-1-m8-schur-feasibility-v1、計測dataset/m8-schur-feasibility-measurement-v1。
+同unitを追跡し、完了後モデル14hashとsfm-debug-ba-rig-infeasibleを監査。
+既存OFF/ONは完了済みなので再poll不要。
+
+最新: session72367はexit0終了（release2m24s）、bounded sample test PASS。
+generalized_rig_factor_tests全2件もPASS。追加診断は実データではまだ未実行。
+空き1.7GiBなので新probeは一度に一件、保守的に出力約310MBとbinary容量を確認する。
+
+最新: first-window step gateをsolver境界で集計（step-detailは拒否のみ出すので
+先頭N行をwindow扱いしない）。main20反復15拒否/feasibility14、tail14反復拒否0。
+証跡m8-schur-first-window-step-gates-v1.json、commit9c2dff5。
+bundle.rsに非投影rig観測の最大16件sampleを追加中。最初の診断windowかつ
+feasibility失敗時のみ、仮更新後のobservation index/frame/track/sensor depthを出力。
+本体rig_residual_jacobians判定を再利用。新規失敗だけではなく仮更新後失敗のsample。
+関連test build session72367稼働中。再起動せずpoll。未commit、実モデル未検証。
+
+最新: Schur ON v1はterminal success/MainPID0/exited。再poll不要。
+OFF/ON/凍結参照の14filesを独立hashし全一致。
+main診断20行(iter0..19/frame0)、tail14行(iter0..13/frame4495)、OFF0行。
+全行finite=true/singular_hll=0。初回適格BAのみの出力範囲を確認。
+ON wall152.620315s/RSS550680KiB、OFF176.969935s/RSS560632KiB。
+single sequential/cache条件が異なるため速度改善とはしない。
+証跡m8-schur-diagnostic-parity-v1.jsonに14hash/測定/診断各行の主要値。
+次は最大消去寄与trackと低視差大移動trackの対応を調べる。全pose/全window寄与は未測定。
+
+最新: Schur OFF v1はterminal success/MainPID0/exited、14参照ファイル独立hash全一致。
+wall176.969935s、sampled aggregate peak RSS560632KiB。再poll不要。
+ON unit visloc-schur-parity-on-v1.serviceを同binary/入力・--diagnosticで起動。
+出力dataset/corridor1-1-m8-schur-parity-on-v1、計測dataset/m8-schur-parity-on-measurement-v1。
+同ON unitを追跡し、完了後14file一致とSchurログのfirst-window制御を監査。
+ON未完了。空き起動前2.0GiB。実行スクリプト/binaryは変更しない。
+
+最新: integration build session76465はexit0完了（2m12s）。
+保存binary /home/sasaki/datasets/openloris/schur-probe-binaries.4WAfOy/integrate-dee3141
+SHA276c5d90452f938db49bf700591c87f98ceef9c4012e90af4bdb26676dd7782b。
+probe_atlas_schur_diagnostic.pyを追加（source/rig検証→stitch/integration参照比較）。
+OFF unit visloc-schur-parity-off-v1.serviceを起動、2GiB/Swap0/timeout1000。
+出力dataset/corridor1-1-m8-schur-parity-off-v1、計測dataset/m8-schur-parity-off-measurement-v1。
+同unitを追跡。OFF PASS後に新ON出力で診断比較、まだON未開始。
+Python既存93 tests PASS、新probeはpy_compile確認で実試験進行中。
+
+最新: session19766はexit0完了、release2m57s、Schur関連3 tests PASS。
+first-window claim（不適格非消費/並行一意）と非zero解不変性を確認。
+次はatlas integrationの実binaryをbuildし、同入力で診断OFF/ONのmodel bytesを比較。
+基準binaryはdataset下の保存コピーを維持し上書きしない。
+
+最新: first-window制御をbundle.rsに実装中（未commit）。
+VISLOC_SFM_DEBUG_BA_SPARSE_FIRST_WINDOW + 既存VISLOC_SFM_DEBUG_BA/
+VISLOC_SFM_DEBUG_BA_STEPS/VISLOC_SFM_DEBUG_BA_SCHUR_SLOTで最初の適格rig sparse BAを選択。
+呼出内全反復で同slot使用。プロセス単位AtomicBoolで一度のみ、無効slot/非適格は消費しない。
+並行8呼出の一意claimテスト追加。cargo test --release schur_block_debug_tests
+session19766がビルド中。再起動せずpollする。rustfmt/diff check PASS。
+実model不変性・診断結果はまだ未検証。選択は単一thread atlas前提で再現性確認が必要。
+
+最新: Schur診断fixtureを非zero pose/landmark RHSへ強化。
+診断ON/OFFの解exact一致、両更新norm>0、同pose合算後の消去norm一致PASS。
+session53281はexit0終了、release2m24s、関連2 tests PASS。再poll不要。
+公開済み03e0368のCI34298844551はsuccess（この新Rust変更のCIではない）。
+first-window制御と実model byte比較は引き続き次の作業。
+
+最新: session91383はexit0終了。release build 3m07s、追加した診断有無の解一致test PASS。
+続いてschur_block_debug_tests全2件PASS。build再poll不要。
+現一致fixtureはzero RHSなので非zero RHS・実model byte比較を追加する必要がある。
+first-window限定もまだ未実装。診断接続のみを完了とし品質改善を主張しない。
+
+最新: bundle.rsにlegacy sparse→既存Schur診断への接続を実装中（未commit）。
+solve_step_with_debug/solve_step_pose_blocks_with_debugは実inverse cache/reduced blockを使用。
+既存debug flags/slotのgateを維持。診断有無の解一致testを追加。
+`cargo test -p visloc-slam --lib debug_context_maps_variable_slot_after_fixed_pose_and_counts_rig_crosses --release -j 1`
+session91383がビルド稼働中。再起動せずpollすること。rustfmt実施/diff check PASS。
+最初の1window限定・実model bytes比較は未実装/未検証。空き約2.3GiB。
+
+最新: pose coupling実装箇所を確認。既存collect_schur_block_debug_countsは
+同poseのcross合算・solver inverse cache利用に対応するが、emitはmatrix-free側のみ。
+atlas実経路solve_step_pose_blocksのinverse cache構築後/factor前へ接続が必要。
+index mapのframe/landmark IDを渡し、export point IDは使わない。
+診断機能の新規接続はまだ未実装。詳細はopenloris_atlas_bounded_ba.md末尾。
+
+最新: main/tail各移動量上位5点の観測ray角とcamera range/translationを監査。
+main上位5は全2観測、pre角0.000252〜0.112018deg。
+最大1004.613m移動点はpre距離1043m、post38.4m、観測camera最大移動0.004214m。
+低視差と点の大移動は確認したがpose RMSEの原因・Jacobian影響は未証明。
+証跡`m8-atlas-top-motion-geometry-v1.json`。rangeは軸方向depthではない。
+次はposeへの残差/Jacobian寄与を診断。既存weak-angle freeze棄却armの単純再実行禁止。
+
+最新: ObservationKeyでpre-ba/modelを対応付けた診断完了。
+image ID/name一致、全final trackが一意の旧trackのsubset、新規/曖昧track0。
+削除957点・総14440観測で既存filter ledger一致。
+mainの旧2観測群216828点の平均移動0.043919m、最大1004.612687m。
+単純ID join結果とは異なる有効対応だが、軌跡誤差への因果は未証明。
+証跡`m8-atlas-observation-key-motion-v1.json`に8入力hash/集計手順/全群統計。
+次は大移動点の視差角・深度・pose couplingをGT-freeで調査。閾値変更はまだ行わない。
+
+最新: 品質診断に戻りmapping-v2 main pre-ba/modelのpoint対応を監査。
+共通数値ID318222件中、同一観測集合7件、観測集合disjoint318215件。
+integrate_rig_atlas_landmarks.rsの出力は順序付け後index+1でIDを再採番する。
+従って数値point IDでBA前後をjoinした移動量・観測数変化の集計は無効として棄却。
+次はObservationKey（image identity, feature index）の対応で点集団を比較する。
+GT未使用、モデル変更なし。再投影低下だけで軌跡改善しない既存Ceres診断に沿う。
+
+最新: pipeline checkpointを既存atomic_jsonへ切替、child起動前にactive_stageを記録。
+atomic replace失敗時の旧JSON保持・起動前記録の試験を追加、93 tests PASS。
+file fsync+renameでありdirectory fsyncなし。電源断durability/full restartを主張しない。
+
+最新: 全体pipeline CLIはcgroup v2のmemory.max=2147483648/swap.max=0を必須化。
+通常シェルからの実CLIはexit1/期待診断/出力なしを確認。91 tests PASS。
+制限確認だけでは独立monitorの存在を証明しないためlaunch_native_measurement経由を維持。
+ライブラリexecuteの単体テストはCLIガード外。全体実データ実行は未開始。
+
+最新: pipeline reportに実行計画由来のartifact_lifetimesを追加（削除機能なし）。
+base/native match最終利用はprefix admission、adaptive matchはrepair admission、
+targeted matchはfinal admission。dense/adaptive特徴は最後のmappingまで必要。
+実測dense特徴4,437,450,752 bytes、loci327,708,672 bytes。
+dense特徴だけで空き2.4GiBを超えるため、早期releaseだけでは現方式を実行できない。
+baseのhardlinkを消してもadaptiveが共有するinodeのbytesは解放されない。
+90 tests PASS。release設計はrestart保持契約と別途統合が必要。実データ削除なし。
+
+最新: pipeline CLIは全scripts/*.py・electro JSON/TSV・9 binaryのhashを記録し、
+stage前後で再検証。変更されたらexit0のstageでも全体FAILで後段停止。
+実子プロセスの変更注入を含め90 tests PASS。これは境界検出で物理immutable化ではない。
+外部raw/calibration/reference全体の固定と、実行中変更→復元の検出はまだ保証しない。
+
+最新: 全体executorの候補生成binaryを実証跡と照合し分離。
+nativeはa7ff5ff/8eeee5c、denseは3ae253a/8cfa9c5。開始前に各hashを固定検証。
+9 binaryの実パス/hashを`benchmarks/electro/m8-native-pipeline-binaries-v1.json`に保存。
+同specで`run_native_pipeline.py --plan-only`が17 stageを生成することを実確認。
+88 tests PASS。長時間の全体実行は開始していない。16GiB guardに対して空き2.4GiB。
+全binary/script/inputの凍結検証・容量lifetime・restartは依然残る。
+
+最新: `run_native_pipeline.py`に全抽出→候補→4系統shared matching→3 admission→
+prefix/target selection→source/atlasの接続実装を追加。88 Python tests PASS。
+実データで全体未実行、restartなし、全script/inputのimmutable provenance凍結も未完。
+16GiB freeを保守的な開始条件とする（実測lifetime上限ではない）。現在空き2.4GiB。
+自動削除なし。`--plan-only`と8 binaryのpath/sha256 JSONで計画を検査可能。
+次はbinary specを凍結し全コマンドと参照互換性をpreflight、容量確保/lifetime設計。
+特にnative/dense候補生成に同candidate binaryを使う接続は実データ未検証。
+品質gate未達とfull restart、連続cold測定の要求は変わらない。
+
+最新: mapping v2は正常終了（MainPID0 / exited / Result success）。再poll不要。
+21 source / 23 nodes / stitch / tail+main integrationが全PASS。
+参照86ファイルを独立再hashして全一致、nodes.tsvも新runへの23 bindingに一致。
+入力検証込み連続wall926.828秒、sampled aggregate peak RSS572860KiB、
+cgroup peak1182564352 bytes（RSSではない）、OOM0。
+証跡`benchmarks/electro/m8-native-mapping-bound-v2.json`。
+既存frontendからのmapping suffix一回の結果でcold E2E・restart・品質改善ではない。
+次はfrontend全段接続と容量/lifetime設計、未達RMSE gateの品質改善。
+
+最新: 補助ファイル許可/未知出力拒否/参照欠落/内容変更の実子プロセス回帰試験PASS、
+Python85 tests。修正head `b66d155`をpush済み。
+新unit `visloc-native-mapping-bound-v2.service`を起動（2GiB/Swap0/timeout6000s）。
+出力`/home/sasaki/datasets/openloris/corridor1-1-m8-native-mapping-bound-v2`、
+計測`/home/sasaki/datasets/openloris/m8-native-mapping-bound-measurement-v2`。
+このv2を同unitで追跡し、terminalを確認するまで再起動しない。
+v1の測定はfail/exit1、46.179秒、sampled aggregate peak RSS376044KiB、OOM0。
+最初のsourceはmodel一致だが全pipeline結果ではない。v1は保持。
+
+最新: 上記mapping v1はterminal FAILED（MainPID0 / Result exit-code）。再poll不要。
+最初のsource-replay-1950はmapper exit0、参照model hash全一致、31.800秒。
+失敗原因は参照audit対象外のcomponents.tsv/retrieval-components.txtを厳密dict比較で
+余分と判定したexecutorバグ。既知2補助ファイルだけ許可し全hash記録を保つ修正を実施。
+未知出力・参照欠落・hash不一致は引き続き拒否。85 tests PASS、追加回帰テストが次。
+v1出力・measurementは失敗証跡として保持。修正後は新v2パスで実行すること。
+
+最新追記: mapping suffixの実データ計測を開始。
+unit `visloc-native-mapping-bound-v1.service`、開始確認MainPID3927517。
+測定root `/home/sasaki/datasets/openloris/m8-native-mapping-bound-measurement-v1`、
+出力root `/home/sasaki/datasets/openloris/corridor1-1-m8-native-mapping-bound-v1`。
+再起動せず同unitのterminal状態とreportを確認すること。MemoryMax2G/Swap0、timeout6000s。
+入力spec `benchmarks/electro/m8-native-mapping-bound-inputs-v1.json` は事前検証PASS。
+全dense新規抽出bankと新targeted admissionを使用、dense snapshot等はretained。
+従ってcold E2Eではない。保存出力からの容量見積はsource326MB+integration309MB。
+実行head `1153a0479c9e2a676b46f27a16e7589aa229b3b1`、CI34296178485は開始時in_progress。
+atlas実子プロセスexit0/7試験を追加しPython85 tests PASS。SfM実行結果とは区別。
+
+最新追記: `run_native_mapping.py`でsource全21→nodes23→atlas結合/BAを接続。
+`--inputs`は5入力のpathとsha256（feature bankはmanifest/manifest_sha256）を要求。
+3 binaryは証跡hashを検証。`--validate-only`は出力を作らない。
+Python 84 tests成功。接続と失敗停止はmock検証で実データ実行は未確認。
+これは既存frontendからのmapping suffixであり、cold E2Eではない。
+入力hashは指定specへの一致で、spec自体の凍結参照との一致は呼出側の責務。
+資源制限は`launch_native_measurement.py`の外側wrapperを必ず使う。
+空き実測は内蔵3.0GiB/外部1.6GiB。全抽出DAGは容量/lifetime設計が必要。
+
+最新追記: `c718cf7`のCI run 34295216906はsuccess。
+`execute_native_atlas.py`にstitch→tail/main integrationの逐次実行を追加。
+binary/input hash記録、出力先拘束、timeout、参照14ファイルhash gateで失敗時停止。
+Python 81 tests成功（atlas実行はmock検証であり実SfM実行未確認）。
+まだsource phaseとの単一CLI接続、frontend全DAG、入力provenanceの全検証、
+restartと連続resource計測は未実装。cold E2E完了・品質改善とはしない。
+
+最新追記（2026-09-09）: dense全10k抽出サービス
+`visloc-full-dense-extraction-v1.service`は正常終了（MainPID 0 / exited / exit0）。
+再起動・待機pollは不要。20,000 feature/lociファイルを独立に再hashし参照全一致、
+6 worker全exit0、計測レポートPASS。抽出＋検証9,789.925秒、50msサンプリングの
+合計peak RSS 1,776,952 KiB、OOM 0。証跡`m8-full-dense-extraction-v1.json`。
+現branchは`feat/shared-matching-recipe`。空き約1GiBのため大容量stageは要容量確認。
+連続native DAG・COLMAP品質/速度比較は未達。base抽出の欠落resource ledgerも
+今回のdense測定では埋まらない。サブエージェントは使わない。
 
 最新（2026-09-09）: PR118/119に続きPR120（head`e136ae6`、CI9成功）は
 `09e79b8dae067521ee8b8be342c1373c68e090c8`へmerge、旧branch整理済み。
