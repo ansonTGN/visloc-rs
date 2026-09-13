@@ -67,7 +67,7 @@ if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
 }
 $finished = [DateTimeOffset]::UtcNow
 $gitHead = (& git -C $repoRoot rev-parse HEAD).Trim()
-$gitStatus = @(& git -C $repoRoot status --porcelain=v1)
+$gitStatus = @(& git -C $repoRoot status --porcelain=v1 --untracked-files=no)
 $rustcVersion = @(& $rustcExecutable -vV)
 $cargoVersion = (& $cargoExecutable -V).Trim()
 $cpuNames = @(Get-CimInstance Win32_Processor | ForEach-Object { $_.Name.Trim() })

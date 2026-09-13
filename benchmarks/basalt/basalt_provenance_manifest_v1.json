@@ -1297,7 +1297,7 @@
       "upstream_refs": [
         "basalt"
       ],
-      "sha256": "f0ec564b31cefd0c816e89b71e6fae5ca0310aa47fe9b244563be9491756f948"
+      "sha256": "d9b1b72c85d5065d4339eef959070f3599efa22b2330189f2bc615fe01c3f6b2"
     },
     "benchmarks/basalt/bundle_selected_license_payload.py": {
       "kind": "diagnostic_tool",

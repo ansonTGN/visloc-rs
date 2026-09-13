@@ -48,7 +48,7 @@
       "path": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
       "kind": "provenance",
       "bytes": 58757,
-      "sha256": "82064ecbaf2d89d3c2bd9fe2d74feb4a9f254a77346127ed37c8003b2dce79e5"
+      "sha256": "3a9246a242747ebc41b9ae212641b3515aa2ee33e4e80d8be1eff9e6f42968a1"
     },
     {
       "path": "benchmarks/basalt/NOTICE",
