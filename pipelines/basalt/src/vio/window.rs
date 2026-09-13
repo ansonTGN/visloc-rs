@@ -13755,6 +13755,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires pinned external k12 Eigen workspace capture"]
     fn enumerate_m7im15_k12_gemv_workspace_schedules() {
         let (essential, bottom) = read_m7im15_k12_focus_fixture();
         let target = 0x35bfb5b6_u32;

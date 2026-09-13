@@ -233,6 +233,10 @@ fn fixture_packet_with_images() -> MargData {
         // frame pose, so the pinned detect_keypoints eligibility gate skips it.
         feature_image(frame_id + 1, timestamp_ns + 1, 0),
     ];
+    // The synthetic sentinel has no pose/state table entry by design.  Bind
+    // its identity through the schema-3 legacy marginalization alias so the
+    // strict ingress validator can distinguish it from an orphan image.
+    packet.kf_to_marg.push((frame_id + 1, frame_id + 1));
     packet
 }
 
@@ -253,6 +257,11 @@ fn fixture_packet_with_two_feature_frames() -> MargData {
         // must skip it, so it cannot enter the HashBoW key/index sequence.
         feature_image(second.frame_id + 1, second.timestamp_ns + 1, 0),
     ];
+    // Keep the ineligible lifecycle sentinel contract-valid without adding a
+    // mapper-visible keyframe or state.
+    packet
+        .kf_to_marg
+        .push((second.frame_id + 1, second.frame_id + 1));
     packet
 }
 

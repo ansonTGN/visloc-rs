@@ -11752,6 +11752,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires pinned external m7im15 full-product capture"]
     fn m7im15_local_product_matches_full_900_30_oracle_bits() {
         let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/m7im15_test_new.json");
@@ -15181,6 +15182,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires pinned external frame-4 Householder capture"]
     fn m7_householder_track1_fixture_is_bitwise_eigen_compatible() {
         // This is the frame-4/track-1/iteration-0 storage captured from the
         // pinned upstream ABS_QR run.  Keep this gate next to the helper so a
@@ -15456,6 +15458,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires pinned external Q2/Eigen Householder captures"]
     fn m7_q2_one_factor_f32_reduction_is_bitwise_eigen_compatible() {
         let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/m7_track1_q2_fixture.txt");
@@ -15630,6 +15633,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires pinned external frame-4 and frame-6 model captures"]
     fn m7_reduced_model_decrease_candidate_is_not_full_qr_model() {
         // This pinned frame-4/track-1 block contains both Q1 and Q2 rows.
         // Using several deterministic trial steps makes the missing Q1
@@ -15812,6 +15816,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires pinned external frame-4 and frame-6 model captures"]
     fn m7_reduced_model_q1_constant_candidate_track1_and_frontier() {
         let q1_constant_variants = |entries: &[CompactLandmarkBackSubstitutionF32]| -> [f32; 4] {
             let mut fma_per_factor = 0.0_f32;
@@ -16067,6 +16072,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires pinned external frame-4 Householder capture"]
     fn m10_landmark_direct_pack_matches_materialized_track1_and_all61() {
         let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/m7_householder_track1_f4_i0.txt");
@@ -16495,6 +16501,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires pinned external frame-4 Householder capture"]
     fn m7_q2_model_reuse_track1_is_bitwise_exact_without_qr() {
         let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../target/m7_householder_track1_f4_i0.txt");
@@ -18779,6 +18786,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires pinned external target-frame3 relpose capture"]
     fn m7im15_current_relpose_targetframe3_cam0_cam1_schedule_probe() {
         // This is a diagnostic sidecar for the first iter3 visual factor.  It
         // uses the exact current/FEJ endpoint words from the native fixture,
@@ -19065,6 +19073,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires pinned external target-frame3 transform captures"]
     fn m7im15_current_packet_transform_matrix_pass0_3_probe() {
         // The target-frame3 relpose fixture records the exact current endpoint
         // words, while the current-transform fixture records the independent
