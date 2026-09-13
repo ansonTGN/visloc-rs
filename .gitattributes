@@ -1,0 +1,14 @@
+# Frozen protocol manifests are byte-hashed by the held-out runner. Keep their
+# canonical Git bytes stable across Windows (core.autocrlf) and Unix checkouts.
+benchmarks/protocols/ssfm_heldout_euroc_v1.json text eol=lf
+benchmarks/protocols/ssfm_external_baselines_v1.json text eol=lf
+benchmarks/protocols/ssfm_heldout_euroc_v2.json text eol=lf
+benchmarks/protocols/ssfm_external_baselines_v2.json text eol=lf
+benchmarks/protocols/ssfm_external_baselines_v3.json text eol=lf
+benchmarks/protocols/ssfm_external_baselines_v4.json text eol=lf
+
+# Basalt manifests bind source and evidence bytes. Preserve the same LF bytes
+# in every checkout so verification is independent of core.autocrlf.
+pipelines/basalt/** text eol=lf
+benchmarks/basalt/** text eol=lf
+examples/basalt_euroc_vio_demo.rs text eol=lf

@@ -9,8 +9,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
-MODULE_PATH = ROOT / "work" / "m11_max52_output_compare_20260907.py"
+MODULE_PATH = Path(__file__).with_name("m11_max_output_compare.py")
 SPEC = importlib.util.spec_from_file_location("m11_max_output_compare", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
