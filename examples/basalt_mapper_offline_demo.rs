@@ -171,7 +171,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "final_point_count": report.final_points.points.len(),
         },
         "elapsed_seconds": elapsed_seconds,
-        "outputs": ["map.json", "poses.json", "trajectory.csv", "trajectory.tum", "mapper_report.json"],
+        "outputs": ["map.json", "points.json", "poses.json", "trajectory.csv", "trajectory.tum", "mapper_report.json"],
     });
 
     fs::create_dir_all(&args.out_dir)?;
@@ -182,6 +182,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     write_json(
         args.out_dir.join("poses.json"),
         &serde_json::to_value(&report.result.poses)?,
+    )?;
+    write_json(
+        args.out_dir.join("points.json"),
+        &json!({"points": report.final_points.points, "ids": report.final_points.ids}),
     )?;
     fs::write(args.out_dir.join("trajectory.csv"), trajectory_csv)?;
     fs::write(args.out_dir.join("trajectory.tum"), trajectory_tum)?;
