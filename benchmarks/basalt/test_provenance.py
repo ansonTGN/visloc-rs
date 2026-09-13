@@ -1,6 +1,8 @@
 """Regression tests for the Basalt provenance/release audit."""
 
 from pathlib import Path
+import subprocess
+import sys
 
 from benchmarks.basalt.verify_provenance import (
     validate,
@@ -9,6 +11,23 @@ from benchmarks.basalt.verify_provenance import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_release_provenance_refresh_is_current():
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "benchmarks/basalt/refresh_release_provenance.py"),
+            "--check",
+            "--root",
+            str(ROOT),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_provenance_manifest_and_generator_hashes():
@@ -44,7 +63,6 @@ def test_release_manifest_binds_every_file_and_contract_input():
         "sha256",
     }
     artifacts = payload["artifacts"]
-    assert len(artifacts) == 109
     assert payload["schema_path"] == "benchmarks/basalt/schemas/release_manifest_v1.schema.json"
     assert payload["self_binding"]["mode"] == "external_sha256"
     assert all({"path", "kind", "bytes", "sha256"} <= set(item) for item in artifacts)
@@ -58,7 +76,18 @@ def test_release_manifest_binds_every_file_and_contract_input():
         "benchmarks/basalt/native_wsl_runner.py",
         "benchmarks/basalt/test_clonefree_perf.py",
     } <= listed
-    assert sum(item["kind"] == "contract_test" for item in artifacts) == 45
+    expected_pipeline_tests = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "pipelines/basalt/tests").rglob("*")
+        if path.is_file()
+    }
+    listed_contract_tests = {
+        item["path"] for item in artifacts if item["kind"] == "contract_test"
+    }
+    assert listed_contract_tests == {
+        *expected_pipeline_tests,
+        "benchmarks/basalt/test_clonefree_perf.py",
+    }
     for item in artifacts:
         path = ROOT / item["path"]
         digest = hashlib.sha256(path.read_bytes()).hexdigest()

@@ -231,6 +231,10 @@ def _correctness_summary(
     contracts: dict[str, Any],
     source: dict[str, Any],
     executable: dict[str, Any] | None,
+    *,
+    timing_feature: str | None,
+    features: list[str] | None,
+    lm_workspace_reuse: str | None,
 ) -> dict[str, Any]:
     """Bind the selected RC certificate and its 52/80/400 exactness claims."""
 
@@ -240,12 +244,12 @@ def _correctness_summary(
     if certificate.get("status") != "PASS_CORRECTNESS_ONLY":
         raise ManifestError("correctness certificate is not PASS_CORRECTNESS_ONLY")
     scope = certificate.get("scope", {})
-    if scope.get("features") != []:
-        raise ManifestError("correctness certificate feature list is not empty")
-    if scope.get("timing_breakdown") != "compile-time feature disabled":
-        raise ManifestError("correctness certificate is not timing-off")
-    if scope.get("lm_workspace_reuse") != "feature disabled":
-        raise ManifestError("correctness certificate is not LM-reuse-off")
+    if features is not None and sorted(scope.get("features", [])) != sorted(features):
+        raise ManifestError("correctness certificate feature list differs from selected build")
+    if timing_feature is not None and scope.get("timing_breakdown") != f"compile-time feature {timing_feature}":
+        raise ManifestError("correctness certificate timing state differs from selected build")
+    if lm_workspace_reuse is not None and scope.get("lm_workspace_reuse") != f"feature {lm_workspace_reuse}":
+        raise ManifestError("correctness certificate LM-reuse state differs from selected build")
 
     certificate_executable = certificate.get("build", {}).get("executable", {})
     if not isinstance(certificate_executable, dict):
@@ -517,6 +521,9 @@ def build_candidate(
                     if not freeze or executable is None
                     else _file_record(root, Path(executable), role="selected_release_executable")
                 ),
+                timing_feature=timing_feature,
+                features=features,
+                lm_workspace_reuse=lm_workspace_reuse,
             ),
         },
         "artifact_policy": {

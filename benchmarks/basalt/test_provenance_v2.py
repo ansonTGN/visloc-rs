@@ -24,7 +24,14 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _current_test_certificate(executable: Path, directory: Path) -> Path:
+def _current_test_certificate(
+    executable: Path,
+    directory: Path,
+    *,
+    features: list[str] | None = None,
+    timing_feature: str = "disabled",
+    lm_workspace_reuse: str = "disabled",
+) -> Path:
     """Create a synthetic certificate bound to current bytes for contract tests."""
 
     template = json.loads(
@@ -34,6 +41,9 @@ def _current_test_certificate(executable: Path, directory: Path) -> Path:
             "m11_release_candidate_final2_correctness_20260831.json"
         ).read_text(encoding="utf-8")
     )
+    template["scope"]["features"] = sorted(features or [])
+    template["scope"]["timing_breakdown"] = f"compile-time feature {timing_feature}"
+    template["scope"]["lm_workspace_reuse"] = f"feature {lm_workspace_reuse}"
     pending = build_candidate(ROOT, captured_at="2026-09-13T00:00:00+00:00")
     current = pending["current_binding"]
     executable_relative = executable.relative_to(ROOT).as_posix()
@@ -189,5 +199,41 @@ def test_v2_frozen_rc_binds_exactness_certificate_and_rejects_tamper():
             "hash mismatch" in error and "cargo_license_inventory_v2" in error
             for error in errors
         )
+    finally:
+        shutil.rmtree(directory)
+
+
+def test_v2_frozen_rc_accepts_workspace_reuse_when_certificate_matches():
+    target_root = ROOT / "target"
+    target_root.mkdir(parents=True, exist_ok=True)
+    directory = Path(tempfile.mkdtemp(prefix="provenance_v2_reuse_test_", dir=target_root))
+    try:
+        executable_path = directory / "basalt_test_executable.bin"
+        executable_path.write_bytes(b"synthetic workspace-reuse executable binding")
+        correctness_path = _current_test_certificate(
+            executable_path,
+            directory,
+            features=["basalt-lm-workspace-reuse"],
+            lm_workspace_reuse="enabled",
+        )
+        candidate = build_candidate(
+            ROOT,
+            captured_at="2026-09-13T00:00:00+00:00",
+            executable=executable_path.relative_to(ROOT),
+            correctness_artifact=correctness_path.relative_to(ROOT),
+            timing_feature="disabled",
+            compiler="rustc test fixture; host=x86_64-pc-windows-msvc",
+            features=["basalt-lm-workspace-reuse"],
+            lm_workspace_reuse="enabled",
+            freeze=True,
+        )
+        assert validate_candidate(ROOT, candidate, require_executable=True) == []
+        assert candidate["current_binding"]["build"]["lm_workspace_reuse"] == "enabled"
+        assert candidate["current_binding"]["correctness"]["scope"] == {
+            "features": ["basalt-lm-workspace-reuse"],
+            "timing_breakdown": "compile-time feature disabled",
+            "lm_workspace_reuse": "feature enabled",
+            "performance_evaluation": False,
+        }
     finally:
         shutil.rmtree(directory)
