@@ -309,8 +309,10 @@ pub struct NfrMapperResult {
 
 /// World-point snapshot produced by the inherited
 /// `BundleAdjustmentBase::get_current_points` boundary.  The upstream helper
-/// emits one constant visualization ID (`1`) per point; retaining that value
-/// keeps the Rust headless result shape source-compatible.
+/// emits one point for every host/target observation-index entry (so the same
+/// landmark can appear more than once) and one constant visualization ID
+/// (`1`) per point. Retaining both details keeps the Rust headless result
+/// shape source-compatible.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NfrMapperCurrentPoints {
     pub points: Vec<[f64; 3]>,
@@ -1143,9 +1145,11 @@ impl NfrMapper {
     }
 
     /// Return the current world-point payload using the inherited
-    /// `BundleAdjustmentBase::get_current_points` convention.  Each point is
-    /// emitted in host-image order, then ascending track ID, and receives the
-    /// source visualization ID `1`.
+    /// `BundleAdjustmentBase::get_current_points` convention. The source
+    /// traverses every host/target observation-index entry rather than each
+    /// unique landmark, so a landmark is intentionally emitted once per
+    /// indexed target observation. Rust keeps deterministic host, target, and
+    /// track ordering and assigns every entry the source visualization ID `1`.
     pub fn get_current_points(&self) -> NfrMapperCurrentPoints {
         let mut points = Vec::new();
         let mut ids = Vec::new();
@@ -1162,20 +1166,28 @@ impl NfrMapper {
                 continue;
             };
             let world_from_camera = pose.compose(camera_to_imu);
-            for track_id in self.lmdb.landmarks_for_host(host) {
-                let Some(landmark) = self.lmdb.landmarks.get(&track_id) else {
-                    continue;
-                };
-                let Some(position_in_host) = landmark.position_in_host() else {
-                    continue;
-                };
-                let point =
-                    world_from_camera.transform_point(&nalgebra::Point3::from(position_in_host));
-                if !point.coords.iter().all(|value| value.is_finite()) {
-                    continue;
+            for track_ids in self
+                .lmdb
+                .observations
+                .get(&host)
+                .into_iter()
+                .flat_map(|targets| targets.values())
+            {
+                for &track_id in track_ids {
+                    let Some(landmark) = self.lmdb.landmarks.get(&track_id) else {
+                        continue;
+                    };
+                    let Some(position_in_host) = landmark.position_in_host() else {
+                        continue;
+                    };
+                    let point = world_from_camera
+                        .transform_point(&nalgebra::Point3::from(position_in_host));
+                    if !point.coords.iter().all(|value| value.is_finite()) {
+                        continue;
+                    }
+                    points.push([point.x, point.y, point.z]);
+                    ids.push(1);
                 }
-                points.push([point.x, point.y, point.z]);
-                ids.push(1);
             }
         }
 

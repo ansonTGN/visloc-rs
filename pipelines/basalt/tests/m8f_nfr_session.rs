@@ -645,9 +645,18 @@ fn headless_mapper_preserves_source_stage_order_and_continuity() {
     assert_eq!(report.first_optimize.requested_iterations, 3);
     assert_eq!(report.second_optimize.requested_iterations, 3);
     assert_eq!(report.filter.removed_landmark_count, 0);
-    assert_eq!(report.initial_points.points.len(), 72);
-    assert_eq!(report.filtered_points.points.len(), 72);
-    assert_eq!(report.final_points.points.len(), 72);
+    assert_eq!(
+        report.initial_points.points.len(),
+        report.setup.observation_count
+    );
+    assert_eq!(
+        report.filtered_points.points.len(),
+        report.filter.after_observation_count
+    );
+    assert_eq!(
+        report.final_points.points.len(),
+        report.filter.after_observation_count
+    );
     assert_eq!(report.result.poses.len(), mapper.frame_poses.len());
     assert_eq!(
         report
