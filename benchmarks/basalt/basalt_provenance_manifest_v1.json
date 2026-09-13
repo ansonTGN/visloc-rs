@@ -1522,6 +1522,14 @@
         "basalt"
       ],
       "sha256": "25404b4773a2fb8eb713bbd99ad19ecf34d5a5443ea4140def0ba6d159edb242"
+    },
+    "benchmarks/basalt/compare_absqr_dense_pipeline.py": {
+      "kind": "parity_checker",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "6f67e8e41cbc5bd1d8a98620ae27b34344776a319de6efc799a2b99ade4e7c19"
     }
   },
   "retained_audit_sources": {
