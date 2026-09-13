@@ -100,6 +100,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let elapsed_seconds = started.elapsed().as_secs_f64();
     let trajectory_csv = mapper.trajectory_euroc();
     let trajectory_tum = mapper.trajectory_tum();
+    let matches_json = Value::Array(
+        mapper
+            .feature_match_data
+            .iter()
+            .map(|(&(left, right), data)| {
+                let transform = data.t_i_j.matrix();
+                json!({
+                    "left": [left.frame_id, u64::from(left.cam_id)],
+                    "right": [right.frame_id, u64::from(right.cam_id)],
+                    "transform": [
+                        [transform[(0, 0)], transform[(0, 1)], transform[(0, 2)], transform[(0, 3)]],
+                        [transform[(1, 0)], transform[(1, 1)], transform[(1, 2)], transform[(1, 3)]],
+                        [transform[(2, 0)], transform[(2, 1)], transform[(2, 2)], transform[(2, 3)]],
+                        [transform[(3, 0)], transform[(3, 1)], transform[(3, 2)], transform[(3, 3)]],
+                    ],
+                    "matches": data.matches,
+                    "inliers": data.inliers,
+                })
+            })
+            .collect(),
+    );
 
     let report_json = json!({
         "schema": "basalt.offline_mapper.run.v1",
@@ -171,7 +192,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "final_point_count": report.final_points.points.len(),
         },
         "elapsed_seconds": elapsed_seconds,
-        "outputs": ["map.json", "points.json", "poses.json", "trajectory.csv", "trajectory.tum", "mapper_report.json"],
+        "outputs": ["map.json", "matches.json", "points.json", "poses.json", "trajectory.csv", "trajectory.tum", "mapper_report.json"],
     });
 
     fs::create_dir_all(&args.out_dir)?;
@@ -179,6 +200,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         args.out_dir.join("map.json"),
         &serde_json::to_value(&report.result.landmarks)?,
     )?;
+    write_json(args.out_dir.join("matches.json"), &matches_json)?;
     write_json(
         args.out_dir.join("poses.json"),
         &serde_json::to_value(&report.result.poses)?,

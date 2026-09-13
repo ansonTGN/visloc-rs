@@ -102,10 +102,11 @@ The offline mapper follows the same pinned Basalt revision end to end:
 - The ground-truth-free command boundary is
   `examples/basalt_mapper_offline_demo.rs`. It accepts schema-4 MargData,
   calibration, and mapper configuration only, and writes parameterized
-  landmarks, observation-index world points, poses, and EuRoC/TUM
-  trajectories. `--temporal-seed` exists for deterministic native-oracle and
-  release fixtures; omitting it retains the pinned OpenGV wall-clock seed
-  behavior.
+  landmarks, the accepted stereo/temporal match graph with its estimated
+  transforms and raw/inlier feature IDs, observation-index world points,
+  poses, and EuRoC/TUM trajectories. `--temporal-seed` exists for
+  deterministic native-oracle and release fixtures; omitting it retains the
+  pinned OpenGV wall-clock seed behavior.
 
 The mapper implementation is a clean-room translation and contains no copied
 Basalt source. The referenced Basalt algorithms remain subject to upstream's
