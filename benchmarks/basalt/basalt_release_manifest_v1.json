@@ -47,8 +47,8 @@
     {
       "path": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
       "kind": "provenance",
-      "bytes": 58209,
-      "sha256": "94ab07289227a99368d6dfed7ffe011313f00ad718b4f60395b00b8e273cc6aa"
+      "bytes": 58757,
+      "sha256": "82064ecbaf2d89d3c2bd9fe2d74feb4a9f254a77346127ed37c8003b2dce79e5"
     },
     {
       "path": "benchmarks/basalt/NOTICE",
@@ -215,8 +215,8 @@
     {
       "path": "pipelines/basalt/src/adapter.rs",
       "kind": "rust_source",
-      "bytes": 12704,
-      "sha256": "ffc50a777964ae4c55bc1afb6fc905fc7067a32a48d7dbbcb4648f61582d9088"
+      "bytes": 12760,
+      "sha256": "0d7258c483781ce9d4148c06a571ee6c150429e7c82de80b53f4e292e8bd2d65"
     },
     {
       "path": "pipelines/basalt/src/calibration.rs",
@@ -233,8 +233,8 @@
     {
       "path": "pipelines/basalt/src/config.rs",
       "kind": "rust_source",
-      "bytes": 7564,
-      "sha256": "3fd39df6ce50bdc935d8e4744031bc67d2aa0ad57faf2c87e81b179c6dcee037"
+      "bytes": 9955,
+      "sha256": "093f1cd61fcf269fb8a39b8da0ce4fb3ce3b7c6444226ea8cf3313e82fa53934"
     },
     {
       "path": "pipelines/basalt/src/euroc.rs",
@@ -245,8 +245,8 @@
     {
       "path": "pipelines/basalt/src/fast.rs",
       "kind": "rust_source",
-      "bytes": 19170,
-      "sha256": "2255c1fc81fdb025cdd289f7edc98157c97ec1cf4012ffa8a2594d211c25d085"
+      "bytes": 23070,
+      "sha256": "99ca1a8ef5b55a2d1e70410e833ff6a9b52dace2973273480386e7397e729383"
     },
     {
       "path": "pipelines/basalt/src/imu/factors.rs",
@@ -287,8 +287,8 @@
     {
       "path": "pipelines/basalt/src/mapper/features.rs",
       "kind": "rust_source",
-      "bytes": 95616,
-      "sha256": "e74dc6e395336aca9a975ffc0ba63b070af12d2c24b8d723e935ba97b830f60a"
+      "bytes": 101734,
+      "sha256": "d6f0c19266c163c509ee6f87cbfb7257aa9b110d1249fa58aae847e60bc923a1"
     },
     {
       "path": "pipelines/basalt/src/mapper/mod.rs",
@@ -299,8 +299,8 @@
     {
       "path": "pipelines/basalt/src/mapper/session.rs",
       "kind": "rust_source",
-      "bytes": 89004,
-      "sha256": "6da86500fbf4addb270f60b43851a18927daffab5998da09d9a6172413275653"
+      "bytes": 89574,
+      "sha256": "69d127357daf6d687f1f3489aed62055239170c66554b435cea868546eabfa74"
     },
     {
       "path": "pipelines/basalt/src/mapper/triangulation.rs",
@@ -335,8 +335,8 @@
     {
       "path": "pipelines/basalt/src/stream.rs",
       "kind": "rust_source",
-      "bytes": 58932,
-      "sha256": "f46e4fe6bdcea22088984993b9d7fe82405c02e16a79bd30e705ea2eba8af856"
+      "bytes": 60126,
+      "sha256": "84aa71e4133d5aa758dd0de317c32fd5a3108657798e7f282651ccf27bea5b65"
     },
     {
       "path": "pipelines/basalt/src/streaming.rs",
@@ -353,8 +353,8 @@
     {
       "path": "pipelines/basalt/src/timing.rs",
       "kind": "rust_source",
-      "bytes": 34793,
-      "sha256": "320294ad25ca3b036e42148f8c53e819ac8fac8c21151bde96e69c6d4a57c5be"
+      "bytes": 37092,
+      "sha256": "5bb75101d5d4ce5a127dbe1525235b54aef14a6928fbc4c09a9cdcf2f824e3e2"
     },
     {
       "path": "pipelines/basalt/src/types.rs",
@@ -365,8 +365,8 @@
     {
       "path": "pipelines/basalt/src/update.rs",
       "kind": "rust_source",
-      "bytes": 26994,
-      "sha256": "0d743554a11b6f8537806cd76b42b41eaaa269e3b44f1bb828fad530de290dde"
+      "bytes": 27005,
+      "sha256": "acc595d7daa70a755c13d92ec7f1f1636ceef76a6a908d37f2231e1b9b7833fe"
     },
     {
       "path": "pipelines/basalt/src/vio/aom.rs",
@@ -377,8 +377,8 @@
     {
       "path": "pipelines/basalt/src/vio/estimator.rs",
       "kind": "rust_source",
-      "bytes": 301286,
-      "sha256": "7bfcb580d9366a8735d5b67243d7134eb1c11ea879256c41d76b50f06ebe8b00"
+      "bytes": 301949,
+      "sha256": "8fd4b8d4b7262bf589da4c93463c47eaf36103794c0d11b5c1e12fd4fc7d5db7"
     },
     {
       "path": "pipelines/basalt/src/vio/landmarks.rs",
@@ -389,8 +389,8 @@
     {
       "path": "pipelines/basalt/src/vio/margdata.rs",
       "kind": "rust_source",
-      "bytes": 80788,
-      "sha256": "a58ff6f6b3bb36d054e10c04ec0a3b24372b5a5affc561e29254bbdf8dd262c0"
+      "bytes": 89178,
+      "sha256": "bb5b989704b8f117f8d74f006287a1826ea72acd63988974a463b5bb9a99356b"
     },
     {
       "path": "pipelines/basalt/src/vio/mod.rs",
@@ -407,8 +407,8 @@
     {
       "path": "pipelines/basalt/src/vio/window.rs",
       "kind": "rust_source",
-      "bytes": 589694,
-      "sha256": "5476150e29df944084f88a94ca747a193c69c07faea7b60c8fd5a5108d92b8c7"
+      "bytes": 590754,
+      "sha256": "dca65766e68afe8f8a85cfdad2aafa951a88a7ee118e2fda2a821a3ec0e074e7"
     },
     {
       "path": "benchmarks/basalt/run_clonefree_perf.py",
@@ -701,8 +701,8 @@
     {
       "path": "pipelines/basalt/tests/m8f_nfr_session.rs",
       "kind": "contract_test",
-      "bytes": 41169,
-      "sha256": "4ef050bd3c3387ccdfab61e3ae49e4aa19f12481c4daf55f9fc5380aaeb9ef6f"
+      "bytes": 41333,
+      "sha256": "3ed86a3292ef471790a5b487c23f9406abbd0e710f2d95736aa96bb37288cd3c"
     },
     {
       "path": "pipelines/basalt/tests/mh01_stereo_golden.rs",

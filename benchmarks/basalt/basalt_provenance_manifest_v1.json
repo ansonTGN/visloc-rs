@@ -187,7 +187,7 @@
   },
   "port_files": {
     "pipelines/basalt/src/adapter.rs": {
-      "sha256": "ffc50a777964ae4c55bc1afb6fc905fc7067a32a48d7dbbcb4648f61582d9088",
+      "sha256": "0d7258c483781ce9d4148c06a571ee6c150429e7c82de80b53f4e292e8bd2d65",
       "translation_status": "clean_room_adapter",
       "upstream_refs": [
         "basalt",
@@ -210,7 +210,7 @@
       ]
     },
     "pipelines/basalt/src/config.rs": {
-      "sha256": "3fd39df6ce50bdc935d8e4744031bc67d2aa0ad57faf2c87e81b179c6dcee037",
+      "sha256": "093f1cd61fcf269fb8a39b8da0ce4fb3ce3b7c6444226ea8cf3313e82fa53934",
       "translation_status": "clean_room_contract",
       "upstream_refs": [
         "basalt"
@@ -224,7 +224,7 @@
       ]
     },
     "pipelines/basalt/src/fast.rs": {
-      "sha256": "2255c1fc81fdb025cdd289f7edc98157c97ec1cf4012ffa8a2594d211c25d085",
+      "sha256": "99ca1a8ef5b55a2d1e70410e833ff6a9b52dace2973273480386e7397e729383",
       "translation_status": "clean_room_translation",
       "upstream_refs": [
         "basalt",
@@ -280,7 +280,7 @@
       ]
     },
     "pipelines/basalt/src/mapper/features.rs": {
-      "sha256": "e74dc6e395336aca9a975ffc0ba63b070af12d2c24b8d723e935ba97b830f60a",
+      "sha256": "d6f0c19266c163c509ee6f87cbfb7257aa9b110d1249fa58aae847e60bc923a1",
       "translation_status": "clean_room_translation",
       "upstream_refs": [
         "basalt",
@@ -302,7 +302,7 @@
       ]
     },
     "pipelines/basalt/src/mapper/session.rs": {
-      "sha256": "6da86500fbf4addb270f60b43851a18927daffab5998da09d9a6172413275653",
+      "sha256": "69d127357daf6d687f1f3489aed62055239170c66554b435cea868546eabfa74",
       "translation_status": "clean_room_translation",
       "upstream_refs": [
         "basalt"
@@ -348,7 +348,7 @@
       ]
     },
     "pipelines/basalt/src/stream.rs": {
-      "sha256": "f46e4fe6bdcea22088984993b9d7fe82405c02e16a79bd30e705ea2eba8af856",
+      "sha256": "84aa71e4133d5aa758dd0de317c32fd5a3108657798e7f282651ccf27bea5b65",
       "translation_status": "clean_room_translation",
       "upstream_refs": [
         "basalt",
@@ -370,7 +370,7 @@
       ]
     },
     "pipelines/basalt/src/timing.rs": {
-      "sha256": "320294ad25ca3b036e42148f8c53e819ac8fac8c21151bde96e69c6d4a57c5be",
+      "sha256": "5bb75101d5d4ce5a127dbe1525235b54aef14a6928fbc4c09a9cdcf2f824e3e2",
       "translation_status": "clean_room_contract",
       "upstream_refs": [
         "basalt"
@@ -385,7 +385,7 @@
       ]
     },
     "pipelines/basalt/src/update.rs": {
-      "sha256": "0d743554a11b6f8537806cd76b42b41eaaa269e3b44f1bb828fad530de290dde",
+      "sha256": "acc595d7daa70a755c13d92ec7f1f1636ceef76a6a908d37f2231e1b9b7833fe",
       "translation_status": "clean_room_translation",
       "upstream_refs": [
         "basalt",
@@ -425,7 +425,7 @@
         "sophus",
         "eigen"
       ],
-      "sha256": "7bfcb580d9366a8735d5b67243d7134eb1c11ea879256c41d76b50f06ebe8b00"
+      "sha256": "8fd4b8d4b7262bf589da4c93463c47eaf36103794c0d11b5c1e12fd4fc7d5db7"
     },
     "pipelines/basalt/src/vio/landmarks.rs": {
       "sha256": "cde9c23836b4513df8ae95c47b132360b5bc904247c53b2b52b13e0fbca2e40e",
@@ -438,7 +438,7 @@
       ]
     },
     "pipelines/basalt/src/vio/margdata.rs": {
-      "sha256": "a58ff6f6b3bb36d054e10c04ec0a3b24372b5a5affc561e29254bbdf8dd262c0",
+      "sha256": "bb5b989704b8f117f8d74f006287a1826ea72acd63988974a463b5bb9a99356b",
       "translation_status": "clean_room_contract",
       "upstream_refs": [
         "basalt"
@@ -459,7 +459,7 @@
       ]
     },
     "pipelines/basalt/src/vio/window.rs": {
-      "sha256": "5476150e29df944084f88a94ca747a193c69c07faea7b60c8fd5a5108d92b8c7",
+      "sha256": "dca65766e68afe8f8a85cfdad2aafa951a88a7ee118e2fda2a821a3ec0e074e7",
       "translation_status": "clean_room_translation",
       "upstream_refs": [
         "basalt",
@@ -1275,7 +1275,7 @@
       ]
     },
     "benchmarks/basalt/phase6_coordinator.py": {
-      "sha256": "4ed613fc6af934af14f2a0c31b61f4b42783e25de41864efccad11f33c25f95a",
+      "sha256": "9768f6306fb8125aa59d5d8f5aa24a503b9f4bb87d4480c9217392c23e5ce3f2",
       "kind": "batch_orchestrator",
       "copied_upstream_source": false,
       "upstream_refs": [
@@ -1353,7 +1353,7 @@
       "upstream_refs": [
         "basalt"
       ],
-      "sha256": "2774c0ccde74c8be055b996905ad0cd68a02ff3a6d5bb7e2ab752aba776ff1be"
+      "sha256": "a3365e804bd008722ff604ac24719c9865220646c4550bc8d6d3ca758fba4930"
     },
     "benchmarks/basalt/refresh_release_provenance.py": {
       "kind": "diagnostic_tool",
@@ -1385,7 +1385,7 @@
       "upstream_refs": [
         "basalt"
       ],
-      "sha256": "e9bd7059db0bd6c8b541bfd64de9df08f6485425d9b86c71f3458546233bf243"
+      "sha256": "10265af9a5d12dd80730536f77e3a18467359ad02993eefe81940f949ffe3a96"
     },
     "benchmarks/basalt/test_provenance_v2.py": {
       "kind": "contract_test",
@@ -1417,7 +1417,7 @@
       "upstream_refs": [
         "basalt"
       ],
-      "sha256": "2122c0be11dedd2ce6a57b815814588860e6a9438bc5004c2406d50bb48e2b4d"
+      "sha256": "27b2a1ff60064492f7cfebbb2b6fdc837e25b0a6c56500afd9c11267cea17a41"
     },
     "benchmarks/basalt/verify_supplemental_source_dependencies.py": {
       "kind": "provenance_checker",
@@ -1506,6 +1506,22 @@
         "basalt"
       ],
       "sha256": "c2e6cac2b62871cc37f30b9960c415eed0f6f909f21410a79aa2292d3959c8a6"
+    },
+    "benchmarks/basalt/generate_rust_wsl_exactness.py": {
+      "kind": "manifest_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "3939f73c3f6766110d21d62a3ec1bc6b3e4c1f7cd3a4333f9098a8db033a2039"
+    },
+    "benchmarks/basalt/test_generate_rust_wsl_exactness.py": {
+      "kind": "contract_test",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "25404b4773a2fb8eb713bbd99ad19ecf34d5a5443ea4140def0ba6d159edb242"
     }
   },
   "retained_audit_sources": {
