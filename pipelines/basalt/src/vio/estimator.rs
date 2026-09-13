@@ -6857,6 +6857,8 @@ mod tests {
             let mut right_marg = right.marg_data;
             left_marg.of_images.clear();
             right_marg.of_images.clear();
+            left_marg.of_observations.clear();
+            right_marg.of_observations.clear();
             assert_eq!(left_marg, right_marg);
         }
     }
@@ -7035,7 +7037,7 @@ mod tests {
         let error = estimator
             .process(3, 4, &[obs(&camera, 1, 3, point)], &[])
             .expect_err("full output must be rejected after lean mode starts");
-        assert!(error.contains("OfImageData"));
+        assert!(error.contains("optical-flow payloads"));
         assert!(error.contains("recreate"));
     }
 
