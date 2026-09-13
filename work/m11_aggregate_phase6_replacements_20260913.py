@@ -31,11 +31,19 @@ def load_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def parse_replacement(value: str) -> tuple[str, Path]:
-    sequence, separator, raw_root = value.partition("=")
-    if not separator or not sequence or not raw_root:
-        raise argparse.ArgumentTypeError("replacement must be SEQUENCE=RUN_ROOT")
-    return sequence, Path(raw_root).resolve()
+def parse_replacement(value: str) -> tuple[str | None, str, Path]:
+    selector, separator, raw_root = value.partition("=")
+    if not separator or not selector or not raw_root:
+        raise argparse.ArgumentTypeError(
+            "replacement must be SEQUENCE=RUN_ROOT or METHOD:SEQUENCE=RUN_ROOT"
+        )
+    method, method_separator, sequence = selector.partition(":")
+    if not method_separator:
+        sequence = method
+        method = None
+    if not sequence or (method_separator and not method):
+        raise argparse.ArgumentTypeError("replacement selector is empty")
+    return method, sequence, Path(raw_root).resolve()
 
 
 def cell_from_document(
@@ -93,9 +101,19 @@ def main() -> int:
     protocol_path = args.protocol.resolve()
     output_path = args.output.resolve()
     plan = load_json(plan_path)
-    replacements = dict(args.replacement)
+    replacements: dict[tuple[str | None, str], Path] = {}
+    for method, sequence, root in args.replacement:
+        key = (method, sequence)
+        if key in replacements:
+            raise ValueError(f"duplicate replacement selector: {key}")
+        replacements[key] = root
     known_sequences = set(plan.get("request", {}).get("sequences", []))
-    unknown = sorted(set(replacements) - known_sequences)
+    known_methods = {str(cell["method"]) for cell in plan.get("cells", [])}
+    unknown = sorted(
+        f"{method or '*'}:{sequence}"
+        for method, sequence in replacements
+        if sequence not in known_sequences or (method is not None and method not in known_methods)
+    )
     if unknown:
         raise ValueError(f"replacement sequences are not in the base plan: {unknown}")
     base_namespace = plan.get("request", {}).get("input_namespace")
@@ -109,7 +127,12 @@ def main() -> int:
         sequence = str(document["sequence"])
         method = str(document["method"])
         repetition = int(document["repetition"])
-        root = replacements.get(sequence, base_root)
+        specific_key = (method, sequence)
+        generic_key = (None, sequence)
+        root = replacements.get(
+            specific_key, replacements.get(generic_key, base_root)
+        )
+        is_replacement = specific_key in replacements or generic_key in replacements
         run_dir = root / method / sequence / f"r{repetition}"
         cell = cell_from_document(document, run_dir, base_namespace)
         cells.append(cell)
@@ -120,7 +143,7 @@ def main() -> int:
                 "method": method,
                 "sequence": sequence,
                 "repetition": repetition,
-                "source": "replacement" if sequence in replacements else "base",
+                "source": "replacement" if is_replacement else "base",
                 "run_dir": str(run_dir),
                 "run_manifest_sha256": sha256(manifest_path),
                 "evaluation_result_sha256": sha256(evaluation_path),
@@ -140,7 +163,12 @@ def main() -> int:
         "schema_id": "basalt.phase6.corrected_aggregate.v1",
         "base_plan": {"path": str(plan_path), "sha256": sha256(plan_path)},
         "base_run_root": str(base_root),
-        "replacements": {key: str(value) for key, value in sorted(replacements.items())},
+        "replacements": {
+            f"{method or '*'}:{sequence}": str(value)
+            for (method, sequence), value in sorted(
+                replacements.items(), key=lambda item: ((item[0][0] or ""), item[0][1])
+            )
+        },
         "selection": selection,
         "selection_count": len(selection),
         "gate_report": gate,

@@ -1,0 +1,125 @@
+{
+  "schema": "visloc-rs.basalt.absqr-dense-pipeline-compare.v1",
+  "status": "PASS",
+  "comparison": "native and Rust IEEE-754 f32 bits; column-major H then b",
+  "event": {
+    "frame_id": 4,
+    "iteration": 0,
+    "trial": 0,
+    "rust_event_id": 0,
+    "state_dof": 75,
+    "visual_factor_count": 61,
+    "factor_order_fingerprint": "b6b33cd531babe5b"
+  },
+  "native": {
+    "root": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined",
+    "stage_root": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined",
+    "run_uuid": null,
+    "binding": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\m11_native_clean_frame4_absqr_reconfirmation_20260901.json",
+    "binding_sha256": "46bad8f000ce9127f079ff435209c9d55f3b12c975a68585b940209b7aa7756b"
+  },
+  "rust": {
+    "jsonl": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\dense_current_20260914\\visual_prefix.jsonl",
+    "jsonl_sha256": "0f899c6db86316ea9beb9353e069c731d25c239db9413714c48e516fb18a8740",
+    "executable": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+    "executable_bytes": 3819008,
+    "executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+  },
+  "stages": [
+    {
+      "stage": "visual_total",
+      "native_bin": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\visual_total.bin",
+      "native_bin_sha256": "93a995804e8468edfc2b002c81551b23c800db54ee5e0b9b94a3894c2a0319c1",
+      "h": {
+        "native_count": 5625,
+        "rust_count": 5625,
+        "exact_count": 5625,
+        "mismatch_count": 0,
+        "first_mismatch": null
+      },
+      "b": {
+        "native_count": 75,
+        "rust_count": 75,
+        "exact_count": 75,
+        "mismatch_count": 0,
+        "first_mismatch": null
+      }
+    },
+    {
+      "stage": "imu_total",
+      "native_bin": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\imu_total.bin",
+      "native_bin_sha256": "295382e364e7a877999af17787bc6b71ae0378ed75878ae04d57702fbf467a14",
+      "h": {
+        "native_count": 5625,
+        "rust_count": 5625,
+        "exact_count": 5625,
+        "mismatch_count": 0,
+        "first_mismatch": null
+      },
+      "b": {
+        "native_count": 75,
+        "rust_count": 75,
+        "exact_count": 75,
+        "mismatch_count": 0,
+        "first_mismatch": null
+      }
+    },
+    {
+      "stage": "prior_before",
+      "native_bin": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\prior_before.bin",
+      "native_bin_sha256": "295382e364e7a877999af17787bc6b71ae0378ed75878ae04d57702fbf467a14",
+      "h": {
+        "native_count": 5625,
+        "rust_count": 5625,
+        "exact_count": 5625,
+        "mismatch_count": 0,
+        "first_mismatch": null
+      },
+      "b": {
+        "native_count": 75,
+        "rust_count": 75,
+        "exact_count": 75,
+        "mismatch_count": 0,
+        "first_mismatch": null
+      }
+    },
+    {
+      "stage": "prior_after",
+      "native_bin": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\prior_after.bin",
+      "native_bin_sha256": "4e0a098368fdf9ae290d905d2d8894ee8ca6ef98b3ce671634770a1be23a7ea6",
+      "h": {
+        "native_count": 5625,
+        "rust_count": 5625,
+        "exact_count": 5625,
+        "mismatch_count": 0,
+        "first_mismatch": null
+      },
+      "b": {
+        "native_count": 75,
+        "rust_count": 75,
+        "exact_count": 75,
+        "mismatch_count": 0,
+        "first_mismatch": null
+      }
+    },
+    {
+      "stage": "final",
+      "native_bin": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\final.bin",
+      "native_bin_sha256": "4e0a098368fdf9ae290d905d2d8894ee8ca6ef98b3ce671634770a1be23a7ea6",
+      "h": {
+        "native_count": 5625,
+        "rust_count": 5625,
+        "exact_count": 5625,
+        "mismatch_count": 0,
+        "first_mismatch": null
+      },
+      "b": {
+        "native_count": 75,
+        "rust_count": 75,
+        "exact_count": 75,
+        "mismatch_count": 0,
+        "first_mismatch": null
+      }
+    }
+  ]
+}
