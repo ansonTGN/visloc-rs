@@ -458,7 +458,14 @@ def _companion_validate_selection(
     _companion_require(isinstance(identity, dict), "packet_identity: expected object")
     _companion_require(selection.get("kfs_all") == identity.get("kfs_all"), "selection kfs_all mismatch")
     _companion_require(selection.get("kfs_to_marg") == identity.get("kfs_to_marg"), "selection kfs_to_marg mismatch")
-    _companion_require(selection.get("last_state_to_marg") == identity.get("event_state_timestamp_ns"), "selection event state timestamp mismatch")
+    q2_boundary = identity.get(
+        "q2_last_state_to_marg_timestamp_ns",
+        identity.get("event_state_timestamp_ns"),
+    )
+    _companion_require(
+        selection.get("last_state_to_marg") == q2_boundary,
+        "selection Q2 last-state timestamp mismatch",
+    )
     _companion_require(selection.get("is_lin_sqrt") is True, "selection is_lin_sqrt is not true")
     _companion_require(selection.get("marg_is_sqrt") is True, "selection marg_is_sqrt is not true")
 
@@ -3997,7 +4004,10 @@ def _build_rust_extension_mapping(
             "run_uuid": companion_manifest.get("run_uuid"),
             "event_ordinal": identity.get("event_ordinal"),
             "event_state_timestamp_ns": identity.get("event_state_timestamp_ns"),
+            "primary_kf_timestamp_ns": identity.get("primary_kf_timestamp_ns"),
             "packet_filename": identity.get("packet_filename"),
+            "packet_sha256": identity.get("packet_sha256"),
+            "frame_map_sha256": _frame_map_binding_sha(frame_map),
         }
     mapping: dict[str, Any] = {
         "schema": RUST_EXTENSION_MAPPING_SCHEMA,
@@ -4387,7 +4397,7 @@ def _self_test_companion() -> dict[str, Any]:
     selection = {
         "kfs_all": [10, 20],
         "kfs_to_marg": [10],
-        "last_state_to_marg": 20,
+        "last_state_to_marg": 10,
         "is_lin_sqrt": True,
         "marg_is_sqrt": True,
     }
@@ -4503,6 +4513,7 @@ def _self_test_companion() -> dict[str, Any]:
                 "event_ordinal": 0,
                 "primary_kf_timestamp_ns": 10,
                 "event_state_timestamp_ns": 20,
+                "q2_last_state_to_marg_timestamp_ns": 10,
                 "packet_filename": packet_path.name,
                 "packet_sha256": packet_sha,
                 "kfs_all": [10, 20], "kfs_to_marg": [10],

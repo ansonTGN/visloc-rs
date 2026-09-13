@@ -21,7 +21,10 @@ use std::{
 };
 
 use visloc_basalt::{
-    vio::{AomBlockData, ImuLinkDiagnostics, LmRunDiagnostics, WindowDiagnostics},
+    vio::{
+        AomBlockData, ImuLinkDiagnostics, LmRunDiagnostics, NativeCompanionIdentity,
+        WindowDiagnostics,
+    },
     BasaltAdapterOutput, BasaltNavState, BasaltVioEstimatorAdapter, EurocSensorDataset,
     TimingBreakdown, TimingBucket,
 };
@@ -35,7 +38,10 @@ struct Args {
     max_frames: Option<usize>,
     no_trace: bool,
     no_marg_data: bool,
+    native_companion_binding: Option<PathBuf>,
 }
+
+const NATIVE_COMPANION_BINDING_SCHEMA: &str = "basalt.rust.native_companion_binding.v1";
 
 fn main() {
     if let Err(error) = run() {
@@ -47,6 +53,17 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse(env::args_os().skip(1))
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+    if args.no_marg_data && args.native_companion_binding.is_some() {
+        return Err("--native-companion-binding requires MargData output".into());
+    }
+    // Load the immutable native identity before replay or output creation.
+    // This makes the resulting packet a capture-time paired artifact rather
+    // than a JSON document labelled after the estimator has finished.
+    let native_companion_identity = args
+        .native_companion_binding
+        .as_ref()
+        .map(|path| load_native_companion_identity(path))
+        .transpose()?;
     fs::create_dir_all(&args.out_dir)?;
     let marg_dir = if args.no_marg_data {
         None
@@ -85,6 +102,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_imu = 0usize;
     let mut total_observations = 0usize;
     let mut last_timestamp_ns = None;
+    let mut mapper_packet_ordinal = 0u64;
+    let mut native_companion_bound = false;
 
     for index in 0..frame_limit {
         let sensor_frame = if timing.enabled() {
@@ -124,15 +143,40 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // only actual mapper packets to the on-disk stream.
                 if let Some(marg_dir) = marg_dir.as_ref() {
                     if output.estimator.marg_data.is_mapper_packet() {
+                        let bind_identity = native_companion_identity
+                            .as_ref()
+                            .filter(|identity| identity.event_ordinal == mapper_packet_ordinal);
+                        if let Some(identity) = bind_identity {
+                            output
+                                .estimator
+                                .marg_data
+                                .validate_native_companion_identity(
+                                    identity,
+                                    mapper_packet_ordinal,
+                                )?;
+                        }
                         let marg_path = marg_dir
                             .join(format!("frame_{:06}.json", output.tracks.frame.frame_id));
                         let file = fs::File::create(marg_path)?;
                         let mut writer = BufWriter::new(file);
-                        output
-                            .estimator
-                            .marg_data
-                            .write_mapper_packet_json(&mut writer)?;
+                        if let Some(identity) = bind_identity {
+                            output
+                                .estimator
+                                .marg_data
+                                .write_mapper_packet_json_with_native_companion_identity(
+                                    &mut writer,
+                                    identity,
+                                    mapper_packet_ordinal,
+                                )?;
+                            native_companion_bound = true;
+                        } else {
+                            output
+                                .estimator
+                                .marg_data
+                                .write_mapper_packet_json(&mut writer)?;
+                        }
                         writer.flush()?;
+                        mapper_packet_ordinal += 1;
                     }
                 }
                 Ok(())
@@ -150,6 +194,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 output.tracks.retained_track_ids.len(),
                 output.tracks.rejected_track_ids.len(),
             );
+        }
+    }
+
+    if let Some(identity) = native_companion_identity.as_ref() {
+        if !native_companion_bound {
+            return Err(format!(
+                "native companion event ordinal {} was not emitted in this replay",
+                identity.event_ordinal
+            )
+            .into());
         }
     }
 
@@ -210,6 +264,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("{summary}");
     Ok(())
+}
+
+fn load_native_companion_identity(
+    path: &std::path::Path,
+) -> Result<NativeCompanionIdentity, Box<dyn std::error::Error>> {
+    let binding: serde_json::Value = serde_json::from_str(&fs::read_to_string(path)?)?;
+    let object = binding
+        .as_object()
+        .ok_or("native companion binding must be a JSON object")?;
+    if object.len() != 2
+        || !object.contains_key("schema")
+        || !object.contains_key("native_companion_identity")
+    {
+        return Err("native companion binding has missing or unknown top-level fields".into());
+    }
+    let schema = object["schema"]
+        .as_str()
+        .ok_or("native companion binding schema must be a string")?;
+    if schema != NATIVE_COMPANION_BINDING_SCHEMA {
+        return Err(format!("unsupported native companion binding schema {schema:?}").into());
+    }
+    serde_json::from_value(object["native_companion_identity"].clone())
+        .map_err(|error| error.into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -612,6 +689,7 @@ impl Args {
         let mut max_frames = None;
         let mut no_trace = false;
         let mut no_marg_data = false;
+        let mut native_companion_binding = None;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy();
@@ -643,6 +721,9 @@ impl Args {
                 }
                 "--no-trace" => no_trace = true,
                 "--no-marg-data" => no_marg_data = true,
+                "--native-companion-binding" => {
+                    native_companion_binding = Some(next_path(&mut arguments, &option)?);
+                }
                 unknown => return Err(format!("unknown option `{unknown}`\n\n{}", Self::usage())),
             }
         }
@@ -658,11 +739,12 @@ impl Args {
             max_frames,
             no_trace,
             no_marg_data,
+            native_companion_binding,
         })
     }
 
     fn usage() -> String {
-        "usage: basalt_euroc_vio_demo --euroc-dir DIR --calibration FILE [--config FILE] [--out-dir DIR] [--max-frames N] [--no-trace] [--no-marg-data]".into()
+        "usage: basalt_euroc_vio_demo --euroc-dir DIR --calibration FILE [--config FILE] [--out-dir DIR] [--max-frames N] [--no-trace] [--no-marg-data] [--native-companion-binding FILE]".into()
     }
 }
 
@@ -689,6 +771,7 @@ mod tests {
         let args = parse(&["--euroc-dir", "dataset", "--calibration", "calib.json"]);
         assert!(!args.no_trace);
         assert!(!args.no_marg_data);
+        assert!(args.native_companion_binding.is_none());
     }
 
     #[test]
@@ -752,5 +835,22 @@ mod tests {
         let usage = Args::usage();
         assert!(usage.contains("--no-trace"));
         assert!(usage.contains("--no-marg-data"));
+        assert!(usage.contains("--native-companion-binding"));
+    }
+
+    #[test]
+    fn native_companion_binding_path_is_parsed() {
+        let args = parse(&[
+            "--euroc-dir",
+            "dataset",
+            "--calibration",
+            "calib.json",
+            "--native-companion-binding",
+            "identity.json",
+        ]);
+        assert_eq!(
+            args.native_companion_binding,
+            Some(PathBuf::from("identity.json"))
+        );
     }
 }

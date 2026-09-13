@@ -16,6 +16,13 @@ EXACTNESS_SCHEMA = "basalt.phase6.rust_wsl_exactness.v1"
 RUNTIME_PROFILE = "rust_wsl_linux"
 REQUIRED_FRAMES = (52, 80, 400)
 FORBIDDEN_OUTPUTS = ("trace.jsonl", "marg_data", "timing_breakdown.json")
+TRACKED_SOURCE_PATHS = (
+    "Cargo.lock",
+    "Cargo.toml",
+    "examples/basalt_euroc_vio_demo.rs",
+    "pipelines/basalt/Cargo.toml",
+    "pipelines/basalt/src",
+)
 
 
 def sha256(path: Path) -> str:
@@ -38,15 +45,7 @@ def binding(path: Path, *, recorded_path: str | None = None) -> dict[str, Any]:
 
 
 def tracked_source_binding(root: Path) -> dict[str, Any]:
-    command = [
-        "git",
-        "ls-files",
-        "--",
-        "Cargo.lock",
-        "Cargo.toml",
-        "pipelines/basalt/Cargo.toml",
-        "pipelines/basalt/src",
-    ]
+    command = ["git", "ls-files", "--", *TRACKED_SOURCE_PATHS]
     result = subprocess.run(command, cwd=root, check=True, capture_output=True, text=True)
     paths = sorted(line for line in result.stdout.splitlines() if line)
     if not paths:

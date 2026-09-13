@@ -21,6 +21,28 @@ pub const MARGDATA_SCHEMA_VERSION_V4: u32 = MARGDATA_SCHEMA_VERSION;
 pub const MARGDATA_SCHEMA_V4: u32 = MARGDATA_SCHEMA_VERSION;
 const POSE_BLOCK_DOF: usize = 6;
 const STATE_BLOCK_DOF: usize = 15;
+
+/// Immutable identity of the pinned native mapper event used by a paired
+/// schema-4 capture.
+///
+/// This metadata is never synthesized by the estimator. A diagnostic caller
+/// must load it before replay and may attach it only to the matching emitted
+/// mapper packet through
+/// [`MargData::write_mapper_packet_json_with_native_companion_identity`].
+/// Keeping the identity outside [`MargData`] preserves the upstream queue
+/// packet unless the explicit paired-capture API is used.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeCompanionIdentity {
+    pub run_uuid: String,
+    pub event_ordinal: u64,
+    pub event_state_timestamp_ns: i64,
+    pub primary_kf_timestamp_ns: i64,
+    pub packet_filename: String,
+    pub packet_sha256: String,
+    pub frame_map_sha256: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MatrixData {
     pub rows: usize,
@@ -521,6 +543,15 @@ struct MapperPacketRef<'a> {
     provenance_version: &'static str,
 }
 
+#[derive(Serialize)]
+struct MapperPacketWithNativeIdentityRef<'a> {
+    #[serde(flatten)]
+    packet: MapperPacketRef<'a>,
+    native_companion_identity: &'a NativeCompanionIdentity,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prior: Option<&'a PriorData>,
+}
+
 const MAPPER_PACKET_PROVENANCE_VERSION: &str = "basalt-0f3b2b52-mapper-packet-v1";
 
 fn finite_array<const N: usize>(values: &[f64; N]) -> bool {
@@ -535,6 +566,32 @@ fn finite_nav(value: &NavStateData) -> bool {
 }
 
 impl MargData {
+    fn mapper_packet_ref(&self) -> MapperPacketRef<'_> {
+        MapperPacketRef {
+            schema_version: self.schema_version,
+            aom_sqrt_jacobian: &self.aom_sqrt_jacobian,
+            aom_sqrt_rhs: &self.aom_sqrt_rhs,
+            aom_abs_h: self.aom_abs_h.as_ref(),
+            aom_abs_b: self.aom_abs_b.as_ref(),
+            frame_poses: &self.frame_poses,
+            frame_states: &self.frame_states,
+            keyframes: &self.keyframes,
+            kf_to_marg: &self.kf_to_marg,
+            kfs_all: &self.kfs_all,
+            kfs_to_marg: &self.kfs_to_marg,
+            aom_order: &self.aom_order,
+            marginalization: &self.marginalization,
+            row_counts: self.row_counts,
+            of_observations: &self.of_observations,
+            of_images: &self.of_images,
+            frame_poses_fej: &self.frame_poses_fej,
+            frame_states_fej: &self.frame_states_fej,
+            fej_complete: self.fej_complete,
+            used_imu: self.used_imu,
+            provenance_version: MAPPER_PACKET_PROVENANCE_VERSION,
+        }
+    }
+
     /// Empty diagnostic placeholder used when a caller explicitly disables
     /// MargData retention.  The estimator's internal square-root prior is
     /// still updated; only the owned on-wire snapshot is omitted.
@@ -1196,30 +1253,101 @@ impl MargData {
         if !self.is_mapper_packet() {
             return Ok(());
         }
-        let packet = MapperPacketRef {
-            schema_version: self.schema_version,
-            aom_sqrt_jacobian: &self.aom_sqrt_jacobian,
-            aom_sqrt_rhs: &self.aom_sqrt_rhs,
-            aom_abs_h: self.aom_abs_h.as_ref(),
-            aom_abs_b: self.aom_abs_b.as_ref(),
-            frame_poses: &self.frame_poses,
-            frame_states: &self.frame_states,
-            keyframes: &self.keyframes,
-            kf_to_marg: &self.kf_to_marg,
-            kfs_all: &self.kfs_all,
-            kfs_to_marg: &self.kfs_to_marg,
-            aom_order: &self.aom_order,
-            marginalization: &self.marginalization,
-            row_counts: self.row_counts,
-            of_observations: &self.of_observations,
-            of_images: &self.of_images,
-            frame_poses_fej: &self.frame_poses_fej,
-            frame_states_fej: &self.frame_states_fej,
-            fej_complete: self.fej_complete,
-            used_imu: self.used_imu,
-            provenance_version: MAPPER_PACKET_PROVENANCE_VERSION,
+        serde_json::to_writer(writer, &self.mapper_packet_ref())
+    }
+
+    /// Streams a queue packet with a pre-bound native companion identity.
+    ///
+    /// Validation happens before a byte is written, so a stale identity cannot
+    /// create a partially labelled packet.
+    pub fn write_mapper_packet_json_with_native_companion_identity<W: Write>(
+        &self,
+        writer: W,
+        identity: &NativeCompanionIdentity,
+        packet_ordinal: u64,
+    ) -> Result<(), String> {
+        self.validate_native_companion_identity(identity, packet_ordinal)?;
+        let packet = MapperPacketWithNativeIdentityRef {
+            packet: self.mapper_packet_ref(),
+            native_companion_identity: identity,
+            prior: self.prior.as_ref(),
         };
-        serde_json::to_writer(writer, &packet)
+        serde_json::to_writer(writer, &packet).map_err(|error| error.to_string())
+    }
+
+    pub fn validate_native_companion_identity(
+        &self,
+        identity: &NativeCompanionIdentity,
+        packet_ordinal: u64,
+    ) -> Result<(), String> {
+        if !self.is_mapper_packet() {
+            return Err("native companion identity requires a mapper packet".into());
+        }
+        if identity.event_ordinal != packet_ordinal {
+            return Err(format!(
+                "native companion event ordinal {} does not match Rust packet ordinal {}",
+                identity.event_ordinal, packet_ordinal
+            ));
+        }
+        if identity.run_uuid.is_empty()
+            || identity.run_uuid.len() > 128
+            || !identity
+                .run_uuid
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        {
+            return Err("native companion run UUID is empty or malformed".into());
+        }
+        for (name, digest) in [
+            ("packet_sha256", identity.packet_sha256.as_str()),
+            ("frame_map_sha256", identity.frame_map_sha256.as_str()),
+        ] {
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(format!("native companion {name} is not lowercase SHA-256"));
+            }
+        }
+        let expected_filename = format!("{}.cereal", identity.primary_kf_timestamp_ns);
+        if identity.packet_filename != expected_filename {
+            return Err(format!(
+                "native companion packet filename {:?} does not match {:?}",
+                identity.packet_filename, expected_filename
+            ));
+        }
+
+        let selected_frames = self.kfs_to_marg.iter().copied().collect::<BTreeSet<_>>();
+        let selected_timestamps = self
+            .of_images
+            .iter()
+            .filter(|image| selected_frames.contains(&image.frame_id))
+            .map(|image| image.timestamp_ns)
+            .collect::<BTreeSet<_>>();
+        if selected_timestamps.len() != 1
+            || !selected_timestamps.contains(&identity.primary_kf_timestamp_ns)
+        {
+            return Err(format!(
+                "native companion primary keyframe timestamp {} does not match Rust selected-keyframe images {:?}",
+                identity.primary_kf_timestamp_ns, selected_timestamps
+            ));
+        }
+        let newest_state_timestamp = self
+            .frame_states
+            .iter()
+            .map(|state| state.timestamp_ns)
+            .max()
+            .ok_or_else(|| {
+                "native companion identity requires a Rust state timestamp".to_owned()
+            })?;
+        if identity.event_state_timestamp_ns != newest_state_timestamp {
+            return Err(format!(
+                "native companion event state timestamp {} does not match newest Rust state {}",
+                identity.event_state_timestamp_ns, newest_state_timestamp
+            ));
+        }
+        Ok(())
     }
 
     pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
@@ -1576,6 +1704,87 @@ mod tests {
         let mut streamed = Vec::new();
         x.write_mapper_packet_json(&mut streamed).unwrap();
         assert_eq!(streamed, expected.as_bytes());
+    }
+
+    #[test]
+    fn native_companion_identity_is_bound_before_streaming() {
+        let mut x = md();
+        x.kfs_to_marg = vec![1];
+        x.of_images = vec![
+            OfImageData::new(1, 10, 0, 1, 1, vec![7]).unwrap(),
+            OfImageData::new(1, 10, 1, 1, 1, vec![8]).unwrap(),
+        ];
+        let identity = NativeCompanionIdentity {
+            run_uuid: "native-run-1".into(),
+            event_ordinal: 0,
+            event_state_timestamp_ns: 10,
+            primary_kf_timestamp_ns: 10,
+            packet_filename: "10.cereal".into(),
+            packet_sha256: "1".repeat(64),
+            frame_map_sha256: "a".repeat(64),
+        };
+        let mut bytes = Vec::new();
+        x.write_mapper_packet_json_with_native_companion_identity(&mut bytes, &identity, 0)
+            .unwrap();
+        let wire: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            wire["native_companion_identity"]["run_uuid"],
+            "native-run-1"
+        );
+        assert!(wire.get("prior").is_none());
+
+        x.prior = Some(PriorData {
+            frame_ids: vec![1],
+            block_kinds: vec!["state".into()],
+            jacobian: MatrixData::new(1, 1, vec![1.]).unwrap(),
+            rhs: vec![2.],
+            fej_point: vec![3.],
+        });
+        let mut diagnostic_bytes = Vec::new();
+        x.write_mapper_packet_json_with_native_companion_identity(
+            &mut diagnostic_bytes,
+            &identity,
+            0,
+        )
+        .unwrap();
+        let diagnostic_wire: serde_json::Value = serde_json::from_slice(&diagnostic_bytes).unwrap();
+        assert!(diagnostic_wire.get("prior").is_some());
+        let mut ordinary_bytes = Vec::new();
+        x.write_mapper_packet_json(&mut ordinary_bytes).unwrap();
+        let ordinary_wire: serde_json::Value = serde_json::from_slice(&ordinary_bytes).unwrap();
+        assert!(ordinary_wire.get("prior").is_none());
+
+        let mut stale = identity.clone();
+        stale.event_state_timestamp_ns += 1;
+        let mut rejected = Vec::new();
+        assert!(x
+            .write_mapper_packet_json_with_native_companion_identity(&mut rejected, &stale, 0)
+            .is_err());
+        assert!(rejected.is_empty(), "validation must precede all output");
+    }
+
+    #[test]
+    fn native_companion_identity_rejects_stale_ordinal_and_digest() {
+        let mut x = md();
+        x.kfs_to_marg = vec![1];
+        x.of_images = vec![OfImageData::new(1, 10, 0, 1, 1, vec![7]).unwrap()];
+        let mut identity = NativeCompanionIdentity {
+            run_uuid: "native-run-1".into(),
+            event_ordinal: 1,
+            event_state_timestamp_ns: 10,
+            primary_kf_timestamp_ns: 10,
+            packet_filename: "10.cereal".into(),
+            packet_sha256: "1".repeat(64),
+            frame_map_sha256: "a".repeat(64),
+        };
+        assert!(x
+            .write_mapper_packet_json_with_native_companion_identity(Vec::new(), &identity, 0)
+            .is_err());
+        identity.event_ordinal = 0;
+        identity.packet_sha256 = "A".repeat(64);
+        assert!(x
+            .write_mapper_packet_json_with_native_companion_identity(Vec::new(), &identity, 0)
+            .is_err());
     }
 
     #[test]
