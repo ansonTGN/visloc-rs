@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "schema_id": "visloc-rs.basalt.supplemental-source-dependencies.v1",
+  "manifest_id": "basalt-supplemental-source-dependencies-v1",
+  "captured_at": "2026-09-07",
+  "status": "CANDIDATE_SUPPLEMENTAL_METADATA_NOT_RELEASE_CLEARANCE",
+  "purpose": "Track manually translated third-party source dependencies that are absent from Cargo.lock and therefore cannot be discovered by the selected Cargo license graph.",
+  "coverage_policy": {
+    "must_be_consumed_with": [
+      "work/m11_selected_license_graph_20260907.json",
+      "benchmarks/basalt/cargo_license_inventory_v1.json",
+      "benchmarks/basalt/cargo_license_inventory_v2.json"
+    ],
+    "selected_cargo_graph_snapshot": {
+      "path": "work/m11_selected_license_graph_20260907.json",
+      "sha256": "beefb79fe31013b4df5f118d4728a60add68990baf953d8b370911c68e619613",
+      "selected_packages": 66,
+      "selected_registry_packages": 56,
+      "selected_local_packages": 10,
+      "selected_inventory_missing": 0,
+      "scope": "basalt_euroc_vio_demo, --no-default-features, x86_64-pc-windows-msvc"
+    },
+    "why_supplemental": "The AOR translation is production Rust source, not a Cargo package or Cargo.lock node; it must remain in release license coverage through this explicit source-dependency record.",
+    "final_release_gate_rule": "Every affected production file with a manual third-party source reference must join to a supplemental dependency record by affected file path and current file SHA-256, independently of Cargo package selection.",
+    "rebind_at_freeze": true
+  },
+  "dependencies": [
+    {
+      "id": "arm-optimized-routines-cosf-v26.01",
+      "kind": "manual_source_translation",
+      "repository": "https://github.com/ARM-software/optimized-routines",
+      "tag": "v26.01",
+      "commit": "649ccc8411e7c4862965710f25c570d854a1483f",
+      "commit_url": "https://github.com/ARM-software/optimized-routines/commit/649ccc8411e7c4862965710f25c570d854a1483f",
+      "license_spdx": "MIT OR Apache-2.0 WITH LLVM-exception",
+      "license_choice": "No branch selected for distribution; preserve the complete applicable license text and document the chosen branch if a release makes an OR selection.",
+      "source_paths": [
+        "math/cosf.c",
+        "math/sincosf.h",
+        "math/sincosf_data.c",
+        "math/sinf.c"
+      ],
+      "covered_functions": {
+        "cosf": "production finite-angle Se2::exp path",
+        "sinf": "production finite-angle Se2::exp path"
+      },
+      "source_hashes": [
+        {
+          "path": "math/cosf.c",
+          "url": "https://raw.githubusercontent.com/ARM-software/optimized-routines/649ccc8411e7c4862965710f25c570d854a1483f/math/cosf.c",
+          "http_status": 200,
+          "bytes": 1658,
+          "sha256": "84068b509762ae5c3ba4f1488f73cce099ffbbf1df3f410aa1c7538562d41b4c"
+        },
+        {
+          "path": "math/sincosf.h",
+          "url": "https://raw.githubusercontent.com/ARM-software/optimized-routines/649ccc8411e7c4862965710f25c570d854a1483f/math/sincosf.h",
+          "http_status": 200,
+          "bytes": 4246,
+          "sha256": "ae5b8962056f72fa9f844b980bed0c50a3612f96e7a17629eb10e6c9b428463b"
+        },
+        {
+          "path": "math/sincosf_data.c",
+          "url": "https://raw.githubusercontent.com/ARM-software/optimized-routines/649ccc8411e7c4862965710f25c570d854a1483f/math/sincosf_data.c",
+          "http_status": 200,
+          "bytes": 1613,
+          "sha256": "9887da2fb996658a88e98ec7ea5142be2b4a8db5650f7fd3290228d67d405cdb"
+        },
+        {
+          "path": "math/sinf.c",
+          "url": "https://raw.githubusercontent.com/ARM-software/optimized-routines/649ccc8411e7c4862965710f25c570d854a1483f/math/sinf.c",
+          "http_status": 200,
+          "bytes": 1748,
+          "sha256": "5b4961963b7b687b96c53db34ce2009feaa93f78cd9acf7b355fd9040b66f52f"
+        }
+      ],
+      "license_evidence": {
+        "path": "LICENSE",
+        "url": "https://raw.githubusercontent.com/ARM-software/optimized-routines/649ccc8411e7c4862965710f25c570d854a1483f/LICENSE",
+        "http_status": 200,
+        "bytes": 13491,
+        "sha256": "650afbf29f214451e02241adc42534e82c9d6ae2b38e2444b92b5a1ffcaf9346",
+        "payload_status": "HASHED_IN_MEMORY_NOT_PERSISTED"
+      },
+      "notice_evidence": {
+        "path": "NOTICE",
+        "url": "https://raw.githubusercontent.com/ARM-software/optimized-routines/649ccc8411e7c4862965710f25c570d854a1483f/NOTICE",
+        "http_status": 404,
+        "status": "NO_ROOT_NOTICE_AT_EXACT_URL; NESTED_NOTICES_NOT_ENUMERATED"
+      },
+      "affected_production_files": [
+        {
+          "path": "pipelines/basalt/src/update.rs",
+          "bytes": 25680,
+          "sha256": "ba239051dc81320efc905a535701f72441ab024f5ca7614e5dbd941627ef865c",
+          "observed_status": "CURRENT_INTEGRATION_WORKTREE_BYTES; REHASH AT FINAL SOURCE FREEZE",
+          "source_line_ranges": [
+            "143-179",
+            "183-372"
+          ],
+          "use": "Finite-angle Se2::exp sine and cosine paths; non-finite theta falls back to the Rust standard-library sine and cosine.",
+          "function_scope": {
+            "cosf": "production",
+            "sinf": "production"
+          },
+          "translation_status": "Manual Rust translation; no literal AOR source subtree copied."
+        }
+      ],
+      "attribution": [
+        "Copyright (c) 2018-2024, Arm Limited. — math/cosf.c",
+        "Copyright (c) 2018-2024, Arm Limited. — math/sinf.c",
+        "Copyright (c) 2018-2024, Arm Limited. — math/sincosf.h",
+        "Copyright (c) 2018-2019, Arm Limited. — math/sincosf_data.c",
+        "SPDX-License-Identifier: MIT OR Apache-2.0 WITH LLVM-exception"
+      ],
+      "semantic_support_reference": {
+        "path": "math/math_config.h",
+        "url": "https://raw.githubusercontent.com/ARM-software/optimized-routines/649ccc8411e7c4862965710f25c570d854a1483f/math/math_config.h",
+        "bytes": 20268,
+        "sha256": "9a3ee029ba2b58444fafb51427bf0dc390d117f26115cd5a7033a5cc03042881",
+        "copied_into_production": false,
+        "use": "Interpretation of TOINT_INTRINSICS/roundtoint/converttoint during bounded lineage review."
+      },
+      "release_payload_obligations": [
+        "Preserve the complete applicable MIT or Apache-2.0-with-LLVM-exception license text in any distributed bundle.",
+        "Retain Arm copyright and SPDX attribution and identify the Rust implementation as a translation/modification.",
+        "Carry the repository, v26.01 tag, full commit, source paths, and per-file source hashes into release provenance.",
+        "Keep math/sinf.c explicitly covered because the Rust sinf wrapper is now used by the finite-angle Se2::exp production path; retain paired runtime/native evidence and final source-freeze rebinding as release obligations.",
+        "Review the exact-tag tree for nested NOTICE/attribution files before final packaging; the root NOTICE probe was HTTP 404.",
+        "Do not copy LGPL glibc source; prior glibc libm.so.6 use was a runtime comparison oracle only."
+      ],
+      "evidence": {
+        "immutable_source": "work/m11_aor_cosf_immutable_source_evidence_20260907.json",
+        "sinf_immutable_source": "work/m11_aor_sinf_immutable_source_evidence_20260907.json",
+        "lineage": "work/m11_aor_cosf_lineage_evidence_20260907.json",
+        "immutable_source_sha256": "4dbb63e3da3ba2497d7814fce65ce895069a5001b85f7e183f90f7db9e84c88d",
+        "sinf_immutable_source_sha256": "673c8d079ef30ee3d6e3c2d711cd4d630904066f1778caa632004c55bae0112b",
+        "lineage_sha256": "7dc3c661929cfdbe2af86255b2fb56df0f7ebae942bcec6c35b131a087dc08b5"
+      },
+      "legal_clearance": "NOT_PERFORMED",
+      "production_release_status": "SUPPLEMENTAL_COVERAGE_REQUIRED; NOT_RELEASE_CERTIFIED"
+    }
+  ],
+  "limitations": [
+    "Current update.rs is an untracked integration worktree file; its recorded hash must be refreshed at the final source freeze.",
+    "The selected Cargo graph and 119-row Cargo inventory remain unchanged; this manifest is additive and does not make the AOR source a Cargo package.",
+    "AOR source/license payloads are hash evidence only and were not copied into the release bundle; no legal clearance is asserted."
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "protocol_id": "basalt-euroc-parity-v1",
+  "status": "frozen_contract",
+  "frozen_utc": "2026-08-21T00:00:00Z",
+  "purpose": "GT-free, metric-scale parity evaluation for a literal Basalt EuRoC stereo-inertial port.",
+  "upstream": {
+    "repository": "https://github.com/VladyslavUsenko/basalt",
+    "commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+    "config": "data/euroc_config.json",
+    "calibration": "data/euroc_ds_calib.json",
+    "license": "BSD-3-Clause"
+  },
+  "dataset": {
+    "name": "EuRoC MAV official ASL release",
+    "sequence_root_layout": "<dataset_root>/<sequence>/mav0",
+    "sensor_input_paths": [
+      "mav0/cam0/data",
+      "mav0/cam0/data.csv",
+      "mav0/cam0/sensor.yaml",
+      "mav0/cam1/data",
+      "mav0/cam1/data.csv",
+      "mav0/cam1/sensor.yaml",
+      "mav0/imu0/data.csv",
+      "mav0/imu0/sensor.yaml"
+    ],
+    "ground_truth_paths": [
+      "mav0/state_groundtruth_estimate0/data.csv"
+    ],
+    "frame_count_glob": "mav0/cam0/data/*",
+    "ground_truth_available_to_runner": false,
+    "ground_truth_materialized_before_engine_exit": false
+  },
+  "sequences": [
+    "MH_01_easy",
+    "MH_02_easy",
+    "MH_03_medium",
+    "MH_04_difficult",
+    "MH_05_difficult",
+    "V1_01_easy",
+    "V1_02_medium",
+    "V1_03_difficult",
+    "V2_01_easy",
+    "V2_02_medium",
+    "V2_03_difficult"
+  ],
+  "methods": [
+    {
+      "id": "basalt_upstream",
+      "role": "oracle",
+      "profile": "basalt-compat",
+      "notes": "Pinned upstream Basalt executable and config."
+    },
+    {
+      "id": "visloc_basalt_compat",
+      "role": "port",
+      "profile": "basalt-compat",
+      "notes": "Rust literal port; no rescue gates, descriptors, PnP, rebootstrap, or Sim(3) welding."
+    }
+  ],
+  "execution_policy": {
+    "command_is_argv": true,
+    "shell_execution": false,
+    "engine_workspace_is_staged_copy": true,
+    "only_sensor_input_paths_are_staged": true,
+    "ground_truth_path_is_never_passed_to_engine": true,
+    "ground_truth_environment_keys_are_removed": true,
+    "manifest_written_after_engine_exit": true,
+    "evaluation_must_be_a_separate_process": true,
+    "resource_poll_seconds": 0.25,
+    "runtime_metric": "wall_seconds",
+    "rss_metric": "peak_process_tree_rss_bytes",
+    "failure_policy": "record_dnf_and_keep_full_denominator"
+  },
+  "evaluation_policy": {
+    "association": "nearest_timestamp_one_to_one",
+    "max_association_delta_ns": 10000000,
+    "alignment_primary": "SE(3) Umeyama",
+    "alignment_diagnostic": "Sim(3) Umeyama",
+    "rpe_delta": "consecutive associated poses",
+    "coverage_denominator": "all cam0 input frames",
+    "coverage_metric": "successful_estimate_rows / expected_input_frames",
+    "metric_names": [
+      "ate_translation_se3_rmse_m",
+      "rpe_translation_consecutive_rmse_m",
+      "rpe_rotation_consecutive_rmse_deg",
+      "coverage_tracked_fraction",
+      "sim3_scale_diagnostic",
+      "runtime_wall_seconds",
+      "peak_process_tree_rss_bytes"
+    ],
+    "sim3_is_diagnostic_only": true,
+    "include_failures_in_aggregate": true,
+    "repetitions": 3,
+    "aggregate": ["mean", "median", "worst"]
+  },
+  "parity_gates": {
+    "coverage_max_drop": 0.02,
+    "ate_se3_ratio_max": 1.10,
+    "ate_se3_additive_floor_m": 0.01,
+    "rpe_translation_ratio_max": 1.15,
+    "rpe_translation_additive_floor_m": 0.005,
+    "rpe_rotation_ratio_max": 1.15,
+    "rpe_rotation_additive_floor_deg": 0.5,
+    "scale_abs_diff_max": 0.05,
+    "scale_relative_diff_max": 0.05,
+    "runtime_ratio_max": 1.50,
+    "rss_ratio_max": 1.50
+  },
+  "artifacts": {
+    "port_manifest": "benchmarks/basalt/basalt_port_manifest_v1.json",
+    "dataset_manifest": "benchmarks/basalt/euroc_dataset_manifest.json",
+    "dataset_manifest_report": "benchmarks/basalt/euroc_dataset_manifest_report.md",
+    "manifest_schema": "benchmarks/basalt/schemas/run_manifest_v1.schema.json",
+    "evaluation_schema": "benchmarks/basalt/schemas/evaluation_result_v1.schema.json",
+    "run_manifest_filename": "run_manifest.json",
+    "evaluation_result_filename": "evaluation_result.json"
+  },
+  "claim_policy": {
+    "metric_scale_claim_requires_se3": true,
+    "sim3_scale_cannot_replace_se3": true,
+    "published_numbers_cannot_be_mixed_with_local_reruns": true,
+    "compat_and_extended_profiles_must_use_separate_namespaces": true
+  }
+}

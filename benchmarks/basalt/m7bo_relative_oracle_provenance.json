@@ -1,0 +1,246 @@
+{
+  "schema": "visloc-rs.basalt.m7bo.relative_oracle_provenance.v1",
+  "date": "2026-08-23",
+  "status": "resolved",
+  "production_source_edits": false,
+  "decision": {
+    "authoritative_call_site": "upstream LinearizationAbsQR::linearizeProblem RUNTIME_REL capture",
+    "iteration_transform_inference": "correct",
+    "authoritative_translation_bits": ["bde1e255", "baf1ec60", "ba884368"],
+    "authoritative_quaternion_xyzw_bits": ["bc0e2957", "bb507f02", "ba002d40", "3f7ffd31"],
+    "local_direct_translation_bits": ["bde1e254", "baf1ecc0", "ba884364"],
+    "local_direct_quaternion_xyzw_bits": ["bc0e2956", "bb507eff", "ba002940", "3f7ffd31"]
+  },
+  "upstream": {
+    "checkout": "/root/visloc-basalt-oracle-0f3b2b52",
+    "commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+    "tree": "b7afb830d82b45b8209cf784ad9744025d838411",
+    "worktree_preexisting_diagnostic_changes": [
+      "include/basalt/linearization/landmark_block.hpp",
+      "include/basalt/linearization/landmark_block_abs_dynamic.hpp",
+      "include/basalt/utils/ba_utils.h",
+      "src/linearization/linearization_abs_qr.cpp",
+      "src/vi_estimator/sqrt_keypoint_vio.cpp"
+    ],
+    "combined_diff_sha256_ba_utils_linearization_sqrt_vio": "2ea1a502e0183393a126702fbe97383ce42caea0cb98dda1f2ae3946b7d1ce4e"
+  },
+  "dump": {
+    "path": "target/m7al_upstream_f4_20260821T000200Z/iteration.jsonl",
+    "sha256": "18e87cff493f758729f91e8270c9968e55bc8fb33cdcf1c3307fce9119711f7a",
+    "bytes": 32541464,
+    "record_line": 57,
+    "frame_timestamp_ns": 1403636579963555584,
+    "iteration": 0,
+    "trial": 0,
+    "phase": "linearization",
+    "track_id": 1,
+    "host_frame_id": 1403636579763555584,
+    "host_cam": 0,
+    "target_frame_id": 1403636579813555456,
+    "target_cam": 1,
+    "pixel_f32_bits": ["41da8172", "42d4c7e1"],
+    "raw_residual_f32_bits": ["bc22d800", "3f915440"]
+  },
+  "inputs": {
+    "calibration_path": "/root/visloc-basalt-oracle-0f3b2b52/data/euroc_ds_calib.json",
+    "calibration_sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
+    "config_path": "/root/visloc-basalt-oracle-0f3b2b52/data/euroc_config.json",
+    "config_sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
+    "calibration_cast": "Calibration<double> loaded from JSON then cast<float>",
+    "extrinsics_f32": {
+      "cam0": {
+        "translation": ["bc896b48", "bd8d2fdc", "3ba86617"],
+        "quaternion_xyzw": ["bbed3c0f", "3bf71cd4", "3f33a827", "3f365a1e"]
+      },
+      "cam1": {
+        "translation": ["bc76fa76", "3d290319", "3b4f4832"],
+        "quaternion_xyzw": ["bb19188b", "3c55012e", "3f33d4ed", "3f362af6"]
+      }
+    },
+    "double_sphere_intrinsics_f32": {
+      "cam0_fx_fy_cx_cy_xi_alpha": ["43aee0c5", "43ae5cbe", "43b6f27c", "43795478", "be76bd89", "3f1126b5"],
+      "cam1_fx_fy_cx_cy_xi_alpha": ["43b4d5f0", "43b44af7", "43bdb43f", "437ffa30", "be5a1edd", "3f13a2ab"]
+    }
+  },
+  "build": {
+    "build_dir": "/root/visloc-basalt-oracle-0f3b2b52/build/core-relwithdebinfo",
+    "generator": "Ninja",
+    "build_type": "RelWithDebInfo",
+    "compiler": "/usr/bin/c++ GCC 11.4.0",
+    "language": "C++17",
+    "ninja_command_linearization_abs_qr": "/usr/bin/c++ -DBASALT_INSTANTIATIONS_DOUBLE -DBASALT_INSTANTIATIONS_FLOAT -DBOOST_ATOMIC_NO_LIB -DBOOST_ATOMIC_STATIC_LINK -DBOOST_CHRONO_NO_LIB -DBOOST_CHRONO_STATIC_LINK -DBOOST_CONTAINER_NO_LIB -DBOOST_CONTAINER_STATIC_LINK -DBOOST_DATE_TIME_NO_LIB -DBOOST_DATE_TIME_STATIC_LINK -DBOOST_FILESYSTEM_NO_LIB -DBOOST_FILESYSTEM_STATIC_LINK=1 -DBOOST_PROGRAM_OPTIONS_NO_LIB -DBOOST_PROGRAM_OPTIONS_STATIC_LINK -DBOOST_THREAD_NO_LIB -DBOOST_THREAD_STATIC_LINK -DBOOST_THREAD_USE_LIB -Dbasalt_EXPORTS -I/root/visloc-basalt-oracle-0f3b2b52/include -I/root/visloc-basalt-oracle-0f3b2b52/thirdparty/ros/include -I/root/visloc-basalt-oracle-0f3b2b52/thirdparty/apriltag/include -isystem /root/visloc-basalt-oracle-0f3b2b52/thirdparty/vcpkg/buildtrees/eigen3/src/5.0.1-d487a628b0.clean -isystem /root/visloc-basalt-oracle-0f3b2b52/build/relwithdebinfo/vcpkg_installed/x64-linux/include/opencv4 -isystem /root/visloc-basalt-oracle-0f3b2b52/build/relwithdebinfo/vcpkg_installed/x64-linux/include -Wall -Wextra -Werror -Wno-error=unused-parameter -ftemplate-backtrace-limit=0 -Wno-error=maybe-uninitialized -Wno-error=implicit-fallthrough -Wno-error=deprecated-declarations -Wno-error=deprecated-copy -Wno-parentheses -DEIGEN_DONT_PARALLELIZE -march=native -O3 -g -DEIGEN_INITIALIZE_MATRICES_BY_NAN -std=c++17 -fPIC -MD -MT CMakeFiles/basalt.dir/src/linearization/linearization_abs_qr.cpp.o -MF CMakeFiles/basalt.dir/src/linearization/linearization_abs_qr.cpp.o.d -o CMakeFiles/basalt.dir/src/linearization/linearization_abs_qr.cpp.o -c /root/visloc-basalt-oracle-0f3b2b52/src/linearization/linearization_abs_qr.cpp",
+    "flags": [
+      "-O3",
+      "-g",
+      "-march=native",
+      "-DEIGEN_DONT_PARALLELIZE",
+      "-DEIGEN_INITIALIZE_MATRICES_BY_NAN",
+      "-fPIC",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-Wno-error=unused-parameter",
+      "-Wno-error=maybe-uninitialized",
+      "-Wno-error=implicit-fallthrough",
+      "-Wno-error=deprecated-declarations",
+      "-Wno-error=deprecated-copy",
+      "-Wno-parentheses",
+      "-ftemplate-backtrace-limit=0",
+      "no -DNDEBUG"
+    ],
+    "cmake_cache": {
+      "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+      "CMAKE_GENERATOR": "Ninja",
+      "CXX_MARCH": "native",
+      "VCPKG_MANIFEST_MODE": "ON",
+      "VCPKG_TARGET_TRIPLET": "x64-linux"
+    },
+    "binary_sha256": {
+      "basalt_vio": "edb6586f7ec03fa055b262840db9ae8216fb4ec18d9291aa6e1dc4714d06188f",
+      "libbasalt.so": "0cea5175689d28605a96cf1aad934a43f3c6487076eb490870280ebb78c83032"
+    }
+  },
+  "probe": {
+    "source": "benchmarks/basalt/m7bo_relative_oracle_probe.cpp",
+    "source_sha256": "814b61a7dd9da1ea297b638c5caebae3aafcbfc6536e637ddef2355e1de07085",
+    "binary": "/tmp/m7bo_relative_oracle_inline_like",
+    "binary_sha256": "7e92fc9bc3556bdfd24c1be102261d1ce69fc5ccf8f0e28d4bcf449022dfe04d",
+    "compiler_observations": {
+      "__VERSION__": "11.4.0",
+      "__OPTIMIZE__": 1,
+      "__FMA__": 1,
+      "EIGEN_DONT_PARALLELIZE": 1,
+      "EIGEN_INITIALIZE_MATRICES_BY_NAN": 1
+    }
+  },
+  "runtime_capture": {
+    "instrumentation": "external upstream src/linearization/linearization_abs_qr.cpp RUNTIME_REL print for exact host/target/camera tuple",
+    "run_command": "/root/visloc-basalt-oracle-0f3b2b52/build/core-relwithdebinfo/basalt_vio --dataset-path /mnt/e/datasets/euroc_mav/machine_hall/MH_01_easy --cam-calib /root/visloc-basalt-oracle-0f3b2b52/data/euroc_ds_calib.json --dataset-type euroc --config-path /root/visloc-basalt-oracle-0f3b2b52/data/euroc_config.json --marg-data /marg_data --show-gui 0 --save-trajectory euroc --num-threads 4 --max-frames 5",
+    "stderr_sha256": "1302b6c2747e9f915ecfaf8fbffc2b413292ae3fb002214e909898693557783f",
+    "stdout_sha256": "3aa582012ba3ffc6ad73ac90089198ffadcaddc749481ea2e0d2d11c87ce1d7f",
+    "first_matching_operands": {
+      "host": {
+        "translation": ["00000000", "00000000", "00000000"],
+        "quaternion_xyzw": ["bd582e43", "bf4d686f", "00000000", "3f182ffd"]
+      },
+      "target": {
+        "translation": ["39c8bb60", "b8cebae8", "bb0527fc"],
+        "quaternion_xyzw": ["bd5cdea6", "bf4d341f", "bb2aa78b", "3f186f67"]
+      },
+      "cam0": {
+        "translation": ["bc896b48", "bd8d2fdc", "3ba86617"],
+        "quaternion_xyzw": ["bbed3c0f", "3bf71cd4", "3f33a827", "3f365a1e"]
+      },
+      "cam1": {
+        "translation": ["bc76fa76", "3d290319", "3b4f4832"],
+        "quaternion_xyzw": ["bb19188b", "3c55012e", "3f33d4ed", "3f362af6"]
+      },
+      "relative_translation": ["bde1e255", "baf1ec60", "ba884368"],
+      "relative_quaternion_xyzw": ["bc0e2957", "bb507f02", "ba002d40", "3f7ffd31"]
+    }
+  },
+  "snapshot_poses": {
+    "snapshot_count": 24,
+    "states_per_snapshot": 5,
+    "relevant_frames": [1403636579763555584, 1403636579813555456],
+    "canonical_relevant_pose_rows": 48,
+    "canonical_relevant_pose_rows_sha256": "4a2cbcacfe56dea32213a48e2091233f8cd9c25fb1be536492f2158f1110bc43",
+    "phase_rule": "trial and accepted rows are identical; accepted(iteration n) is iteration_start(iteration n+1) for n<7",
+    "iteration_start_pose_bits": [
+      {
+        "iteration": 0,
+        "line": 124,
+        "host_frame0_t": ["00000000", "00000000", "00000000"],
+        "host_frame0_q_xyzw": ["bd582e43", "bf4d686f", "00000000", "3f182ffd"],
+        "target_frame1_t": ["39c8bb60", "b8cebae8", "bb0527fc"],
+        "target_frame1_q_xyzw": ["bd5cdea6", "bf4d341f", "bb2aa78b", "3f186f67"]
+      },
+      {
+        "iteration": 1,
+        "line": 310,
+        "host_frame0_t": ["366aea00", "368cce48", "388e781c"],
+        "host_frame0_q_xyzw": ["bd587fec", "bf4d699e", "38d8db06", "3f182df0"],
+        "target_frame1_t": ["b939cb10", "ba512a18", "bc577245"],
+        "target_frame1_q_xyzw": ["bd5cff33", "bf4d37d1", "bb25d838", "3f186a45"]
+      },
+      {
+        "iteration": 2,
+        "line": 496,
+        "host_frame0_t": ["366f1a00", "b4112a20", "36b72520"],
+        "host_frame0_q_xyzw": ["bd589afc", "bf4d86a2", "38cfb3e7", "3f180698"],
+        "target_frame1_t": ["baf8ecc5", "ba3eecb7", "bc81de68"],
+        "target_frame1_q_xyzw": ["bd5d03be", "bf4d508e", "bb27434f", "3f1848e6"]
+      },
+      {
+        "iteration": 3,
+        "line": 682,
+        "host_frame0_t": ["3482d800", "b2fbf858", "35105550"],
+        "host_frame0_q_xyzw": ["bd578395", "bf4db51c", "b9a9a3f9", "3f17c93b"],
+        "target_frame1_t": ["bb116914", "ba2c68f1", "bc88458c"],
+        "target_frame1_q_xyzw": ["bd5bd8b5", "bf4d7bf3", "bb441940", "3f180fe3"]
+      },
+      {
+        "iteration": 4,
+        "line": 868,
+        "host_frame0_t": ["b1a38000", "b2cefd41", "3381c630"],
+        "host_frame0_q_xyzw": ["bd55e156", "bf4e10c8", "ba814073", "3f174ef6"],
+        "target_frame1_t": ["bb09f8f2", "ba09f33c", "bc8a2482"],
+        "target_frame1_q_xyzw": ["bd5a2798", "bf4dd659", "bb6fc56f", "3f1797a3"]
+      },
+      {
+        "iteration": 5,
+        "line": 1054,
+        "host_frame0_t": ["b29f2000", "b168acd0", "3158fe00"],
+        "host_frame0_q_xyzw": ["bd553465", "bf4eac03", "bab9fde6", "3f167b8f"],
+        "target_frame1_t": ["bae002de", "b9f9e198", "bc89fc4d"],
+        "target_frame1_q_xyzw": ["bd596b3d", "bf4e7186", "bb8615ca", "3f16c4ec"]
+      },
+      {
+        "iteration": 6,
+        "line": 1240,
+        "host_frame0_t": ["b237c000", "2edbb9a0", "ad0a0000"],
+        "host_frame0_q_xyzw": ["bd5580b6", "bf4f1424", "babf9af5", "3f15ebb5"],
+        "target_frame1_t": ["babc6ed6", "b9fea14e", "bc899c67"],
+        "target_frame1_q_xyzw": ["bd59aed2", "bf4ed9ce", "bb8786b0", "3f163553"]
+      },
+      {
+        "iteration": 7,
+        "line": 1426,
+        "host_frame0_t": ["b1dcc000", "2fdb8861", "2e6a8000"],
+        "host_frame0_q_xyzw": ["bd55dc3a", "bf4f536e", "babb6717", "3f1593a1"],
+        "target_frame1_t": ["baa7b22b", "ba02bd03", "bc896848"],
+        "target_frame1_q_xyzw": ["bd5a06d2", "bf4f192f", "bb8689e8", "3f15dd68"]
+      }
+    ]
+  },
+  "projection_comparison": {
+    "host_point_f32_bits": ["bf2a746e", "be9aed26", "3f2e9644", "3e160ef3"],
+    "local_direct": {
+      "relative_translation": ["bde1e254", "baf1ecc0", "ba884364"],
+      "relative_quaternion_xyzw": ["bc0e2956", "bb507eff", "ba002940", "3f7ffd31"],
+      "target_point_f32_bits": ["bf2fc73d", "be94aaaa", "3f2ec6b2", "3e160ef3"],
+      "projected_uv_f32_bits": ["41da6d22", "42d70d2e"],
+      "residual_f32_bits": ["bc228000", "3f915340"]
+    },
+    "authoritative_runtime": {
+      "relative_translation": ["bde1e255", "baf1ec60", "ba884368"],
+      "relative_quaternion_xyzw": ["bc0e2957", "bb507f02", "ba002d40", "3f7ffd31"],
+      "target_point_f32_bits": ["bf2fc73e", "be94aaa8", "3f2ec6b2", "3e160ef3"],
+      "projected_uv_f32_bits": ["41da6d17", "42d70d32"],
+      "residual_f32_bits": ["bc22d800", "3f915440"]
+    },
+    "literal_se3_constructor_normalized_quaternion_xyzw": ["bc0e2958", "bb507f03", "ba002d41", "3f7ffd32"],
+    "iteration_record_residual_f32_bits": ["bc22d800", "3f915440"],
+    "first_projection_operand_difference": {
+      "operand": "target_point.x",
+      "local_direct_bits": "bf2fc73d",
+      "authoritative_bits": "bf2fc73e",
+      "next_difference": {
+        "operand": "target_point.y",
+        "local_direct_bits": "be94aaaa",
+        "authoritative_bits": "be94aaa8"
+      },
+      "equal_operands": ["target_point.z", "target_point.rho"]
+    }
+  }
+}

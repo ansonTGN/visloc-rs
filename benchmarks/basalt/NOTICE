@@ -1,0 +1,111 @@
+Third-party provenance for the checked-in Basalt oracle and fixture sources
+==========================================================================
+
+The benchmark directory is classified as newly written C++ diagnostic programs
+and Python/PowerShell/shell harnesses.  The audit found no copied upstream
+source subtree; these files call the pinned upstream Basalt, OpenGV, Sophus,
+Eigen, and OpenCV packages.  Keep
+this notice with any source or binary redistribution of these diagnostics.
+
+Basalt and basalt-headers
+-------------------------
+Copyright (c) 2019, Vladyslav Usenko and Nikolaus Demmel.
+SPDX-License-Identifier: BSD-3-Clause
+Basalt commit: 0f3b2b52c807f70ff4e2973ce253c73329eea7bc
+Basalt headers commit: aa441ba3e51050c47ba1902537792a2e4db7e43d
+Sources: https://github.com/VladyslavUsenko/basalt and
+https://gitlab.com/VladyslavUsenko/basalt-headers.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+* Neither the name of the copyright holder nor the names of its contributors
+  may be used to endorse or promote products derived from this software
+  without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+OpenGV
+------
+Copyright (c) 2013 Laurent Kneip, ANU.  SPDX-License-Identifier: BSD-3-Clause
+Commit: 91f4b19c73450833a40e463ad3648aae80b3a7f3
+Source: https://github.com/laurentkneip/opengv (License.txt).
+The BSD-3-Clause conditions and disclaimer above apply; the endorsement
+condition names ANU and its contributors.
+
+Sophus
+------
+Copyright 2011-2017 Hauke Strasdat; 2012-2017 Steven Lovegrove.
+SPDX-License-Identifier: MIT; version 1.24.6,
+commit d0b7315a0d90fc6143defa54596a3a95d9fa10ec.
+Source: https://github.com/strasdat/Sophus (LICENSE.txt).
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, subject to inclusion of the copyright and permission
+notice.  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+Eigen
+-----
+SPDX-License-Identifier: MPL-2.0; version 5.0.1,
+commit bc3b39870ecb690a623a3f49149a358b95c5781d.
+Source: https://gitlab.com/libeigen/eigen.  Retain Eigen's MPL-2.0 text
+(COPYING.MPL2) and its third-party COPYING.APACHE, COPYING.BSD,
+COPYING.MINPACK, and COPYING.README notices when redistributing Eigen itself.
+No Eigen source is checked in here.
+
+OpenCV
+------
+SPDX-License-Identifier: Apache-2.0; version 4.12.0,
+commit cbee6841638edb6fbc8110df7cd52bb8e3d66211.
+Source: https://github.com/opencv/opencv.  Retain the pinned LICENSE or the
+Apache-2.0 text (https://www.apache.org/licenses/LICENSE-2.0) when shipping
+OpenCV itself.
+
+The referenced FAST files modules/features2d/src/fast.cpp and fast_score.cpp
+also contain the BSD-3-Clause notice for Copyright (c) 2006, 2008 Edward
+Rosten.  Its conditions are: retain the copyright, conditions, and disclaimer
+in source and binary forms; do not use the University of Cambridge or
+contributors to endorse derived products without written permission; and
+accept the standard "AS IS" warranty/liability disclaimer.  The referenced
+corner file modules/imgproc/src/corner.cpp carries the same BSD-3-Clause
+conditions for Intel Corporation, Willow Garage Inc., and Itseez Inc.  The
+complete source-file notices are available in the pinned OpenCV LICENSE tree;
+the benchmark C++ files do not copy those implementations.
+
+The complete Eigen MPL-2.0 text is pinned as COPYING.MPL2, and the complete
+OpenCV Apache-2.0 text is pinned as LICENSE; retain those files if either
+dependency is bundled in a future binary.  This benchmark directory does not
+redistribute those dependency sources.
+
+Audit record
+------------
+Exact paths, commits, SPDX identifiers, translation/copy status, and SHA-256
+hashes for the current source/executable freeze are in
+basalt_provenance_manifest_v2.json.  The immutable
+basalt_provenance_manifest_v1.json remains historical evidence.  This is a
+technical record, not legal advice or a line-by-line authorship determination.
+The current Cargo
+dependency/license inventory is cargo_license_inventory_v2.json: all 119 of
+119 lockfile rows are resolved and `unresolved=0`, with crate, checksum, SPDX,
+license-file, and source evidence.  The inventory records an explicit dirty VCS
+provenance caveat for ort/ort-sys and the winapi 0.4.0 condition that its
+license texts are upstream evidence rather than packaged crate files; obtain
+legal review before redistribution.  Audit transitive vcpkg packages before
+shipping a binary.

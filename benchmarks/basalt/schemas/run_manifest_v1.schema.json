@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://visloc-rs.local/schemas/basalt/run-manifest-v1.schema.json",
+  "title": "Basalt parity GT-free engine run manifest v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "schema_id",
+    "protocol_id",
+    "run_id",
+    "method",
+    "profile",
+    "sequence",
+    "ground_truth_firewall",
+    "input",
+    "execution",
+    "artifacts",
+    "status"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "schema_id": {"const": "basalt.run_manifest.v1"},
+    "protocol_id": {"type": "string", "const": "basalt-euroc-parity-v1"},
+    "run_id": {"type": "string", "minLength": 1},
+    "method": {"type": "string", "minLength": 1},
+    "profile": {"enum": ["basalt-compat", "basalt-extended"]},
+    "sequence": {"type": "string", "minLength": 1},
+    "protocol": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}
+      },
+      "additionalProperties": true
+    },
+    "ground_truth_firewall": {
+      "type": "object",
+      "required": [
+        "ground_truth_available_to_engine",
+        "ground_truth_path_passed_to_engine",
+        "ground_truth_environment_keys_passed",
+        "staged_input_excludes_ground_truth",
+        "manifest_written_after_engine_exit"
+      ],
+      "properties": {
+        "ground_truth_available_to_engine": {"const": false},
+        "ground_truth_path_passed_to_engine": {"const": false},
+        "ground_truth_environment_keys_passed": {"const": false},
+        "staged_input_excludes_ground_truth": {"const": true},
+        "manifest_written_after_engine_exit": {"const": true},
+        "blocked_environment_keys": {"type": "array", "items": {"type": "string"}},
+        "blocked_command_tokens": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "input": {
+      "type": "object",
+      "required": ["staged_root", "file_count", "frame_count", "sha256"],
+      "properties": {
+        "staged_root": {"type": "string", "minLength": 1},
+        "file_count": {"type": "integer", "minimum": 0},
+        "frame_count": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+        "frame_count_glob": {"type": "string"},
+        "source_root": {"type": "string"},
+        "source_root_sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}
+      },
+      "additionalProperties": true
+    },
+    "execution": {
+      "type": "object",
+      "required": [
+        "argv",
+        "cwd",
+        "returncode",
+        "wall_seconds",
+        "peak_process_tree_rss_bytes",
+        "resource_poll_seconds"
+      ],
+      "properties": {
+        "argv": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "cwd": {"type": "string"},
+        "returncode": {"type": "integer"},
+        "wall_seconds": {"type": "number", "minimum": 0},
+        "peak_process_tree_rss_bytes": {"type": "integer", "minimum": 0},
+        "resource_poll_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "stdout_log": {"type": "string"},
+        "started_utc": {"type": "string"},
+        "finished_utc": {"type": "string"},
+        "python": {"type": "string"},
+        "platform": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "artifacts": {
+      "type": "object",
+      "required": ["trajectory", "stdout_log"],
+      "properties": {
+        "trajectory": {"type": ["string", "null"]},
+        "stdout_log": {"type": "string"},
+        "engine_output_root": {"type": "string"},
+        "trajectory_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{64}$"}
+      },
+      "additionalProperties": true
+    },
+    "status": {"enum": ["success", "dnf", "failure"]},
+    "failure_reason": {"type": ["string", "null"]},
+    "created_utc": {"type": "string"}
+  },
+  "not": {"anyOf": [{"required": ["ground_truth"]}, {"required": ["ground_truth_path"]}]},
+  "additionalProperties": true
+}

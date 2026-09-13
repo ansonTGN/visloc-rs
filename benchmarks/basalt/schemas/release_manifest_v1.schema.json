@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://visloc-rs.local/schemas/basalt/release-manifest-v1.schema.json",
+  "title": "visloc-rs Basalt release inventory manifest v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "schema_id",
+    "manifest_id",
+    "upstream_commit",
+    "provenance_manifest",
+    "schema_path",
+    "self_binding",
+    "contract_inputs",
+    "artifacts",
+    "excluded_artifacts",
+    "ground_truth_artifacts",
+    "ground_truth_firewall",
+    "legal_note"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "schema_id": {"const": "visloc-rs.basalt.release.v1"},
+    "manifest_id": {"const": "basalt-release-v1"},
+    "upstream_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "provenance_manifest": {"type": "string", "minLength": 1},
+    "schema_path": {"const": "benchmarks/basalt/schemas/release_manifest_v1.schema.json"},
+    "self_binding": {
+      "type": "object",
+      "required": ["path", "mode"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "mode": {"const": "external_sha256"},
+        "note": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "contract_inputs": {
+      "type": "object",
+      "required": ["port_manifest", "upstream_manifest", "protocol", "config", "provenance_manifest"],
+      "properties": {
+        "port_manifest": {"type": "string", "minLength": 1},
+        "upstream_manifest": {"type": "string", "minLength": 1},
+        "protocol": {"type": "string", "minLength": 1},
+        "config": {"type": "string", "minLength": 1},
+        "provenance_manifest": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/artifact"}
+    },
+    "excluded_artifacts": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "ground_truth_artifacts": {"const": []},
+    "ground_truth_firewall": {
+      "type": "object",
+      "required": ["release_artifacts_contain_ground_truth", "ground_truth_is_post_run", "forbidden_artifact_path_fragments"],
+      "properties": {
+        "release_artifacts_contain_ground_truth": {"const": false},
+        "ground_truth_is_post_run": {"const": true},
+        "forbidden_artifact_path_fragments": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": true
+    },
+    "legal_note": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "required": ["path", "kind", "bytes", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

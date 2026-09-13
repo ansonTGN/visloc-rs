@@ -1,0 +1,1344 @@
+{
+  "base_timestamp_ns": 1403636579763555584,
+  "frame_period_ns": 50000000,
+  "notes": [
+    "Rows/groups are Rust diagnostic groups; pinned MargData serializes abs_H/abs_b, not factor groups.",
+    "H/b differences are reported without tolerance relaxation because Rust direct-KLT/solver trajectories differ from the pinned C++ run.",
+    "The mapper-writer input is expected to omit the Rust-only carried prior; in-process diagnostic retention is covered by the MargData unit test."
+  ],
+  "packet_count": 5,
+  "records": [
+    {
+      "comparisons": {
+        "aom_order": true,
+        "fej_flags": true,
+        "frame_pose_ids": true,
+        "frame_state_ids": true,
+        "image_count_is_two_per_kf": true,
+        "images_keyframe_ids": true,
+        "kfs_all": true,
+        "kfs_to_marg": true,
+        "mapper_writer_prior_present": false,
+        "prior_wire_contract": true,
+        "source_packet_prior_present": false,
+        "targets_pose_selection": true,
+        "used_imu": true
+      },
+      "frame_tables": {
+        "poses": {
+          "matched_count": 7,
+          "max_abs_pose": 0.182035930454731,
+          "rms_pose": 0.036825446403780646,
+          "rust_count": 7,
+          "upstream_count": 7
+        },
+        "states": {
+          "matched_count": 3,
+          "max_abs_pose": 0.24099791049957275,
+          "rms_pose": 0.09422304536037629,
+          "rust_count": 3,
+          "upstream_count": 3
+        }
+      },
+      "numeric": {
+        "max_abs_b": 3904632.0272246,
+        "max_abs_h": 1993521468.8841035,
+        "rms_b": 771536.6317380941,
+        "rms_h": 77769981.63686727,
+        "shape_equal": true
+      },
+      "rust": {
+        "aom_order": [
+          [
+            0,
+            0,
+            6
+          ],
+          [
+            7,
+            6,
+            6
+          ],
+          [
+            14,
+            12,
+            6
+          ],
+          [
+            21,
+            18,
+            6
+          ],
+          [
+            28,
+            24,
+            6
+          ],
+          [
+            35,
+            30,
+            6
+          ],
+          [
+            42,
+            36,
+            6
+          ],
+          [
+            49,
+            42,
+            15
+          ],
+          [
+            50,
+            57,
+            15
+          ]
+        ],
+        "fej_flags": [
+          true,
+          false,
+          false
+        ],
+        "frame_poses": [
+          0,
+          7,
+          14,
+          21,
+          28,
+          35,
+          42
+        ],
+        "frame_states": [
+          49,
+          50,
+          51
+        ],
+        "image_count": 16,
+        "image_frame_ids": [
+          0,
+          7,
+          14,
+          21,
+          28,
+          35,
+          42,
+          49
+        ],
+        "kfs_all": [
+          0,
+          7,
+          14,
+          21,
+          28,
+          35,
+          42,
+          49
+        ],
+        "kfs_to_marg": [
+          14
+        ],
+        "marginalization": {
+          "lost_landmarks": [
+            1288,
+            2018
+          ],
+          "poses_to_marg": [
+            14
+          ],
+          "states_to_marg_all": [],
+          "states_to_marg_vel_bias": [
+            49
+          ]
+        },
+        "packet_prior_present": false,
+        "row_count_sum": 2108,
+        "row_counts": [
+          57,
+          2036,
+          9,
+          6
+        ],
+        "sqrt_jacobian_shape": [
+          2108,
+          72
+        ],
+        "used_imu": true
+      },
+      "rust_file": "target\\basalt_m6_run80_packets_postfix\\marg_data\\frame_000051.json",
+      "selection": "exact_state_timestamps",
+      "upstream": {
+        "abs_h_shape": [
+          72,
+          72
+        ],
+        "aom_order": [
+          [
+            0,
+            0,
+            6
+          ],
+          [
+            7,
+            6,
+            6
+          ],
+          [
+            14,
+            12,
+            6
+          ],
+          [
+            21,
+            18,
+            6
+          ],
+          [
+            28,
+            24,
+            6
+          ],
+          [
+            35,
+            30,
+            6
+          ],
+          [
+            42,
+            36,
+            6
+          ],
+          [
+            49,
+            42,
+            15
+          ],
+          [
+            50,
+            57,
+            15
+          ]
+        ],
+        "fej_flags": [
+          true,
+          false,
+          false
+        ],
+        "frame_poses": [
+          0,
+          7,
+          14,
+          21,
+          28,
+          35,
+          42
+        ],
+        "frame_states": [
+          49,
+          50,
+          51
+        ],
+        "image_count_expected": 16,
+        "image_frame_ids_expected": [
+          0,
+          7,
+          14,
+          21,
+          28,
+          35,
+          42,
+          49
+        ],
+        "kfs_all": [
+          0,
+          7,
+          14,
+          21,
+          28,
+          35,
+          42,
+          49
+        ],
+        "kfs_to_marg": [
+          14
+        ],
+        "prior_serialized": false,
+        "used_imu": true
+      },
+      "upstream_file": "work\\m6_upstream_packet_oracle\\up_14.json"
+    },
+    {
+      "comparisons": {
+        "aom_order": true,
+        "fej_flags": true,
+        "frame_pose_ids": true,
+        "frame_state_ids": true,
+        "image_count_is_two_per_kf": true,
+        "images_keyframe_ids": true,
+        "kfs_all": true,
+        "kfs_to_marg": true,
+        "mapper_writer_prior_present": false,
+        "prior_wire_contract": true,
+        "source_packet_prior_present": false,
+        "targets_pose_selection": true,
+        "used_imu": true
+      },
+      "frame_tables": {
+        "poses": {
+          "matched_count": 7,
+          "max_abs_pose": 0.22933036088943481,
+          "rms_pose": 0.050190427996015155,
+          "rust_count": 7,
+          "upstream_count": 7
+        },
+        "states": {
+          "matched_count": 3,
+          "max_abs_pose": 0.29337838664650917,
+          "rms_pose": 0.12156248242596775,
+          "rust_count": 3,
+          "upstream_count": 3
+        }
+      },
+      "numeric": {
+        "max_abs_b": 4875376.3098725155,
+        "max_abs_h": 2417781582.3707075,
+        "rms_b": 981093.4226967584,
+        "rms_h": 82677253.1361793,
+        "shape_equal": true
+      },
+      "rust": {
+        "aom_order": [
+          [
+            0,
+            0,
+            6
+          ],
+          [
+            7,
+            6,
+            6
+          ],
+          [
+            21,
+            12,
+            6
+          ],
+          [
+            28,
+            18,
+            6
+          ],
+          [
+            35,
+            24,
+            6
+          ],
+          [
+            42,
+            30,
+            6
+          ],
+          [
+            49,
+            36,
+            6
+          ],
+          [
+            56,
+            42,
+            15
+          ],
+          [
+            57,
+            57,
+            15
+          ]
+        ],
+        "fej_flags": [
+          true,
+          false,
+          false
+        ],
+        "frame_poses": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          42,
+          49
+        ],
+        "frame_states": [
+          56,
+          57,
+          58
+        ],
+        "image_count": 16,
+        "image_frame_ids": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          42,
+          49,
+          56
+        ],
+        "kfs_all": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          42,
+          49,
+          56
+        ],
+        "kfs_to_marg": [
+          42
+        ],
+        "marginalization": {
+          "lost_landmarks": [
+            58,
+            2565
+          ],
+          "poses_to_marg": [
+            42
+          ],
+          "states_to_marg_all": [],
+          "states_to_marg_vel_bias": [
+            56
+          ]
+        },
+        "packet_prior_present": false,
+        "row_count_sum": 2372,
+        "row_counts": [
+          57,
+          2300,
+          9,
+          6
+        ],
+        "sqrt_jacobian_shape": [
+          2372,
+          72
+        ],
+        "used_imu": true
+      },
+      "rust_file": "target\\basalt_m6_run80_packets_postfix\\marg_data\\frame_000058.json",
+      "selection": "exact_state_timestamps",
+      "upstream": {
+        "abs_h_shape": [
+          72,
+          72
+        ],
+        "aom_order": [
+          [
+            0,
+            0,
+            6
+          ],
+          [
+            7,
+            6,
+            6
+          ],
+          [
+            21,
+            12,
+            6
+          ],
+          [
+            28,
+            18,
+            6
+          ],
+          [
+            35,
+            24,
+            6
+          ],
+          [
+            42,
+            30,
+            6
+          ],
+          [
+            49,
+            36,
+            6
+          ],
+          [
+            56,
+            42,
+            15
+          ],
+          [
+            57,
+            57,
+            15
+          ]
+        ],
+        "fej_flags": [
+          true,
+          false,
+          false
+        ],
+        "frame_poses": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          42,
+          49
+        ],
+        "frame_states": [
+          56,
+          57,
+          58
+        ],
+        "image_count_expected": 16,
+        "image_frame_ids_expected": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          42,
+          49,
+          56
+        ],
+        "kfs_all": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          42,
+          49,
+          56
+        ],
+        "kfs_to_marg": [
+          42
+        ],
+        "prior_serialized": false,
+        "used_imu": true
+      },
+      "upstream_file": "work\\m6_upstream_packet_oracle\\up_42.json"
+    },
+    {
+      "comparisons": {
+        "aom_order": true,
+        "fej_flags": true,
+        "frame_pose_ids": true,
+        "frame_state_ids": true,
+        "image_count_is_two_per_kf": true,
+        "images_keyframe_ids": true,
+        "kfs_all": true,
+        "kfs_to_marg": false,
+        "mapper_writer_prior_present": false,
+        "prior_wire_contract": true,
+        "source_packet_prior_present": false,
+        "targets_pose_selection": true,
+        "used_imu": true
+      },
+      "frame_tables": {
+        "poses": {
+          "matched_count": 7,
+          "max_abs_pose": 0.279387429356575,
+          "rms_pose": 0.061646965083461354,
+          "rust_count": 7,
+          "upstream_count": 7
+        },
+        "states": {
+          "matched_count": 3,
+          "max_abs_pose": 0.3477785736322403,
+          "rms_pose": 0.15540967036210662,
+          "rust_count": 3,
+          "upstream_count": 3
+        }
+      },
+      "numeric": {
+        "max_abs_b": 6014015.279247509,
+        "max_abs_h": 2667182588.055983,
+        "rms_b": 1149545.9306550396,
+        "rms_h": 88393993.45687586,
+        "shape_equal": true
+      },
+      "rust": {
+        "aom_order": [
+          [
+            0,
+            0,
+            6
+          ],
+          [
+            7,
+            6,
+            6
+          ],
+          [
+            21,
+            12,
+            6
+          ],
+          [
+            28,
+            18,
+            6
+          ],
+          [
+            35,
+            24,
+            6
+          ],
+          [
+            49,
+            30,
+            6
+          ],
+          [
+            56,
+            36,
+            6
+          ],
+          [
+            63,
+            42,
+            15
+          ],
+          [
+            64,
+            57,
+            15
+          ]
+        ],
+        "fej_flags": [
+          true,
+          false,
+          false
+        ],
+        "frame_poses": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          49,
+          56
+        ],
+        "frame_states": [
+          63,
+          64,
+          65
+        ],
+        "image_count": 16,
+        "image_frame_ids": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          49,
+          56,
+          63
+        ],
+        "kfs_all": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          49,
+          56,
+          63
+        ],
+        "kfs_to_marg": [
+          21
+        ],
+        "marginalization": {
+          "lost_landmarks": [
+            1903,
+            1904,
+            2324,
+            2920,
+            3018,
+            3086,
+            3130,
+            3159,
+            3190,
+            3192,
+            3195
+          ],
+          "poses_to_marg": [
+            21
+          ],
+          "states_to_marg_all": [],
+          "states_to_marg_vel_bias": [
+            63
+          ]
+        },
+        "packet_prior_present": false,
+        "row_count_sum": 2848,
+        "row_counts": [
+          57,
+          2776,
+          9,
+          6
+        ],
+        "sqrt_jacobian_shape": [
+          2848,
+          72
+        ],
+        "used_imu": true
+      },
+      "rust_file": "target\\basalt_m6_run80_packets_postfix\\marg_data\\frame_000065.json",
+      "selection": "exact_state_timestamps",
+      "upstream": {
+        "abs_h_shape": [
+          72,
+          72
+        ],
+        "aom_order": [
+          [
+            0,
+            0,
+            6
+          ],
+          [
+            7,
+            6,
+            6
+          ],
+          [
+            21,
+            12,
+            6
+          ],
+          [
+            28,
+            18,
+            6
+          ],
+          [
+            35,
+            24,
+            6
+          ],
+          [
+            49,
+            30,
+            6
+          ],
+          [
+            56,
+            36,
+            6
+          ],
+          [
+            63,
+            42,
+            15
+          ],
+          [
+            64,
+            57,
+            15
+          ]
+        ],
+        "fej_flags": [
+          true,
+          false,
+          false
+        ],
+        "frame_poses": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          49,
+          56
+        ],
+        "frame_states": [
+          63,
+          64,
+          65
+        ],
+        "image_count_expected": 16,
+        "image_frame_ids_expected": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          49,
+          56,
+          63
+        ],
+        "kfs_all": [
+          0,
+          7,
+          21,
+          28,
+          35,
+          49,
+          56,
+          63
+        ],
+        "kfs_to_marg": [
+          35
+        ],
+        "prior_serialized": false,
+        "used_imu": true
+      },
+      "upstream_file": "work\\m6_upstream_packet_oracle\\up_35.json"
+    },
+    {
+      "comparisons": {
+        "aom_order": false,
+        "fej_flags": true,
+        "frame_pose_ids": false,
+        "frame_state_ids": true,
+        "image_count_is_two_per_kf": true,
+        "images_keyframe_ids": true,
+        "kfs_all": false,
+        "kfs_to_marg": false,
+        "mapper_writer_prior_present": false,
+        "prior_wire_contract": true,
+        "source_packet_prior_present": false,
+        "targets_pose_selection": true,
+        "used_imu": true
+      },
+      "frame_tables": {
+        "poses": {
+          "matched_count": 6,
+          "max_abs_pose": 0.32970984280109406,
+          "rms_pose": 0.08713684806228839,
+          "rust_count": 7,
+          "upstream_count": 7
+        },
+        "states": {
+          "matched_count": 3,
+          "max_abs_pose": 0.4130527973175049,
+          "rms_pose": 0.1986257977129005,
+          "rust_count": 3,
+          "upstream_count": 3
+        }
+      },
+      "numeric": {
+        "max_abs_b": 5840024.926082851,
+        "max_abs_h": 2784984304.23372,
+        "rms_b": 1331684.5401376334,
+        "rms_h": 89534305.81136185,
+        "shape_equal": true
+      },
+      "rust": {
+        "aom_order": [
+          [
+            0,
+            0,
+            6
+          ],
+          [
+            7,
+            6,
+            6
+          ],
+          [
+            28,
+            12,
+            6
+          ],
+          [
+            35,
+            18,
+            6
+          ],
+          [
+            49,
+            24,
+            6
+          ],
+          [
+            56,
+            30,
+            6
+          ],
+          [
+            63,
+            36,
+            6
+          ],
+          [
+            70,
+            42,
+            15
+          ],
+          [
+            71,
+            57,
+            15
+          ]
+        ],
+        "fej_flags": [
+          true,
+          false,
+          false
+        ],
+        "frame_poses": [
+          0,
+          7,
+          28,
+          35,
+          49,
+          56,
+          63
+        ],
+        "frame_states": [
+          70,
+          71,
+          72
+        ],
+        "image_count": 16,
+        "image_frame_ids": [
+          0,
+          7,
+          28,
+          35,
+          49,
+          56,
+          63,
+          70
+        ],
+        "kfs_all": [
+          0,
+          7,
+          28,
+          35,
+          49,
+          56,
+          63,
+          70
+        ],
+        "kfs_to_marg": [
+          56
+        ],
+        "marginalization": {
+          "lost_landmarks": [
+            100,
+            1025,
+            2896,
+            3035,
+            3110,
+            3112,
+            3161,
+            3174,
+            3245,
+            3261,
+            3286,
+            3289,
+            3304,
+            3308,
+            3309,
+            3312,
+            3317,
+            3329,
+            3333,
+            3347
+          ],
+          "poses_to_marg": [
+            56
+          ],
+          "states_to_marg_all": [],
+          "states_to_marg_vel_bias": [
+            70
+          ]
+        },
+        "packet_prior_present": false,
+        "row_count_sum": 3520,
+        "row_counts": [
+          57,
+          3448,
+          9,
+          6
+        ],
+        "sqrt_jacobian_shape": [
+          3520,
+          72
+        ],
+        "used_imu": true
+      },
+      "rust_file": "target\\basalt_m6_run80_packets_postfix\\marg_data\\frame_000072.json",
+      "selection": "exact_state_timestamps",
+      "upstream": {
+        "abs_h_shape": [
+          72,
+          72
+        ],
+        "aom_order": [
+          [
+            0,
+            0,
+            6
+          ],
+          [
+            7,
+            6,
+            6
+          ],
+          [
+            21,
+            12,
+            6
+          ],
+          [
+            28,
+            18,
+            6
+          ],
+          [
+            49,
+            24,
+            6
+          ],
+          [
+            56,
+            30,
+            6
+          ],
+          [
+            63,
+            36,
+            6
+          ],
+          [
+            70,
+            42,
+            15
+          ],
+          [
+            71,
+            57,
+            15
+          ]
+        ],
+        "fej_flags": [
+          true,
+          false,
+          false
+        ],
+        "frame_poses": [
+          0,
+          7,
+          21,
+          28,
+          49,
+          56,
+          63
+        ],
+        "frame_states": [
+          70,
+          71,
+          72
+        ],
+        "image_count_expected": 16,
+        "image_frame_ids_expected": [
+          0,
+          7,
+          21,
+          28,
+          49,
+          56,
+          63,
+          70
+        ],
+        "kfs_all": [
+          0,
+          7,
+          21,
+          28,
+          49,
+          56,
+          63,
+          70
+        ],
+        "kfs_to_marg": [
+          28
+        ],
+        "prior_serialized": false,
+        "used_imu": true
+      },
+      "upstream_file": "work\\m6_upstream_packet_oracle\\up_28.json"
+    },
+    {
+      "comparisons": {
+        "aom_order": false,
+        "fej_flags": true,
+        "frame_pose_ids": false,
+        "frame_state_ids": true,
+        "image_count_is_two_per_kf": true,
+        "images_keyframe_ids": true,
+        "kfs_all": false,
+        "kfs_to_marg": false,
+        "mapper_writer_prior_present": false,
+        "prior_wire_contract": true,
+        "source_packet_prior_present": false,
+        "targets_pose_selection": true,
+        "used_imu": true
+      },
+      "frame_tables": {
+        "poses": {
+          "matched_count": 5,
+          "max_abs_pose": 0.39157193899154663,
+          "rms_pose": 0.11583871594530815,
+          "rust_count": 7,
+          "upstream_count": 7
+        },
+        "states": {
+          "matched_count": 3,
+          "max_abs_pose": 0.48289066553115845,
+          "rms_pose": 0.25242803792628526,
+          "rust_count": 3,
+          "upstream_count": 3
+        }
+      },
+      "numeric": {
+        "max_abs_b": 6324274.470851812,
+        "max_abs_h": 2999984426.9931107,
+        "rms_b": 1502270.8144089547,
+        "rms_h": 96477871.62966105,
+        "shape_equal": true
+      },
+      "rust": {
+        "aom_order": [
+          [
+            0,
+            0,
+            6
+          ],
+          [
+            7,
+            6,
+            6
+          ],
+          [
+            28,
+            12,
+            6
+          ],
+          [
+            35,
+            18,
+            6
+          ],
+          [
+            49,
+            24,
+            6
+          ],
+          [
+            63,
+            30,
+            6
+          ],
+          [
+            70,
+            36,
+            6
+          ],
+          [
+            77,
+            42,
+            15
+          ],
+          [
+            78,
+            57,
+            15
+          ]
+        ],
+        "fej_flags": [
+          true,
+          false,
+          false
+        ],
+        "frame_poses": [
+          0,
+          7,
+          28,
+          35,
+          49,
+          63,
+          70
+        ],
+        "frame_states": [
+          77,
+          78,
+          79
+        ],
+        "image_count": 16,
+        "image_frame_ids": [
+          0,
+          7,
+          28,
+          35,
+          49,
+          63,
+          70,
+          77
+        ],
+        "kfs_all": [
+          0,
+          7,
+          28,
+          35,
+          49,
+          63,
+          70,
+          77
+        ],
+        "kfs_to_marg": [
+          49
+        ],
+        "marginalization": {
+          "lost_landmarks": [
+            2941,
+            3012,
+            3055,
+            3123,
+            3210,
+            3270,
+            3278,
+            3356,
+            3395,
+            3551
+          ],
+          "poses_to_marg": [
+            49
+          ],
+          "states_to_marg_all": [],
+          "states_to_marg_vel_bias": [
+            77
+          ]
+        },
+        "packet_prior_present": false,
+        "row_count_sum": 3052,
+        "row_counts": [
+          57,
+          2980,
+          9,
+          6
+        ],
+        "sqrt_jacobian_shape": [
+          3052,
+          72
+        ],
+        "used_imu": true
+      },
+      "rust_file": "target\\basalt_m6_run80_packets_postfix\\marg_data\\frame_000079.json",
+      "selection": "exact_state_timestamps",
+      "upstream": {
+        "abs_h_shape": [
+          72,
+          72
+        ],
+        "aom_order": [
+          [
+            0,
+            0,
+            6
+          ],
+          [
+            7,
+            6,
+            6
+          ],
+          [
+            21,
+            12,
+            6
+          ],
+          [
+            49,
+            18,
+            6
+          ],
+          [
+            56,
+            24,
+            6
+          ],
+          [
+            63,
+            30,
+            6
+          ],
+          [
+            70,
+            36,
+            6
+          ],
+          [
+            77,
+            42,
+            15
+          ],
+          [
+            78,
+            57,
+            15
+          ]
+        ],
+        "fej_flags": [
+          true,
+          false,
+          false
+        ],
+        "frame_poses": [
+          0,
+          7,
+          21,
+          49,
+          56,
+          63,
+          70
+        ],
+        "frame_states": [
+          77,
+          78,
+          79
+        ],
+        "image_count_expected": 16,
+        "image_frame_ids_expected": [
+          0,
+          7,
+          21,
+          49,
+          56,
+          63,
+          70,
+          77
+        ],
+        "kfs_all": [
+          0,
+          7,
+          21,
+          49,
+          56,
+          63,
+          70,
+          77
+        ],
+        "kfs_to_marg": [
+          56
+        ],
+        "prior_serialized": false,
+        "used_imu": true
+      },
+      "upstream_file": "work\\m6_upstream_packet_oracle\\up_56.json"
+    }
+  ],
+  "schema": "basalt.m6_actual_packet_oracle.v1",
+  "upstream": "basalt-0f3b2b52"
+}
