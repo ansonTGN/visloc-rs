@@ -68,8 +68,28 @@ fail closed. Use `--timing-feature disabled` for the canonical no-timing
 release binary and `--timing-feature enabled` only for a binary built with:
 
 ```powershell
-cargo build -p visloc-basalt --example basalt_euroc_vio_demo --features basalt-timing-breakdown --release
+cargo build --example basalt_euroc_vio_demo --features basalt-timing-breakdown --release
 ```
+
+## Canonical Windows release build
+
+The faithful f32 path mirrors the pinned Eigen build's AVX2/FMA packet
+arithmetic. A generic x86-64 Rust build preserves the numerical result but can
+lower fused operations to much slower scalar fallbacks. Build the formal
+Phase 6 executable with the checked script below. It enables the validated
+capacity-only LM workspace reuse feature, fixes the CPU contract to
+`avx2,fma`, requires an out-of-checkout target directory, and writes a
+content-addressed build manifest beside the executable.
+
+```powershell
+& benchmarks/basalt/build_phase6_rust.ps1 `
+  -TargetDir E:\visloc-rs-runs\basalt_phase6_release
+```
+
+The resulting executable requires an x86-64 host with AVX2 and FMA. Keep the
+manifest with Phase 6 results and bind its executable SHA-256 into the
+coordinator request. Timing instrumentation remains a separate diagnostic
+build and must not be enabled for the canonical runtime cells.
 
 The timing sidecar is diagnostic evidence and is not part of the formal lean
 trajectory-only output policy.
