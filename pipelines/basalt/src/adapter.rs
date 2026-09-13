@@ -192,29 +192,16 @@ impl BasaltVioEstimatorAdapter {
             .finish(TimingBucket::AdapterFrontend, frontend_started);
         let tracks = tracks_result?;
         let estimator_started = self.timing.start();
-        let estimator_result = if let Some(of_images) = of_images {
-            self.estimator.process_with_images(
-                tracks.frame.frame_id,
-                tracks.frame.timestamp_ns,
-                &tracks.observations,
-                &frame.imu,
-                Some(of_images),
-            )
-        } else if retain_trace {
-            self.estimator.process_without_marg_data(
-                tracks.frame.frame_id,
-                tracks.frame.timestamp_ns,
-                &tracks.observations,
-                &frame.imu,
-            )
-        } else {
-            self.estimator.process_without_marg_data_no_trace(
-                tracks.frame.frame_id,
-                tracks.frame.timestamp_ns,
-                &tracks.observations,
-                &frame.imu,
-            )
-        };
+        let estimator_result = self.estimator.process_adapter_frame(
+            tracks.frame.frame_id,
+            tracks.frame.timestamp_ns,
+            &tracks.observations,
+            &frame.imu,
+            frame.initialization_imu,
+            of_images,
+            retain_marg_data,
+            retain_trace,
+        );
         let estimator_result = estimator_result.map_err(BasaltAdapterError::Estimator);
         self.timing
             .finish(TimingBucket::AdapterEstimator, estimator_started);

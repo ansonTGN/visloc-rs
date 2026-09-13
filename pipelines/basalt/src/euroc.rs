@@ -44,6 +44,10 @@ pub struct EurocSensorFrame {
     /// frame timestamp.  For frame zero, all samples at or before its camera
     /// timestamp are returned.
     pub imu: Vec<ImuSample>,
+    /// First IMU sample at or after the first camera timestamp.  Upstream
+    /// Basalt skips older packets and uses this sample only to align the
+    /// initial pose with gravity; normal interval delivery remains in `imu`.
+    pub initialization_imu: Option<ImuSample>,
 }
 
 /// EuRoC sensor data and the two upstream Basalt JSON contracts.
@@ -51,6 +55,7 @@ pub struct EurocSensorFrame {
 pub struct EurocSensorDataset {
     root: PathBuf,
     cam0_images: Vec<EurocImageEntry>,
+    cam0_manifest_count: usize,
     cam1_by_timestamp: BTreeMap<TimestampNs, EurocImageEntry>,
     imu_samples: Vec<ImuSample>,
     calibration: BasaltCalibration,
@@ -104,7 +109,7 @@ impl EurocSensorDataset {
         let cam1_dir = mav0.join("cam1");
         let imu0_dir = mav0.join("imu0");
 
-        let cam0_images = timing.measure(TimingBucket::DatasetCsvParsing, || {
+        let mut cam0_images = timing.measure(TimingBucket::DatasetCsvParsing, || {
             read_image_manifest(&cam0_dir.join("data.csv"), &cam0_dir)
         })?;
         if cam0_images.is_empty() {
@@ -124,6 +129,14 @@ impl EurocSensorDataset {
                     timestamp_ns: image.timestamp_ns,
                 });
             }
+        }
+        let cam0_manifest_count = cam0_images.len();
+        cam0_images.retain(|image| cam1_by_timestamp.contains_key(&image.timestamp_ns));
+        if cam0_images.is_empty() {
+            return Err(EurocReaderError::EmptyStereoIntersection {
+                cam0: cam0_dir.join("data.csv"),
+                cam1: cam1_dir.join("data.csv"),
+            });
         }
         let imu_samples = timing.measure(TimingBucket::DatasetCsvParsing, || {
             read_imu_csv(&imu0_dir.join("data.csv"))
@@ -151,6 +164,7 @@ impl EurocSensorDataset {
         Ok(Self {
             root,
             cam0_images,
+            cam0_manifest_count,
             cam1_by_timestamp,
             imu_samples,
             calibration,
@@ -172,6 +186,12 @@ impl EurocSensorDataset {
 
     pub fn frame_count(&self) -> usize {
         self.cam0_images.len()
+    }
+
+    /// Number of rows in the original cam0 manifest, before requiring the
+    /// stereo timestamp intersection used by upstream Basalt optical flow.
+    pub fn cam0_manifest_count(&self) -> usize {
+        self.cam0_manifest_count
     }
 
     pub fn cam0_images(&self) -> &[EurocImageEntry] {
@@ -250,6 +270,14 @@ impl EurocSensorDataset {
             cam0_path: cam0.path.clone(),
             cam1_path,
             imu,
+            initialization_imu: (index == 0)
+                .then(|| {
+                    self.imu_samples
+                        .iter()
+                        .find(|sample| sample.timestamp_ns >= cam0.timestamp_ns)
+                        .copied()
+                })
+                .flatten(),
         })
     }
 }
@@ -481,6 +509,8 @@ pub enum EurocReaderError {
     },
     #[error("empty EuRoC image manifest: {0}")]
     EmptyManifest(PathBuf),
+    #[error("cam0/cam1 manifests have no common timestamp (`{cam0}`, `{cam1}`)")]
+    EmptyStereoIntersection { cam0: PathBuf, cam1: PathBuf },
     #[error("invalid CSV `{path}` line {line}: {message}")]
     Csv {
         path: PathBuf,
@@ -588,13 +618,59 @@ mod tests {
         let first = dataset.frame(0).unwrap();
         assert_eq!(first.frame_id, 0);
         assert_eq!(first.imu.len(), 2);
+        assert_eq!(first.initialization_imu.unwrap().timestamp_ns, 100);
         assert_eq!(first.cam0.pixel(0, 0), Some(0));
         assert_eq!(first.cam0.pixel(1, 0), Some(65_280));
         assert_eq!(first.cam1.as_ref().unwrap().pixel(0, 0), Some(0));
         let second = dataset.frame(1).unwrap();
+        assert!(second.initialization_imu.is_none());
         assert_eq!(second.imu.len(), 2);
         assert_eq!(second.imu[0].timestamp_ns, 150);
         assert_eq!(second.imu[1].timestamp_ns, 200);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn first_frame_exposes_future_imu_only_for_initialization() {
+        let (root, calibration, config) = make_dataset();
+        write_file(
+            &root.join("mav0/imu0/data.csv"),
+            "#timestamp,gx,gy,gz,ax,ay,az\n125,0,0,0,0,9.8,0\n150,0,0,0,0,9.8,0\n200,0,0,0,0,9.8,0\n",
+        );
+        let dataset = EurocSensorDataset::open(&root, calibration, config).unwrap();
+
+        let first = dataset.frame(0).unwrap();
+        assert!(first.imu.is_empty());
+        assert_eq!(first.initialization_imu.unwrap().timestamp_ns, 125);
+
+        let second = dataset.frame(1).unwrap();
+        assert!(second.initialization_imu.is_none());
+        assert_eq!(
+            second
+                .imu
+                .iter()
+                .map(|sample| sample.timestamp_ns)
+                .collect::<Vec<_>>(),
+            vec![125, 150, 200]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reader_uses_stereo_timestamp_intersection_like_upstream_optical_flow() {
+        let (root, calibration, config) = make_dataset();
+        write_file(
+            &root.join("mav0/cam1/data.csv"),
+            "#timestamp,filename\n200,200.png\n",
+        );
+        let dataset = EurocSensorDataset::open(&root, calibration, config).unwrap();
+        assert_eq!(dataset.cam0_manifest_count(), 2);
+        assert_eq!(dataset.frame_count(), 1);
+
+        let first = dataset.frame(0).unwrap();
+        assert_eq!(first.timestamp_ns, 200);
+        assert_eq!(first.initialization_imu.unwrap().timestamp_ns, 200);
+        assert!(first.cam1.is_some());
         fs::remove_dir_all(root).unwrap();
     }
 
