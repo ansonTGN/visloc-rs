@@ -83,3 +83,30 @@ a clean-room implementation. The active-window public factor keeps the M7h
 `[rotation, velocity, position]` row contract, while the audited upstream
 header's internal residual is `[position, rotation, velocity]`; this
 permutation is an explicit compatibility boundary covered by tests.
+
+The offline mapper follows the same pinned Basalt revision end to end:
+
+- Reference files: `src/mapper.cpp`, `src/vi_estimator/nfr_mapper.cpp`,
+  `include/basalt/vi_estimator/nfr_mapper.h`, `src/utils/keypoints.cpp`,
+  `src/vi_estimator/ba_base.cpp`, and
+  `src/vi_estimator/landmark_database.cpp`.
+- The Rust lifecycle preserves MargData reduction and factor recovery, image
+  retention, FAST/BRIEF and HashBoW matching, OpenGV-compatible temporal
+  RANSAC, track building, stereographic landmark initialization, two global
+  BA passes with the intervening outlier filter, and final pose/map export.
+- `BundleAdjustmentBase::get_current_points` is represented literally: the
+  visualization payload contains one world point for every host/target
+  observation-index entry, including repeated coordinates for a landmark
+  observed in multiple target images, and assigns the source ID `1` to every
+  entry.
+- The ground-truth-free command boundary is
+  `examples/basalt_mapper_offline_demo.rs`. It accepts schema-4 MargData,
+  calibration, and mapper configuration only, and writes parameterized
+  landmarks, observation-index world points, poses, and EuRoC/TUM
+  trajectories. `--temporal-seed` exists for deterministic native-oracle and
+  release fixtures; omitting it retains the pinned OpenGV wall-clock seed
+  behavior.
+
+The mapper implementation is a clean-room translation and contains no copied
+Basalt source. The referenced Basalt algorithms remain subject to upstream's
+BSD-3-Clause notice recorded above.
