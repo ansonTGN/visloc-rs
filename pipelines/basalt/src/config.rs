@@ -1,3 +1,4 @@
+use crate::mapper::{GlobalBaConfig, MapperConfig, OfflineMapperConfig};
 use crate::vio::aom::LmConfig;
 use crate::vio::estimator::EstimatorConfig;
 use crate::vio::margdata::WindowPolicy;
@@ -145,6 +146,42 @@ impl BasaltConfig {
             rebootstrap: false,
         })
     }
+    pub fn mapper_config(&self) -> Result<MapperConfig, ConfigError> {
+        if self.value::<bool>("config.mapper_no_factor_weights")? {
+            return Err(ConfigError::Value(
+                "config.mapper_no_factor_weights=true is outside the pinned weighted-factor profile"
+                    .into(),
+            ));
+        }
+        Ok(MapperConfig::default())
+    }
+    pub fn offline_mapper_config(&self) -> Result<OfflineMapperConfig, ConfigError> {
+        Ok(OfflineMapperConfig {
+            max_points: self.value("config.mapper_detection_num_points")?,
+            max_hamming: self.value("config.mapper_max_hamming_distance")?,
+            second_best_ratio: self.value("config.mapper_second_best_test_ratio")?,
+            bow_bits: self.value("config.mapper_bow_num_bits")?,
+            match_window: self.value("config.mapper_num_frames_to_match")?,
+            frames_to_match_threshold: self.value("config.mapper_frames_to_match_threshold")?,
+            min_matches: self.value("config.mapper_min_matches")?,
+            ransac_threshold: self.value("config.mapper_ransac_threshold")?,
+            min_track_length: self.value("config.mapper_min_track_length")?,
+            min_triangulation_distance: self.value("config.mapper_min_triangulation_dist")?,
+        })
+    }
+    pub fn mapper_global_ba_config(&self) -> Result<GlobalBaConfig, ConfigError> {
+        Ok(GlobalBaConfig {
+            enabled: true,
+            use_lm: self.value("config.mapper_use_lm")?,
+            lambda_initial: self.value("config.mapper_lm_lambda_min")?,
+            lambda_min: self.value("config.mapper_lm_lambda_min")?,
+            lambda_max: self.value("config.mapper_lm_lambda_max")?,
+            max_iterations: GlobalBaConfig::default().max_iterations,
+            huber_delta: self.value("config.mapper_obs_huber_thresh")?,
+            observation_std_dev: self.value("config.mapper_obs_std_dev")?,
+            use_factors: self.value("config.mapper_use_factors")?,
+        })
+    }
     pub fn consumed_keys(&self) -> usize {
         self.values.len()
     }
@@ -167,6 +204,15 @@ mod tests {
         assert_eq!(e.initial_pose_weight, 1.0e8);
         assert_eq!(e.initial_accel_bias_weight, 1.0e1);
         assert_eq!(e.initial_gyro_bias_weight, 1.0e2);
+        assert_eq!(c.mapper_config().unwrap(), MapperConfig::default());
+        assert_eq!(
+            c.offline_mapper_config().unwrap(),
+            OfflineMapperConfig::default()
+        );
+        assert_eq!(
+            c.mapper_global_ba_config().unwrap(),
+            GlobalBaConfig::default()
+        );
         assert_eq!(
             serde_json::to_string(&c).unwrap(),
             serde_json::to_string(&c).unwrap()
