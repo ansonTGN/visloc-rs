@@ -1,0 +1,13 @@
+{
+  "schema": "visloc-rs.basalt.m7ez.ordinal3-camera-jacobian.v1",
+  "source": "target/m7ew_ordinal3_jp_frontier.json",
+  "ordinal": 3,
+  "camera_params_f32_bits": [
+    "43aee0c5", "43ae5cbe", "43b6f27c", "43795478", "be76bd89", "3f1126b5"
+  ],
+  "target_point_xyz_f32_bits": ["bf168e1b", "be731644", "3f45ede0"],
+  "projection_uv_f32_bits": ["428ffd82", "43030c0a"],
+  "camera_jacobian_column_major_f32_bits": [
+    "43bd0848", "c243e04b", "c244749c", "43ef3fd0", "43883f6e", "42db5669"
+  ]
+}

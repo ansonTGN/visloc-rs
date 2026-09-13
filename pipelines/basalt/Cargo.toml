@@ -1,0 +1,29 @@
+[package]
+name = "visloc-basalt"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Faithful Basalt VI-SLAM contracts and calibration foundations for visloc-rs."
+readme = "PROVENANCE.md"
+documentation = "https://docs.rs/visloc-basalt"
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = []
+# Keep timing out of canonical release builds unless explicitly requested.
+basalt-timing-breakdown = []
+# Capacity-only reuse of the clean LM landmark QR scratch buffers.  Disabled
+# by default so canonical builds retain the historical allocation path.
+basalt-lm-workspace-reuse = []
+[dependencies]
+base64 = "0.22"
+image = { version = "=0.25.5", default-features = false, features = ["png"] }
+nalgebra = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = { workspace = true }
+visloc-core = { path = "../../crates/core", version = "0.1.0" }

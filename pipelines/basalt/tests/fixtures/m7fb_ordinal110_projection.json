@@ -1,0 +1,23 @@
+{
+  "schema": "visloc-rs.basalt.m7fb.ordinal110-projection.v1",
+  "source": "target/m7fb_ordinal110_projection.json",
+  "ordinal": 110,
+  "relation": "cross-time frame 0 cam0 -> frame 4 cam1",
+  "camera_params_f32_bits": [
+    "43b4d5f0", "43b44af7", "43bdb43f", "437ffa30", "be5a1edd", "3f13a2ab"
+  ],
+  "direction_xy_f32_bits": ["be80b1ef", "bd33aa7c"],
+  "inverse_distance_f32_bits": "3e4db2e6",
+  "observation_f32_bits": ["4308f5bb", "434d03fc"],
+  "q_xyzw_f32_bits": ["3ba066a6", "bbce2fcd", "3ac222e9", "3f7ffdda"],
+  "t_xyz_f32_bits": ["bde17018", "bce785d8", "baa35d96"],
+  "transform_t_t_h_f32_bits_column_major": [
+    "3f7ffa86", "3b3e17c4", "3c4e6ae4", "00000000",
+    "bb462acc", "3f7ffc92", "3c20171f", "00000000",
+    "bc4df140", "bc20b37c", "3f7ff7ab", "00000000",
+    "bde17018", "bce785d8", "baa35d96", "3f800000"
+  ],
+  "target_point4_f32_bits": ["bf013d67", "bdc8bcda", "3f5ee20a", "3e4db2e6"],
+  "projection_uv_f32_bits": ["430a717f", "43515578"],
+  "raw_residual_uv_f32_bits": ["3fbde200", "408a2f80"]
+}

@@ -1,0 +1,28 @@
+{
+  "schema": "visloc-rs.basalt.m7dx.clean-track1-relative-pose-jacobian.v1",
+  "factor": "frame 4 / iteration 0 / track 1 / host frame 0 cam 0 -> target frame 1 cam 1",
+  "host_pose_q_xyzw": ["bd582e43", "bf4d686f", "00000000", "3f182ffd"],
+  "host_pose_t_xyz": ["00000000", "00000000", "00000000"],
+  "target_pose_q_xyzw": ["bd5cdea6", "bf4d341f", "bb2aa78b", "3f186f67"],
+  "target_pose_t_xyz": ["39c8bb60", "b8cebae8", "bb0527fc"],
+  "host_extrinsic_q_xyzw": ["bbed3c0f", "3bf71cd4", "3f33a827", "3f365a1e"],
+  "host_extrinsic_t_xyz": ["bc896b48", "bd8d2fdc", "3ba86617"],
+  "target_extrinsic_q_xyzw": ["bb19188b", "3c55012e", "3f33d4ed", "3f362af6"],
+  "target_extrinsic_t_xyz": ["bc76fa76", "3d290319", "3b4f4832"],
+  "d_rel_d_h_bits_column_major": [
+    "3dda79b6", "3e8b3905", "bf74d5e7", "00000000", "00000000", "00000000",
+    "3f7e5132", "bd8df611", "3dba92eb", "00000000", "00000000", "00000000",
+    "bd2a12f8", "bf75b6c9", "be8e17f1", "00000000", "00000000", "00000000",
+    "3c93c295", "bd226d6d", "bc17c309", "3dda79b6", "3e8b3905", "bf74d5e7",
+    "baf80708", "b9828894", "3ca77d77", "3f7e5132", "bd8df611", "3dba92eb",
+    "3a8bd263", "bc37c50e", "3d1e3cc5", "bd2a12f8", "bf75b6c9", "be8e17f1"
+  ],
+  "d_rel_d_t_bits_column_major": [
+    "bdda79af", "be8b3907", "3f74d5e9", "00000000", "00000000", "00000000",
+    "bf7e5131", "3d8df601", "bdba92eb", "00000000", "00000000", "80000000",
+    "3d2a12d7", "3f75b6ca", "3e8e17f1", "00000000", "00000000", "00000000",
+    "bc833104", "3d223cf7", "3c1b3e27", "bdda79af", "be8b3907", "3f74d5e9",
+    "3addb39c", "388626ba", "bc96b372", "bf7e5131", "3d8df601", "bdba92eb",
+    "ba312e45", "3c37c62b", "bd1e7b0f", "3d2a12d7", "3f75b6ca", "3e8e17f1"
+  ]
+}

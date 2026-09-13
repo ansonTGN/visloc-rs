@@ -1,0 +1,29 @@
+{
+  "schema": "visloc-rs.basalt.m7fx.same-timestamp-clean-relpose-jacobian.v1",
+  "factor": "frame 4 / iteration 0 / track 1 / host frame 0 cam 0 -> target frame 0 cam 1",
+  "provenance": "target/m7fw_clean_rel_jacs_all.json completion_ordinal 0",
+  "host_pose_q_xyzw": ["bd582e43", "bf4d686f", "00000000", "3f182ffd"],
+  "host_pose_t_xyz": ["00000000", "00000000", "00000000"],
+  "target_pose_q_xyzw": ["bd582e43", "bf4d686f", "00000000", "3f182ffd"],
+  "target_pose_t_xyz": ["00000000", "00000000", "00000000"],
+  "host_extrinsic_q_xyzw": ["bbed3c0f", "3bf71cd4", "3f33a827", "3f365a1e"],
+  "host_extrinsic_t_xyz": ["bc896b48", "bd8d2fdc", "3ba86617"],
+  "target_extrinsic_q_xyzw": ["bb19188b", "3c55012e", "3f33d4ed", "3f362af6"],
+  "target_extrinsic_t_xyz": ["bc76fa76", "3d290319", "3b4f4832"],
+  "d_rel_d_h_bits_column_major": [
+    "3dd075ed", "3e8c7f1f", "bf74ca42", "00000000", "00000000", "00000000",
+    "3f7e6b43", "bd90e41c", "3daf14a4", "00000000", "00000000", "00000000",
+    "bd35018a", "bf758184", "be8f50df", "00000000", "00000000", "00000000",
+    "3c833f20", "bd2221b8", "bc1e2b04", "3dd075ed", "3e8c7f1f", "bf74ca42",
+    "bad2e6af", "b99aef72", "3c973b7e", "3f7e6b43", "bd90e41c", "3daf14a4",
+    "3a3bcb89", "bc3935d2", "3d1e2c4d", "bd35018a", "bf758184", "be8f50df"
+  ],
+  "d_rel_d_t_bits_column_major": [
+    "bdd075ed", "be8c7f1f", "3f74ca42", "00000000", "00000000", "00000000",
+    "bf7e6b43", "3d90e41c", "bdaf14a4", "00000000", "00000000", "80000000",
+    "3d35018a", "3f758184", "3e8f50df", "00000000", "00000000", "00000000",
+    "bc833f20", "3d2221b8", "3c1e2b05", "bdd075ed", "be8c7f1f", "3f74ca42",
+    "3ad2e6af", "399aef72", "bc973b7e", "bf7e6b43", "3d90e41c", "bdaf14a4",
+    "ba3bcb89", "3c3935d2", "bd1e2c4d", "3d35018a", "3f758184", "3e8f50df"
+  ]
+}

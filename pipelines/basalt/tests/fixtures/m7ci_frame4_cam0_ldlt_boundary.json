@@ -1,0 +1,26 @@
+{
+  "schema": "m7ci-frame4-cam0-ldlt-boundary-v1",
+  "source_bits": ["0x43830000", "0x42140000"],
+  "source_timestamp_ns": 1403636579913555456,
+  "target_timestamp_ns": 1403636579963555584,
+  "camera": 0,
+  "track_id": 210,
+  "level": 3,
+  "hessian_bits": [
+    "0x3fb8c0ff", "0xbf7bab82", "0x3fff4a69",
+    "0xbf7bab82", "0x4119e7f0", "0x4039dda9",
+    "0x3fff4a69", "0x4039dda9", "0x42301f20"
+  ],
+  "native_inverse_bits": [
+    "0x3f519e8f", "0x3dc644d6", "0xbd3213f2",
+    "0x3dc644d6", "0x3df0ad3f", "0xbc46d83e",
+    "0xbd3213f1", "0xbc46d83e", "0x3cd0be6f"
+  ],
+  "rust_inverse_bits": [
+    "0x3f519e8f", "0x3dc644d6", "0xbd3213f1",
+    "0x3dc644d6", "0x3df0ad3f", "0xbc46d83e",
+    "0xbd3213f1", "0xbc46d83e", "0x3cd0be6e"
+  ],
+  "native_l3_i0_increment_bits": ["0xbd66e4de", "0xbf75005a", "0x3d6bf2d0"],
+  "rust_l3_i0_increment_bits": ["0xbd66e4e3", "0xbf75005a", "0x3d6bf2ce"]
+}

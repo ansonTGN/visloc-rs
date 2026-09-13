@@ -1,0 +1,10 @@
+{
+  "schema": "visloc-rs.basalt.m7ez.ordinal38-projection.v1",
+  "source": "target/m7ex_ordinal38_projection_frontier.json",
+  "ordinal": 38,
+  "camera_params_f32_bits": [
+    "43b4d5f0", "43b44af7", "43bdb43f", "437ffa30", "be5a1edd", "3f13a2ab"
+  ],
+  "target_point_xyz_f32_bits": ["bf04c770", "bed67432", "3f425028"],
+  "projection_uv_f32_bits": ["42f25155", "424034ff"]
+}

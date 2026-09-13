@@ -767,6 +767,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
 
 [[package]]
+name = "visloc-basalt"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "image",
+ "nalgebra",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "visloc-core",
+]
+
+[[package]]
 name = "visloc-core"
 version = "0.1.0"
 dependencies = [
@@ -830,6 +843,8 @@ dependencies = [
  "nalgebra",
  "ndarray",
  "rayon",
+ "serde_json",
+ "visloc-basalt",
  "visloc-core",
  "visloc-fusion",
  "visloc-io",

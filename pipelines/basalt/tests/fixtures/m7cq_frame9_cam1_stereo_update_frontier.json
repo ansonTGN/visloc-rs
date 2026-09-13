@@ -1,0 +1,30 @@
+{
+  "schema": "m7cq-frame9-cam1-stereo-update-frontier-v1",
+  "source": "pinned native Eigen 5.0.1 frame-9 cam1 new-stereo trace; canonical affine order [a00,a01,a10,a11,tx,ty]",
+  "path": "new cam0 FAST point -> StereoForwardSe2Ic -> StereoBackwardSe2Ic",
+  "frame": 9,
+  "camera": 1,
+  "track_id": 481,
+  "source_bits": ["0x442b0000", "0x42540000"],
+  "level": 3,
+  "iteration": 1,
+  "pre_transform_bits": [
+    "0x3f7ddbfd", "0xbe0425d4", "0x3e0425d4", "0x3f7ddbfd",
+    "0x42adb8f5", "0x40f7ec5e"
+  ],
+  "increment_bits": ["0xbe18cf0d", "0x3ebd2b4c", "0xbe0fde47"],
+  "exp_bits": [
+    "0x3f7d7a40", "0x3e0f653b", "0xbe0f653b", "0x3f7d7a40",
+    "0xbdfb8ba7", "0x3ec1e7e5"
+  ],
+  "native_post_bits": [
+    "0x3f7ffbf9", "0x3c359c70", "0xbc359c70", "0x3f7ffbf9",
+    "0x42ad6193", "0x4101b788"
+  ],
+  "rust_post_bits": [
+    "0x3f7ffbfa", "0x3c359c6a", "0xbc359c77", "0x3f7ffbf9",
+    "0x42ad6193", "0x4101b788"
+  ],
+  "native_endpoint_bits": ["0x428105e8"],
+  "rust_endpoint_bits": ["0x428105e7"]
+}

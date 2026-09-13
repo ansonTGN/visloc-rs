@@ -1,0 +1,21 @@
+{
+  "schema": "visloc-rs.basalt.m7fi.ordinal311-projection.v1",
+  "source": "target/m7fg_ordinal311_projection.json",
+  "ordinal": 311,
+  "relation": "cross-time frame 0 cam0 -> frame 1 cam1",
+  "camera_params_f32_bits": [
+    "43b4d5f0", "43b44af7", "43bdb43f", "437ffa30", "be5a1edd", "3f13a2ab"
+  ],
+  "direction_xy_f32_bits": ["be830522", "bd01766c"],
+  "inverse_distance_f32_bits": "3e59788c",
+  "observation_f32_bits": ["430891dd", "4369ce4d"],
+  "transform_t_t_h_f32_bits_column_major": [
+    "3f7ffea4", "ba71deac", "3bd0c3e6", "00000000",
+    "3a87685a", "3f7ff61a", "bc8e2141", "00000000",
+    "bbd0358b", "3c8e2e4e", "3f7ff4ce", "00000000",
+    "bde1e255", "baf1ec60", "ba884368", "3f800000"
+  ],
+  "target_point4_f32_bits": ["bf024930", "bd344ff6", "3f5f77ea", "3e59788c"],
+  "projection_uv_f32_bits": ["4308bb31", "436b0c94"],
+  "raw_residual_uv_f32_bits": ["3e255000", "3f9f2380"]
+}
