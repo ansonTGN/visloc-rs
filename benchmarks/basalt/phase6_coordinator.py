@@ -1635,6 +1635,33 @@ def _local_file_binding_matches_current(binding: Any) -> bool:
         return False
 
 
+def _rust_executable_binding_matches_current(
+    binding: Any, *, runtime_profile: str
+) -> bool:
+    """Validate the host-local or provenance-bound Rust executable.
+
+    A WSL executable is deliberately not visible through ``WindowsPath``.
+    Its provenance and exactness certificate are validated above, and the
+    Linux runner re-hashes the remote file immediately before execution.
+    Requiring a second host-local ``Path.is_file`` check would reject every
+    real ``rust_wsl_linux`` run while allowing its dry-run plan.
+    """
+
+    if runtime_profile != RUST_RUNTIME_PROFILE_WSL:
+        return _local_file_binding_matches_current(binding)
+    if not isinstance(binding, Mapping):
+        return False
+    path = binding.get("path")
+    if not isinstance(path, str) or not path.startswith("/"):
+        return False
+    if not _valid_sha256(binding.get("sha256")):
+        return False
+    try:
+        return int(binding.get("bytes")) >= 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _wsl_file_binding(document: Mapping[str, Any], key: str, *, label: str) -> dict[str, Any]:
     """Validate one remote WSL file binding from a Rust provenance record."""
 
@@ -2358,7 +2385,10 @@ def build_plan(
             else None
         )
     if METHOD_RUST in method_ids and require_sources:
-        if not _local_file_binding_matches_current(rust_executable_binding):
+        if not _rust_executable_binding_matches_current(
+            rust_executable_binding,
+            runtime_profile=rust_runtime_profile,
+        ):
             raise CoordinatorError(
                 "rust_current requires an available executable with a valid content SHA-256 binding"
             )

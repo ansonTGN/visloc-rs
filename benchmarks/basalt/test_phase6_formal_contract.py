@@ -33,3 +33,19 @@ def test_rust_config_bytes_match_pinned_native_oracle():
     assert hashlib.sha256(coordinator.DEFAULT_CONFIG.read_bytes()).hexdigest() == (
         "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
     )
+
+
+def test_wsl_rust_binding_does_not_require_a_windows_local_path():
+    remote = {
+        "path": "/mnt/e/release/basalt_euroc_vio_demo",
+        "bytes": 1234,
+        "sha256": "ab" * 32,
+    }
+    assert coordinator._rust_executable_binding_matches_current(
+        remote,
+        runtime_profile=coordinator.RUST_RUNTIME_PROFILE_WSL,
+    )
+    assert not coordinator._rust_executable_binding_matches_current(
+        remote,
+        runtime_profile=coordinator.RUST_RUNTIME_PROFILE_MSVC,
+    )
