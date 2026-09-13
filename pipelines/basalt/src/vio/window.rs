@@ -6342,7 +6342,10 @@ fn so3_exp_f32(omega: Vector3<f32>) -> UnitQuaternion<f32> {
     } else {
         let theta = theta_sq.sqrt();
         let half_theta = 0.5_f32 * theta;
-        (half_theta.sin() / theta, half_theta.cos())
+        (
+            crate::update::portable_cosf::sinf(half_theta) / theta,
+            crate::update::portable_cosf::cosf(half_theta),
+        )
     };
     UnitQuaternion::new_unchecked(Quaternion::new(
         real_factor,
@@ -12296,6 +12299,30 @@ mod tests {
         assert_ne!(
             actual.translation.map(|value| (value as f32).to_bits()),
             naive_translation.map(|value| value.to_bits())
+        );
+    }
+
+    #[test]
+    fn pose_only_so3_exp_matches_frame174_portable_oracle() {
+        // MH_01 frame 174, iteration 0, pose-only block 112. Both targets
+        // receive these exact FEJ-base and accumulated-tangent bits.
+        let f = f32::from_bits;
+        let before = UnitQuaternion::new_unchecked(Quaternion::new(
+            f(0x3f16_aba4),
+            f(0xbd94_e019),
+            f(0xbf4d_7c08),
+            f(0xbd82_0a27),
+        ));
+        let omega = Vector3::new(f(0xbba4_3bd6), f(0xbc41_ea40), f(0xb91b_19cc));
+        let delta = so3_exp_f32(omega);
+        assert_eq!(
+            [delta.i, delta.j, delta.k, delta.w].map(f32::to_bits),
+            [0xbb24_3b8c, 0xbbc1_e9e9, 0xb89b_1986, 0x3f7f_fea6]
+        );
+        let updated = sophus_so3_product(delta, before);
+        assert_eq!(
+            [updated.i, updated.j, updated.k, updated.w].map(f32::to_bits),
+            [0xbd97_3eb7, 0xbf4e_6948, 0xbd7d_c672, 0x3f15_674c]
         );
     }
 

@@ -47,7 +47,7 @@ class SupplementalSourceDependencyTests(unittest.TestCase):
         self.assertEqual(result["known_source_hashes_verified_count"], 4)
         self.assertEqual(result["known_source_file_count"], 4)
         self.assertTrue(result["known_license_hash_verified"])
-        self.assertEqual(result["affected_production_file_hashes_verified_count"], 1)
+        self.assertEqual(result["affected_production_file_hashes_verified_count"], 2)
         self.assertEqual(result["errors"], [])
 
     def test_current_manifest_binds_sinf_to_production_se2_path(self) -> None:

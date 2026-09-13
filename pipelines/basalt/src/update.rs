@@ -204,7 +204,7 @@ impl Se2 {
 /// `work/m11_aor_cosf_immutable_source_evidence_20260907.json` and
 /// `work/m11_aor_sinf_immutable_source_evidence_20260907.json`.
 /// No LGPL glibc source is used.
-mod portable_cosf {
+pub(crate) mod portable_cosf {
     #[derive(Clone, Copy)]
     struct Coefficients {
         sign: [f64; 4],
@@ -295,7 +295,7 @@ mod portable_cosf {
         ((res0 as i64) as f64 * PI63, n)
     }
 
-    pub(super) fn cosf(y: f32) -> f32 {
+    pub(crate) fn cosf(y: f32) -> f32 {
         let top = abstop12(y);
         if top < PIO4_TOP {
             let x = y as f64;
@@ -339,7 +339,7 @@ mod portable_cosf {
     }
 
     /// AOR `sinf` wrapper used by the finite-angle Se2 path.
-    pub(super) fn sinf(y: f32) -> f32 {
+    pub(crate) fn sinf(y: f32) -> f32 {
         let top = abstop12(y);
         if top < PIO4_TOP {
             let x = y as f64;

@@ -94,9 +94,9 @@
       "affected_production_files": [
         {
           "path": "pipelines/basalt/src/update.rs",
-          "bytes": 26994,
-          "sha256": "0d743554a11b6f8537806cd76b42b41eaaa269e3b44f1bb828fad530de290dde",
-          "observed_status": "FINAL_SOURCE_FREEZE_BYTES; SHA-256 REBOUND 2026-09-13",
+          "bytes": 27005,
+          "sha256": "acc595d7daa70a755c13d92ec7f1f1636ceef76a6a908d37f2231e1b9b7833fe",
+          "observed_status": "CROSS-PLATFORM SO3 SOURCE REBIND; SHA-256 REBOUND 2026-09-13",
           "source_line_ranges": [
             "142-180",
             "191-379"
@@ -107,6 +107,21 @@
             "sinf": "production"
           },
           "translation_status": "Manual Rust translation; no literal AOR source subtree copied."
+        },
+        {
+          "path": "pipelines/basalt/src/vio/window.rs",
+          "bytes": 590754,
+          "sha256": "dca65766e68afe8f8a85cfdad2aafa951a88a7ee118e2fda2a821a3ec0e074e7",
+          "observed_status": "CROSS-PLATFORM SO3 SOURCE REBIND; SHA-256 CAPTURED 2026-09-13",
+          "source_line_ranges": [
+            "6330-6355"
+          ],
+          "use": "Finite-angle VIO SO3<float>::exp sine and cosine factors used by pose/state trial reconstruction and accepted-state updates.",
+          "function_scope": {
+            "cosf": "production",
+            "sinf": "production"
+          },
+          "translation_status": "Consumes the manual Rust AOR translation in update.rs; no literal AOR source subtree copied."
         }
       ],
       "attribution": [
@@ -145,7 +160,7 @@
     }
   ],
   "limitations": [
-    "Current tracked update.rs is rebound to the final source-freeze SHA-256; any later production edit requires another rebind.",
+    "Current tracked update.rs and window.rs consumers are rebound to their source SHA-256 values; any later production edit requires another rebind.",
     "The selected Cargo graph and 119-row Cargo inventory remain unchanged; this manifest is additive and does not make the AOR source a Cargo package.",
     "The complete hash-verified AOR LICENSE payload is persisted under third_party/licenses; no legal clearance is asserted."
   ]
