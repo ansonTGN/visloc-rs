@@ -2,12 +2,12 @@
   "schema_version": 2,
   "schema_id": "visloc-rs.basalt.provenance.v2",
   "manifest_id": "basalt-provenance-v2-frozen",
-  "captured_at": "2026-08-31T09:30:00+09:00",
+  "captured_at": "2026-09-13T08:59:58+00:00",
   "status": "frozen",
   "supersedes": {
     "path": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
-    "bytes": 46494,
-    "sha256": "76c08147035efaccffa9abeec6bd80d8a9f75d46a0e5331231d43ce8b747c513",
+    "bytes": 58209,
+    "sha256": "94ab07289227a99368d6dfed7ffe011313f00ad718b4f60395b00b8e273cc6aa",
     "schema_id": "visloc-rs.basalt.provenance.v1",
     "immutable": true,
     "retained_sections": [
@@ -58,12 +58,12 @@
       "hash_algorithm": "sha256",
       "hash_basis": "exact checked-out bytes; no line-ending normalization",
       "canonical_record": "relative POSIX path|lowercase SHA256, newline-joined and sorted",
-      "source_tree_sha256": "bf62dbae9df31a69232aaa8cc8ee54a5c5bfdff34e634c572113d86601e72622",
+      "source_tree_sha256": "9dc8b8b516587b7f8bbb619254ba17f91cb6164fbacdc4ee9f91f1c2e170d524",
       "files": [
         {
           "path": "pipelines/basalt/src/adapter.rs",
-          "bytes": 13188,
-          "sha256": "b3261499b12213db7f03d480ba69cba9d0faafcf5ef9080a34c729384d319e2c",
+          "bytes": 12704,
+          "sha256": "ffc50a777964ae4c55bc1afb6fc905fc7067a32a48d7dbbcb4648f61582d9088",
           "role": "production_rust"
         },
         {
@@ -86,8 +86,8 @@
         },
         {
           "path": "pipelines/basalt/src/euroc.rs",
-          "bytes": 22661,
-          "sha256": "d4773ada60baefab6190c0bd45af8610f78ad0e0e640d402ccf59be6f4ac270b",
+          "bytes": 25834,
+          "sha256": "02b36a7443d429b45c75bc1953045399577e8676decdb6a837c7fb3b7399cffd",
           "role": "production_rust"
         },
         {
@@ -98,14 +98,14 @@
         },
         {
           "path": "pipelines/basalt/src/imu/factors.rs",
-          "bytes": 129360,
-          "sha256": "b53604638fe0dcc68c5500cd7b7cdde306258ba787438e42c6898a14c857d95f",
+          "bytes": 142604,
+          "sha256": "495f29f1c45d88e8b68ca398a7e1f1a0dbd228ff19746a836f2d76efa922f2c3",
           "role": "production_rust"
         },
         {
           "path": "pipelines/basalt/src/imu/mod.rs",
-          "bytes": 1081,
-          "sha256": "6de279bb0774e5e58b09c3283cdc7ee0bed7fe73158e701a26d7f41b2c5e8680",
+          "bytes": 1364,
+          "sha256": "fde2b3bfaefeaf76ad8180ac00ec6148bcd344dc0a99e4650502f6ce0e4c1601",
           "role": "production_rust"
         },
         {
@@ -146,8 +146,8 @@
         },
         {
           "path": "pipelines/basalt/src/mapper/session.rs",
-          "bytes": 86477,
-          "sha256": "247401d17669c63459de727a9ea5c10578025681c3235f9e1823414cc655102d",
+          "bytes": 89004,
+          "sha256": "6da86500fbf4addb270f60b43851a18927daffab5998da09d9a6172413275653",
           "role": "production_rust"
         },
         {
@@ -182,8 +182,8 @@
         },
         {
           "path": "pipelines/basalt/src/stream.rs",
-          "bytes": 26589,
-          "sha256": "d0a48e28fbc5b6cd76211abdd75ba348d8dbf5cd663a8001b93ef141f770e6b7",
+          "bytes": 58932,
+          "sha256": "f46e4fe6bdcea22088984993b9d7fe82405c02e16a79bd30e705ea2eba8af856",
           "role": "production_rust"
         },
         {
@@ -212,32 +212,32 @@
         },
         {
           "path": "pipelines/basalt/src/update.rs",
-          "bytes": 11853,
-          "sha256": "00a9d573fddf52cf159cbceccab15dcc1a25198b75bf41e09a3e942e2ba61378",
+          "bytes": 26994,
+          "sha256": "0d743554a11b6f8537806cd76b42b41eaaa269e3b44f1bb828fad530de290dde",
           "role": "production_rust"
         },
         {
           "path": "pipelines/basalt/src/vio/aom.rs",
-          "bytes": 692013,
-          "sha256": "246979610f9c6537311ac1d3e94f611ce6f7efdf265d357ba3cbc6588a1c9667",
+          "bytes": 856564,
+          "sha256": "5a95f499f1849d0bdeaf7301faf6d1108ed014f62731733406ca79d96e129dee",
           "role": "production_rust"
         },
         {
           "path": "pipelines/basalt/src/vio/estimator.rs",
-          "bytes": 196458,
-          "sha256": "a43eaa12e79eefbb3a87f2a05354032e981296d8f124cf5a52f60a77ad71b45d",
+          "bytes": 301286,
+          "sha256": "7bfcb580d9366a8735d5b67243d7134eb1c11ea879256c41d76b50f06ebe8b00",
           "role": "production_rust"
         },
         {
           "path": "pipelines/basalt/src/vio/landmarks.rs",
-          "bytes": 83038,
-          "sha256": "5eab7c4749ab92bdec249cf5e9a354cfabd66cfafbc2b328b1cd4d1fa765c831",
+          "bytes": 122380,
+          "sha256": "cde9c23836b4513df8ae95c47b132360b5bc904247c53b2b52b13e0fbca2e40e",
           "role": "production_rust"
         },
         {
           "path": "pipelines/basalt/src/vio/margdata.rs",
-          "bytes": 52986,
-          "sha256": "060f18dc1f81ac0a3603e41340647e41c25a4ec7a5a5e007e0e1c3701aaa1274",
+          "bytes": 80788,
+          "sha256": "a58ff6f6b3bb36d054e10c04ec0a3b24372b5a5affc561e29254bbdf8dd262c0",
           "role": "production_rust"
         },
         {
@@ -254,15 +254,15 @@
         },
         {
           "path": "pipelines/basalt/src/vio/window.rs",
-          "bytes": 436210,
-          "sha256": "9facfcbfe0b76b29f764265ea90104699a0af82b293906c9d9baac43bfae36c0",
+          "bytes": 589694,
+          "sha256": "5476150e29df944084f88a94ca747a193c69c07faea7b60c8fd5a5108d92b8c7",
           "role": "production_rust"
         }
       ]
     },
     "tests": {
       "root": "pipelines/basalt/tests",
-      "file_count": 44,
+      "file_count": 48,
       "hash_algorithm": "sha256",
       "hash_basis": "exact checked-out bytes; no line-ending normalization",
       "files": [
@@ -282,6 +282,30 @@
           "path": "pipelines/basalt/tests/fixtures/klt_stream_synthetic.json",
           "bytes": 435,
           "sha256": "33560fa37fa47f713775af55df6bd7d53be3fd76d3c30fa0436a1d148cffee99",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m11_imu_r_f64_scaled_axis_candidate_20260908.json",
+          "bytes": 54675,
+          "sha256": "3109eda4cf9fe38be303ce58aa3633ab09179d194e11d044f30c263f3026a79e",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m11_prior39_model_frame24_native_20260909.json",
+          "bytes": 39138,
+          "sha256": "e1e776b7a21178cc6a4a0e83772e9d28c3fd0f91ad510d2b94b2eb94894e510c",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m11_prior_reanchor_rhs_schedule_20260908.json",
+          "bytes": 11252,
+          "sha256": "b6d9c2a265a32c5afe051de4258a72b403dd0365c0abe81d66b5d260e0182f0b",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m11_se2_exp_portable_cosf_witness.json",
+          "bytes": 1189,
+          "sha256": "d1ca5f7f5e85cec9783602241a2620ba83fc7bd83c840d02bc86e29203178d0a",
           "role": "rust_test_or_fixture"
         },
         {
@@ -412,8 +436,8 @@
         },
         {
           "path": "pipelines/basalt/tests/fixtures/m7im15_step_relpose_inputs_gdb_20260827.json",
-          "bytes": 26933,
-          "sha256": "5a244de65e33feecdcac0fb2a1f75743c3ad36f3b85a671861967b1e91c60bd8",
+          "bytes": 25680,
+          "sha256": "fa8130ada7f003c2f612c74a983ca337a058a3cda199b3f938bc9a60fe77294c",
           "role": "rust_test_or_fixture"
         },
         {
@@ -460,8 +484,8 @@
         },
         {
           "path": "pipelines/basalt/tests/m7bd_obs_pixel_exact.rs",
-          "bytes": 2174,
-          "sha256": "5ad4212d3dd39fc475037d4c49c80be21578f5241cfd12bed383153b9b8b7a5c",
+          "bytes": 7456,
+          "sha256": "de941d722da856864c03be3ebb764788bfc1a3c9cbf2661701289ec5e65e5977",
           "role": "rust_test_or_fixture"
         },
         {
@@ -478,8 +502,8 @@
         },
         {
           "path": "pipelines/basalt/tests/m7f_camera_contract.rs",
-          "bytes": 6929,
-          "sha256": "2a883b6236b7e1132b0380508481c354ed64be780213a675104af0f069e016a9",
+          "bytes": 6967,
+          "sha256": "10e98fb33d97be1f87437d8dd6343013e133714d8481a40e7002ab6e1a987ef6",
           "role": "rust_test_or_fixture"
         },
         {
@@ -507,7 +531,7 @@
           "role": "rust_test_or_fixture"
         },
         {
-          "path": "pipelines/basalt/tests/m8d_setup_opt_oracle.rs",
+          "path": "pipelines/basalt/tests/m8d_pose_opt_oracle.rs",
           "bytes": 10262,
           "sha256": "23f4fe88d62e4b891cf13186d609b821b0c204e8aa913544fb1f6011cf917637",
           "role": "rust_test_or_fixture"
@@ -520,8 +544,8 @@
         },
         {
           "path": "pipelines/basalt/tests/m8f_nfr_session.rs",
-          "bytes": 40675,
-          "sha256": "616cf7066b43cb36ab811a1c7bdcf889bc3351d26388d4864245eb0df96d7f60",
+          "bytes": 41169,
+          "sha256": "4ef050bd3c3387ccdfab61e3ae49e4aa19f12481c4daf55f9fc5380aaeb9ef6f",
           "role": "rust_test_or_fixture"
         },
         {
@@ -540,7 +564,7 @@
         "role": "config"
       },
       "calibration": {
-        "path": "target/euroc_ds_calib.json",
+        "path": "benchmarks/basalt/release_inputs/euroc_ds_calib.json",
         "bytes": 5967,
         "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
         "role": "calibration"
@@ -559,26 +583,26 @@
       },
       "workspace_cargo_toml": {
         "path": "Cargo.toml",
-        "bytes": 6107,
-        "sha256": "a54be7cfad7700b24a6ae3af5dc7efa5a2c04bcc2f3b28e68e304db0ec3f3e54",
+        "bytes": 6138,
+        "sha256": "5c049cc8597f7e05bf14cc50c098c09e71c0995adbbf4bee34e7c062ca868984",
         "role": "build_input"
       },
       "basalt_cargo_toml": {
         "path": "pipelines/basalt/Cargo.toml",
-        "bytes": 1072,
-        "sha256": "7c1533a4a3c50efeaa6e1428467690f2e7b82b58a0df1ae770a60dbbe2f30ad6",
+        "bytes": 1071,
+        "sha256": "3d7db0a7e58d2ef86894f548e896e0c354059ca8fcf6d9d2e94ec5200b30f1e2",
         "role": "build_input"
       },
       "cargo_lock": {
         "path": "Cargo.lock",
-        "bytes": 26592,
-        "sha256": "bc06922e3b6cf36766c292514a7a7681af322dfaa50ac14d40e915d48760ea35",
+        "bytes": 27662,
+        "sha256": "901cfb7ee48c13b030eb9c33288813a12a0773e608a070ee1a4dbd0e028b75d0",
         "role": "build_input"
       },
       "coordinator": {
         "path": "benchmarks/basalt/phase6_coordinator.py",
-        "bytes": 253824,
-        "sha256": "c966edbea2ed16532bc1cc93d4f0f419acb15be2d5be0e826b06fdf589471093",
+        "bytes": 270983,
+        "sha256": "4ed613fc6af934af14f2a0c31b61f4b42783e25de41864efccad11f33c25f95a",
         "role": "phase6_coordinator"
       },
       "native_runner": {
@@ -601,32 +625,32 @@
       },
       "license_inventory": {
         "path": "benchmarks/basalt/cargo_license_inventory_v2.json",
-        "bytes": 29952,
-        "sha256": "442d0c642bac9960b8754839b02642d49be3e0d67a1224477f5b390799f34c0f",
+        "bytes": 34108,
+        "sha256": "97b3c8db56f8ebda5e98975fefe1efcfae51bab19ac3d4f911ecf6cdf55a58ef",
         "role": "cargo_license_inventory_v2"
       },
       "correctness_certificate": {
-        "path": "work/m11_release_candidate_final2_correctness_20260831.json",
-        "bytes": 10818,
-        "sha256": "4657facf1b77aeb05c309d55680d57e77f87768cd142aaa4953d81f77b3659a7",
+        "path": "benchmarks/basalt/release_inputs/m11_release_candidate_avx2_reuse_correctness_20260913.json",
+        "bytes": 15485,
+        "sha256": "7ce63e1c9175c1cd5c6ba8f5cc7bf7f7d2f7223de336511cc4e562bf47d2937c",
         "role": "correctness_certificate"
       },
       "benchmark_readme": {
         "path": "benchmarks/basalt/README.md",
-        "bytes": 10078,
-        "sha256": "9e4998e2132c3ddc3fcf94b648b91d09f6328b91f21fbe0c89f6768a6b9e871b",
+        "bytes": 11216,
+        "sha256": "ab66a59d92d6c5b4ccd16fc3e92bce0757f24d1ab9fb0bc95b7a876e8db15202",
         "role": "benchmark_readme"
       },
       "provenance_audit": {
         "path": "benchmarks/basalt/PROVENANCE_AUDIT.md",
-        "bytes": 8119,
-        "sha256": "e6e57caf71a8d53666b04689b5630caa334cdf8ceb262f0463d3675c9199e4eb",
+        "bytes": 8430,
+        "sha256": "1e0892f63e5d845715e95b23f57738c027d10f8e70c574d8f61db541153db53f",
         "role": "provenance_audit"
       },
       "provenance_generator": {
         "path": "benchmarks/basalt/generate_provenance_manifest_v2.py",
-        "bytes": 34376,
-        "sha256": "dd961195fcb8949dcb78559a9472a5e0735b2540ca226691be82ffa67319571c",
+        "bytes": 36456,
+        "sha256": "159197ac81160bc03c80533262fcf63aae1c19ec4ffa5362bb2db30ef2d91496",
         "role": "provenance_generator"
       },
       "provenance_schema": {
@@ -637,8 +661,8 @@
       },
       "provenance_tests": {
         "path": "benchmarks/basalt/test_provenance_v2.py",
-        "bytes": 5737,
-        "sha256": "8b6bc18cbe3fe79fd550533e055a88cd8d918c51434d6d3dc358db7321c1b3f6",
+        "bytes": 10221,
+        "sha256": "4cdbc7efa1bf5416e4de3613c1410b6f5123788a24054c1e33abc5fd3813ec38",
         "role": "provenance_tests"
       },
       "benchmark_notice": {
@@ -667,9 +691,9 @@
         "dataset_manifest_sha256",
         "timing_feature_state"
       ],
-      "source_tree_sha256": "bf62dbae9df31a69232aaa8cc8ee54a5c5bfdff34e634c572113d86601e72622",
-      "cargo_toml_sha256": "a54be7cfad7700b24a6ae3af5dc7efa5a2c04bcc2f3b28e68e304db0ec3f3e54",
-      "cargo_lock_sha256": "bc06922e3b6cf36766c292514a7a7681af322dfaa50ac14d40e915d48760ea35",
+      "source_tree_sha256": "9dc8b8b516587b7f8bbb619254ba17f91cb6164fbacdc4ee9f91f1c2e170d524",
+      "cargo_toml_sha256": "5c049cc8597f7e05bf14cc50c098c09e71c0995adbbf4bee34e7c062ca868984",
+      "cargo_lock_sha256": "901cfb7ee48c13b030eb9c33288813a12a0773e608a070ee1a4dbd0e028b75d0",
       "input_sha256": {
         "config": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
         "calibration": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
@@ -682,23 +706,25 @@
         "env_is_not_a_substitute_for_compile_feature": true
       },
       "compiler": {
-        "rustc": "rustc 1.94.0; commit=4a4ef493e3a1488c6e321570238084b38948f6db; host=x86_64-pc-windows-msvc; LLVM=21.1.8",
+        "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02), host x86_64-pc-windows-msvc, LLVM 21.1.8",
         "target": "x86_64-pc-windows-msvc",
         "profile": "release"
       },
-      "cargo_features": [],
-      "lm_workspace_reuse": "disabled",
-      "build_command": "C:/Users/rsasa/.cargo/bin/cargo.exe build --locked --release --no-default-features --manifest-path C:/Users/rsasa/Workspace/visloc-rs/Cargo.toml --example basalt_euroc_vio_demo",
+      "cargo_features": [
+        "basalt-lm-workspace-reuse"
+      ],
+      "lm_workspace_reuse": "enabled",
+      "build_command": "RUSTFLAGS=-C target-feature=+avx2,+fma cargo build --locked --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse",
       "executable": {
-        "path": "target/m11_release_candidate_final2_ms_20260831/release/examples/basalt_euroc_vio_demo.exe",
-        "bytes": 3006976,
-        "sha256": "7307fc7c469b01af77530739773e9ef229a1213bec1cfee83e961ea93ea31fac",
+        "path": "target/m11_release_candidate_avx2_reuse_20260913/basalt_euroc_vio_demo.exe",
+        "bytes": 3749376,
+        "sha256": "580abf66ca0afa57c8d828388cb41b7ea15dbefcc7ce1abd670182a3b40ce938",
         "role": "selected_release_executable"
       },
       "build_evidence": {
-        "path": "work/m11_release_candidate_final2_build_20260831.err",
-        "bytes": 8322,
-        "sha256": "f5ff87a4369910b176f41ebd12adecabf95306e9a08ab5715d06f36bdbd41016",
+        "path": "target/m11_release_candidate_avx2_reuse_20260913/phase6_rust_build_manifest.json",
+        "bytes": 1897,
+        "sha256": "5e87b0d6de4fb07a3be1e5ce11815e5006422b75129dd05c0e13a97dda8b68b7",
         "role": "release_build_evidence"
       }
     },
@@ -712,8 +738,8 @@
     },
     "license": {
       "path": "benchmarks/basalt/cargo_license_inventory_v2.json",
-      "bytes": 29952,
-      "sha256": "442d0c642bac9960b8754839b02642d49be3e0d67a1224477f5b390799f34c0f",
+      "bytes": 34108,
+      "sha256": "97b3c8db56f8ebda5e98975fefe1efcfae51bab19ac3d4f911ecf6cdf55a58ef",
       "schema_id": "visloc-rs.cargo-license.v2",
       "package_count": 119,
       "licenses_resolved": 119,
@@ -722,27 +748,27 @@
       "legal_clearance_claimed": false
     },
     "correctness": {
-      "path": "work/m11_release_candidate_final2_correctness_20260831.json",
-      "bytes": 10818,
-      "sha256": "4657facf1b77aeb05c309d55680d57e77f87768cd142aaa4953d81f77b3659a7",
+      "path": "benchmarks/basalt/release_inputs/m11_release_candidate_avx2_reuse_correctness_20260913.json",
+      "bytes": 15485,
+      "sha256": "7ce63e1c9175c1cd5c6ba8f5cc7bf7f7d2f7223de336511cc4e562bf47d2937c",
       "role": "correctness_certificate",
       "schema": "visloc.basalt.release_candidate_correctness.v1",
       "status": "PASS_CORRECTNESS_ONLY",
       "scope": {
-        "features": [],
+        "features": [
+          "basalt-lm-workspace-reuse"
+        ],
         "timing_breakdown": "compile-time feature disabled",
-        "lm_workspace_reuse": "feature disabled",
+        "lm_workspace_reuse": "feature enabled",
         "performance_evaluation": false
       },
       "executable": {
-        "path": "target/m11_release_candidate_final2_ms_20260831/release/examples/basalt_euroc_vio_demo.exe",
-        "bytes": 3006976,
-        "sha256": "7307FC7C469B01AF77530739773E9EF229A1213BEC1CFEE83E961EA93EA31FAC"
+        "path": "target/m11_release_candidate_avx2_reuse_20260913/basalt_euroc_vio_demo.exe",
+        "bytes": 3749376,
+        "sha256": "580ABF66CA0AFA57C8D828388CB41B7EA15DBEFCC7CE1ABD670182A3B40CE938"
       },
-      "source_binding_file_count": 11,
-      "certificate_warnings": [
-        "certificate input hash differs from current contract: calibration"
-      ],
+      "source_binding_file_count": 33,
+      "certificate_warnings": [],
       "replays": [
         {
           "name": "max52_lean",
@@ -751,14 +777,14 @@
           "frames_processed": 52,
           "observations_emitted": 14661,
           "imu_samples_delivered": 512,
-          "summary_sha256": "C79F130A01BC3D1A2ADDB7A4135B0C384DC51531662259F2B9D8B3B34D764E3F",
+          "summary_sha256": "AC9EE96059B2B720760E0262A71E48637C648D7A2BC573F3CA5A06E4570D8688",
           "trajectory_csv": {
-            "bytes": 7082,
-            "sha256": "5F389D899682B34F296AF4B59B8BCEA2080FBD5E71D86265A8CE0AC849FDF4EA"
+            "bytes": 7079,
+            "sha256": "23EA4883A8726AEF1E5DA5BD9D12B66AAD683C669728B68259A0698ED538EB48"
           },
           "trajectory_tum": {
-            "bytes": 6356,
-            "sha256": "41A21BA235ABAC75875F403074EFD31F1509E5D91453E04FA3257A796DC150EF9"
+            "bytes": 6353,
+            "sha256": "63DEEA29F52899D6A840B2879134D50587BB1E5841D4A89AE1685DD9F2133AFF"
           },
           "forbidden_absent": [
             "trace.jsonl",
@@ -779,14 +805,14 @@
           "frames_processed": 80,
           "observations_emitted": 24256,
           "imu_samples_delivered": 792,
-          "summary_sha256": "9087A99250F6CD55C3BD2AA7E8DB29B8D4B4C24B11CA756787B39E05B00EFAEF",
+          "summary_sha256": "24E2569664CF30AA6407197BB78B483120591C83A8F8A7BD3086EED5457F8043",
           "trajectory_csv": {
-            "bytes": 10851,
-            "sha256": "9B8838BB856404C2B0B54018C25BFBF2942C29E6D1ED2772E7D4F82A570ADEC3"
+            "bytes": 10847,
+            "sha256": "7658A0DB9708F901C4FBC23C473862C21009ED3F9EEF54B1D48D9FAA0B9CC165"
           },
           "trajectory_tum": {
-            "bytes": 9768,
-            "sha256": "2DCCBB00FC5A55F27C9E059492D047E8CCA07BD7B5BA32C9CD8329C0678724E9"
+            "bytes": 9764,
+            "sha256": "919A361DF16D86ADC508EF1FA13E10E7200E18BD2032C124ADC9926AF2F5419C"
           },
           "forbidden_absent": [
             "trace.jsonl",
@@ -807,14 +833,14 @@
           "frames_processed": 400,
           "observations_emitted": 106981,
           "imu_samples_delivered": 3992,
-          "summary_sha256": "7D559E507B57887441344CC2211255A7342687BCC9037BECE10DFB581C70EF3F",
+          "summary_sha256": "D899D28B49C9A970F495196985F4E0CF5545F720DE3CB8992623DEAC91841A6C",
           "trajectory_csv": {
-            "bytes": 53776,
-            "sha256": "0838EB33CA8947BE6E7E9A66251002D8EC46E10E76BB22155CB7C1B1AA206FFC"
+            "bytes": 53762,
+            "sha256": "6606E95C8FA1B6F8EDAEABDE931308821F0C91238EDA99AFC6BFD73A13D14A55"
           },
           "trajectory_tum": {
-            "bytes": 48520,
-            "sha256": "363AC4A76D6C73D1E48F96DCF22D632960463F3FCBCF6CFBB64D31938C48D919"
+            "bytes": 48506,
+            "sha256": "32038A918D62E7B677F950BD92ED8B88FC40007404AFEC04113ECA3B1035F138"
           },
           "forbidden_absent": [
             "trace.jsonl",
@@ -830,16 +856,11 @@
         }
       ],
       "aggregate": {
-        "replays_successful": "3/3",
-        "trajectory_csv_exact": "3/3",
-        "trajectory_tum_exact": "3/3",
-        "frame_counts_exact": "3/3",
-        "observation_counts_exact": "3/3",
-        "imu_counts_exact": "3/3",
-        "forbidden_outputs_absent": "3/3",
-        "state_and_lifecycle_event_hashes": "not_evaluable_for_lean_runs",
-        "performance_gate": "not_evaluated",
-        "gt_metrics": "not_evaluated_gt_not_passed_to_engine"
+        "all_exit_zero": true,
+        "all_frame_counts_exact": true,
+        "all_independent_trajectory_replays_byte_exact": true,
+        "all_observation_and_imu_counts_exact": true,
+        "performance_claimed": false
       }
     }
   },

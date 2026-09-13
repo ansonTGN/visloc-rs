@@ -1305,7 +1305,7 @@
       "upstream_refs": [
         "basalt"
       ],
-      "sha256": "156e8c2da2a3bf5366aaad360f91f8e865073ee2229d1471b988f0e0ec919f63"
+      "sha256": "5016f0b3ef7536d0a0ab474d4201b1bd60481305208dd61d21ba6f8c976f5087"
     },
     "benchmarks/basalt/generate_provenance_manifest_v2.py": {
       "kind": "manifest_generator",
@@ -1313,7 +1313,7 @@
       "upstream_refs": [
         "basalt"
       ],
-      "sha256": "6038551303fb46ee6f862deeb081e5d8c6f76a9f78fa17eee9788f046d7c8844"
+      "sha256": "159197ac81160bc03c80533262fcf63aae1c19ec4ffa5362bb2db30ef2d91496"
     },
     "benchmarks/basalt/generate_rc_source_closure.py": {
       "kind": "manifest_generator",
@@ -1393,7 +1393,7 @@
       "upstream_refs": [
         "basalt"
       ],
-      "sha256": "dd76212f5d36b9b7403c3a2df55b77e73f82f764fcb856079bc92707994d2fd4"
+      "sha256": "4cdbc7efa1bf5416e4de3613c1410b6f5123788a24054c1e33abc5fd3813ec38"
     },
     "benchmarks/basalt/test_selected_license_payload.py": {
       "kind": "contract_test",
@@ -1401,7 +1401,7 @@
       "upstream_refs": [
         "basalt"
       ],
-      "sha256": "c727128ce9d0a9385d7b7aaca2a157ae7672b6d50813d4d76eab0463fb768c71"
+      "sha256": "9d6565376891555811aa2fb60561037140b45e8673682d3f41070d97b6f9e29c"
     },
     "benchmarks/basalt/test_selected_license_report.py": {
       "kind": "contract_test",
@@ -1417,7 +1417,7 @@
       "upstream_refs": [
         "basalt"
       ],
-      "sha256": "04edef4db55675a22ee26d4ec493baf2b1e1ffdd3afbcc85c4bdd5a50bbff4df"
+      "sha256": "2122c0be11dedd2ce6a57b815814588860e6a9438bc5004c2406d50bb48e2b4d"
     },
     "benchmarks/basalt/verify_supplemental_source_dependencies.py": {
       "kind": "provenance_checker",
@@ -1425,7 +1425,7 @@
       "upstream_refs": [
         "basalt"
       ],
-      "sha256": "19b4ae1c9d1b9ada9569d08d70a08e18b87e8c10d88044cd373449265ec8eedc"
+      "sha256": "193933ac5b8ac9844dadf56b3e88fda21a2693feb8394df9517733e0d4c65fe9"
     },
     "pipelines/basalt/examples/export_rust_imu_golden.rs": {
       "kind": "diagnostic_probe",

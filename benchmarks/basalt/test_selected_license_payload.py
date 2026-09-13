@@ -77,17 +77,20 @@ class SelectedLicensePayloadTests(unittest.TestCase):
         )
         MODULE._validate_selected_report(report)
 
-    def test_build_refuses_current_pending_supplement_before_staging(self) -> None:
+    def test_build_stages_current_verified_supplement(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "candidate"
-            with self.assertRaisesRegex(MODULE.PayloadError, "supplemental source coverage"):
-                MODULE.build_payload(
-                    root=Path(__file__).resolve().parents[2],
-                    report_path=Path(__file__).resolve().parents[2] / "work" / "m11_selected_license_graph_20260907.json",
-                    output_root=output,
-                    cargo_lock_path=Path(__file__).resolve().parents[2] / "Cargo.lock",
-                )
-            self.assertFalse(output.exists())
+            root = Path(__file__).resolve().parents[2]
+            manifest = MODULE.build_payload(
+                root=root,
+                report_path=root / "work" / "m11_selected_license_graph_20260913.json",
+                output_root=output,
+                cargo_lock_path=root / "Cargo.lock",
+            )
+            self.assertTrue((output / "candidate_license_payload_manifest.json").is_file())
+            self.assertEqual(manifest["status"], "pass_candidate_selected_license_payload_staged")
+            self.assertEqual(manifest["verification"]["package_count"], 66)
+            self.assertEqual(manifest["verification"]["missing_license_text_count"], 0)
 
     def test_rendered_manifest_distinguishes_referenced_aor_from_output_files(self) -> None:
         markdown = MODULE._render_markdown(

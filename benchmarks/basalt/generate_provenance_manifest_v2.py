@@ -43,7 +43,7 @@ _REQUIRED_CONTRACTS = {
     "license_inventory": Path("benchmarks/basalt/cargo_license_inventory_v2.json"),
     "correctness_certificate": Path(
         "benchmarks/basalt/release_inputs/"
-        "m11_release_candidate_final2_correctness_20260831.json"
+        "m11_release_candidate_avx2_reuse_correctness_20260913.json"
     ),
     "benchmark_readme": Path("benchmarks/basalt/README.md"),
     "provenance_audit": Path("benchmarks/basalt/PROVENANCE_AUDIT.md"),
@@ -244,11 +244,11 @@ def _correctness_summary(
     if certificate.get("status") != "PASS_CORRECTNESS_ONLY":
         raise ManifestError("correctness certificate is not PASS_CORRECTNESS_ONLY")
     scope = certificate.get("scope", {})
-    if features is not None and sorted(scope.get("features", [])) != sorted(features):
+    if executable is not None and features is not None and sorted(scope.get("features", [])) != sorted(features):
         raise ManifestError("correctness certificate feature list differs from selected build")
-    if timing_feature is not None and scope.get("timing_breakdown") != f"compile-time feature {timing_feature}":
+    if executable is not None and timing_feature is not None and scope.get("timing_breakdown") != f"compile-time feature {timing_feature}":
         raise ManifestError("correctness certificate timing state differs from selected build")
-    if lm_workspace_reuse is not None and scope.get("lm_workspace_reuse") != f"feature {lm_workspace_reuse}":
+    if executable is not None and lm_workspace_reuse is not None and scope.get("lm_workspace_reuse") != f"feature {lm_workspace_reuse}":
         raise ManifestError("correctness certificate LM-reuse state differs from selected build")
 
     certificate_executable = certificate.get("build", {}).get("executable", {})

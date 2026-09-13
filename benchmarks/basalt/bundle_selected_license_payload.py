@@ -7,8 +7,9 @@ texts, and the two checked-in Basalt attribution notices.  Before any staging,
 it also requires the independent supplemental non-Cargo source verifier to
 prove the manually translated AOR source and persisted license payload.  It
 never downloads or edits a source, inventory, cache, or existing destination;
-the current candidate therefore remains pending/non-release and stages no
-payload.
+it refuses to stage anything unless that supplemental payload verifies.  A
+successful invocation stages a fresh candidate payload without claiming legal
+clearance.
 
 The output is a candidate payload manifest, not legal clearance and not a
 complete native/runtime SBOM.  Registry source-cache files are explicitly

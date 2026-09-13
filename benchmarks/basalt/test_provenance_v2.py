@@ -38,7 +38,7 @@ def _current_test_certificate(
         (
             ROOT
             / "benchmarks/basalt/release_inputs/"
-            "m11_release_candidate_final2_correctness_20260831.json"
+            "m11_release_candidate_avx2_reuse_correctness_20260913.json"
         ).read_text(encoding="utf-8")
     )
     template["scope"]["features"] = sorted(features or [])

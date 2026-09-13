@@ -80,7 +80,10 @@
         "http_status": 200,
         "bytes": 13491,
         "sha256": "650afbf29f214451e02241adc42534e82c9d6ae2b38e2444b92b5a1ffcaf9346",
-        "payload_status": "HASHED_IN_MEMORY_NOT_PERSISTED"
+        "payload_status": "RELEASE_PAYLOAD_PERSISTED",
+        "payload_path": "third_party/licenses/arm-optimized-routines-v26.01/LICENSE",
+        "payload_bytes": 13491,
+        "payload_sha256": "650afbf29f214451e02241adc42534e82c9d6ae2b38e2444b92b5a1ffcaf9346"
       },
       "notice_evidence": {
         "path": "NOTICE",
@@ -91,12 +94,12 @@
       "affected_production_files": [
         {
           "path": "pipelines/basalt/src/update.rs",
-          "bytes": 25680,
-          "sha256": "ba239051dc81320efc905a535701f72441ab024f5ca7614e5dbd941627ef865c",
-          "observed_status": "CURRENT_INTEGRATION_WORKTREE_BYTES; REHASH AT FINAL SOURCE FREEZE",
+          "bytes": 26994,
+          "sha256": "0d743554a11b6f8537806cd76b42b41eaaa269e3b44f1bb828fad530de290dde",
+          "observed_status": "FINAL_SOURCE_FREEZE_BYTES; SHA-256 REBOUND 2026-09-13",
           "source_line_ranges": [
-            "143-179",
-            "183-372"
+            "142-180",
+            "191-379"
           ],
           "use": "Finite-angle Se2::exp sine and cosine paths; non-finite theta falls back to the Rust standard-library sine and cosine.",
           "function_scope": {
@@ -138,12 +141,12 @@
         "lineage_sha256": "7dc3c661929cfdbe2af86255b2fb56df0f7ebae942bcec6c35b131a087dc08b5"
       },
       "legal_clearance": "NOT_PERFORMED",
-      "production_release_status": "SUPPLEMENTAL_COVERAGE_REQUIRED; NOT_RELEASE_CERTIFIED"
+      "production_release_status": "SUPPLEMENTAL_LICENSE_PAYLOAD_COMPLETE; LEGAL_CLEARANCE_NOT_PERFORMED"
     }
   ],
   "limitations": [
-    "Current update.rs is an untracked integration worktree file; its recorded hash must be refreshed at the final source freeze.",
+    "Current tracked update.rs is rebound to the final source-freeze SHA-256; any later production edit requires another rebind.",
     "The selected Cargo graph and 119-row Cargo inventory remain unchanged; this manifest is additive and does not make the AOR source a Cargo package.",
-    "AOR source/license payloads are hash evidence only and were not copied into the release bundle; no legal clearance is asserted."
+    "The complete hash-verified AOR LICENSE payload is persisted under third_party/licenses; no legal clearance is asserted."
   ]
 }

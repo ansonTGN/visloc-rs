@@ -28,18 +28,22 @@ class SupplementalSourceDependencyTests(unittest.TestCase):
         manifest_path = base / "supplemental.json"
         manifest = json.loads(SOURCE_MANIFEST.read_text(encoding="utf-8"))
         if payload_status is not None:
-            manifest["dependencies"][0]["license_evidence"]["payload_status"] = payload_status
+            evidence = manifest["dependencies"][0]["license_evidence"]
+            evidence["payload_status"] = payload_status
+            for key in ("payload_path", "payload_bytes", "payload_sha256"):
+                evidence.pop(key, None)
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         affected = base / "pipelines" / "basalt" / "src" / "update.rs"
         affected.parent.mkdir(parents=True)
         shutil.copyfile(AFFECTED_SOURCE, affected)
         return holder, base, manifest
 
-    def test_current_candidate_is_pending_not_pass(self) -> None:
+    def test_current_candidate_has_verified_persisted_payload(self) -> None:
         result = MODULE.validate_manifest(ROOT)
-        self.assertEqual(result["status"], MODULE.PENDING_STATUS)
-        self.assertFalse(result["release_ready"])
-        self.assertFalse(result["payload_persisted"])
+        self.assertEqual(result["status"], MODULE.PASS_STATUS)
+        self.assertTrue(result["release_ready"])
+        self.assertTrue(result["payload_persisted"])
+        self.assertTrue(result["payload_file_verified"])
         self.assertEqual(result["known_source_hashes_verified_count"], 4)
         self.assertEqual(result["known_source_file_count"], 4)
         self.assertTrue(result["known_license_hash_verified"])

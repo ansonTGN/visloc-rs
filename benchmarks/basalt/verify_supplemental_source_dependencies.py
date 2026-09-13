@@ -12,8 +12,8 @@ Exact final-workflow invocation::
         --root C:/Users/rsasa/Workspace/visloc-rs \
         [--payload-root C:/path/to/reviewed/payload]
 
-The current candidate is expected to return a pending/non-release status until
-the AOR license text is persisted in a reviewed release payload.
+The current source manifest binds a persisted AOR license payload.  Missing,
+tampered, or stale source/payload bytes still fail closed.
 """
 
 from __future__ import annotations
