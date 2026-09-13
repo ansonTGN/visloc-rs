@@ -170,7 +170,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         args.max_frames
             .map_or_else(|| "all".to_owned(), |value| value.to_string()),
         frame_limit,
-        dataset.frame_count(),
+        dataset.cam0_manifest_count(),
         dataset.cam1_timestamp_count(),
         dataset.imu_samples().len(),
         total_imu,

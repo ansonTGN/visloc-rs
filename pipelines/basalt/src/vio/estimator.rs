@@ -693,7 +693,16 @@ impl BasaltVioEstimator {
         observations: &[TrackObservation],
         imu: &[ImuSample],
     ) -> Result<EstimatorOutput, String> {
-        self.process_impl(frame_id, timestamp_ns, observations, imu, None, true, true)
+        self.process_impl(
+            frame_id,
+            timestamp_ns,
+            observations,
+            imu,
+            None,
+            None,
+            true,
+            true,
+        )
     }
 
     /// Processes one frame and optionally retains its raw optical-flow input
@@ -713,6 +722,7 @@ impl BasaltVioEstimator {
             timestamp_ns,
             observations,
             imu,
+            None,
             images,
             true,
             true,
@@ -733,7 +743,16 @@ impl BasaltVioEstimator {
         observations: &[TrackObservation],
         imu: &[ImuSample],
     ) -> Result<EstimatorOutput, String> {
-        self.process_impl(frame_id, timestamp_ns, observations, imu, None, false, true)
+        self.process_impl(
+            frame_id,
+            timestamp_ns,
+            observations,
+            imu,
+            None,
+            None,
+            false,
+            true,
+        )
     }
 
     /// Processes one frame without retaining MargData or diagnostic trace
@@ -753,8 +772,32 @@ impl BasaltVioEstimator {
             observations,
             imu,
             None,
+            None,
             false,
             false,
+        )
+    }
+
+    pub(crate) fn process_adapter_frame(
+        &mut self,
+        frame_id: u64,
+        timestamp_ns: i64,
+        observations: &[TrackObservation],
+        imu: &[ImuSample],
+        initialization_imu: Option<ImuSample>,
+        images: Option<Vec<OfImageData>>,
+        retain_marg_data: bool,
+        retain_trace: bool,
+    ) -> Result<EstimatorOutput, String> {
+        self.process_impl(
+            frame_id,
+            timestamp_ns,
+            observations,
+            imu,
+            initialization_imu,
+            images,
+            retain_marg_data,
+            retain_trace,
         )
     }
 
@@ -764,6 +807,7 @@ impl BasaltVioEstimator {
         timestamp_ns: i64,
         observations: &[TrackObservation],
         imu: &[ImuSample],
+        initialization_imu: Option<ImuSample>,
         images: Option<Vec<OfImageData>>,
         retain_marg_data: bool,
         retain_trace: bool,
@@ -808,6 +852,8 @@ impl BasaltVioEstimator {
             .copied()
             .map(|sample| self.calibrate_imu(sample))
             .collect::<Vec<_>>();
+        let calibrated_initialization_imu =
+            initialization_imu.map(|sample| self.calibrate_imu(sample));
         for sample in &calibrated_imu {
             self.stream
                 .push_imu(*sample)
@@ -830,8 +876,15 @@ impl BasaltVioEstimator {
             .map(|state| state.nav.clone())
             .unwrap_or_else(|| self.nav.clone());
         if previous_timestamp.is_none() {
-            previous_nav =
-                initial_nav_from_imu(timestamp_ns, &calibrated_imu, self.config.scalar_mode);
+            let initialization_samples = calibrated_initialization_imu
+                .as_ref()
+                .map(std::slice::from_ref)
+                .unwrap_or(&calibrated_imu);
+            previous_nav = initial_nav_from_imu(
+                timestamp_ns,
+                initialization_samples,
+                self.config.scalar_mode,
+            );
         }
         let initialization_output =
             (retain_trace_payload && previous_timestamp.is_none()).then(|| previous_nav.clone());
@@ -6234,6 +6287,29 @@ mod tests {
         assert!(state.velocity_world_m_s.norm() < 1.0e-12);
         assert!(state.gyro_bias_rad_s.norm() < 1.0e-12);
         assert!(state.accel_bias_m_s2.norm() < 1.0e-12);
+    }
+
+    #[test]
+    fn adapter_bootstrap_uses_first_future_imu_when_frame_interval_is_empty() {
+        let mut estimator = BasaltVioEstimator::new(cam(), EstimatorConfig::default());
+        let bootstrap = ImuSample::new(
+            125,
+            Vector3::new(0.2, -0.1, 0.3),
+            Vector3::new(0.0, 2.0, 0.0),
+        );
+        let output = estimator
+            .process_adapter_frame(0, 100, &[], &[], Some(bootstrap), None, false, true)
+            .unwrap();
+        let initialized = output.state_trace.initialization_output.unwrap();
+        let aligned = initialized
+            .imu_to_world
+            .rotation
+            .transform_vector(&Vector3::y_axis());
+        assert!((aligned - Vector3::z()).norm() < 1.0e-6);
+        assert_ne!(
+            initialized.imu_to_world.rotation,
+            UnitQuaternion::identity()
+        );
     }
 
     #[test]
