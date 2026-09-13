@@ -1,0 +1,74 @@
+{
+  "schema": "visloc.basalt.fast9_formal_gate.v1",
+  "created_local_date": "2026-09-13",
+  "status": "PASS",
+  "source_head": "c163cf737715fbbb1a333a4008f4148c745a69c6",
+  "source_closure_sha256": "8a6a1f27fca4fbed7a562fb646f4e6f71c38f0ba992f9121aa033644be60d01e",
+  "upstream_basalt_commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+  "candidate": {
+    "linux_executable_sha256": "a0c3d1dca89640df8f79efbf6b6efe97db9eb0e40baab470adcd75abae96109e",
+    "windows_executable_sha256": "0790d1c0f633f656b39656f35189a1e03f21c737218154cff57d1a5f53e4feac",
+    "provenance_sha256": "146075a738717a69f13545590349e9df28d782f8d4785116ae614a754a37f01e",
+    "exactness_certificate_sha256": "d100f82ca15310af5e415d3ddfe115dd6289823b81b3b30c1c4e329d7d9024df",
+    "cross_platform_exact_artifacts": 9,
+    "cross_platform_total_artifacts": 9
+  },
+  "formal_pair": {
+    "root": "E:/visloc-rs-runs/basalt_goal_fastmask_formal_pair_20260913",
+    "sequence": "MH_01_easy",
+    "method_order": ["rust_current", "native_core"],
+    "workers": 1,
+    "threads": 1,
+    "seed": 7,
+    "sensor_only": true,
+    "no_marg_data": true,
+    "no_trace": true,
+    "runtime_gate_canonical": true,
+    "resource_gate_canonical": true,
+    "rss_authoritative_domain": "linux-proc-process-tree",
+    "result_counts": {"success": 2},
+    "gate_report": {
+      "path": "E:/visloc-rs-runs/basalt_goal_fastmask_formal_pair_20260913/phase6_gate_report.json",
+      "bytes": 24276,
+      "sha256": "8a7a3ff78308fb443b260be3020369271acbd2f6de71f2f9638b1d2bb3003da5",
+      "overall_status": "pass"
+    },
+    "aggregate": {
+      "path": "E:/visloc-rs-runs/basalt_goal_fastmask_formal_pair_20260913/aggregate.json",
+      "bytes": 34109,
+      "sha256": "c6d49f3b2336ac42acca903b9c7742a2b1e620fcf14e36bcbf0d5128f6762b18"
+    }
+  },
+  "gates": {
+    "runtime": {
+      "status": "pass",
+      "rust_common_wall_seconds": 511.119216799736,
+      "native_common_wall_seconds": 469.1187391001731,
+      "ratio": 1.0895305904431039,
+      "max_ratio": 1.5,
+      "rust_inner_wall_seconds": 482.01929497299716,
+      "native_inner_wall_seconds": 446.1659272261895
+    },
+    "rss": {
+      "status": "pass",
+      "rust_peak_process_tree_rss_bytes": 29544448,
+      "native_peak_process_tree_rss_bytes": 52850688,
+      "ratio": 0.559017282802449,
+      "max_ratio": 1.5
+    },
+    "accuracy": {
+      "status": "pass",
+      "rust_ate_translation_se3_rmse_m": 0.06572474774789937,
+      "native_ate_translation_se3_rmse_m": 0.0657318229112738,
+      "rust_coverage_tracked_fraction": 1.0,
+      "native_coverage_tracked_fraction": 1.0
+    },
+    "input_namespace": {"status": "pass", "unique_namespace_count": 1}
+  },
+  "storage": {
+    "bulk_outputs_drive": "E:",
+    "c_free_gib_after": 11.08,
+    "e_free_gib_after": 293.09
+  },
+  "push_performed": false
+}
