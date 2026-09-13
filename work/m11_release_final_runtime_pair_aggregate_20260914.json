@@ -1,0 +1,782 @@
+{
+  "base_plan": {
+    "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\work\\m11_release_final_runtime_pair_plan_run_20260914.json",
+    "sha256": "7fdac9475c78520bead7a10a1f23a6f1803c2229cf88d13ea53ec900b0a91134"
+  },
+  "base_run_root": "E:\\visloc-rs-runs\\basalt_goal_release_final_runtime_pair_20260914",
+  "gate_report": {
+    "aggregate": {
+      "native_core": {
+        "MH_01_easy": {
+          "measurement": {
+            "outer_wsl_peak_process_tree_rss_bytes": {
+              "mean": 45895680.0,
+              "median": 45895680.0,
+              "worst": 45895680.0
+            },
+            "outer_wsl_wall_seconds": {
+              "mean": 349.8409317000769,
+              "median": 349.8409317000769,
+              "worst": 349.8409317000769
+            },
+            "rss_authoritative": [
+              true
+            ],
+            "rss_authoritative_domains": [
+              "linux-proc-process-tree"
+            ],
+            "rss_domains": [
+              "linux-proc-process-tree"
+            ],
+            "rss_sources": [
+              "native_wsl_runner:/proc"
+            ],
+            "runtime_common_domains": [
+              "windows-coordinator-process-tree-command"
+            ],
+            "runtime_common_sources": [
+              "phase6_coordinator:perf_counter"
+            ],
+            "wall_domains": [
+              "linux-inner-command"
+            ],
+            "wall_sources": [
+              "native_wsl_runner:monotonic"
+            ]
+          },
+          "metrics": {
+            "ate_translation_se3_rmse_m": {
+              "mean": 0.0657318229112738,
+              "median": 0.0657318229112738,
+              "worst": 0.0657318229112738
+            },
+            "coverage_tracked_fraction": {
+              "mean": 1.0,
+              "median": 1.0,
+              "worst": 1.0
+            },
+            "peak_process_tree_rss_bytes": {
+              "mean": 53051392.0,
+              "median": 53051392.0,
+              "worst": 53051392.0
+            },
+            "rpe_rotation_consecutive_rmse_deg": {
+              "mean": 1.053386862714997,
+              "median": 1.053386862714997,
+              "worst": 1.053386862714997
+            },
+            "rpe_translation_consecutive_rmse_m": {
+              "mean": 0.038404318029770915,
+              "median": 0.038404318029770915,
+              "worst": 0.038404318029770915
+            },
+            "runtime_common_wall_seconds": {
+              "mean": 349.8409317000769,
+              "median": 349.8409317000769,
+              "worst": 349.8409317000769
+            },
+            "runtime_wall_seconds": {
+              "mean": 343.69394808099605,
+              "median": 343.69394808099605,
+              "worst": 343.69394808099605
+            },
+            "sim3_scale_diagnostic": {
+              "mean": 1.014240225045347,
+              "median": 1.014240225045347,
+              "worst": 1.014240225045347
+            }
+          },
+          "successful_repetitions": 1
+        }
+      },
+      "rust_current": {
+        "MH_01_easy": {
+          "measurement": {
+            "outer_wsl_peak_process_tree_rss_bytes": {
+              "mean": 46149632.0,
+              "median": 46149632.0,
+              "worst": 46149632.0
+            },
+            "outer_wsl_wall_seconds": {
+              "mean": 531.0105432001874,
+              "median": 531.0105432001874,
+              "worst": 531.0105432001874
+            },
+            "rss_authoritative": [
+              true
+            ],
+            "rss_authoritative_domains": [
+              "linux-proc-process-tree"
+            ],
+            "rss_domains": [
+              "linux-proc-process-tree"
+            ],
+            "rss_sources": [
+              "rust_wsl_runner:/proc"
+            ],
+            "runtime_common_domains": [
+              "windows-coordinator-process-tree-command"
+            ],
+            "runtime_common_sources": [
+              "phase6_coordinator:perf_counter"
+            ],
+            "wall_domains": [
+              "linux-inner-command"
+            ],
+            "wall_sources": [
+              "rust_wsl_runner:monotonic"
+            ]
+          },
+          "metrics": {
+            "ate_translation_se3_rmse_m": {
+              "mean": 0.06572474774789937,
+              "median": 0.06572474774789937,
+              "worst": 0.06572474774789937
+            },
+            "coverage_tracked_fraction": {
+              "mean": 1.0,
+              "median": 1.0,
+              "worst": 1.0
+            },
+            "peak_process_tree_rss_bytes": {
+              "mean": 29155328.0,
+              "median": 29155328.0,
+              "worst": 29155328.0
+            },
+            "rpe_rotation_consecutive_rmse_deg": {
+              "mean": 0.018769844406636278,
+              "median": 0.018769844406636278,
+              "worst": 0.018769844406636278
+            },
+            "rpe_translation_consecutive_rmse_m": {
+              "mean": 0.0013037782529951934,
+              "median": 0.0013037782529951934,
+              "worst": 0.0013037782529951934
+            },
+            "runtime_common_wall_seconds": {
+              "mean": 531.0105432001874,
+              "median": 531.0105432001874,
+              "worst": 531.0105432001874
+            },
+            "runtime_wall_seconds": {
+              "mean": 524.899129625177,
+              "median": 524.899129625177,
+              "worst": 524.899129625177
+            },
+            "sim3_scale_diagnostic": {
+              "mean": 1.0142391714852412,
+              "median": 1.0142391714852412,
+              "worst": 1.0142391714852412
+            }
+          },
+          "successful_repetitions": 1
+        }
+      }
+    },
+    "cell_order_policy": {
+      "canonical_method_order": [
+        "native_core",
+        "rust_current"
+      ],
+      "id": "sequence_major_repetition_major_method_parity_v1",
+      "parity": "reverse canonical method order when (sequence_index + repetition) % 2 == 1",
+      "repetition_order": "ascending",
+      "sequence_order": "selected_protocol_order",
+      "workers_1_execution": "deterministic sequential plan order",
+      "workers_gt_1_runtime_gate": "noncanonical_parallel_order"
+    },
+    "comparisons": [
+      {
+        "family": "machine_hall",
+        "gates": {
+          "ate_translation_se3": {
+            "detail": null,
+            "expected": {
+              "additive_floor": 0.01,
+              "max": 0.08230500520240118,
+              "ratio": 1.1
+            },
+            "observed": {
+              "native": 0.0657318229112738,
+              "rust": 0.06572474774789937
+            },
+            "status": "pass"
+          },
+          "coverage": {
+            "detail": null,
+            "expected": {
+              "max_drop": 0.02
+            },
+            "observed": {
+              "drop": 0.0,
+              "native": 1.0,
+              "rust": 1.0
+            },
+            "status": "pass"
+          },
+          "input_namespace": {
+            "detail": null,
+            "expected": {
+              "uniform": true
+            },
+            "observed": {
+              "detail": null,
+              "namespace_ids": [
+                "5f5ebfd6e83abbe732fb16c385552620765ddcc5d2106f2ad6c3d72f48555870"
+              ],
+              "observed": [
+                {
+                  "direct_dataset_no_sensor_copy": true,
+                  "gt_absence_fingerprint": "c1368ee075db1ba509a34c0d7af04815fba511422ab84ac86d1f5109553d5f11",
+                  "mode": "sensor_only",
+                  "schema_id": "basalt.phase6.input_namespace.v1",
+                  "sensor_input_view_mode": "junction",
+                  "sensor_view_fingerprints": {
+                    "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8"
+                  },
+                  "staged_sensor_only": false,
+                  "strict_gt_absence_verified": true
+                },
+                {
+                  "direct_dataset_no_sensor_copy": true,
+                  "gt_absence_fingerprint": "c1368ee075db1ba509a34c0d7af04815fba511422ab84ac86d1f5109553d5f11",
+                  "mode": "sensor_only",
+                  "schema_id": "basalt.phase6.input_namespace.v1",
+                  "sensor_input_view_mode": "junction",
+                  "sensor_view_fingerprints": {
+                    "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8"
+                  },
+                  "staged_sensor_only": false,
+                  "strict_gt_absence_verified": true
+                }
+              ],
+              "status": "pass",
+              "unique_namespace_count": 1
+            },
+            "status": "pass"
+          },
+          "rpe_rotation": {
+            "detail": null,
+            "expected": {
+              "additive_floor": 0.5,
+              "max": 1.7113948921222464,
+              "ratio": 1.15
+            },
+            "observed": {
+              "native": 1.053386862714997,
+              "rust": 0.018769844406636278
+            },
+            "status": "pass"
+          },
+          "rpe_translation": {
+            "detail": null,
+            "expected": {
+              "additive_floor": 0.005,
+              "max": 0.049164965734236545,
+              "ratio": 1.15
+            },
+            "observed": {
+              "native": 0.038404318029770915,
+              "rust": 0.0013037782529951934
+            },
+            "status": "pass"
+          },
+          "rss": {
+            "detail": null,
+            "expected": {
+              "max_ratio": 1.5,
+              "required_authoritative_domain": "linux-proc-process-tree",
+              "required_same_domain": true,
+              "required_source": "Linux /proc process tree"
+            },
+            "observed": {
+              "native": 53051392.0,
+              "native_authoritative": true,
+              "native_domain": [
+                "linux-proc-process-tree"
+              ],
+              "ratio": 0.5495676343421866,
+              "rust": 29155328.0,
+              "rust_authoritative": true,
+              "rust_domain": [
+                "linux-proc-process-tree"
+              ]
+            },
+            "status": "pass"
+          },
+          "runtime": {
+            "detail": null,
+            "expected": {
+              "max_ratio": 1.5,
+              "required_domain": "windows-coordinator-process-tree-command",
+              "required_same_domain": true
+            },
+            "observed": {
+              "native": 349.8409317000769,
+              "native_domain": [
+                "windows-coordinator-process-tree-command"
+              ],
+              "native_inner_wall_diagnostic": 343.69394808099605,
+              "ratio": 1.5178628201671653,
+              "rust": 531.0105432001874,
+              "rust_domain": [
+                "windows-coordinator-process-tree-command"
+              ],
+              "rust_process_wall_diagnostic": 524.899129625177
+            },
+            "status": "fail"
+          },
+          "sim3_scale_diagnostic": {
+            "detail": null,
+            "expected": {
+              "absolute_gate": 0.05,
+              "max_difference": 0.050712011252267354,
+              "relative_gate": 0.05
+            },
+            "observed": {
+              "absolute_difference": 1.053560105823692e-06,
+              "native": 1.014240225045347,
+              "rust": 1.0142391714852412
+            },
+            "status": "pass"
+          }
+        },
+        "native": {
+          "measurement": {
+            "outer_wsl_peak_process_tree_rss_bytes": {
+              "mean": 45895680.0,
+              "median": 45895680.0,
+              "worst": 45895680.0
+            },
+            "outer_wsl_wall_seconds": {
+              "mean": 349.8409317000769,
+              "median": 349.8409317000769,
+              "worst": 349.8409317000769
+            },
+            "rss_authoritative": [
+              true
+            ],
+            "rss_authoritative_domains": [
+              "linux-proc-process-tree"
+            ],
+            "rss_domains": [
+              "linux-proc-process-tree"
+            ],
+            "rss_sources": [
+              "native_wsl_runner:/proc"
+            ],
+            "runtime_common_domains": [
+              "windows-coordinator-process-tree-command"
+            ],
+            "runtime_common_sources": [
+              "phase6_coordinator:perf_counter"
+            ],
+            "wall_domains": [
+              "linux-inner-command"
+            ],
+            "wall_sources": [
+              "native_wsl_runner:monotonic"
+            ]
+          },
+          "metrics": {
+            "ate_translation_se3_rmse_m": {
+              "mean": 0.0657318229112738,
+              "median": 0.0657318229112738,
+              "worst": 0.0657318229112738
+            },
+            "coverage_tracked_fraction": {
+              "mean": 1.0,
+              "median": 1.0,
+              "worst": 1.0
+            },
+            "peak_process_tree_rss_bytes": {
+              "mean": 53051392.0,
+              "median": 53051392.0,
+              "worst": 53051392.0
+            },
+            "rpe_rotation_consecutive_rmse_deg": {
+              "mean": 1.053386862714997,
+              "median": 1.053386862714997,
+              "worst": 1.053386862714997
+            },
+            "rpe_translation_consecutive_rmse_m": {
+              "mean": 0.038404318029770915,
+              "median": 0.038404318029770915,
+              "worst": 0.038404318029770915
+            },
+            "runtime_common_wall_seconds": {
+              "mean": 349.8409317000769,
+              "median": 349.8409317000769,
+              "worst": 349.8409317000769
+            },
+            "runtime_wall_seconds": {
+              "mean": 343.69394808099605,
+              "median": 343.69394808099605,
+              "worst": 343.69394808099605
+            },
+            "sim3_scale_diagnostic": {
+              "mean": 1.014240225045347,
+              "median": 1.014240225045347,
+              "worst": 1.014240225045347
+            }
+          },
+          "successful_repetitions": 1
+        },
+        "rust": {
+          "measurement": {
+            "outer_wsl_peak_process_tree_rss_bytes": {
+              "mean": 46149632.0,
+              "median": 46149632.0,
+              "worst": 46149632.0
+            },
+            "outer_wsl_wall_seconds": {
+              "mean": 531.0105432001874,
+              "median": 531.0105432001874,
+              "worst": 531.0105432001874
+            },
+            "rss_authoritative": [
+              true
+            ],
+            "rss_authoritative_domains": [
+              "linux-proc-process-tree"
+            ],
+            "rss_domains": [
+              "linux-proc-process-tree"
+            ],
+            "rss_sources": [
+              "rust_wsl_runner:/proc"
+            ],
+            "runtime_common_domains": [
+              "windows-coordinator-process-tree-command"
+            ],
+            "runtime_common_sources": [
+              "phase6_coordinator:perf_counter"
+            ],
+            "wall_domains": [
+              "linux-inner-command"
+            ],
+            "wall_sources": [
+              "rust_wsl_runner:monotonic"
+            ]
+          },
+          "metrics": {
+            "ate_translation_se3_rmse_m": {
+              "mean": 0.06572474774789937,
+              "median": 0.06572474774789937,
+              "worst": 0.06572474774789937
+            },
+            "coverage_tracked_fraction": {
+              "mean": 1.0,
+              "median": 1.0,
+              "worst": 1.0
+            },
+            "peak_process_tree_rss_bytes": {
+              "mean": 29155328.0,
+              "median": 29155328.0,
+              "worst": 29155328.0
+            },
+            "rpe_rotation_consecutive_rmse_deg": {
+              "mean": 0.018769844406636278,
+              "median": 0.018769844406636278,
+              "worst": 0.018769844406636278
+            },
+            "rpe_translation_consecutive_rmse_m": {
+              "mean": 0.0013037782529951934,
+              "median": 0.0013037782529951934,
+              "worst": 0.0013037782529951934
+            },
+            "runtime_common_wall_seconds": {
+              "mean": 531.0105432001874,
+              "median": 531.0105432001874,
+              "worst": 531.0105432001874
+            },
+            "runtime_wall_seconds": {
+              "mean": 524.899129625177,
+              "median": 524.899129625177,
+              "worst": 524.899129625177
+            },
+            "sim3_scale_diagnostic": {
+              "mean": 1.0142391714852412,
+              "median": 1.0142391714852412,
+              "worst": 1.0142391714852412
+            }
+          },
+          "successful_repetitions": 1
+        },
+        "sequence": "MH_01_easy",
+        "status": "fail"
+      }
+    ],
+    "created_utc": "2026-09-13T19:42:20Z",
+    "diagnostic_aggregate": {
+      "native_core": {
+        "MH_01_easy": {
+          "measurement": {
+            "outer_wsl_peak_process_tree_rss_bytes": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "outer_wsl_wall_seconds": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "rss_authoritative": [],
+            "rss_authoritative_domains": [],
+            "rss_domains": [],
+            "rss_sources": [],
+            "runtime_common_domains": [],
+            "runtime_common_sources": [],
+            "wall_domains": [],
+            "wall_sources": []
+          },
+          "metrics": {
+            "ate_translation_se3_rmse_m": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "coverage_tracked_fraction": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "peak_process_tree_rss_bytes": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "rpe_rotation_consecutive_rmse_deg": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "rpe_translation_consecutive_rmse_m": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "runtime_common_wall_seconds": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "runtime_wall_seconds": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "sim3_scale_diagnostic": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            }
+          },
+          "successful_repetitions": 0
+        }
+      },
+      "rust_current": {
+        "MH_01_easy": {
+          "measurement": {
+            "outer_wsl_peak_process_tree_rss_bytes": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "outer_wsl_wall_seconds": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "rss_authoritative": [],
+            "rss_authoritative_domains": [],
+            "rss_domains": [],
+            "rss_sources": [],
+            "runtime_common_domains": [],
+            "runtime_common_sources": [],
+            "wall_domains": [],
+            "wall_sources": []
+          },
+          "metrics": {
+            "ate_translation_se3_rmse_m": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "coverage_tracked_fraction": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "peak_process_tree_rss_bytes": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "rpe_rotation_consecutive_rmse_deg": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "rpe_translation_consecutive_rmse_m": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "runtime_common_wall_seconds": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "runtime_wall_seconds": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            },
+            "sim3_scale_diagnostic": {
+              "mean": null,
+              "median": null,
+              "worst": null
+            }
+          },
+          "successful_repetitions": 0
+        }
+      }
+    },
+    "diagnostic_metric_rows": 0,
+    "diagnostic_only": false,
+    "diagnostic_output_policy": "representative_diagnostic",
+    "diagnostic_result_counts": {},
+    "diagnostic_run_count": 0,
+    "diagnostic_separate_from_formal": true,
+    "excluded_diagnostic_cells": [],
+    "formal_cell_count": 2,
+    "formal_count_contract": {
+      "actual": 2,
+      "diagnostic_cells_excluded": 0,
+      "expected": 2,
+      "formal_repetitions": 1,
+      "full_all11": false,
+      "legacy_full_all11x3": false,
+      "required_full_count": null,
+      "status": "pass"
+    },
+    "formal_expected_cell_count": 2,
+    "formal_output_policy": "trajectory_only_lean",
+    "formal_result_counts": {
+      "success": 2
+    },
+    "formal_run_count": 2,
+    "fresh_output_root": true,
+    "input_namespace": {
+      "detail": null,
+      "namespace_ids": [
+        "5f5ebfd6e83abbe732fb16c385552620765ddcc5d2106f2ad6c3d72f48555870"
+      ],
+      "observed": [
+        {
+          "direct_dataset_no_sensor_copy": true,
+          "gt_absence_fingerprint": "c1368ee075db1ba509a34c0d7af04815fba511422ab84ac86d1f5109553d5f11",
+          "mode": "sensor_only",
+          "schema_id": "basalt.phase6.input_namespace.v1",
+          "sensor_input_view_mode": "junction",
+          "sensor_view_fingerprints": {
+            "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8"
+          },
+          "staged_sensor_only": false,
+          "strict_gt_absence_verified": true
+        },
+        {
+          "direct_dataset_no_sensor_copy": true,
+          "gt_absence_fingerprint": "c1368ee075db1ba509a34c0d7af04815fba511422ab84ac86d1f5109553d5f11",
+          "mode": "sensor_only",
+          "schema_id": "basalt.phase6.input_namespace.v1",
+          "sensor_input_view_mode": "junction",
+          "sensor_view_fingerprints": {
+            "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8"
+          },
+          "staged_sensor_only": false,
+          "strict_gt_absence_verified": true
+        }
+      ],
+      "status": "pass",
+      "unique_namespace_count": 1
+    },
+    "missing_metric_rows": 0,
+    "output_root": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\work",
+    "overall_status": "fail",
+    "protocol_id": "basalt-euroc-parity-v1",
+    "protocol_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\protocols\\basalt_euroc_parity_v1.json",
+    "request_sha256": "148fcc2e063da5b3720db926cd22198ebd8872714bcbec3ad0b7355cdcc5ff02",
+    "resource_gate_canonical": true,
+    "resource_measurement_contract": {
+      "mixed_runtime_wall_domains_are_not_evaluable": true,
+      "native_inner_rss_domain": "linux-proc-process-tree",
+      "native_inner_wall_is_diagnostic": true,
+      "native_outer_wsl_rss_recorded_separately": true,
+      "native_outer_wsl_wall_recorded_separately": true,
+      "outer_wsl_measurements_are_auxiliary": true,
+      "rss_authoritative_domain": "linux-proc-process-tree",
+      "rss_authoritative_source": "Linux /proc process tree for both methods",
+      "rss_gate_requires_same_domain": true,
+      "runtime_common_measurement_domain": "windows-coordinator-process-tree-command",
+      "runtime_common_measurement_source": "phase6_coordinator:perf_counter",
+      "runtime_gate_metric": "runtime_common_wall_seconds",
+      "rust_rss_domain": "must_be_linux-proc-process-tree; Windows psutil is auxiliary only"
+    },
+    "result_counts": {
+      "success": 2
+    },
+    "rss_gate_candidate_eligible": true,
+    "run_count": 2,
+    "runtime_gate_canonical": true,
+    "runtime_gate_canonical_override": null,
+    "runtime_gate_canonical_request": true,
+    "runtime_gate_requirements": {
+      "fresh_output_root": true,
+      "rss_authoritative_domain": "linux-proc-process-tree",
+      "rss_gate_candidate_eligible": true,
+      "rust_runtime_profile": "rust_wsl_linux",
+      "seed": 7,
+      "sensor_namespace_must_be_uniform": true,
+      "sensor_only_input_view": true,
+      "strict_gt_absence_verified": true,
+      "threads": 1,
+      "workers": 1
+    },
+    "runtime_session": {
+      "cache_context_id": "fa02b6b0870c06b24c94951a502f39a6a7f9e3dccd71865d6c4e138ba7772303",
+      "pair_context_recorded": true,
+      "session_id": "00891385803c43b4a13f4d1afa220ea8"
+    },
+    "rust_runtime_profile": "rust_wsl_linux",
+    "schema_id": "basalt.phase6.gate_report.v1",
+    "schema_version": 1,
+    "successful_metric_rows": 2,
+    "workers_policy": "canonical_sequential"
+  },
+  "replacements": {},
+  "schema_id": "basalt.phase6.corrected_aggregate.v1",
+  "selection": [
+    {
+      "evaluation_result_sha256": "1092d1c98f4867ef69a201b9daceac7b65d188aa5227c749abd353b71b413b0e",
+      "method": "rust_current",
+      "repetition": 1,
+      "run_dir": "E:\\visloc-rs-runs\\basalt_goal_release_final_runtime_pair_20260914\\rust_current\\MH_01_easy\\r1",
+      "run_manifest_sha256": "e73a3e33c33160ffedef4dd37e32ca81f28e0c0fa28b52fd4b72a960d64dd094",
+      "sequence": "MH_01_easy",
+      "source": "base"
+    },
+    {
+      "evaluation_result_sha256": "049cfc7857b3a98451cd5476fca9e166a165ab3671daf9316f2d3a2af5244864",
+      "method": "native_core",
+      "repetition": 1,
+      "run_dir": "E:\\visloc-rs-runs\\basalt_goal_release_final_runtime_pair_20260914\\native_core\\MH_01_easy\\r1",
+      "run_manifest_sha256": "b4c209757dcf9bd61e093709b881fc2ba26145c1091176a1633082ec2cb81521",
+      "sequence": "MH_01_easy",
+      "source": "base"
+    }
+  ],
+  "selection_count": 2
+}
