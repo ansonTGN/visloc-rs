@@ -61,6 +61,18 @@ pub enum TimingBucket {
     DatasetRawU16Conversion,
     AdapterTotal,
     AdapterFrontend,
+    /// Raw-u16 pyramid construction for both cameras.
+    FrontendPyramid,
+    /// Forward/backward frame-to-frame KLT for existing cam0/cam1 tracks.
+    FrontendTemporalKlt,
+    /// Existing-position collection, grid FAST detection, and track insertion.
+    FrontendFastReplenish,
+    /// Forward/backward stereo KLT for newly detected cam0 tracks.
+    FrontendNewStereoKlt,
+    /// Double-Sphere stereo essential-residual filtering.
+    FrontendEssentialFilter,
+    /// Observation and lifecycle-vector materialization after tracking.
+    FrontendOutput,
     AdapterEstimator,
     AdapterOutput,
     DemoOutput,
@@ -114,6 +126,12 @@ pub struct TimingBreakdown {
     pub dataset_raw_u16_conversion: TimingStat,
     pub adapter_total: TimingStat,
     pub adapter_frontend: TimingStat,
+    pub frontend_pyramid: TimingStat,
+    pub frontend_temporal_klt: TimingStat,
+    pub frontend_fast_replenish: TimingStat,
+    pub frontend_new_stereo_klt: TimingStat,
+    pub frontend_essential_filter: TimingStat,
+    pub frontend_output: TimingStat,
     pub adapter_estimator: TimingStat,
     pub adapter_output: TimingStat,
     pub demo_output: TimingStat,
@@ -305,6 +323,21 @@ impl TimingBreakdown {
         );
         merge_stat(&mut self.adapter_total, other.adapter_total);
         merge_stat(&mut self.adapter_frontend, other.adapter_frontend);
+        merge_stat(&mut self.frontend_pyramid, other.frontend_pyramid);
+        merge_stat(&mut self.frontend_temporal_klt, other.frontend_temporal_klt);
+        merge_stat(
+            &mut self.frontend_fast_replenish,
+            other.frontend_fast_replenish,
+        );
+        merge_stat(
+            &mut self.frontend_new_stereo_klt,
+            other.frontend_new_stereo_klt,
+        );
+        merge_stat(
+            &mut self.frontend_essential_filter,
+            other.frontend_essential_filter,
+        );
+        merge_stat(&mut self.frontend_output, other.frontend_output);
         merge_stat(&mut self.adapter_estimator, other.adapter_estimator);
         merge_stat(&mut self.adapter_output, other.adapter_output);
         merge_stat(&mut self.demo_output, other.demo_output);
@@ -453,6 +486,12 @@ impl TimingBreakdown {
                 "dataset_raw_u16_conversion": self.dataset_raw_u16_conversion,
                 "adapter_total": self.adapter_total,
                 "adapter_frontend": self.adapter_frontend,
+                "frontend_pyramid": self.frontend_pyramid,
+                "frontend_temporal_klt": self.frontend_temporal_klt,
+                "frontend_fast_replenish": self.frontend_fast_replenish,
+                "frontend_new_stereo_klt": self.frontend_new_stereo_klt,
+                "frontend_essential_filter": self.frontend_essential_filter,
+                "frontend_output": self.frontend_output,
                 "adapter_estimator": self.adapter_estimator,
                 "adapter_output": self.adapter_output,
                 "demo_output": self.demo_output,
@@ -510,6 +549,12 @@ impl TimingBreakdown {
             TimingBucket::DatasetRawU16Conversion => &mut self.dataset_raw_u16_conversion,
             TimingBucket::AdapterTotal => &mut self.adapter_total,
             TimingBucket::AdapterFrontend => &mut self.adapter_frontend,
+            TimingBucket::FrontendPyramid => &mut self.frontend_pyramid,
+            TimingBucket::FrontendTemporalKlt => &mut self.frontend_temporal_klt,
+            TimingBucket::FrontendFastReplenish => &mut self.frontend_fast_replenish,
+            TimingBucket::FrontendNewStereoKlt => &mut self.frontend_new_stereo_klt,
+            TimingBucket::FrontendEssentialFilter => &mut self.frontend_essential_filter,
+            TimingBucket::FrontendOutput => &mut self.frontend_output,
             TimingBucket::AdapterEstimator => &mut self.adapter_estimator,
             TimingBucket::AdapterOutput => &mut self.adapter_output,
             TimingBucket::DemoOutput => &mut self.demo_output,

@@ -187,7 +187,9 @@ impl BasaltVioEstimatorAdapter {
         let stereo =
             crate::StereoFrame::new(frame.frame_id, frame.timestamp_ns, frame.cam0, frame.cam1);
         let frontend_started = self.timing.start();
-        let tracks_result = self.frontend.process_frame(stereo);
+        let tracks_result = self
+            .frontend
+            .process_frame_with_timing(stereo, &mut self.timing);
         self.timing
             .finish(TimingBucket::AdapterFrontend, frontend_started);
         let tracks = tracks_result?;

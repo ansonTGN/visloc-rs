@@ -29,6 +29,7 @@ use crate::{
     fast::{GridFastConfig, GridFastDetector},
     patch::{MeanNormalizedPatch51, PatchResidualError},
     pyramid::{ImageError, RawU16Pyramid},
+    timing::{TimingBreakdown, TimingBucket},
     types::{BasaltFrame, FrameId, TrackId, TrackObservation},
     update::{AffineCompact2f, Se2UpdateError},
 };
@@ -265,6 +266,17 @@ impl DirectKltStream {
 
     /// Processes one stereo frame and emits only direct KLT observations.
     pub fn process_frame(&mut self, frame: StereoFrame) -> Result<TrackFrameOutput, StreamError> {
+        let mut timing = TimingBreakdown::from_env();
+        self.process_frame_with_timing(frame, &mut timing)
+    }
+
+    /// Processes one stereo frame while recording optional disjoint frontend
+    /// sub-buckets in the adapter-owned timing collector.
+    pub fn process_frame_with_timing(
+        &mut self,
+        frame: StereoFrame,
+        timing: &mut TimingBreakdown,
+    ) -> Result<TrackFrameOutput, StreamError> {
         if let Some(previous_frame) = self.previous_frame {
             if frame.frame_id <= previous_frame.frame_id
                 || frame.timestamp_ns <= previous_frame.timestamp_ns
@@ -276,6 +288,7 @@ impl DirectKltStream {
             return Err(StreamError::MissingCamera1Calibration);
         }
 
+        let pyramid_started = timing.start();
         let cam0 = RawU16Pyramid::from_image_with_scratch(
             frame.cam0,
             self.config.pyramid_levels,
@@ -290,6 +303,7 @@ impl DirectKltStream {
             None => None,
         };
         let current = FramePyramids { cam0, cam1 };
+        timing.finish(TimingBucket::FrontendPyramid, pyramid_started);
         let mut counters = RejectReasonCounters::default();
         let stage_trace = vec![
             TrackStage::FrameForwardSe2Ic,
@@ -311,6 +325,7 @@ impl DirectKltStream {
         let mut retained_track_ids = Vec::new();
         let mut rejected_track_ids = Vec::new();
 
+        let temporal_started = timing.start();
         if let Some(previous) = &self.previous {
             for (&track_id, &old_track) in &old_tracks {
                 // `FrameToFrameOpticalFlow::trackPoints` runs once for each
@@ -411,7 +426,9 @@ impl DirectKltStream {
                 }
             }
         }
+        timing.finish(TimingBucket::FrontendTemporalKlt, temporal_started);
 
+        let fast_started = timing.start();
         let existing_positions: Vec<_> = current_tracks
             .values()
             .filter_map(|track| track.cam0.map(|cam0| *cam0.translation()))
@@ -437,9 +454,11 @@ impl DirectKltStream {
             );
             created_track_ids.push(track_id);
         }
+        timing.finish(TimingBucket::FrontendFastReplenish, fast_started);
 
         // New cam0 points are stereo-tracked only after replenishment, exactly
         // as Basalt's addPoints path does.
+        let stereo_started = timing.start();
         if let (Some(current_cam1), Some(_camera1)) = (&current.cam1, self.calibration.camera(1)) {
             for track_id in &created_track_ids {
                 let Some(track) = current_tracks.get_mut(track_id) else {
@@ -481,7 +500,9 @@ impl DirectKltStream {
                 }
             }
         }
+        timing.finish(TimingBucket::FrontendNewStereoKlt, stereo_started);
 
+        let essential_started = timing.start();
         if self.calibration.camera(1).is_some() {
             for track in current_tracks.values_mut() {
                 let Some(cam1_transform) = track.cam1 else {
@@ -508,7 +529,9 @@ impl DirectKltStream {
                 }
             }
         }
+        timing.finish(TimingBucket::FrontendEssentialFilter, essential_started);
 
+        let output_started = timing.start();
         let mut observations = Vec::new();
         for (track_id, track) in &current_tracks {
             if let Some(cam0) = track.cam0 {
@@ -548,6 +571,7 @@ impl DirectKltStream {
             stage_trace,
         };
         self.previous_frame = Some(output.frame);
+        timing.finish(TimingBucket::FrontendOutput, output_started);
         Ok(output)
     }
 }

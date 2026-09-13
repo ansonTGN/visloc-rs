@@ -121,6 +121,12 @@ impl GridFastDetector {
                 let y0 = y_start + cell_y * cell;
                 let mut threshold = self.config.threshold;
                 let mut selected = 0;
+                // OpenCV's FAST_t computes one score row and performs NMS
+                // against the retained neighbouring score rows.  Cache the
+                // complete cell here as the equivalent bounded form instead
+                // of recomputing as many as eight neighbour scores for every
+                // candidate pixel.
+                let mut score_grid = vec![0_i16; cell * cell];
                 while selected < self.config.points_per_cell
                     && threshold >= self.config.min_threshold
                 {
@@ -132,19 +138,43 @@ impl GridFastDetector {
                     if cell <= 6 {
                         break;
                     }
+                    score_grid.fill(0);
                     for y in y0 + 3..y0 + cell - 3 {
                         for x in x0 + 3..x0 + cell - 3 {
-                            if let Some(score) = fast_score(
-                                image,
-                                x,
-                                y,
-                                threshold,
-                                self.config.edge_threshold,
-                                x0,
-                                y0,
-                                cell,
-                            ) {
-                                candidates.push((score, x, y));
+                            if let Some(score) =
+                                fast_score_without_nms(image, x, y, threshold, x0, y0, cell)
+                            {
+                                score_grid[(y - y0) * cell + (x - x0)] = score;
+                            }
+                        }
+                    }
+                    for y in y0 + 3..y0 + cell - 3 {
+                        for x in x0 + 3..x0 + cell - 3 {
+                            let local_x = x - x0;
+                            let local_y = y - y0;
+                            let score = score_grid[local_y * cell + local_x];
+                            if score == 0 {
+                                continue;
+                            }
+                            let mut is_maximum = true;
+                            for dy in -1_i32..=1 {
+                                for dx in -1_i32..=1 {
+                                    if dx == 0 && dy == 0 {
+                                        continue;
+                                    }
+                                    let neighbour_x = (local_x as i32 + dx) as usize;
+                                    let neighbour_y = (local_y as i32 + dy) as usize;
+                                    if score_grid[neighbour_y * cell + neighbour_x] >= score {
+                                        is_maximum = false;
+                                        break;
+                                    }
+                                }
+                                if !is_maximum {
+                                    break;
+                                }
+                            }
+                            if is_maximum {
+                                candidates.push((score as u8, x, y));
                             }
                         }
                     }
@@ -301,6 +331,7 @@ fn unguarded_linear_insert(candidates: &mut [(u8, usize, usize)], index: usize) 
     candidates[position] = value;
 }
 
+#[cfg(test)]
 fn fast_score(
     image: &RawU16Image,
     x: usize,
@@ -380,41 +411,38 @@ fn fast_score_without_nms(
     }
 
     let center = raw_to_u8(image.pixel(x, y)?) as i16;
-    let mut ring = [0_i16; 16];
+    let threshold = i16::from(threshold);
+    let mut differences = [0_i16; 24];
+    let mut bright_mask = 0_u16;
+    let mut dark_mask = 0_u16;
     for (index, (dx, dy)) in FAST_CIRCLE.iter().enumerate() {
         let px = x as i32 + dx;
         let py = y as i32 + dy;
         if px < 0 || py < 0 {
             return None;
         }
-        ring[index] = raw_to_u8(image.pixel(px as usize, py as usize)?) as i16;
+        let difference = center - raw_to_u8(image.pixel(px as usize, py as usize)?) as i16;
+        differences[index] = difference;
+        if difference < -threshold {
+            bright_mask |= 1 << index;
+        }
+        if difference > threshold {
+            dark_mask |= 1 << index;
+        }
     }
 
-    let mut is_corner = false;
-    let threshold = i16::from(threshold);
-    for start in 0..16 {
-        let mut bright = true;
-        let mut dark = true;
-        for offset in 0..9 {
-            let difference = ring[(start + offset) % 16] - center;
-            bright &= difference > threshold;
-            dark &= difference < -threshold;
-        }
-        if bright || dark {
-            is_corner = true;
-            break;
-        }
-    }
-    if !is_corner {
+    if !has_circular_run9(bright_mask) && !has_circular_run9(dark_mask) {
         return None;
     }
 
+    let (head, wrap) = differences.split_at_mut(16);
+    wrap.copy_from_slice(&head[..8]);
     let mut score = i16::MIN;
     for start in 0..16 {
         let mut min_difference = i16::MAX;
         let mut max_difference = i16::MIN;
         for offset in 0..9 {
-            let difference = center - ring[(start + offset) % 16];
+            let difference = differences[start + offset];
             min_difference = min_difference.min(difference);
             max_difference = max_difference.max(difference);
         }
@@ -424,6 +452,16 @@ fn fast_score_without_nms(
         score = score.max(-max_difference - 1);
     }
     Some(score)
+}
+
+#[inline]
+fn has_circular_run9(mask: u16) -> bool {
+    let doubled = u32::from(mask) | (u32::from(mask) << 16);
+    let mut starts = doubled;
+    for shift in 1..9 {
+        starts &= doubled >> shift;
+    }
+    starts & 0xffff != 0
 }
 
 #[inline]
@@ -485,6 +523,15 @@ mod tests {
             fast_score_without_nms(&threshold_edge, 25, 25, 5, 0, 0, 50),
             Some(5)
         );
+    }
+
+    #[test]
+    fn circular_run9_mask_matches_direct_arc_scan() {
+        for mask in 0_u16..=u16::MAX {
+            let direct = (0..16)
+                .any(|start| (0..9).all(|offset| mask & (1 << ((start + offset) % 16)) != 0));
+            assert_eq!(has_circular_run9(mask), direct, "mask={mask:04x}");
+        }
     }
 
     #[test]
@@ -557,5 +604,45 @@ mod tests {
         assert!(points
             .iter()
             .any(|p| (p.x - 32.0).abs() < 2.0 && (p.y - 32.0).abs() < 2.0));
+    }
+
+    #[test]
+    fn cached_score_grid_matches_direct_neighbour_recomputation() {
+        let cell = 50;
+        let image = RawU16Image::from_fn(cell, cell, |x, y| {
+            let value = (x * 37 + y * 61 + x * y * 3 + (x ^ y) * 11) & 0xff;
+            (value as u16) << 8
+        })
+        .unwrap();
+
+        for threshold in [40_u8, 20, 10, 5] {
+            let mut score_grid = vec![0_i16; cell * cell];
+            for y in 3..cell - 3 {
+                for x in 3..cell - 3 {
+                    if let Some(score) = fast_score_without_nms(&image, x, y, threshold, 0, 0, cell)
+                    {
+                        score_grid[y * cell + x] = score;
+                    }
+                }
+            }
+
+            for y in 3..cell - 3 {
+                for x in 3..cell - 3 {
+                    let direct = fast_score(&image, x, y, threshold, 19, 0, 0, cell);
+                    let score = score_grid[y * cell + x];
+                    let cached = (score != 0
+                        && (-1_i32..=1).all(|dy| {
+                            (-1_i32..=1).all(|dx| {
+                                (dx == 0 && dy == 0)
+                                    || score_grid
+                                        [(y as i32 + dy) as usize * cell + (x as i32 + dx) as usize]
+                                        < score
+                            })
+                        }))
+                    .then_some(score as u8);
+                    assert_eq!(cached, direct, "threshold={threshold} x={x} y={y}");
+                }
+            }
+        }
     }
 }
