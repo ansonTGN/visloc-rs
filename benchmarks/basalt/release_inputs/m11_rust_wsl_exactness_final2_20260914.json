@@ -1,0 +1,215 @@
+{
+  "calibration_sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
+  "config_sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
+  "created_utc": "2026-09-13T18:18:23+00:00",
+  "frames": {
+    "400": {
+      "artifacts": {
+        "lifecycle.jsonl": {
+          "linux": {
+            "bytes": 688512,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\linux400\\lifecycle.jsonl",
+            "sha256": "85e7f472992eb37d61a7443d3a94dc95df85d3b3a0a1605ae8d7f17701f9600b"
+          },
+          "windows": {
+            "bytes": 688512,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\windows400\\lifecycle.jsonl",
+            "sha256": "85e7f472992eb37d61a7443d3a94dc95df85d3b3a0a1605ae8d7f17701f9600b"
+          }
+        },
+        "trajectory.csv": {
+          "linux": {
+            "bytes": 53762,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\linux400\\trajectory.csv",
+            "sha256": "26978d55e8a70d80422a0e59b5acd892cf4c572f3f5b8fe8b38ae98d28d98cb4"
+          },
+          "windows": {
+            "bytes": 53762,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\windows400\\trajectory.csv",
+            "sha256": "26978d55e8a70d80422a0e59b5acd892cf4c572f3f5b8fe8b38ae98d28d98cb4"
+          }
+        },
+        "trajectory.tum": {
+          "linux": {
+            "bytes": 48506,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\linux400\\trajectory.tum",
+            "sha256": "f3ce239a3d5302ae5098d514387d30f887e5290916b2e78112b700600cd8e044"
+          },
+          "windows": {
+            "bytes": 48506,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\windows400\\trajectory.tum",
+            "sha256": "f3ce239a3d5302ae5098d514387d30f887e5290916b2e78112b700600cd8e044"
+          }
+        }
+      },
+      "forbidden_outputs": [
+        "trace.jsonl",
+        "marg_data",
+        "timing_breakdown.json"
+      ],
+      "forbidden_outputs_absent": true,
+      "lifecycle_exact": true,
+      "summaries": {
+        "linux": {
+          "frames_processed": 400,
+          "frames_requested": 400,
+          "imu_samples_delivered": 3992,
+          "observations_emitted": 106981,
+          "sha256": "baa35865fe1a80089c2344060f349d17250ec4cac39c383496bda1527d49ba2e"
+        },
+        "windows": {
+          "frames_processed": 400,
+          "frames_requested": 400,
+          "imu_samples_delivered": 3992,
+          "observations_emitted": 106981,
+          "sha256": "29bddb815394dbcdf552eace54a0e188763acdd9f82114851179bf15a8c8480a"
+        }
+      },
+      "trajectory_exact": true
+    },
+    "52": {
+      "artifacts": {
+        "lifecycle.jsonl": {
+          "linux": {
+            "bytes": 84118,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\linux52\\lifecycle.jsonl",
+            "sha256": "a77885d11cc5741c0c825d20f815096a6d77c459a34e480ff0fcc425ea84f9bc"
+          },
+          "windows": {
+            "bytes": 84118,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\windows52\\lifecycle.jsonl",
+            "sha256": "a77885d11cc5741c0c825d20f815096a6d77c459a34e480ff0fcc425ea84f9bc"
+          }
+        },
+        "trajectory.csv": {
+          "linux": {
+            "bytes": 7079,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\linux52\\trajectory.csv",
+            "sha256": "23ea4883a8726aef1e5da5bd9d12b66aad683c669728b68259a0698ed538eb48"
+          },
+          "windows": {
+            "bytes": 7079,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\windows52\\trajectory.csv",
+            "sha256": "23ea4883a8726aef1e5da5bd9d12b66aad683c669728b68259a0698ed538eb48"
+          }
+        },
+        "trajectory.tum": {
+          "linux": {
+            "bytes": 6353,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\linux52\\trajectory.tum",
+            "sha256": "63deea29f52899d6a840b2879134d50587bb1e5841d4a89ae1685dd9f2133aff"
+          },
+          "windows": {
+            "bytes": 6353,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\windows52\\trajectory.tum",
+            "sha256": "63deea29f52899d6a840b2879134d50587bb1e5841d4a89ae1685dd9f2133aff"
+          }
+        }
+      },
+      "forbidden_outputs": [
+        "trace.jsonl",
+        "marg_data",
+        "timing_breakdown.json"
+      ],
+      "forbidden_outputs_absent": true,
+      "lifecycle_exact": true,
+      "summaries": {
+        "linux": {
+          "frames_processed": 52,
+          "frames_requested": 52,
+          "imu_samples_delivered": 512,
+          "observations_emitted": 14661,
+          "sha256": "1f7723587dfcb0191fc35d4c5c61788f739a15ef5046e778bc39159ed8d3fc3f"
+        },
+        "windows": {
+          "frames_processed": 52,
+          "frames_requested": 52,
+          "imu_samples_delivered": 512,
+          "observations_emitted": 14661,
+          "sha256": "c9bddafbbba193c96c375c94464c1d9d4d594e4528ab98dc9d25403a96823e63"
+        }
+      },
+      "trajectory_exact": true
+    },
+    "80": {
+      "artifacts": {
+        "lifecycle.jsonl": {
+          "linux": {
+            "bytes": 130788,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\linux80\\lifecycle.jsonl",
+            "sha256": "174e465bb025e2f235a201f24f3eb549c4bdbf93539b238f55ca49c00a9e41ad"
+          },
+          "windows": {
+            "bytes": 130788,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\windows80\\lifecycle.jsonl",
+            "sha256": "174e465bb025e2f235a201f24f3eb549c4bdbf93539b238f55ca49c00a9e41ad"
+          }
+        },
+        "trajectory.csv": {
+          "linux": {
+            "bytes": 10847,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\linux80\\trajectory.csv",
+            "sha256": "7658a0db9708f901c4fbc23c473862c21009ed3f9eef54b1d48d9faa0b9cc165"
+          },
+          "windows": {
+            "bytes": 10847,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\windows80\\trajectory.csv",
+            "sha256": "7658a0db9708f901c4fbc23c473862c21009ed3f9eef54b1d48d9faa0b9cc165"
+          }
+        },
+        "trajectory.tum": {
+          "linux": {
+            "bytes": 9764,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\linux80\\trajectory.tum",
+            "sha256": "919a361df16d86adc508ef1fa13e10e7200e18bd2032c124adc9926af2f5419c"
+          },
+          "windows": {
+            "bytes": 9764,
+            "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\exactness\\windows80\\trajectory.tum",
+            "sha256": "919a361df16d86adc508ef1fa13e10e7200e18bd2032c124adc9926af2f5419c"
+          }
+        }
+      },
+      "forbidden_outputs": [
+        "trace.jsonl",
+        "marg_data",
+        "timing_breakdown.json"
+      ],
+      "forbidden_outputs_absent": true,
+      "lifecycle_exact": true,
+      "summaries": {
+        "linux": {
+          "frames_processed": 80,
+          "frames_requested": 80,
+          "imu_samples_delivered": 792,
+          "observations_emitted": 24256,
+          "sha256": "564615bfe5d3a6a6b11b95ebb32b30922f14a17b496ba6a115e9b0cb597f1662"
+        },
+        "windows": {
+          "frames_processed": 80,
+          "frames_requested": 80,
+          "imu_samples_delivered": 792,
+          "observations_emitted": 24256,
+          "sha256": "69a3c95a7fd401308be1725898122b1a66debd28d95e155d999d1aecee9c9ec9"
+        }
+      },
+      "trajectory_exact": true
+    }
+  },
+  "required_frames": [
+    52,
+    80,
+    400
+  ],
+  "rust_msvc_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+  "rust_wsl_executable_sha256": "a952f6d94304c387eb9a720b07e534a59f9dbdab51af55ec205ce44ac9b19f7f",
+  "rust_wsl_provenance_sha256": "b8adc1b8e40c735969571df3dba83bd4eac7be2997cc7be4c9a431d83b4d2d0b",
+  "schema_id": "basalt.phase6.rust_wsl_exactness.v1",
+  "source_sha256": "16e2d70c99aff38d8d1d31b167f67ef4db427382ae1f6dd10e944626e8d9c2c2",
+  "status": "pass",
+  "windows_executable": {
+    "bytes": 3819008,
+    "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+    "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+  }
+}

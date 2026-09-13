@@ -2,12 +2,12 @@
   "schema_version": 2,
   "schema_id": "visloc-rs.basalt.provenance.v2",
   "manifest_id": "basalt-provenance-v2-frozen",
-  "captured_at": "2026-09-13T08:59:58+00:00",
+  "captured_at": "2026-09-14T03:30:00+09:00",
   "status": "frozen",
   "supersedes": {
     "path": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
-    "bytes": 58209,
-    "sha256": "94ab07289227a99368d6dfed7ffe011313f00ad718b4f60395b00b8e273cc6aa",
+    "bytes": 58757,
+    "sha256": "3a9246a242747ebc41b9ae212641b3515aa2ee33e4e80d8be1eff9e6f42968a1",
     "schema_id": "visloc-rs.basalt.provenance.v1",
     "immutable": true,
     "retained_sections": [
@@ -58,12 +58,12 @@
       "hash_algorithm": "sha256",
       "hash_basis": "exact checked-out bytes; no line-ending normalization",
       "canonical_record": "relative POSIX path|lowercase SHA256, newline-joined and sorted",
-      "source_tree_sha256": "9dc8b8b516587b7f8bbb619254ba17f91cb6164fbacdc4ee9f91f1c2e170d524",
+      "source_tree_sha256": "d7d39c379011800ad47908faf133ccc4173a9980b19d1475fc96cc7906eca1f5",
       "files": [
         {
           "path": "pipelines/basalt/src/adapter.rs",
-          "bytes": 12704,
-          "sha256": "ffc50a777964ae4c55bc1afb6fc905fc7067a32a48d7dbbcb4648f61582d9088",
+          "bytes": 12760,
+          "sha256": "0d7258c483781ce9d4148c06a571ee6c150429e7c82de80b53f4e292e8bd2d65",
           "role": "production_rust"
         },
         {
@@ -80,8 +80,8 @@
         },
         {
           "path": "pipelines/basalt/src/config.rs",
-          "bytes": 7564,
-          "sha256": "3fd39df6ce50bdc935d8e4744031bc67d2aa0ad57faf2c87e81b179c6dcee037",
+          "bytes": 9955,
+          "sha256": "093f1cd61fcf269fb8a39b8da0ce4fb3ce3b7c6444226ea8cf3313e82fa53934",
           "role": "production_rust"
         },
         {
@@ -92,8 +92,8 @@
         },
         {
           "path": "pipelines/basalt/src/fast.rs",
-          "bytes": 19170,
-          "sha256": "2255c1fc81fdb025cdd289f7edc98157c97ec1cf4012ffa8a2594d211c25d085",
+          "bytes": 23070,
+          "sha256": "99ca1a8ef5b55a2d1e70410e833ff6a9b52dace2973273480386e7397e729383",
           "role": "production_rust"
         },
         {
@@ -134,8 +134,8 @@
         },
         {
           "path": "pipelines/basalt/src/mapper/features.rs",
-          "bytes": 95616,
-          "sha256": "e74dc6e395336aca9a975ffc0ba63b070af12d2c24b8d723e935ba97b830f60a",
+          "bytes": 101734,
+          "sha256": "d6f0c19266c163c509ee6f87cbfb7257aa9b110d1249fa58aae847e60bc923a1",
           "role": "production_rust"
         },
         {
@@ -146,8 +146,8 @@
         },
         {
           "path": "pipelines/basalt/src/mapper/session.rs",
-          "bytes": 89004,
-          "sha256": "6da86500fbf4addb270f60b43851a18927daffab5998da09d9a6172413275653",
+          "bytes": 89574,
+          "sha256": "69d127357daf6d687f1f3489aed62055239170c66554b435cea868546eabfa74",
           "role": "production_rust"
         },
         {
@@ -182,8 +182,8 @@
         },
         {
           "path": "pipelines/basalt/src/stream.rs",
-          "bytes": 58932,
-          "sha256": "f46e4fe6bdcea22088984993b9d7fe82405c02e16a79bd30e705ea2eba8af856",
+          "bytes": 60126,
+          "sha256": "84aa71e4133d5aa758dd0de317c32fd5a3108657798e7f282651ccf27bea5b65",
           "role": "production_rust"
         },
         {
@@ -200,8 +200,8 @@
         },
         {
           "path": "pipelines/basalt/src/timing.rs",
-          "bytes": 34793,
-          "sha256": "320294ad25ca3b036e42148f8c53e819ac8fac8c21151bde96e69c6d4a57c5be",
+          "bytes": 37092,
+          "sha256": "5bb75101d5d4ce5a127dbe1525235b54aef14a6928fbc4c09a9cdcf2f824e3e2",
           "role": "production_rust"
         },
         {
@@ -212,8 +212,8 @@
         },
         {
           "path": "pipelines/basalt/src/update.rs",
-          "bytes": 26994,
-          "sha256": "0d743554a11b6f8537806cd76b42b41eaaa269e3b44f1bb828fad530de290dde",
+          "bytes": 27005,
+          "sha256": "acc595d7daa70a755c13d92ec7f1f1636ceef76a6a908d37f2231e1b9b7833fe",
           "role": "production_rust"
         },
         {
@@ -224,8 +224,8 @@
         },
         {
           "path": "pipelines/basalt/src/vio/estimator.rs",
-          "bytes": 301286,
-          "sha256": "7bfcb580d9366a8735d5b67243d7134eb1c11ea879256c41d76b50f06ebe8b00",
+          "bytes": 301949,
+          "sha256": "8fd4b8d4b7262bf589da4c93463c47eaf36103794c0d11b5c1e12fd4fc7d5db7",
           "role": "production_rust"
         },
         {
@@ -236,8 +236,8 @@
         },
         {
           "path": "pipelines/basalt/src/vio/margdata.rs",
-          "bytes": 80788,
-          "sha256": "a58ff6f6b3bb36d054e10c04ec0a3b24372b5a5affc561e29254bbdf8dd262c0",
+          "bytes": 89178,
+          "sha256": "bb5b989704b8f117f8d74f006287a1826ea72acd63988974a463b5bb9a99356b",
           "role": "production_rust"
         },
         {
@@ -254,8 +254,8 @@
         },
         {
           "path": "pipelines/basalt/src/vio/window.rs",
-          "bytes": 589694,
-          "sha256": "5476150e29df944084f88a94ca747a193c69c07faea7b60c8fd5a5108d92b8c7",
+          "bytes": 590754,
+          "sha256": "dca65766e68afe8f8a85cfdad2aafa951a88a7ee118e2fda2a821a3ec0e074e7",
           "role": "production_rust"
         }
       ]
@@ -544,8 +544,8 @@
         },
         {
           "path": "pipelines/basalt/tests/m8f_nfr_session.rs",
-          "bytes": 41169,
-          "sha256": "4ef050bd3c3387ccdfab61e3ae49e4aa19f12481c4daf55f9fc5380aaeb9ef6f",
+          "bytes": 41333,
+          "sha256": "3ed86a3292ef471790a5b487c23f9406abbd0e710f2d95736aa96bb37288cd3c",
           "role": "rust_test_or_fixture"
         },
         {
@@ -601,8 +601,8 @@
       },
       "coordinator": {
         "path": "benchmarks/basalt/phase6_coordinator.py",
-        "bytes": 270983,
-        "sha256": "4ed613fc6af934af14f2a0c31b61f4b42783e25de41864efccad11f33c25f95a",
+        "bytes": 272072,
+        "sha256": "9768f6306fb8125aa59d5d8f5aa24a503b9f4bb87d4480c9217392c23e5ce3f2",
         "role": "phase6_coordinator"
       },
       "native_runner": {
@@ -691,7 +691,7 @@
         "dataset_manifest_sha256",
         "timing_feature_state"
       ],
-      "source_tree_sha256": "9dc8b8b516587b7f8bbb619254ba17f91cb6164fbacdc4ee9f91f1c2e170d524",
+      "source_tree_sha256": "d7d39c379011800ad47908faf133ccc4173a9980b19d1475fc96cc7906eca1f5",
       "cargo_toml_sha256": "5c049cc8597f7e05bf14cc50c098c09e71c0995adbbf4bee34e7c062ca868984",
       "cargo_lock_sha256": "901cfb7ee48c13b030eb9c33288813a12a0773e608a070ee1a4dbd0e028b75d0",
       "input_sha256": {
@@ -716,15 +716,15 @@
       "lm_workspace_reuse": "enabled",
       "build_command": "RUSTFLAGS=-C target-feature=+avx2,+fma cargo build --locked --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse",
       "executable": {
-        "path": "target/m11_release_candidate_avx2_reuse_20260913/basalt_euroc_vio_demo.exe",
-        "bytes": 3749376,
-        "sha256": "580abf66ca0afa57c8d828388cb41b7ea15dbefcc7ce1abd670182a3b40ce938",
+        "path": "target/m11_release_candidate_final_20260914/basalt_euroc_vio_demo.exe",
+        "bytes": 3819008,
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
         "role": "selected_release_executable"
       },
       "build_evidence": {
-        "path": "target/m11_release_candidate_avx2_reuse_20260913/phase6_rust_build_manifest.json",
-        "bytes": 1897,
-        "sha256": "5e87b0d6de4fb07a3be1e5ce11815e5006422b75129dd05c0e13a97dda8b68b7",
+        "path": "target/m11_release_candidate_final_20260914/phase6_rust_build_manifest.json",
+        "bytes": 1918,
+        "sha256": "305850963afa9d5f859b32c3c90287ebfcad771818ae016b28621f6a0c25d2a7",
         "role": "release_build_evidence"
       }
     },
@@ -748,9 +748,9 @@
       "legal_clearance_claimed": false
     },
     "correctness": {
-      "path": "benchmarks/basalt/release_inputs/m11_release_candidate_avx2_reuse_correctness_20260913.json",
-      "bytes": 15485,
-      "sha256": "7ce63e1c9175c1cd5c6ba8f5cc7bf7f7d2f7223de336511cc4e562bf47d2937c",
+      "path": "benchmarks/basalt/release_inputs/m11_release_candidate_final2_correctness_20260914.json",
+      "bytes": 15639,
+      "sha256": "9f60e3da48ff251f06c3727e21ba9f12f3c3174aed4d36ac2af119b0f88a5573",
       "role": "correctness_certificate",
       "schema": "visloc.basalt.release_candidate_correctness.v1",
       "status": "PASS_CORRECTNESS_ONLY",
@@ -763,9 +763,9 @@
         "performance_evaluation": false
       },
       "executable": {
-        "path": "target/m11_release_candidate_avx2_reuse_20260913/basalt_euroc_vio_demo.exe",
-        "bytes": 3749376,
-        "sha256": "580ABF66CA0AFA57C8D828388CB41B7EA15DBEFCC7CE1ABD670182A3B40CE938"
+        "path": "target/m11_release_candidate_final_20260914/basalt_euroc_vio_demo.exe",
+        "bytes": 3819008,
+        "sha256": "941B740908B2BB448D039865F6461E86DDAFE4612E7635F50D44AAEB7C46DCDF"
       },
       "source_binding_file_count": 33,
       "certificate_warnings": [],
@@ -777,7 +777,7 @@
           "frames_processed": 52,
           "observations_emitted": 14661,
           "imu_samples_delivered": 512,
-          "summary_sha256": "AC9EE96059B2B720760E0262A71E48637C648D7A2BC573F3CA5A06E4570D8688",
+          "summary_sha256": "C9BDDAFBBBA193C96C375C94464C1D9D4D594E4528AB98DC9D25403A96823E63",
           "trajectory_csv": {
             "bytes": 7079,
             "sha256": "23EA4883A8726AEF1E5DA5BD9D12B66AAD683C669728B68259A0698ED538EB48"
@@ -805,7 +805,7 @@
           "frames_processed": 80,
           "observations_emitted": 24256,
           "imu_samples_delivered": 792,
-          "summary_sha256": "24E2569664CF30AA6407197BB78B483120591C83A8F8A7BD3086EED5457F8043",
+          "summary_sha256": "69A3C95A7FD401308BE1725898122B1A66DEBD28D95E155D999D1AECEE9C9EC9",
           "trajectory_csv": {
             "bytes": 10847,
             "sha256": "7658A0DB9708F901C4FBC23C473862C21009ED3F9EEF54B1D48D9FAA0B9CC165"
@@ -833,14 +833,14 @@
           "frames_processed": 400,
           "observations_emitted": 106981,
           "imu_samples_delivered": 3992,
-          "summary_sha256": "D899D28B49C9A970F495196985F4E0CF5545F720DE3CB8992623DEAC91841A6C",
+          "summary_sha256": "29BDDB815394DBCDF552EACE54A0E188763ACDD9F82114851179BF15A8C8480A",
           "trajectory_csv": {
             "bytes": 53762,
-            "sha256": "6606E95C8FA1B6F8EDAEABDE931308821F0C91238EDA99AFC6BFD73A13D14A55"
+            "sha256": "26978D55E8A70D80422A0E59B5ACD892CF4C572F3F5B8FE8B38AE98D28D98CB4"
           },
           "trajectory_tum": {
             "bytes": 48506,
-            "sha256": "32038A918D62E7B677F950BD92ED8B88FC40007404AFEC04113ECA3B1035F138"
+            "sha256": "F3CE239A3D5302AE5098D514387D30F887E5290916B2E78112B700600CD8E044"
           },
           "forbidden_absent": [
             "trace.jsonl",
