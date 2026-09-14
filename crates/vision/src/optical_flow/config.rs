@@ -189,7 +189,9 @@ impl BasaltVioConfigFile {
         serde_json::from_str(json)
     }
 
-    pub fn from_path(path: impl AsRef<std::path::Path>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_path(
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let text = std::fs::read_to_string(path)?;
         Ok(Self::from_json_str(&text)?)
     }

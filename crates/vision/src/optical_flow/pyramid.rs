@@ -40,8 +40,7 @@ impl GrayImage {
 
     /// Bilinear sample; returns `None` outside the valid interior.
     pub fn sample_bilinear(&self, x: f32, y: f32) -> Option<f32> {
-        if x < 0.0 || y < 0.0 || x > (self.width as f32 - 1.0) || y > (self.height as f32 - 1.0)
-        {
+        if x < 0.0 || y < 0.0 || x > (self.width as f32 - 1.0) || y > (self.height as f32 - 1.0) {
             return None;
         }
         let x0 = x.floor() as i32;

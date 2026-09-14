@@ -5128,8 +5128,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let Some((rx, ry)) = right else {
                     continue;
                 };
-                right_undist_by_raw[raw_i] = cam1_distortion
-                    .undistort_pixel(cam1_camera, Point2::new(rx as f64, ry as f64));
+                right_undist_by_raw[raw_i] =
+                    cam1_distortion.undistort_pixel(cam1_camera, Point2::new(rx as f64, ry as f64));
             }
 
             let mut correspondences = Vec::new();
@@ -5154,14 +5154,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .optical_flow_epipolar_error
                 .max(0.0) as f64;
             let before_epi = correspondences.len();
-            let correspondences = visloc_rs::vision::stereo_bootstrap::filter_correspondences_by_epipolar(
-                &camera,
-                cam1_camera,
-                cam0_to_cam1,
-                &seed_features.keypoints,
-                &correspondences,
-                epi_thresh,
-            );
+            let correspondences =
+                visloc_rs::vision::stereo_bootstrap::filter_correspondences_by_epipolar(
+                    &camera,
+                    cam1_camera,
+                    cam0_to_cam1,
+                    &seed_features.keypoints,
+                    &correspondences,
+                    epi_thresh,
+                );
             if before_epi != correspondences.len() {
                 eprintln!(
                     "basalt OF stereo epipolar: {before_epi} -> {} (thresh={epi_thresh})",
@@ -5205,49 +5206,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 stereo_bootstrap_matches.len(),
             );
         } else {
-        // For the offline-replay path, switch the extractor to cam1
-        // and to the cam1 seed frame index. The cam0/cam1 SuperPoint
-        // pre-exports are aligned by frame index (the EuRoC streams
-        // share a 20 Hz cadence), so the cam1 features at
-        // `cam1_seed_idx` correspond to the cam0 seed timestamp.
-        extractor.set_camera(SuperPointCamera::Cam1);
-        extractor.set_frame_idx(cam1_seed_idx);
-        let cam1_features_raw = extractor
-            .extract(&cam1_image)
-            .map_err(|err| format!("cam1 seed-frame feature extraction failed: {err}"))?;
-        // Restore the loop-path defaults so subsequent cam0 extracts
-        // pick up the correct stream.
-        extractor.set_camera(SuperPointCamera::Cam0);
-        stereo_cam1_features_count = cam1_features_raw.len();
-        let cam1_features =
-            undistort_feature_keypoints(cam1_distortion, cam1_camera, &cam1_features_raw);
-        stereo_cam1_features_after_undistort_count = cam1_features.len();
-        stereo_bootstrap_matches = bootstrap_stereo_landmarks(
-            &camera,
-            cam1_camera,
-            cam0_to_cam1,
-            &seed_features,
-            &cam1_features,
-            &StereoBootstrapConfig::default(),
-        );
-        let cam0_pose_camera_to_world = seed_pose.camera_to_world();
-        let rotation_camera_to_world = cam0_pose_camera_to_world
-            .rotation
-            .to_rotation_matrix()
-            .into_inner();
-        for survivor in &stereo_bootstrap_matches {
-            let world_point =
-                cam0_pose_camera_to_world.transform_point(&survivor.point_left_camera_frame);
-            stereo_world_points[survivor.left_keypoint_index] = Some(world_point);
-            stereo_world_covariances[survivor.left_keypoint_index] = Some(
-                rotation_camera_to_world
-                    * survivor.point_covariance_left_camera_frame
-                    * rotation_camera_to_world.transpose(),
+            // For the offline-replay path, switch the extractor to cam1
+            // and to the cam1 seed frame index. The cam0/cam1 SuperPoint
+            // pre-exports are aligned by frame index (the EuRoC streams
+            // share a 20 Hz cadence), so the cam1 features at
+            // `cam1_seed_idx` correspond to the cam0 seed timestamp.
+            extractor.set_camera(SuperPointCamera::Cam1);
+            extractor.set_frame_idx(cam1_seed_idx);
+            let cam1_features_raw = extractor
+                .extract(&cam1_image)
+                .map_err(|err| format!("cam1 seed-frame feature extraction failed: {err}"))?;
+            // Restore the loop-path defaults so subsequent cam0 extracts
+            // pick up the correct stream.
+            extractor.set_camera(SuperPointCamera::Cam0);
+            stereo_cam1_features_count = cam1_features_raw.len();
+            let cam1_features =
+                undistort_feature_keypoints(cam1_distortion, cam1_camera, &cam1_features_raw);
+            stereo_cam1_features_after_undistort_count = cam1_features.len();
+            stereo_bootstrap_matches = bootstrap_stereo_landmarks(
+                &camera,
+                cam1_camera,
+                cam0_to_cam1,
+                &seed_features,
+                &cam1_features,
+                &StereoBootstrapConfig::default(),
             );
-            stereo_right_pixels[survivor.left_keypoint_index] =
-                Some(cam1_features.keypoints[survivor.right_keypoint_index]);
-        }
-        println!(
+            let cam0_pose_camera_to_world = seed_pose.camera_to_world();
+            let rotation_camera_to_world = cam0_pose_camera_to_world
+                .rotation
+                .to_rotation_matrix()
+                .into_inner();
+            for survivor in &stereo_bootstrap_matches {
+                let world_point =
+                    cam0_pose_camera_to_world.transform_point(&survivor.point_left_camera_frame);
+                stereo_world_points[survivor.left_keypoint_index] = Some(world_point);
+                stereo_world_covariances[survivor.left_keypoint_index] = Some(
+                    rotation_camera_to_world
+                        * survivor.point_covariance_left_camera_frame
+                        * rotation_camera_to_world.transpose(),
+                );
+                stereo_right_pixels[survivor.left_keypoint_index] =
+                    Some(cam1_features.keypoints[survivor.right_keypoint_index]);
+            }
+            println!(
             "stereo_bootstrap cam1_seed_idx={cam1_seed_idx} cam1_features={} after_undistort={} triangulated_matches={}",
             stereo_cam1_features_count,
             stereo_cam1_features_after_undistort_count,
@@ -5580,9 +5581,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         })
     } else if args.local_vi_ba_marginalization && args.local_vi_ba_use_sqrt_window_marginalization {
-        Some(OnlineSlamLoopClosureRefinementConfig::recovered_factor_sink(
-            camera.clone(),
-        ))
+        Some(OnlineSlamLoopClosureRefinementConfig::recovered_factor_sink(camera.clone()))
     } else {
         None
     };
@@ -6289,27 +6288,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
         extractor.set_frame_idx(frame_idx);
-        let (features_raw, features) = if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow)
-            && frame_idx == seed_frame_idx
-        {
-            // Reuse the exact FeatureSet that seeded the map so track-id
-            // descriptors match 1:1. Re-running KLT on the seed image can
-            // drop tracks and mint new ids, zeroing localization.
-            (seed_features_raw.clone(), seed_features.clone())
-        } else {
-            match extractor.extract(&image) {
-                Ok(raw) => {
-                    let undist = undistort_feature_keypoints(&distortion, &camera, &raw);
-                    (raw, undist)
+        let (features_raw, features) =
+            if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow)
+                && frame_idx == seed_frame_idx
+            {
+                // Reuse the exact FeatureSet that seeded the map so track-id
+                // descriptors match 1:1. Re-running KLT on the seed image can
+                // drop tracks and mint new ids, zeroing localization.
+                (seed_features_raw.clone(), seed_features.clone())
+            } else {
+                match extractor.extract(&image) {
+                    Ok(raw) => {
+                        let undist = undistort_feature_keypoints(&distortion, &camera, &raw);
+                        (raw, undist)
+                    }
+                    Err(err) => {
+                        eprintln!(
+                            "skipping frame_idx={frame_idx} due to feature-extraction error: {err}"
+                        );
+                        continue;
+                    }
                 }
-                Err(err) => {
-                    eprintln!(
-                        "skipping frame_idx={frame_idx} due to feature-extraction error: {err}"
-                    );
-                    continue;
-                }
-            }
-        };
+            };
         feature_count_sum += features.len();
         feature_count_min = feature_count_min.min(features.len());
         feature_count_max = feature_count_max.max(features.len());
@@ -6373,8 +6373,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 &cam1_setup.distortion,
                                 &cam1_setup.camera,
                                 &cam1_setup.cam0_to_cam1,
-                                args.optical_flow_config.optical_flow_epipolar_error.max(0.0)
-                                    as f64,
+                                args.optical_flow_config
+                                    .optical_flow_epipolar_error
+                                    .max(0.0) as f64,
                             )
                         } else {
                             extractor.set_camera(SuperPointCamera::Cam1);

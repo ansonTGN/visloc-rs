@@ -173,11 +173,7 @@ impl OpticalFlowTracker {
             .collect()
     }
 
-    fn track_all(
-        &self,
-        prev_pyr: &[GrayImage],
-        curr_pyr: &[GrayImage],
-    ) -> Vec<TrackedKeypoint> {
+    fn track_all(&self, prev_pyr: &[GrayImage], curr_pyr: &[GrayImage]) -> Vec<TrackedKeypoint> {
         let max_iters = self.config.optical_flow_max_iterations.max(1) as usize;
         let max_fb2 = self.config.temporal_max_recovered_dist2();
         let mut kept = Vec::with_capacity(self.tracks.len());
@@ -391,7 +387,10 @@ mod tests {
         tracker.prev_pyramid = Some(build_pyramid(&img0, cfg.optical_flow_levels as usize));
 
         let obs1 = tracker.process(&img1);
-        let hit = obs1.iter().find(|o| o.id == 1).expect("track 1 survived FB=0.04");
+        let hit = obs1
+            .iter()
+            .find(|o| o.id == 1)
+            .expect("track 1 survived FB=0.04");
         assert!(
             (hit.x - (cx + 3.0)).abs() < 0.5 && (hit.y - (cy - 2.0)).abs() < 0.5,
             "expected ~(+3,-2) flow, got ({}, {})",

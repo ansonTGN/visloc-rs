@@ -1673,8 +1673,7 @@ fn estimate_gyro_bias_with_window(
     for w in MIN_ALIGNMENT_WINDOW..=max_w {
         for start in 0..=ids.len() - w {
             let subset = ids[start..start + w].to_vec();
-            let Some(alignment) =
-                estimate_gyro_bias_on_ids(map, &subset, factors, bias_gyro_seed)
+            let Some(alignment) = estimate_gyro_bias_on_ids(map, &subset, factors, bias_gyro_seed)
             else {
                 continue;
             };

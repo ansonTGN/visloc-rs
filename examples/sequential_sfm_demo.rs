@@ -193,7 +193,8 @@ fn choose_export_pose_candidates_coherent(
 ) -> BTreeMap<u64, usize> {
     let mut selection = BTreeMap::<u64, usize>::new();
     let mut run: Vec<(u64, &Vec<ExportPoseCandidate>)> = Vec::new();
-    let flush = |run: &Vec<(u64, &Vec<ExportPoseCandidate>)>, selection: &mut BTreeMap<u64, usize>| {
+    let flush = |run: &Vec<(u64, &Vec<ExportPoseCandidate>)>,
+                 selection: &mut BTreeMap<u64, usize>| {
         if run.is_empty() {
             return;
         }

@@ -486,12 +486,8 @@ where
         let mut used_temporal_landmark_track = false;
         let mut localization = if let Some(temporal_store) = temporal_store.as_ref() {
             self.stats.temporal_landmark_attempt_count += 1;
-            let temporal = self.localize_appearance_global(
-                frame,
-                map,
-                temporal_store,
-                pose_prior.as_ref(),
-            );
+            let temporal =
+                self.localize_appearance_global(frame, map, temporal_store, pose_prior.as_ref());
             if temporal.success {
                 self.stats.temporal_landmark_success_count += 1;
                 used_temporal_landmark_track = true;
@@ -647,10 +643,7 @@ where
     }
 
     fn push_tracked_landmark_set(&mut self, landmark_ids: Vec<LandmarkId>) {
-        let history = self
-            .config
-            .temporal_landmark_tracking_history_frames
-            .max(1);
+        let history = self.config.temporal_landmark_tracking_history_frames.max(1);
         self.recent_tracked_landmark_sets.push(landmark_ids);
         while self.recent_tracked_landmark_sets.len() > history {
             self.recent_tracked_landmark_sets.remove(0);

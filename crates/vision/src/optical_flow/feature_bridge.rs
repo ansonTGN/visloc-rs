@@ -12,9 +12,7 @@ use crate::features::{FeatureExtractor, FeatureSet, GrayscaleImage};
 
 use super::config::BasaltOpticalFlowConfig;
 use super::pyramid::GrayImage;
-use super::tracker::{
-    track_points_between, OpticalFlowTracker, PATTERN51_SIZE,
-};
+use super::tracker::{track_points_between, OpticalFlowTracker, PATTERN51_SIZE};
 
 /// Descriptor length for track-id encodings (compact + L2-friendly).
 pub const TRACK_ID_DESCRIPTOR_DIM: usize = 16;

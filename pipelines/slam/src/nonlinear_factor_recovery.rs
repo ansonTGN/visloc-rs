@@ -268,7 +268,9 @@ fn recovered_factors_from_pose_lambda(
             .view_mut((VI_POSE_DOF, VI_POSE_DOF), (VI_POSE_DOF, VI_POSE_DOF))
             .copy_from(&lambda_pose.view((rj, rj), (VI_POSE_DOF, VI_POSE_DOF)));
 
-        let omega_ii = omega_joint.view((0, 0), (VI_POSE_DOF, VI_POSE_DOF)).into_owned();
+        let omega_ii = omega_joint
+            .view((0, 0), (VI_POSE_DOF, VI_POSE_DOF))
+            .into_owned();
         let omega_ij = omega_joint
             .view((0, VI_POSE_DOF), (VI_POSE_DOF, VI_POSE_DOF))
             .into_owned();
@@ -278,8 +280,7 @@ fn recovered_factors_from_pose_lambda(
         let omega_relative = match omega_ii.clone().cholesky() {
             Some(chol) => {
                 let inv_ij = chol.solve(&omega_ij);
-                0.5 * (&omega_jj - omega_ij.transpose() * inv_ij.clone()
-                    + &omega_jj
+                0.5 * (&omega_jj - omega_ij.transpose() * inv_ij.clone() + &omega_jj
                     - inv_ij.transpose() * omega_ij.transpose())
             }
             None => {
@@ -467,8 +468,7 @@ mod tests {
         // Sqrt path: marginalize nothing (keep = all) to get the sqrt factor.
         let keep: Vec<usize> = (0..d).collect();
         let sm = marginalize_sqrt(&j_full, &r_full, &keep, &[], None).unwrap();
-        let sqrt_factors =
-            recover_relative_pose_factors(&sm.factor, &sm.rhs, n).unwrap();
+        let sqrt_factors = recover_relative_pose_factors(&sm.factor, &sm.rhs, n).unwrap();
 
         assert_eq!(dense_factors.len(), sqrt_factors.len());
         for (df, sf) in dense_factors.iter().zip(sqrt_factors.iter()) {
@@ -539,8 +539,12 @@ mod tests {
         }
         let r = DVector::zeros(12);
         assert!(
-            recover_relative_pose_factors(&permute_sqrt_stack_to_vi_blocks(&j_ba, n, 0).unwrap(), &r, n)
-                .is_none(),
+            recover_relative_pose_factors(
+                &permute_sqrt_stack_to_vi_blocks(&j_ba, n, 0).unwrap(),
+                &r,
+                n
+            )
+            .is_none(),
             "zero vel/bias columns must make VI Schur fail"
         );
         let pose_j = j_ba.columns(0, pose_cols).into_owned();

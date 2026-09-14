@@ -904,12 +904,9 @@ fn recovered_marginal_factors_inject_into_pose_graph_sink() {
     };
 
     let (map, first_frame) = map_and_frame_with_extra_landmarks(10, 1, Vector3::zeros());
-    let (_, second_frame) =
-        map_and_frame_with_extra_landmarks(30, 1, Vector3::new(1.5, 0.0, 0.0));
-    let (_, third_frame) =
-        map_and_frame_with_extra_landmarks(50, 1, Vector3::new(3.0, 0.0, 0.0));
-    let (_, fourth_frame) =
-        map_and_frame_with_extra_landmarks(70, 1, Vector3::new(4.5, 0.0, 0.0));
+    let (_, second_frame) = map_and_frame_with_extra_landmarks(30, 1, Vector3::new(1.5, 0.0, 0.0));
+    let (_, third_frame) = map_and_frame_with_extra_landmarks(50, 1, Vector3::new(3.0, 0.0, 0.0));
+    let (_, fourth_frame) = map_and_frame_with_extra_landmarks(70, 1, Vector3::new(4.5, 0.0, 0.0));
     let mut slam = build_slam(map);
 
     slam.process_frame(&first_frame, []);
