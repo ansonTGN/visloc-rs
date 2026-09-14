@@ -6,11 +6,18 @@ dependency surface that matches their deployment.
 
 | Feature set | Support tier | CI expectation | MSRV | Notes |
 | --- | --- | --- | --- | --- |
-| `--no-default-features` | Tier 1 | Linux + Windows `cargo check --workspace --all-targets --no-default-features` | Rust 1.82 | Core crates, algorithms, pipelines, and dependency-light examples. |
-| default | Tier 1 | Linux + Windows `cargo check --workspace --all-targets` | Rust 1.82 | Same lightweight surface; default features are intentionally empty. |
-| `image-io` | Tier 1 | Linux + Windows `cargo check --workspace --all-targets --features image-io`; MSRV check in `scripts/check_msrv.sh` | Rust 1.82 | PNG/JPEG loading, common image sequences, KITTI image-directory helpers, and user-facing image examples. |
-| `onnx-inference` | Tier 2 opt-in | `VISLOC_CHECK_ONNX=1 sh scripts/check_feature_matrix.sh` on a current stable Rust | Not part of the Rust 1.82 MSRV guarantee | Pulls ONNX Runtime through `ort`; model files and hashes must be recorded in benchmark manifests. |
-| `onnx-cuda` | Tier 2 hardware-gated | `VISLOC_CHECK_ONNX_CUDA=1 sh scripts/check_feature_matrix.sh` on CUDA-capable hosts | Not part of the Rust 1.82 MSRV guarantee | Requires CUDA/cuDNN-compatible ONNX Runtime setup and remains outside the default CI gate. |
+| `--no-default-features` | Tier 1 | Linux + Windows `cargo check --workspace --all-targets --no-default-features` | Rust 1.83 | Core crates, algorithms, pipelines, and dependency-light examples. |
+| default | Tier 1 | Linux + Windows `cargo check --workspace --all-targets` | Rust 1.83 | Same lightweight surface; default features are intentionally empty. |
+| `image-io` | Tier 1 | Linux + Windows `cargo check --workspace --all-targets --features image-io`; MSRV check in `scripts/check_msrv.sh` | Rust 1.83 | PNG/JPEG loading, common image sequences, KITTI image-directory helpers, and user-facing image examples. |
+| `onnx-inference` | Tier 2 opt-in | `VISLOC_CHECK_ONNX=1 sh scripts/check_feature_matrix.sh` on a current stable Rust | Not part of the Rust 1.83 MSRV guarantee | Pulls ONNX Runtime through `ort`; model files and hashes must be recorded in benchmark manifests. |
+| `onnx-cuda` | Tier 2 hardware-gated | `VISLOC_CHECK_ONNX_CUDA=1 sh scripts/check_feature_matrix.sh` on CUDA-capable hosts | Not part of the Rust 1.83 MSRV guarantee | Requires CUDA/cuDNN-compatible ONNX Runtime setup and remains outside the default CI gate. |
+
+`basalt-timing-breakdown` and `basalt-lm-workspace-reuse` are internal, narrowly-scoped
+opt-in switches on `visloc-basalt` (a timing/instrumentation sidecar and a capacity-only
+LM workspace-buffer reuse toggle, respectively; see their doc comments in the root
+`Cargo.toml`). They are intentionally excluded from this Tier 1/Tier 2 support-surface
+table — `tests/test_feature_matrix.py` tracks them separately from the documented matrix
+below so this table stays a map of *user-facing* build profiles.
 
 ## Policy
 

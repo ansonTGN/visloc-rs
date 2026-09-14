@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "audit_id": "m10-release-bundle-blockers-20260829",
+  "captured_at": "2026-08-29T06:21:49+09:00",
+  "scope": {
+    "workspace": "C:/Users/rsasa/Workspace/visloc-rs",
+    "read_only": true,
+    "heavy_build_or_timing_started": false,
+    "live_phase6_processes_observed": [6232, 8492, 46744],
+    "purpose": "Audit remaining release-bundle reproducibility, scope, licensing, and oracle-label blockers after the M10 provenance repair."
+  },
+  "passes": {
+    "provenance_validator": {
+      "command": "python -m benchmarks.basalt.verify_provenance",
+      "status": "PASS",
+      "output": "Basalt provenance validation passed."
+    },
+    "lightweight_gt_firewall_suite": {
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q benchmarks/basalt/test_provenance.py tests/test_basalt_parity_harness.py tests/test_basalt_batch.py tests/test_basalt_parity_evaluator.py tests/test_euroc_dataset_manifest.py",
+      "status": "PASS",
+      "passed": 27,
+      "failed": 0,
+      "warnings": 1,
+      "warning": "PytestCacheWarning: cache path denied by workspace permissions"
+    },
+    "release_path_and_firewall": {
+      "release_manifest": "benchmarks/basalt/basalt_release_manifest_v1.json",
+      "release_manifest_sha256": "995056435ddabadcdd478c7e7e3a56df6c0a5141f0c14abf88c5d158d2b298bd",
+      "artifact_records": 9,
+      "artifact_paths_exist": true,
+      "ground_truth_artifacts": 0,
+      "forbidden_artifact_path_matches": 0,
+      "notice_files_exist": true,
+      "notice_hashes": {
+        "benchmarks/basalt/NOTICE": {"bytes": 5253, "sha256": "307e6d77cd2b57c5548f3e650629d659c3aab62729f32bc87b5119b4a5d30841"},
+        "pipelines/basalt/NOTICE": {"bytes": 10486, "sha256": "24e7aaee0388d60053e382fc60aa1bd241f8912599c7d5358ea57403cfb1484c"}
+      }
+    }
+  },
+  "release_inventory_observed": {
+    "pipelines/basalt/src": {"kind": "rust_source", "files": 32, "bytes": 1816959, "directly_listed_in_provenance": 32},
+    "pipelines/basalt/examples": {"kind": "diagnostic_examples", "files": 15, "bytes": 99296, "directly_listed_in_provenance": 15},
+    "pipelines/basalt/tests": {"kind": "contract_tests", "files": 44, "bytes": 273787, "directly_listed_in_provenance": 0},
+    "pipelines/basalt/NOTICE": {"kind": "license_notice", "files": 1, "bytes": 10486, "sha256": "24e7aaee0388d60053e382fc60aa1bd241f8912599c7d5358ea57403cfb1484c"},
+    "benchmarks/basalt/basalt_provenance_manifest_v1.json": {"kind": "provenance", "files": 1, "bytes": 41717, "sha256": "5f872df75bf4a8a00fe5cfe7745593610ce4c296b24035e329c3ff30417ce77d"},
+    "benchmarks/basalt/schemas/provenance_manifest_v1.schema.json": {"kind": "provenance_schema", "files": 1, "bytes": 3675, "sha256": "fd42c85432e093797df7684c225993b42d1b7b1624bf49488349edce7b815b92"},
+    "benchmarks/basalt/basalt_release_manifest_v1.json": {"kind": "release_metadata", "files": 1, "bytes": 1671, "sha256": "995056435ddabadcdd478c7e7e3a56df6c0a5141f0c14abf88c5d158d2b298bd"},
+    "benchmarks/basalt/verify_provenance.py": {"kind": "provenance_validator", "files": 1, "bytes": 18204, "sha256": "5a2a96b0b927fe8779f76cc544945afec215326183e108d4e9d5bcdd941dfe6e"},
+    "benchmarks/basalt/NOTICE": {"kind": "license_notice", "files": 1, "bytes": 5253, "sha256": "307e6d77cd2b57c5548f3e650629d659c3aab62729f32bc87b5119b4a5d30841"}
+  },
+  "open_release_blockers": [
+    {
+      "id": "bundle-content-hashes",
+      "severity": "release-blocking-for-reproducibility",
+      "finding": "The nine release artifact records contain paths/kinds but zero sha256 or byte fields. Directory entries therefore do not cryptographically bind their contents, and the release manifest itself is not externally hash-bound.",
+      "evidence": "artifact_records=9; artifact_sha256_fields=0; all nine paths currently exist",
+      "owner_action": "Define a release inventory/archive contract with per-file bytes and SHA-256, then bind the inventory to the released bundle."
+    },
+    {
+      "id": "release-scope-manifests",
+      "severity": "release-owner-decision",
+      "finding": "The release artifact list omits basalt_port_manifest_v1.json, upstream_manifest.json, protocols/basalt_euroc_parity_v1.json, and configs/basalt/euroc_config.json even though they bind the port, upstream pins, protocol, and configuration.",
+      "evidence": {
+        "omitted_existing_files": {
+          "benchmarks/basalt/basalt_port_manifest_v1.json": "928005ec6e41697605fec0d98c7c2f312fa4a7238ff336d02f87947ad2b04dde",
+          "benchmarks/basalt/upstream_manifest.json": "46b9e7c1b429a40d755ce2c1b21270e95f6e73a2607381e68066a53ec18f4556",
+          "benchmarks/basalt/protocols/basalt_euroc_parity_v1.json": "7957f102ffa47a67c3509cdf77942d599e7b0f5f5f2bf452987f87a55df246e5",
+          "configs/basalt/euroc_config.json": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+        }
+      },
+      "owner_action": "Either include and hash these contract inputs in the release bundle or explicitly document that the bundle is source-only and requires external pinned inputs."
+    },
+    {
+      "id": "test-content-binding",
+      "severity": "release-owner-decision",
+      "finding": "The release includes pipelines/basalt/tests as a directory, but the provenance generator inventory intentionally excludes tests; none of the 44 test files has a direct provenance hash record.",
+      "evidence": "pipelines/basalt/tests contains 44 files / 273787 bytes; directly_listed_in_provenance=0",
+      "owner_action": "Add a test-tree inventory/hash or explicitly classify tests as non-reproducibility-critical release material."
+    },
+    {
+      "id": "release-schema",
+      "severity": "release-owner-decision",
+      "finding": "No dedicated release_manifest_v1.schema.json was found; release metadata is checked by hand-coded fields in verify_provenance.py.",
+      "evidence": "benchmarks/basalt/schemas contains evaluation, port, provenance, and run schemas, but no release schema",
+      "owner_action": "Add a release schema and validate artifact record shape, hash policy, exclusions, and firewall fields before declaring a bundle reproducible."
+    },
+    {
+      "id": "license-review",
+      "severity": "legal-review",
+      "finding": "NOTICE attribution covers the pinned Basalt, basalt-headers, OpenGV, Sophus, Eigen, and OpenCV metadata, but transitive vcpkg and binary redistribution obligations remain outside this technical validator.",
+      "evidence": "Both NOTICE files explicitly retain the legal-review limitation; no binary bundle was produced",
+      "owner_action": "Obtain legal review before shipping binaries or redistributing transitive package contents."
+    }
+  ],
+  "searches": {
+    "release_named_archive_candidates": {
+      "scope": "repository files whose names contain release or bundle and extensions .zip/.tar/.gz/.7z",
+      "matches": []
+    },
+    "new_frame51_evidence": {
+      "paths": [
+        "work/m7im15_frame51_kf_counter_comparison_20260829.json",
+        "work/m7im15_frame51_kf_counter_comparison_20260829.md",
+        "work/m7im15_gdb_native_frame51_kf_counters_20260829.gdb"
+      ],
+      "release_artifact_listed": false,
+      "provenance_generator_inventory_listed": false,
+      "reason": "They are diagnostic evidence under work/ and are not code/script suffixes in the validator's benchmarks/basalt or pipelines/basalt/examples inventory."
+    }
+  },
+  "retained_caveats": [
+    "Pinned WSL checkout /root/visloc-basalt-oracle-0f3b2b52 remains dirty in five diagnostic files; binaries from it must be labeled instrumented/dirty, not clean-pinned oracle evidence.",
+    "The historical target/basalt_upstream_imu_golden_frame1_2.cpp source hash differs from the current source; its historical binding was intentionally not regenerated.",
+    "No heavy build, engine run, timing benchmark, release archive, or pinned-checkout edit was performed during this audit."
+  ]
+}

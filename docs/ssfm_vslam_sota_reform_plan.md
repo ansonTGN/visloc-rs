@@ -512,7 +512,319 @@ time without further tuning. Export now also welds only R2-inlier local landmark
 groups into one deduplicated multi-view COLMAP track; all unwelded points remain
 submap-owned, so unverified cross-seam observations cannot be merged.
 
-### S3 — Hard-video robustness
+S2 terminal, full MH_03 head-to-head (committed `fcbc95d`, 2026-07-31):
+the frozen 2700-frame monocular policy (trusted 8/12 stride 2, pose-graph
+20/30 stride 2, `--wide-hypothesis --post-refinement-registration
+--structureless-registration`, COLMAP SIFT/Ceres, `--capture-registry`) run with
+the hierarchical + global-consistency stack beats COLMAP 4.1 on both axes:
+**ATE Sim(3) 3.82 cm vs 4.94 cm (-22.7%)** and **wall 4 h 08 m vs 10.36 h
+(2.5x faster)**, 2700/2700 registered under the frozen evaluation protocol
+(Sim(3) primary). Root cause of the earlier 22.41 cm result was segment-
+composition drift: the submap Sim(3) pose graph was a pure spanning tree
+(adjacent edges only, a mathematical no-op). The landed fix ladder -- banded
+submap constraints (`--submap-constraint-band`), submap loop closure
+(`--submap-loop-closure`, `hierarchical_loop_closure.rs`), post-seam-BA Sim(3)
+PGO with loop-landmark welds and a convergence-stopped second global BA
+(`--submap-loop-ba`), and seam BA (`--submap-seam-ba*`) -- gives the pose graph
+real cycles. Evidence (hash-frozen):
+`E:/visloc_archive/sota_s2_hierarchical_mh03_full2700_postfix_20260727/attempt10_loopweld_retri/evaluation/`.
+This closes the S2 gate on the full sequence. All mechanisms are flag-gated,
+off by default; the frozen config without flags is bit-identical.
+
+Full-EuRoC sweep (2026-07-31..08-05, per-sequence attempt-10 config +
+remediation budgets 48, 6 build threads; run books + binary SHA in
+`E:/visloc_archive/sota_full_euroc_sweep_20260731/`):
+
+| seq | frames | ATE Sim(3) RMSE | notes |
+| --- | --- | --- | --- |
+| MH_03 | 2700 | **3.82 cm** | the committed win; light remediation (3 merges) |
+| MH_01 | 3682 | 9.85 cm | PGO-only fallback; loop-BA rerun (08-05) is 9.84 cm -- no loop-BA gain, scale-16 hover pathology persists |
+| MH_05 | 2273 | 15.24 cm | dark segments; ~8 merges + 1 last-resort |
+| MH_04 | 2032 | 52.28 cm | aggressive motion; 13 merges incl. 5 last-resort -- completion bought at accuracy cost |
+| MH_02 | 3040 | 14.05 cm | mean 9.07 / median 7.48 / **max 226 cm**; 7 consensus + 12 drift + 2 last-resort merges |
+
+Central empirical finding: remediation intensity correlates with ATE
+degradation (3 merges -> 3.82 cm MH_03; ~8 -> 15.24 cm MH_05; 13 -> 52.28 cm
+MH_04; 21 -> 14.05 cm MH_02). Seam rejections are true signals of broken
+frontend geometry (dark segments, aggressive motion); forced merges preserve
+registration completeness but stitch distorted geometry. This matches the
+older ETH3D verdict: the COLMAP gap is frontend coverage / view graph, not the
+mapper. Full-sequence COLMAP baselines for MH_01/02/04/05 do NOT exist yet
+(owner approval required before running them; COLMAP already lost the MH_04
+300f held-out 6.51 vs 1.07 cm, so do not assume COLMAP wins the difficult
+sequences).
+
+MH_02 outlier localization (08-06): the 226 cm max is a single localized
+region at **frames 840-855** (peak frame 855, 2.264 m; 16 poses > 0.5 m),
+inside final submap 26 (832-920) overlapping 53 (848-936). No seam merge fired
+there; it is a fast-motion segment (GT forward acceleration 0.29->0.50 m per
+processed frame). Three independent runs reproduce it -- the 08-04 baseline,
+the 08-05 overlapfix rerun (identical 14.05 cm / same max), and the 08-05
+`--no-submap-loop-ba` rerun (13.95 cm, max 2.215 m) -- so it is not a merge or
+loop-BA artifact. **Root-cause diagnosis (08-06): the FRONTEND here is healthy,
+not coverage-starved.** The isolated 768-920 subrange builds to 0.56 cm rmse /
+0.94 cm max, and the full model restricted to the same window scores 0.32 cm
+rmse / 1.51 m max -- i.e. the region's internal geometry is sound even inside
+the full model. The 2.26 m only appears under the full-sequence global Sim(3)
+alignment, and frame 855's window-local max grows with window size (0.83 m
+@800-880, 1.51 m @768-920, 2.00 m @700-1000, 2.26 m full). **Trajectory-jump
+evidence:** in the FULL model the consecutive pose steps around 855 literally
+break -- step 839->840 = 87.6, step 854->855 = 72.7, **step 855->856 = 263.4**
+vs a smooth ~3-9 everywhere else (GT ~0.03). The frame-855 pose is isolated
+from both neighbors by the global composition -- this is NOT smooth scale
+drift but a broken pose chain. **Conclusion: the outlier is a global-composition
+artifact of the monocular hierarchy (a pose pulled out of the chain by the
+global pose graph / second global BA), not a frontend matching defect.** Cheap
+discriminator next: rerun full MH_02 with `--no-submap-loop-ba
+--no-submap-loop-closure` (PGO-only, no loop edges) and check whether the
+step-855 jump disappears. This redirects the fix lever from frontend pair
+selection toward global scale/pose consistency (seam Sim(3) scale
+accumulation, loop-anchored scale fixation, gauge regularization in the second
+global BA).
+
+Cross-sequence comparison (08-06): MH_02's 840-855 break is UNIQUE to MH_02.
+Per-pose Sim(3)-aligned error shape across the four full MH runs:
+
+| seq | rmse | max | median | frames >3x median | character |
+| --- | --- | --- | --- | --- | --- |
+| MH_04 | 0.523 | 1.282 | 0.512 | 0.0% | uniform offset (frontend quality) |
+| MH_05 | 0.152 | 0.370 | 0.117 | 0.7% | near-uniform |
+| MH_01 | 0.098 | 0.253 | 0.081 | 0.0% | near-uniform |
+| MH_02 | 0.141 | 2.264 | 0.075 | ~1.2% (16 poses) | single broken pose chain @840-855 |
+
+MH_04/MH_05/MH_01 have NO pose-step jumps (>20x median: 11.6x / 15.2x / 13.9x
+max) whereas MH_02 has a 263.4 step (1000x median). The MH_04/MH_05 high ATE
+is a smooth, whole-trajectory offset -- consistent with the earlier
+frontend-quality diagnosis (dark segments, aggressive motion) and NOT the same
+mechanism as MH_02's local pose break. So the global-composition/scale
+investigation is specific to MH_02; MH_04/MH_05 remain frontend-quality
+problems. Spatial error profile (08-06): MH_04's mean error is 0.29-0.58 m
+across ALL ten frame-deciles -- uniformly bad everywhere, not one dark region;
+MH_05 is 0.07-0.24 m with a mild peak at frames 1136-1363. This means the
+MH_04/MH_05 lever is a SYSTEMIC frontend/matching-quality improvement, not a
+localized fix. Error-direction profile (08-06): after Sim(3) alignment MH_04's
+per-axis rms is x=0.174 / y=0.374 / z=0.322 m -- lateral (y) and vertical (z)
+dominate forward (x); MH_05 is x=0.088 / y=0.105 / z=0.067 m with y largest.
+A lateral/vertical-dominant error is consistent with a frontend whose matched
+features cluster along the forward axis (weakly constraining the perpendicular
+directions) -- a matching-coverage / feature-distribution hypothesis to test
+in the frontend slice, distinct from MH_02's single-pose break.
+
+MH_02 local-scale measurement (08-06): the full model's LOCAL scale (model
+step / GT step, median over ranges) is 106.7 before the break (100-800), 180.6
+after (1000-2800), and **326.8 in the broken 840-850 span** -- a 3.06x local
+scale over-expansion vs before. So the MH_02 outlier is not just a single pose
+flung out of the chain: the trajectory around 855 is locally stretched at ~3x
+the surrounding scale. This is exactly what a wrong Sim(3) scale on a loop edge
+incident on submap 26 would produce (the loop's target-from-source scale is
+the only independent scale signal into the pose graph for that region), and
+it is consistent with the in-flight discriminator run (loop closure OFF). The
+discriminator has since REJECTED the loop-scale hypothesis (see below): the
+855 break persists without any loop edge, so the over-expansion is seam/banded
+scale accumulation, not loop scale.
+
+MH_02 outlier discriminator (08-06, COMPLETE): submap 26 (832-920) carries
+many ACCEPTED loop edges to later submaps 137-143 (~frames 2760-3000); GT
+confirms frames 2856-2912 genuinely revisit the 832-920 location (0.04-0.17 m
+min distance), so these are real revisit loops carrying the only long-range
+scale constraints for that region. Hypothesis: a wrong Sim(3) scale on one of
+these loop edges pulls submap 26 (and with it frame 855) out of the pose chain.
+Discriminator run `MH_02\full_noloopba_nolc_discriminator_20260806\` disables
+BOTH loop closure and loop BA (pure chain+banded PGO, `--no-submap-loop-ba`,
+no `--submap-loop-closure`). **Verdict (08-07): LOOP-EDGE HYPOTHESIS
+REJECTED.** The step-855 jump PERSISTS without any loop edge: 854->855 = 76.0,
+855->856 = 275.5 (vs 72.7 / 263.4 with loop closure on -- statistically the
+same size). The discriminator model's Sim(3) ATE is 32.80 cm rmse / max 2.076 m
+(worse than the 14.05 cm with loops, because removing loops also removed the
+only long-range scale anchors -- but the local 855 break is unchanged).
+**Conclusion: the 840-855 pose break is caused by seam/banded Sim(3) scale
+accumulation along the submap chain, NOT by loop-edge scale.** The break is
+present in the pure chain+banded pose graph itself. Fix lever narrows to:
+seam Sim(3) scale estimation/accumulation (why does submap 26's chain-side
+scale over-expand ~3x?), banded-edge scale consistency, and gauge
+regularization in the global PGO/BA. Note the discriminator was ~2.7x slower
+than the 08-04 baseline under concurrent system load (MsMpEng/EpicGames etc.),
+so wall-clock comparisons against archived runs are not meaningful.
+
+Scale-jump localization (08-07): comparing the loop-on and loop-off full models,
+the local scale (model step / GT step) is IDENTICAL in both: ~105-115 normally,
+**304.9/318.2 at frames 832-848 and 193.4/201.7 at 848-864** (3x / 2x over-
+expansion), back to ~108-115 by 864-880. The over-expansion starts EXACTLY at
+frame 832 = the start of final submap 26 (832-920), and matches the 2.60x
+boundary jump measured at the 904-832 seam. Because it is byte-identical with
+and without loop edges, it is produced by the seam/banded Sim(3) composition of
+submap 26, not by any loop. Submap 26's boundary seams (25..26, 26..27) skipped
+the camera-centre scale check (empty `camera_landmark_log_scale_disagreement`),
+so their Sim(3) scale rests only on the landmark RANSAC-Umeyama estimate. Next
+measurement: extract submap 26's incoming/outgoing seam Sim(3) scale values
+(need a code-level log -- currently not printed) and compare against the
+independent camera-centre scale on the shared frames.
+
+Isolated-vs-full gauge comparison (08-07): the SAME frames 832-848 (submap 26
+head) have model-vs-GT local scale **5.43 in the isolated 768-920 subrange
+build but 304.95 in the full model** (a 56x discrepancy); surrounding frames
+are 10-13 vs 105-126. So submap 26's own local gauge is internally consistent
+(its 832-848 span is comparatively SHRUNK), yet the full-sequence composition
+inverts it into a 3x over-expansion. The distortion is introduced exactly at
+submap 26's boundary seams (25..26 in, 26..27 out) when its local gauge is
+transformed into the global frame -- the incoming/outgoing seam Sim(3) scale
+is inconsistent with submap 26's internal scale. (The isolated subrange is
+healthy because it re-estimates a coherent set of local gauges; the full run
+inherits submap 26's gauge from the chain.) This pinpoints the fix: verify /
+correct the Sim(3) scale on the seams entering and leaving a submap against an
+independent measurement (camera-centre scale on the shared frames), or
+re-gauge submap 26 after seam composition.
+
+Banded-edge scale-chain analysis (08-07): the logged banded-edge Sim(3) scales
+around submap 26 are **internally consistent** -- banded(24,26)*banded(26,28)
+= 0.5931 vs banded(24,28) = 0.5929 (exact), so the chain of Sim(3) scales is
+transitive as expected. What the banded scales reveal: seams leaving submaps
+26/27 carry scale ~0.37-0.44 while neighboring chains carry ~0.99-1.60
+(banded 26->28=0.370, 27->29=0.444 vs 28->30=1.009, 23->25=0.993), i.e. the
+submap-26/27 chain's local gauge is ~2.3-2.7x SMALLER than the surrounding
+submaps. Combined with the isolated-vs-full comparison (832-848 is 5.43 in the
+isolated build, 304.95 in full), the conclusion is: **submap 26's local build
+has a scale-gauge that is internally consistent but globally inconsistent with
+its neighbors**; the seam Sim(3) faithfully records that ratio, so the
+distortion is in submap 26's local reconstruction scale, not in the seam
+estimation. Next step: compare submap 26's local camera-trajectory scale
+against GT (or against a re-built subrange) to decide whether the local build
+is wrong (frontend/BA scale defect inside the submap) or the world-anchor
+gauge is at fault.
+
+Standalone submap-26 build (08-07): a fresh standalone hierarchical build of
+frames 832-920 (89 frames, 1 submap, 89/89 registered, mean reproj 0.68 px)
+produces a COMPLETELY smooth chain -- consecutive steps 0.37-0.72 everywhere,
+NO jump at 839->840, 854->855, or 855->856. The isolated 768-920 subrange is
+equally smooth (0.07-0.24). Only the FULL-model composition shows the jumps
+(839->840 = 87.6, 854->855 = 72.7, 855->856 = 263.4). **Therefore submap 26's
+local reconstruction is healthy; the frame-855 break is introduced by the
+full-sequence seam/banded Sim(3) composition into the global frame.** Note the
+jump frames (840, 855) both sit inside the 832-904 overlap region shared by
+final submaps 25 (816-904) and 26 (832-920), so the two candidate gauges for
+those frames disagree in the global frame. The mechanism to investigate next is
+how overlapping frames' poses are resolved when the seam Sim(3) between the two
+submaps is applied (duplicate-frame gauge arbitration), which now has the
+new `hierarchical-seam-edge` scale diagnostic to measure directly.
+
+Standalone submap-27 build (08-07): a fresh standalone build of frames
+848-936 (89 frames, 1 submap, 89/89 registered) is also COMPLETELY smooth --
+steps 0.11-0.14, no jump at 854->855 or 855->856. So BOTH submaps that
+contain frame 855 (submap 26 832-920 and submap 27 848-936) are healthy in
+isolation, and the isolated 768-920 subrange is healthy. **The frame-855 break
+exists ONLY in the full-sequence composition.** The overlap-reselect log shows
+frame 855 owner 22 -> 27 (earliest owner 22 = the merged 496-840 submap has
+step_outlier_ratio 47.29, so candidate 27 at 1.15 is chosen). Since every
+constituent local build is smooth, the break must come from the interaction of
+the overlap-frame pose arbitration with the seam Sim(3) gauge transforms in
+the full hierarchy -- i.e. a frame whose pose is selected from one submap while
+neighboring frames' poses come from a submap with a different local_from_atlas
+gauge, producing a discontinuous chain at the seam-arbitration boundary. This
+narrows the fix to the export-time overlap-frame arbitration
+(`choose_export_pose_candidate` in `sequential_sfm_demo.rs`) and/or the seam
+gauge consistency at the 25..26 / 26..27 / 22..26 boundaries, which can now be
+measured with the added `hierarchical-seam-edge` scale log.
+
+Root cause CONFIRMED (08-07) -- gauge-arbitration boundary at 855/856: the
+overlap-reselect log shows frames 840-847 owner 22 -> 26 (submap 26 gauge),
+frames 848-855 owner 22 -> 27 (submap 27 gauge), and NO reselect for frames
+856+ (they stay on the earliest owner, submap 22 -- the merged 496-840
+component whose step_outlier_ratio is 47.29, i.e. a distorted gauge). So in
+the final model frame 855 is transformed with submap 27's healthy
+local_from_atlas gauge while frame 856 is transformed with submap 22's
+distorted gauge; the two gauges disagree by ~263 model units, which IS the
+observed step-855->856 jump. The 839->840 jump is the same phenomenon at the
+submap-22/26 boundary (839 on submap 22, 840 reselected to submap 26). The
+local builds are all healthy (verified standalone); the break is the
+**export-time gauge mix**: overlapping frames are individually re-arbitrated
+per-frame by `choose_export_pose_candidate`, so adjacent frames can end up
+with different submap gauges whose Sim(3) transforms disagree. Fix direction:
+arbitrate gauges COHERENTLY across a contiguous overlap run (not per-frame),
+and/or heal the distorted merged submap 22 gauge (step_ratio 47.29) so it does
+not contaminate the boundary frames.
+
+Gauge-boundary mechanism pinned (08-07): the final submap list shows submap 21
+= images 496-840 (merged), submap 22 = images 768-856, submap 26 = 832-920,
+submap 27 = 848-936. Frames 840-855 all sit in the overlap of 21/22/26/27.
+The reselect log gives owner 22 -> 26 for frames 840-847, owner 22 -> 27 for
+frames 848-855, and NO reselect for frame 856 (the LAST frame of submap 22)
+or 857+ (earliest owner = submap 26, step_ratio below threshold, kept). So the
+final chain is: ... frame 855 (submap 27 gauge) -> frame 856 (submap 22's
+distorted gauge, step_ratio 47.29) -> frame 857 (submap 26 gauge). The 855->856
+jump (263.4) is the submap-27-vs-submap-22 gauge boundary, and the 856->857
+edge is submap-22-vs-submap-26. Submap 22 (768-856) is the only distorted
+participant (step_ratio 47.29 vs ~1.2 for 26/27), and it is the earliest
+candidate for frame 856, so that single frame inherits the bad gauge. **The
+break is a single frame (856) left on a distorted merged-submap gauge while
+its neighbors were re-arbitrated to healthy gauges.** The local builds of 26
+and 27 are verified healthy standalone; the distortion lives in the merged
+submap 22 build. Fix candidates (in order of suspicion): (1) extend the
+overlap reselect so the arbitration is coherent across a contiguous run (frame
+856 would then be pulled onto submap 26/27 too), (2) diagnose why merged
+submap 22 (496-840 + neighbors) has step_ratio 47.29 -- a merged-component
+gauge defect -- and heal it, (3) verify seam Sim(3) scales at the 21..22,
+22..26, 26..27 boundaries with the new `hierarchical-seam-edge` log.
+
+Step-ratio metric is the false positive (08-07): the isolated subrange's own
+submap covering frames 768-856 (submap 0: step_median 0.085, step_max 4.036)
+has the SAME step_outlier_ratio 47.3 -- and that isolated build is healthy
+(88/88, smooth export). The ratio 47.3 is a HOVER->ACCELERATION transition
+(median step near zero during the hover, then a sharp acceleration), which
+`export_step_outlier_ratio` (step_max/step_median) misclassifies as "distorted
+gauge". So submap 22's gauge is NOT actually distorted; it is a normal gauge
+on a hover->accelerate trajectory. The real defect is that this normal-but-
+different gauge was assigned to frame 856 while its neighbors 855/857 were
+arbitrated onto submap 27/26 gauges, creating the boundary jump. Two distinct
+levers, both now precise: (a) the arbitration should not fragment a contiguous
+overlap run across different gauges (coherent-run arbitration), and (b)
+`export_step_outlier_ratio`'s median-in-the-denominator is fragile for
+hover segments -- a robust motion-quality proxy should be used for the
+"healthier duplicate" decision.
+
+Final gauge picture (08-07): in the full model, the model/GT scale is
+**304.9 in submap 26's exclusive frames 832-848**, **109.7 in the 26+27
+overlap 848-920**, and **105.4 in submap 27's exclusive 920-936**. So submap
+26's own world-frame transform is ~3x over-expanded while everything it shares
+with submap 27 is normal (arbitrated onto submap 27's gauge). The 3x
+over-expansion lives specifically in submap 26's `local_from_atlas` Sim(3)
+transform, NOT in submap 26's local build (verified smooth standalone). Since
+frames 832-847 (submap-26-only gauge) are stretched ~3x and the overlap is
+normal, the frame ~855/856 discontinuity is the junction where the per-frame
+arbitration switches from submap 27 (normal) to submap 26 (3x-stretched)
+gauges. The actionable defect is now singular: **submap 26's world-frame
+Sim(3) gauge is 3x wrong relative to its neighbors** -- i.e. the seam Sim(3)
+scale entering submap 26 (via seam 25..26 or the merged-component seam) is
+off by ~3x. This is directly measurable with the new `hierarchical-seam-edge`
+scale log (the seam(s) incident on submap 26 should show scale ~0.33 or ~3.0
+vs ~1.0 elsewhere). Next experiment: a full MH_02 run with the seam-scale log
+to read submap 26's incoming/outgoing seam scales.
+
+Coherent-run arbitration FIX (08-07, `f893ba0`): `choose_export_pose_candidates_coherent`
+now arbitrates contiguous overlap runs to one gauge instead of per-frame, so
+adjacent frames cannot strand on different submap gauges (the 855/856
+mechanism). Two unit tests regress the exact 854..857 fragmentation case.
+**Subrange validation (08-07): the coherent-fix build of 768-920 is
+BIT-IDENTICAL to the old binary (0.56 cm / 0.94 cm max, 153/153) -- no
+regression; contiguous runs are unified to one gauge. The remaining gate is a
+FULL MH_02 run with the fixed binary (deferred to a later session), which
+should remove the 855/856 step-855 jump (263.4) and drop the max from 2.264 m
+toward the median ~0.07 m.
+
+Isolated-vs-full Sim(3) scale (08-07): the same frames 768-920 have Sim(3)
+scale 0.1467 in the isolated build vs 0.0078 in the full model (18.8x), both
+reaching rmse < 0.32 cm when aligned within their own gauge. Both are within
+monocular gauge freedom; the decisive fact is the RELATIVE 3x gap between
+submap 26's local scale and its neighbors in the full model, which the seam
+Sim(3) faithfully records (banded 26->28 = 0.370). So submap 26's LOCAL build
+carries a scale ~3x inconsistent with the surrounding chain. Because the
+isolated build's geometry is accurate (0.6 cm) but its gauge is arbitrary, and
+the full model inherits that arbitrary gauge through the seams, the practical
+fix is a scale-anchoring step: after local submap builds, verify each submap's
+internal camera-trajectory scale against a GT-free invariant (e.g. known
+baseline, or the dominant camera-centre step distribution vs neighboring
+submaps) and re-gauge outliers (like submap 26) before seam composition.
+
+S3 — Hard-video robustness
 
 - Add motion/blur/dynamic-region quality scores to edge selection, not to the
   geometry acceptance threshold.
@@ -1126,25 +1438,27 @@ time.
 
 ## 7. Immediate next three slices
 
-1. **S1/S2 terminal evidence:** leave the protected frozen MH_03 2700-frame S1
-   process untouched, validate its complete manifest, accuracy, registration,
-   stage time, and sampled resources at exit, then allow the already-queued
-   clean `03973813` S2 build/run to execute alone. Compare S2 against S1 only
-   after both terminal artifacts pass completeness checks; do not treat the
-   concurrently contaminated S1 wall clock as a pristine headline timing.
-2. **Frozen held-out SSfM:** after S2 exits, allow the queued official archive
-   download and GT-free extraction to finish, then execute the hash-frozen
-   three-sequence serial suite once. Preserve every COLMAP, GLUEMAP, and
-   InstantSfM failure as a DNF cell, verify the deferred-GT transaction and
-   release audit, and keep the SOTA claim false until the independent ORBIT
-   gate and public-release requirements exist.
-3. **R1e then VSLAM:** only after the timing-sensitive S1/S2 controls finish,
-   install the pinned MASt3R-SLAM backend and run the prepared two-process
-   dense-submap gate. Feed a scale edge to R2 only if independent held-out
-   support clears the frozen 0.60 consensus criterion. If it passes, use that
-   independent source (or a visual-only shadow state) for continuous metric
-   coupling before any 11-sequence V4 freeze; if it fails, record the negative
-   and replace the measurement source rather than weakening the gate.
+1. **S1/S2 terminal evidence:** S2 is closed on full MH_03 (see the S2 terminal
+   block above, committed `fcbc95d`). The full-EuRoC sweep (MH_01/02/04/05)
+   has run to completion; the remediation fix-ladder that made it possible
+   (consensus-merge routing, connected-component rebuilds, exponential widen
+   escalation, last-resort merge, component-rebuild remediation,
+   `--submap-seam-merge-budget`, and the loop-BA OOM fix) is committed with
+   this milestone.
+2. **Frontend robustness (the real accuracy lever):** MH_04 52.28 cm,
+   MH_05 15.24 cm, and the MH_02 840-855 outlier are all dark-segment /
+   aggressive-motion frontend failures, not mapper failures. Options to
+   evaluate as a design slice: better low-light matching, motion-adaptive pair
+   selection (DROID-style), and proximity-based loop candidates as a complement
+   to descriptor cosine. A second remediation pass on post-merge outlier
+   regions (flag and re-solve instead of forcing one stitch) is the cheap
+   first candidate.
+3. **Frozen held-out SSfM + COLMAP baselines:** the three-sequence
+   V1_02/V1_03/V2_02 held-out suite and the sweep's missing COLMAP baselines
+   are queued behind owner approval (COLMAP-arms queue was explicitly rejected
+   on 08-03; get fresh approval). MH_02 full is also the natural fresh
+   held-out for the program-level SfM gate (three untouched ordered sequences,
+   one config).
 
 ## 8. Stop rules
 

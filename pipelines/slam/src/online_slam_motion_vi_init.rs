@@ -127,10 +127,13 @@ pub enum MotionViInitializationStatus {
     },
 }
 
-#[allow(clippy::large_enum_variant)]
 /// State-transition event exposed on [`crate::OnlineSlamResult::vi_motion_init`].
 /// `Some` only on the frame where the motion-based stage actually
 /// changed state.
+// `Succeeded` intentionally carries the complete public initialization
+// result, while `StillWaiting` carries only a compact reason. Keep this event
+// shape stable for downstream consumers rather than boxing the public result.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum MotionViInitializationEvent {
     /// VIBA1 fired and succeeded this frame. The pipeline has atomically

@@ -18,7 +18,7 @@ use std::path::Path;
 use nalgebra::{Matrix3, Point3, Quaternion, Rotation3, UnitQuaternion, Vector3};
 use visloc_core::geometry::{Pose, Sim3, SE3};
 use visloc_core::types::{
-    CameraId, Frame, FrameId, LandmarkDescriptorStore, LocalizationFailureReason,
+    CameraId, Frame, FrameId, LandmarkDescriptorStore, LandmarkId, LocalizationFailureReason,
     LocalizationResult, QueryImage, VisualMap,
 };
 use visloc_localization::{
@@ -96,6 +96,40 @@ pub struct TrackingConfig {
     /// because the widen-retry ladder falls back to the existing
     /// appearance-global path if every projection attempt fails.
     pub projection_guided_tracking: Option<ProjectionGuidedTrackingConfig>,
+    /// When `true` and the motion model exposes a predictive prior
+    /// (`allows_pnp_pose_prior_warm_start`), accept that prior as the
+    /// frame pose whenever visual localization / quality gates fail.
+    /// Keeps the IMU strapdown window draining and the trajectory
+    /// continuous through brief visual cliffs without writing a bad
+    /// PnP teleport; keyframe policies should still reject 0-inlier
+    /// coasts. Off by default.
+    pub accept_motion_prior_on_failure: bool,
+    /// Cap on consecutive motion-prior coasts. After this many coasts
+    /// without a visual success, fall back to reporting failure so the
+    /// adaptive model can switch / reloc can fire. `None` = unlimited
+    /// (gate67: 626 coasts collapsed Sim(3) scale to 0.02 — do not use).
+    pub max_consecutive_motion_prior_coasts: Option<usize>,
+    /// When `true`, try matching the current frame against only the
+    /// landmark ids that were inliers on the previous successful track
+    /// before falling back to the full appearance-global / projection
+    /// path. This is the image-free temporal track analogue of Basalt
+    /// KLT: keep associating the same 3D points frame-to-frame via
+    /// descriptors. Off by default.
+    pub temporal_landmark_tracking: bool,
+    /// Minimum retained previous-inlier landmarks required to attempt
+    /// the temporal track stage. Below this, skip straight to the
+    /// normal path.
+    pub temporal_landmark_tracking_min_landmarks: usize,
+    /// Number of recent successful inlier sets whose landmark ids are
+    /// unioned for the temporal store. `1` is last-frame-only (gate70);
+    /// larger values keep short-term tracks alive across brief dropouts.
+    pub temporal_landmark_tracking_history_frames: usize,
+    /// Inlier floor applied only when the temporal landmark stage produced
+    /// the candidate pose. Can be lower than [`Self::min_inliers`] so a
+    /// brief dropout does not discard a still-associated track, without
+    /// softening the full-map appearance path (gate72 softened global
+    /// min_inliers to 20 and path-dependently hurt coverage).
+    pub temporal_landmark_tracking_min_inliers: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -255,6 +289,12 @@ impl Default for TrackingConfig {
             pose_jump_gap_scaling: false,
             pose_jump_gap_scaling_max_multiplier: 10,
             projection_guided_tracking: None,
+            accept_motion_prior_on_failure: false,
+            max_consecutive_motion_prior_coasts: Some(5),
+            temporal_landmark_tracking: false,
+            temporal_landmark_tracking_min_landmarks: 20,
+            temporal_landmark_tracking_history_frames: 1,
+            temporal_landmark_tracking_min_inliers: 20,
         }
     }
 }

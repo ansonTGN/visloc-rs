@@ -10,6 +10,15 @@ pub struct Tracker<P, M = ConstantPoseMotionModel> {
     config: TrackingConfig,
     state: TrackingState,
     successive_failures: usize,
+    consecutive_motion_prior_coasts: usize,
+    /// Landmark ids that were PnP inliers on recent successful visual
+    /// tracks (union of the history ring). Used by
+    /// `temporal_landmark_tracking` to re-associate the same 3D points
+    /// before a full-map search.
+    last_tracked_landmark_ids: Vec<LandmarkId>,
+    /// Ring of per-success inlier landmark id sets. Length capped by
+    /// `temporal_landmark_tracking_history_frames`.
+    recent_tracked_landmark_sets: Vec<Vec<LandmarkId>>,
     last_result: Option<TrackingResult>,
     last_successful_frame_id: Option<FrameId>,
     last_successful_pose: Option<Pose>,
@@ -80,6 +89,9 @@ where
             config,
             state: TrackingState::Uninitialized,
             successive_failures: 0,
+            consecutive_motion_prior_coasts: 0,
+            last_tracked_landmark_ids: Vec::new(),
+            recent_tracked_landmark_sets: Vec::new(),
             last_result: None,
             last_successful_frame_id: None,
             last_successful_pose: None,
@@ -126,6 +138,9 @@ where
     pub fn reset(&mut self) {
         self.state = TrackingState::Uninitialized;
         self.successive_failures = 0;
+        self.consecutive_motion_prior_coasts = 0;
+        self.last_tracked_landmark_ids.clear();
+        self.recent_tracked_landmark_sets.clear();
         self.last_result = None;
         self.last_successful_frame_id = None;
         self.last_successful_pose = None;
@@ -175,6 +190,10 @@ where
     ) {
         self.state = TrackingState::Tracking;
         self.successive_failures = 0;
+        self.consecutive_motion_prior_coasts = 0;
+        if !result.localization.inlier_landmark_ids.is_empty() {
+            self.push_tracked_landmark_set(result.localization.inlier_landmark_ids.clone());
+        }
         self.last_successful_frame_id = Some(result.frame_id);
         self.last_successful_pose = result.localization.pose.clone();
         self.last_result = Some(result.clone());
@@ -443,24 +462,69 @@ where
             .as_ref()
             .unwrap_or(descriptor_store);
 
+        // Temporal landmark track (image-free Basalt-KLT analogue): try
+        // matching against only the previous successful inlier landmarks
+        // before the full appearance / projection path.
+        let temporal_store = if self.config.temporal_landmark_tracking
+            && self.last_tracked_landmark_ids.len()
+                >= self.config.temporal_landmark_tracking_min_landmarks
+        {
+            let store = active_descriptor_store.filtered(&self.last_tracked_landmark_ids);
+            if store.len() >= self.config.temporal_landmark_tracking_min_landmarks {
+                Some(store)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Copied out (the config is `Copy`) rather than borrowed, so the
         // widen-retry ladder below can take `&mut self` for its stats
         // bookkeeping without fighting the borrow checker over `self.config`.
         let projection_guided_config = self.config.projection_guided_tracking;
-        let mut localization = match (projection_guided_config, pose_prior.as_ref()) {
-            (Some(projection_config), Some(prior)) => self.run_projection_guided_tracking(
-                frame,
-                map,
-                active_descriptor_store,
-                prior,
-                &projection_config,
-            ),
-            _ => self.localize_appearance_global(
-                frame,
-                map,
-                active_descriptor_store,
-                pose_prior.as_ref(),
-            ),
+        let mut used_temporal_landmark_track = false;
+        let mut localization = if let Some(temporal_store) = temporal_store.as_ref() {
+            self.stats.temporal_landmark_attempt_count += 1;
+            let temporal =
+                self.localize_appearance_global(frame, map, temporal_store, pose_prior.as_ref());
+            if temporal.success {
+                self.stats.temporal_landmark_success_count += 1;
+                used_temporal_landmark_track = true;
+                temporal
+            } else {
+                match (projection_guided_config, pose_prior.as_ref()) {
+                    (Some(projection_config), Some(prior)) => self.run_projection_guided_tracking(
+                        frame,
+                        map,
+                        active_descriptor_store,
+                        prior,
+                        &projection_config,
+                    ),
+                    _ => self.localize_appearance_global(
+                        frame,
+                        map,
+                        active_descriptor_store,
+                        pose_prior.as_ref(),
+                    ),
+                }
+            }
+        } else {
+            match (projection_guided_config, pose_prior.as_ref()) {
+                (Some(projection_config), Some(prior)) => self.run_projection_guided_tracking(
+                    frame,
+                    map,
+                    active_descriptor_store,
+                    prior,
+                    &projection_config,
+                ),
+                _ => self.localize_appearance_global(
+                    frame,
+                    map,
+                    active_descriptor_store,
+                    pose_prior.as_ref(),
+                ),
+            }
         };
 
         if localization.success {
@@ -472,8 +536,63 @@ where
             );
         }
 
-        let (tracking_failure_reason, continuation_pose) =
+        let saved_min_inliers = self.config.min_inliers;
+        if used_temporal_landmark_track {
+            self.config.min_inliers = self
+                .config
+                .temporal_landmark_tracking_min_inliers
+                .min(saved_min_inliers);
+        }
+        let (mut tracking_failure_reason, continuation_pose) =
             self.apply_tracking_quality_gate(frame, map, pose_prior.as_ref(), &mut localization);
+        self.config.min_inliers = saved_min_inliers;
+
+        // IMU/velocity coast: when visual tracking dies but the motion
+        // model still has a predictive prior, accept that prior so the
+        // strapdown window drains and the trajectory stays continuous.
+        // Constant-pose models deliberately refuse this path (frozen
+        // prior would just stamp the last success forever). Cap the
+        // streak — unlimited coast (gate67) collapsed Sim(3) scale.
+        let mut coasted = false;
+        if !localization.success
+            && self.config.accept_motion_prior_on_failure
+            && self.motion_model.allows_pnp_pose_prior_warm_start()
+        {
+            let within_cap = self
+                .config
+                .max_consecutive_motion_prior_coasts
+                .is_none_or(|cap| self.consecutive_motion_prior_coasts < cap);
+            if within_cap {
+                if let Some(prior) = pose_prior.as_ref() {
+                    localization.success = true;
+                    localization.pose = Some(prior.clone());
+                    localization.failure_reason = None;
+                    localization.inlier_count = 0;
+                    localization.inlier_ratio = 0.0;
+                    localization.inliers.clear();
+                    localization.inlier_query_indices.clear();
+                    localization.inlier_landmark_ids.clear();
+                    localization.inlier_confidences.clear();
+                    localization.inlier_reprojection_errors.clear();
+                    localization.reprojection_error = None;
+                    localization.median_reprojection_error = None;
+                    localization.max_reprojection_error = None;
+                    tracking_failure_reason = None;
+                    self.stats.motion_prior_coast_count += 1;
+                    coasted = true;
+                }
+            }
+        }
+        if localization.success && !coasted {
+            self.consecutive_motion_prior_coasts = 0;
+            if !localization.inlier_landmark_ids.is_empty() {
+                self.push_tracked_landmark_set(localization.inlier_landmark_ids.clone());
+            }
+        } else if coasted {
+            self.consecutive_motion_prior_coasts += 1;
+        } else {
+            self.consecutive_motion_prior_coasts = 0;
+        }
 
         let previous_state = self.state;
         let event = if localization.success {
@@ -521,6 +640,21 @@ where
         self.update_history(&continuation_result);
         self.motion_model.observe(&continuation_result);
         result
+    }
+
+    fn push_tracked_landmark_set(&mut self, landmark_ids: Vec<LandmarkId>) {
+        let history = self.config.temporal_landmark_tracking_history_frames.max(1);
+        self.recent_tracked_landmark_sets.push(landmark_ids);
+        while self.recent_tracked_landmark_sets.len() > history {
+            self.recent_tracked_landmark_sets.remove(0);
+        }
+        let mut union = HashSet::new();
+        for set in &self.recent_tracked_landmark_sets {
+            union.extend(set.iter().copied());
+        }
+        let mut merged: Vec<LandmarkId> = union.into_iter().collect();
+        merged.sort_unstable();
+        self.last_tracked_landmark_ids = merged;
     }
 
     /// Today's appearance-global localization path (descriptor search over
@@ -1714,6 +1848,13 @@ pub struct TrackingStats {
     /// Number of frames accepted only because a strong visual solution
     /// activated the bounded pose-prior translation-gate widening.
     pub pose_prior_visual_override_count: usize,
+    /// Number of frames accepted by substituting the motion-model prior
+    /// after visual localization / quality gates failed.
+    pub motion_prior_coast_count: usize,
+    /// Temporal-landmark-track attempts (previous-inlier descriptor store).
+    pub temporal_landmark_attempt_count: usize,
+    /// Temporal-landmark-track attempts that produced a successful pose.
+    pub temporal_landmark_success_count: usize,
     pub total_inlier_count: usize,
     pub total_correspondence_count: usize,
     pub covisibility_local_map_used_count: usize,

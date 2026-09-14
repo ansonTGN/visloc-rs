@@ -1,0 +1,357 @@
+//! Raw `u16` image storage and the Basalt five-tap binomial pyramid.
+//!
+//! The downsample operation follows `ManagedImagePyr::subsample` from the
+//! pinned `basalt-headers` revision: a separable `[1, 4, 6, 4, 1]` kernel,
+//! reflection at the image boundary, decimation by two, and integer rounding
+//! `(accumulator + 128) >> 8`. `max_level` is an index, so a pyramid built
+//! with `max_level = N` contains levels `0..=N`.
+
+use nalgebra::Vector2;
+use thiserror::Error;
+
+const BINOMIAL5: [i32; 5] = [1, 4, 6, 4, 1];
+const BINOMIAL5_MIN_INPUT_DIMENSION: usize = 3;
+
+/// A contiguous row-major raw image with unsigned 16-bit pixels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawU16Image {
+    width: usize,
+    height: usize,
+    pixels: Vec<u16>,
+}
+
+impl RawU16Image {
+    pub fn new(width: usize, height: usize, pixels: Vec<u16>) -> Result<Self, ImageError> {
+        let expected = width
+            .checked_mul(height)
+            .ok_or(ImageError::DimensionOverflow)?;
+        if width == 0 || height == 0 {
+            return Err(ImageError::InvalidDimensions { width, height });
+        }
+        if pixels.len() != expected {
+            return Err(ImageError::PixelCountMismatch {
+                width,
+                height,
+                expected,
+                actual: pixels.len(),
+            });
+        }
+        Ok(Self {
+            width,
+            height,
+            pixels,
+        })
+    }
+
+    pub fn from_fn<F>(width: usize, height: usize, mut f: F) -> Result<Self, ImageError>
+    where
+        F: FnMut(usize, usize) -> u16,
+    {
+        let count = width
+            .checked_mul(height)
+            .ok_or(ImageError::DimensionOverflow)?;
+        let mut pixels = Vec::with_capacity(count);
+        for y in 0..height {
+            for x in 0..width {
+                pixels.push(f(x, y));
+            }
+        }
+        Self::new(width, height, pixels)
+    }
+
+    pub const fn width(&self) -> usize {
+        self.width
+    }
+
+    pub const fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn pixels(&self) -> &[u16] {
+        &self.pixels
+    }
+
+    pub fn pixel(&self, x: usize, y: usize) -> Option<u16> {
+        if x < self.width && y < self.height {
+            Some(self.pixels[y * self.width + x])
+        } else {
+            None
+        }
+    }
+
+    /// Basalt's floating-point bounds convention for interpolation.
+    ///
+    /// A floating coordinate requires four neighbouring pixels, and `border`
+    /// is an additional margin. Thus `border = 2` matches the optical-flow
+    /// patch's `InBounds(p, 2)` call before central-difference gradients.
+    pub fn in_bounds(&self, point: Vector2<f32>, border: f32) -> bool {
+        let offset = 1.0_f32;
+        border <= point.x
+            && point.x < self.width as f32 - border - offset
+            && border <= point.y
+            && point.y < self.height as f32 - border - offset
+    }
+
+    /// Bilinear interpolation matching `Image::interp<float>`.
+    pub fn interp(&self, point: Vector2<f32>) -> Option<f32> {
+        if !self.in_bounds(point, 0.0) {
+            return None;
+        }
+        let ix = point.x as usize;
+        let iy = point.y as usize;
+        let dx = point.x - ix as f32;
+        let dy = point.y - iy as f32;
+        let p00 = self.pixels[iy * self.width + ix] as f32;
+        let p01 = self.pixels[(iy + 1) * self.width + ix] as f32;
+        let p10 = self.pixels[iy * self.width + ix + 1] as f32;
+        let p11 = self.pixels[(iy + 1) * self.width + ix + 1] as f32;
+        Some(bilinear_fma(p00, p01, p10, p11, dx, dy))
+    }
+
+    /// Returns `[value, dvalue/dx, dvalue/dy]` using Basalt's central-
+    /// difference image followed by bilinear interpolation.
+    pub fn interp_grad(&self, point: Vector2<f32>) -> Option<[f32; 3]> {
+        if !self.in_bounds(point, 1.0) {
+            return None;
+        }
+        let value = self.interp(point)?;
+        let ix = point.x as usize;
+        let iy = point.y as usize;
+        let dx = point.x - ix as f32;
+        let dy = point.y - iy as f32;
+        let bilinear = |x0: usize, y0: usize| {
+            let p00 = self.pixels[y0 * self.width + x0] as f32;
+            let p01 = self.pixels[(y0 + 1) * self.width + x0] as f32;
+            let p10 = self.pixels[y0 * self.width + x0 + 1] as f32;
+            let p11 = self.pixels[(y0 + 1) * self.width + x0 + 1] as f32;
+            bilinear_fma(p00, p01, p10, p11, dx, dy)
+        };
+
+        let value_x_minus = bilinear(ix - 1, iy);
+        let value_x_plus = bilinear(ix + 1, iy);
+        let value_y_minus = bilinear(ix, iy - 1);
+        let value_y_plus = bilinear(ix, iy + 1);
+        Some([
+            value,
+            0.5 * (value_x_plus - value_x_minus),
+            0.5 * (value_y_plus - value_y_minus),
+        ])
+    }
+
+    /// Applies the pinned Basalt 5x5 binomial filter and decimates by two.
+    pub fn subsample_binomial5(&self) -> Result<Self, ImageError> {
+        let mut scratch = Vec::new();
+        self.subsample_binomial5_with_scratch(&mut scratch)
+    }
+
+    /// Applies the pinned filter while reusing the caller's vertical-pass
+    /// storage.  The scratch contents are intentionally not cleared: every
+    /// element read by the horizontal pass is assigned exactly once by the
+    /// vertical pass first, so retaining the allocation cannot affect the
+    /// arithmetic or traversal order.
+    fn subsample_binomial5_with_scratch(&self, scratch: &mut Vec<i32>) -> Result<Self, ImageError> {
+        let output_width = self.width / 2;
+        let output_height = self.height / 2;
+        // The reflected five-tap stencil below reaches source index 2 for
+        // the first output sample.  A dimension of two would therefore
+        // produce an in-bounds-looking output dimension of one but still
+        // index past the source row/column.  Treat it as the same terminal
+        // level as a zero-output dimension instead of relying on a panic.
+        if output_width == 0
+            || output_height == 0
+            || self.width < BINOMIAL5_MIN_INPUT_DIMENSION
+            || self.height < BINOMIAL5_MIN_INPUT_DIMENSION
+        {
+            return Err(ImageError::LevelTooDeep {
+                width: self.width,
+                height: self.height,
+            });
+        }
+
+        let vertical_len = output_height
+            .checked_mul(self.width)
+            .ok_or(ImageError::DimensionOverflow)?;
+        if scratch.len() < vertical_len {
+            scratch.resize(vertical_len, 0_i32);
+        }
+        for row in 0..output_height {
+            let source_rows = [
+                (2 * row).abs_diff(2),
+                (2 * row).abs_diff(1),
+                2 * row,
+                border101(2 * row + 1, self.height),
+                border101(2 * row + 2, self.height),
+            ];
+            for col in 0..self.width {
+                let mut accumulator = 0_i32;
+                for (weight, source_row) in BINOMIAL5.iter().zip(source_rows) {
+                    accumulator += *weight * i32::from(self.pixels[source_row * self.width + col]);
+                }
+                scratch[row * self.width + col] = accumulator;
+            }
+        }
+
+        let mut output = vec![0_u16; output_width * output_height];
+        for col in 0..output_width {
+            let source_cols = [
+                (2 * col).abs_diff(2),
+                (2 * col).abs_diff(1),
+                2 * col,
+                border101(2 * col + 1, self.width),
+                border101(2 * col + 2, self.width),
+            ];
+            for row in 0..output_height {
+                let mut accumulator = 0_i32;
+                for (weight, source_col) in BINOMIAL5.iter().zip(source_cols) {
+                    accumulator += *weight * scratch[row * self.width + source_col];
+                }
+                output[row * output_width + col] = ((accumulator + (1 << 7)) >> 8) as u16;
+            }
+        }
+
+        Self::new(output_width, output_height, output)
+    }
+}
+
+/// Evaluate Basalt's bilinear interpolation with the scalar contraction used
+/// by the pinned native build.  The upstream expression is compiled to one
+/// rounded product for the second term followed by three fused multiply-adds;
+/// spelling that contract out keeps the result independent of Rust's target
+/// FMA/codegen choices.
+#[inline]
+fn bilinear_fma(p00: f32, p01: f32, p10: f32, p11: f32, dx: f32, dy: f32) -> f32 {
+    let ddx = 1.0 - dx;
+    let ddy = 1.0 - dy;
+    let term1 = ddx * dy * p01;
+    let acc = (ddx * ddy).mul_add(p00, term1);
+    let acc = (dx * ddy).mul_add(p10, acc);
+    (dx * dy).mul_add(p11, acc)
+}
+
+/// A pyramid whose level indices are exactly `0..=max_level`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawU16Pyramid {
+    levels: Vec<RawU16Image>,
+}
+
+impl RawU16Pyramid {
+    pub fn from_image(image: RawU16Image, max_level: usize) -> Result<Self, ImageError> {
+        let mut scratch = Vec::new();
+        Self::from_image_with_scratch(image, max_level, &mut scratch)
+    }
+
+    pub(crate) fn from_image_with_scratch(
+        image: RawU16Image,
+        max_level: usize,
+        scratch: &mut Vec<i32>,
+    ) -> Result<Self, ImageError> {
+        let capacity = max_level
+            .checked_add(1)
+            .ok_or(ImageError::DimensionOverflow)?;
+        let mut levels = Vec::with_capacity(capacity);
+        levels.push(image);
+        for _ in 0..max_level {
+            let next = levels
+                .last()
+                .expect("level zero is always present")
+                .subsample_binomial5_with_scratch(scratch)?;
+            levels.push(next);
+        }
+        Ok(Self { levels })
+    }
+
+    pub fn levels(&self) -> &[RawU16Image] {
+        &self.levels
+    }
+
+    pub fn level(&self, level: usize) -> Option<&RawU16Image> {
+        self.levels.get(level)
+    }
+
+    pub fn max_level(&self) -> usize {
+        self.levels.len() - 1
+    }
+}
+
+fn border101(x: usize, height: usize) -> usize {
+    height - 1 - (height - 1).abs_diff(x)
+}
+
+/// Errors raised by raw image and pyramid construction.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ImageError {
+    #[error("image dimensions must be non-zero, got {width}x{height}")]
+    InvalidDimensions { width: usize, height: usize },
+    #[error("image dimensions overflow a pixel count")]
+    DimensionOverflow,
+    #[error("expected {expected} pixels for {width}x{height}, got {actual}")]
+    PixelCountMismatch {
+        width: usize,
+        height: usize,
+        expected: usize,
+        actual: usize,
+    },
+    #[error("cannot build another pyramid level from {width}x{height}")]
+    LevelTooDeep { width: usize, height: usize },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn border_reflection_matches_basalt101() {
+        assert_eq!(border101(8, 8), 6);
+        assert_eq!(border101(9, 8), 5);
+    }
+
+    #[test]
+    fn levels_are_indexed_inclusive_of_max_level() {
+        let image = RawU16Image::new(8, 8, (1..=64).collect()).unwrap();
+        let pyramid = RawU16Pyramid::from_image(image, 2).unwrap();
+        assert_eq!(pyramid.levels().len(), 3);
+        assert_eq!(pyramid.level(0).unwrap().width(), 8);
+        assert_eq!(pyramid.level(1).unwrap().width(), 4);
+        assert_eq!(pyramid.level(2).unwrap().width(), 2);
+    }
+
+    #[test]
+    fn pyramid_scratch_capacity_reuses_allocation_without_changing_levels() {
+        let image = RawU16Image::from_fn(32, 24, |x, y| {
+            ((x * 977 + y * 613 + x * y * 17) & 0xffff) as u16
+        })
+        .unwrap();
+        let expected = RawU16Pyramid::from_image(image.clone(), 3).unwrap();
+        let mut scratch = Vec::new();
+        let actual = RawU16Pyramid::from_image_with_scratch(image, 3, &mut scratch).unwrap();
+        assert_eq!(actual, expected);
+
+        let capacity = scratch.capacity();
+        let pointer = scratch.as_ptr();
+        let second_image = RawU16Image::from_fn(32, 24, |x, y| {
+            ((x * 1499 + y * 431 + x * y * 29 + 7) & 0xffff) as u16
+        })
+        .unwrap();
+        let expected_second = RawU16Pyramid::from_image(second_image.clone(), 3).unwrap();
+        let actual_second =
+            RawU16Pyramid::from_image_with_scratch(second_image, 3, &mut scratch).unwrap();
+        assert_eq!(actual_second, expected_second);
+        assert_eq!(scratch.capacity(), capacity);
+        assert_eq!(scratch.as_ptr(), pointer);
+        assert!(capacity >= (24 / 2) * 32);
+    }
+
+    #[test]
+    fn pyramid_rejects_two_pixel_tap_dimension_without_indexing_past_input() {
+        for (width, height, max_level) in [(4, 4, 2), (2, 8, 1), (8, 2, 1)] {
+            let image = RawU16Image::from_fn(width, height, |x, y| (x + y) as u16).unwrap();
+            let error = RawU16Pyramid::from_image(image, max_level).unwrap_err();
+            assert!(matches!(error, ImageError::LevelTooDeep { .. }));
+        }
+
+        // Three pixels are sufficient for the reflected index-2 tap and
+        // remain a valid one-level input.
+        let image = RawU16Image::from_fn(3, 3, |x, y| (x + y) as u16).unwrap();
+        assert!(RawU16Pyramid::from_image(image, 1).is_ok());
+    }
+}

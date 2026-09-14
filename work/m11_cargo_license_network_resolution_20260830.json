@@ -1,0 +1,407 @@
+{
+  "schema_id": "visloc-rs.cargo-license-network-resolution.v1",
+  "captured_at": "2026-08-30",
+  "status": "resolved_license_with_source_caveat",
+  "constraints": {
+    "network": "read_only_crates_io_and_github_raw_api",
+    "dedicated_evidence_dir": "work/m11_cargo_license_network_resolution_20260830_evidence",
+    "existing_cargo_cache_modified": false,
+    "existing_inventory_modified": false,
+    "build": false,
+    "run": false,
+    "cargo_command": false,
+    "commit_or_push": false
+  },
+  "inputs": {
+    "lockfile": {
+      "path": "Cargo.lock",
+      "bytes": 26592,
+      "sha256": "bc06922e3b6cf36766c292514a7a7681af322dfaa50ac14d40e915d48760ea35"
+    },
+    "inventory": {
+      "path": "benchmarks/basalt/cargo_license_inventory_v1.json",
+      "bytes": 32441,
+      "sha256": "e44bf59a68b1f70a847716a102eae3bbabb355f093e111e86dd272d6ba60e42a",
+      "package_count": 119,
+      "unresolved_before": 11,
+      "task_scope_remaining": 9,
+      "previously_locally_resolved": ["shlex 1.3.0", "socks 0.3.4"]
+    },
+    "resolution_rule": "Resolved only when crates.io API checksum, downloaded exact-version crate SHA, Cargo.lock/inventory checksum, upstream exact-commit Cargo.toml license, and upstream license-file evidence agree. Legacy Cargo license slash is recorded verbatim and normalized to SPDX OR syntax. Source reproducibility caveats remain explicit."
+  },
+  "packages": [
+    {
+      "package": "cc 1.2.61",
+      "declared_license": "MIT OR Apache-2.0",
+      "spdx_expression": "MIT OR Apache-2.0",
+      "crates_io": {
+        "api_url": "https://crates.io/api/v1/crates/cc/1.2.61",
+        "download_url": "https://crates.io/api/v1/crates/cc/1.2.61/download",
+        "api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/cc-1.2.61.api.json",
+        "api_bytes": 1428,
+        "api_sha256": "434fdb154d6d0d7ce554b1849b4f549aa8f749b85eab3fdfc6181fc94bca2897",
+        "crate_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/cc-1.2.61.crate",
+        "crate_bytes": 97163,
+        "crate_sha256": "d16d90359e986641506914ba71350897565610e87ce0ad9e6f28569db3dd5c6d",
+        "inventory_checksum_match": true,
+        "api_checksum_match": true
+      },
+      "upstream": {
+        "repository": "https://github.com/rust-lang/cc-rs",
+        "commit": "360f69119862eb26b44253f09f9ce60be5b3011b",
+        "commit_url": "https://github.com/rust-lang/cc-rs/commit/360f69119862eb26b44253f09f9ce60be5b3011b",
+        "commit_date": "2026-04-24T12:08:05Z",
+        "commit_subject": "chore(cc): release v1.2.61 (#1707)",
+        "commit_api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream-cc-360f69119862eb26b44253f09f9ce60be5b3011b.commit.json",
+        "commit_api_sha256": "c193dca90faa47c285b516b83ca967f63b080a7a31f1fd1c7c9f5011ebd7cf83",
+        "cargo_vcs_path": "",
+        "cargo_vcs_dirty": false,
+        "cargo_toml_url": "https://raw.githubusercontent.com/rust-lang/cc-rs/360f69119862eb26b44253f09f9ce60be5b3011b/Cargo.toml",
+        "cargo_toml_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/cc/Cargo.toml",
+        "cargo_toml_sha256": "a64e8ee742ba5e654f51575d52aaeff30ad9fecadf9d6b8645ff50b89d86902c",
+        "archive_cargo_toml_orig_sha256": "a64e8ee742ba5e654f51575d52aaeff30ad9fecadf9d6b8645ff50b89d86902c",
+        "archive_orig_matches_upstream": true
+      },
+      "license_files": {
+        "LICENSE-APACHE": {"url": "https://raw.githubusercontent.com/rust-lang/cc-rs/360f69119862eb26b44253f09f9ce60be5b3011b/LICENSE-APACHE", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/cc/LICENSE-APACHE", "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2", "archive_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2", "archive_packaged": true, "match": true},
+        "LICENSE-MIT": {"url": "https://raw.githubusercontent.com/rust-lang/cc-rs/360f69119862eb26b44253f09f9ce60be5b3011b/LICENSE-MIT", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/cc/LICENSE-MIT", "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397", "archive_sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397", "archive_packaged": true, "match": true}
+      },
+      "status": "resolved"
+    },
+    {
+      "package": "http 1.4.0",
+      "declared_license": "MIT OR Apache-2.0",
+      "spdx_expression": "MIT OR Apache-2.0",
+      "crates_io": {
+        "api_url": "https://crates.io/api/v1/crates/http/1.4.0",
+        "download_url": "https://crates.io/api/v1/crates/http/1.4.0/download",
+        "api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/http-1.4.0.api.json",
+        "api_bytes": 1604,
+        "api_sha256": "41febe997bdd6c5a248813a677ce12e7edb1171411fbd50d99f9e4fe3e2a43c8",
+        "crate_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/http-1.4.0.crate",
+        "crate_bytes": 106978,
+        "crate_sha256": "e3ba2a386d7f85a81f119ad7498ebe444d2e22c2af0b86b069416ace48b3311a",
+        "inventory_checksum_match": true,
+        "api_checksum_match": true
+      },
+      "upstream": {
+        "repository": "https://github.com/hyperium/http",
+        "commit": "b9625d83b524f7a8306883484f29a746eefc1bab",
+        "commit_url": "https://github.com/hyperium/http/commit/b9625d83b524f7a8306883484f29a746eefc1bab",
+        "commit_date": "2025-11-24T15:49:04Z",
+        "commit_subject": "v1.4.0",
+        "commit_api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream-http-b9625d83b524f7a8306883484f29a746eefc1bab.commit.json",
+        "commit_api_sha256": "df42738f05c70696bef785d4ba3ca17c3472065cd33de9e538f4f7e2a631b6f6",
+        "cargo_vcs_path": "",
+        "cargo_vcs_dirty": false,
+        "cargo_toml_url": "https://raw.githubusercontent.com/hyperium/http/b9625d83b524f7a8306883484f29a746eefc1bab/Cargo.toml",
+        "cargo_toml_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/http/Cargo.toml",
+        "cargo_toml_sha256": "f75ba4b9e29ead4f2bb8b32ae0ca05f0e21dab6369f83afac5ddb217354481ee",
+        "archive_cargo_toml_orig_sha256": "f75ba4b9e29ead4f2bb8b32ae0ca05f0e21dab6369f83afac5ddb217354481ee",
+        "archive_orig_matches_upstream": true
+      },
+      "license_files": {
+        "LICENSE-APACHE": {"url": "https://raw.githubusercontent.com/hyperium/http/b9625d83b524f7a8306883484f29a746eefc1bab/LICENSE-APACHE", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/http/LICENSE-APACHE", "sha256": "8bb1b50b0e5c9399ae33bd35fab2769010fa6c14e8860c729a52295d84896b7a", "archive_sha256": "8bb1b50b0e5c9399ae33bd35fab2769010fa6c14e8860c729a52295d84896b7a", "archive_packaged": true, "match": true},
+        "LICENSE-MIT": {"url": "https://raw.githubusercontent.com/hyperium/http/b9625d83b524f7a8306883484f29a746eefc1bab/LICENSE-MIT", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/http/LICENSE-MIT", "sha256": "dc91f8200e4b2a1f9261035d4c18c33c246911a6c0f7b543d75347e61b249cff", "archive_sha256": "dc91f8200e4b2a1f9261035d4c18c33c246911a6c0f7b543d75347e61b249cff", "archive_packaged": true, "match": true}
+      },
+      "status": "resolved"
+    },
+    {
+      "package": "libloading 0.9.0",
+      "declared_license": "ISC",
+      "spdx_expression": "ISC",
+      "crates_io": {
+        "api_url": "https://crates.io/api/v1/crates/libloading/0.9.0",
+        "download_url": "https://crates.io/api/v1/crates/libloading/0.9.0/download",
+        "api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/libloading-0.9.0.api.json",
+        "api_bytes": 1673,
+        "api_sha256": "50fba0ae77a64b5b3530836715245b679b685f667ebe5ef98073e249bc134305",
+        "crate_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/libloading-0.9.0.crate",
+        "crate_bytes": 33816,
+        "crate_sha256": "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60",
+        "inventory_checksum_match": true,
+        "api_checksum_match": true
+      },
+      "upstream": {
+        "repository": "https://github.com/nagisa/rust_libloading",
+        "commit": "dab97c569b33bd515e16637b8dedbdc696d9ec9c",
+        "commit_url": "https://github.com/nagisa/rust_libloading/commit/dab97c569b33bd515e16637b8dedbdc696d9ec9c",
+        "commit_date": "2025-11-05T14:15:04Z",
+        "commit_subject": "0.9.0 release rites",
+        "commit_api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream-libloading-dab97c569b33bd515e16637b8dedbdc696d9ec9c.commit.json",
+        "commit_api_sha256": "14fa053c76bb44580e8fdf8693ba053ca300089a81bc7d755b650e3059807449",
+        "cargo_vcs_path": "",
+        "cargo_vcs_dirty": false,
+        "cargo_toml_url": "https://raw.githubusercontent.com/nagisa/rust_libloading/dab97c569b33bd515e16637b8dedbdc696d9ec9c/Cargo.toml",
+        "cargo_toml_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/libloading/Cargo.toml",
+        "cargo_toml_sha256": "314ff537879a9964374ea56bfb7f3c657e407483e71ac1361e50a411541ca17c",
+        "archive_cargo_toml_orig_sha256": "314ff537879a9964374ea56bfb7f3c657e407483e71ac1361e50a411541ca17c",
+        "archive_orig_matches_upstream": true
+      },
+      "license_files": {
+        "LICENSE": {"url": "https://raw.githubusercontent.com/nagisa/rust_libloading/dab97c569b33bd515e16637b8dedbdc696d9ec9c/LICENSE", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/libloading/LICENSE", "sha256": "b29f8b01452350c20dd1af16ef83b598fea3053578ccc1c7a0ef40e57be2620f", "archive_sha256": "b29f8b01452350c20dd1af16ef83b598fea3053578ccc1c7a0ef40e57be2620f", "archive_packaged": true, "match": true}
+      },
+      "status": "resolved"
+    },
+    {
+      "package": "ort 2.0.0-rc.12",
+      "declared_license": "MIT OR Apache-2.0",
+      "spdx_expression": "MIT OR Apache-2.0",
+      "crates_io": {
+        "api_url": "https://crates.io/api/v1/crates/ort/2.0.0-rc.12",
+        "download_url": "https://crates.io/api/v1/crates/ort/2.0.0-rc.12/download",
+        "api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/ort-2.0.0-rc.12.api.json",
+        "api_bytes": 3359,
+        "api_sha256": "b88927ae81f7d899918be410ea43d84dd93b8956f014f332a3a28eb2d43e7fbd",
+        "crate_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/ort-2.0.0-rc.12.crate",
+        "crate_bytes": 149216,
+        "crate_sha256": "d7de3af33d24a745ffb8fab904b13478438d1cd52868e6f17735ef6e1f8bf133",
+        "inventory_checksum_match": true,
+        "api_checksum_match": true
+      },
+      "upstream": {
+        "repository": "https://github.com/pykeio/ort",
+        "commit": "079ecb47034ec8188e3a06fc04f49ec28a6499e8",
+        "commit_url": "https://github.com/pykeio/ort/commit/079ecb47034ec8188e3a06fc04f49ec28a6499e8",
+        "commit_date": "2026-03-03T19:11:22Z",
+        "commit_subject": "fix: one environment (#542)",
+        "commit_api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream-ort-079ecb47034ec8188e3a06fc04f49ec28a6499e8.commit.json",
+        "commit_api_sha256": "cbb79723075ff97e263d662b50a0ee3dd40117edf131a6441a37190de9be7dd2",
+        "cargo_vcs_path": "",
+        "cargo_vcs_dirty": true,
+        "cargo_toml_url": "https://raw.githubusercontent.com/pykeio/ort/079ecb47034ec8188e3a06fc04f49ec28a6499e8/Cargo.toml",
+        "cargo_toml_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/ort/Cargo.toml",
+        "cargo_toml_sha256": "a1242eb65123b983ce76c9cf81a06e31df295dfcd77bf9f1ec05e1398937465a",
+        "archive_cargo_toml_orig_sha256": "10ba27aeb5c4caf27c0eef2bb53b86db469394d7351689fff56872fe926ed5f8",
+        "archive_orig_matches_upstream": false,
+        "caveat": "The packaged .cargo_vcs_info.json marks the source dirty. Cargo.toml.orig has version/include/dependency differences from the clean commit, but the declared license and both license files are byte-identical to the clean commit. License is resolved; exact source provenance remains caveated."
+      },
+      "license_files": {
+        "LICENSE-APACHE": {"url": "https://raw.githubusercontent.com/pykeio/ort/079ecb47034ec8188e3a06fc04f49ec28a6499e8/LICENSE-APACHE", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/ort/LICENSE-APACHE", "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30", "archive_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30", "archive_packaged": true, "match": true},
+        "LICENSE-MIT": {"url": "https://raw.githubusercontent.com/pykeio/ort/079ecb47034ec8188e3a06fc04f49ec28a6499e8/LICENSE-MIT", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/ort/LICENSE-MIT", "sha256": "6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b", "archive_sha256": "6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b", "archive_packaged": true, "match": true}
+      },
+      "status": "resolved_with_provenance_caveat"
+    },
+    {
+      "package": "ort-sys 2.0.0-rc.12",
+      "declared_license": "MIT OR Apache-2.0",
+      "spdx_expression": "MIT OR Apache-2.0",
+      "crates_io": {
+        "api_url": "https://crates.io/api/v1/crates/ort-sys/2.0.0-rc.12",
+        "download_url": "https://crates.io/api/v1/crates/ort-sys/2.0.0-rc.12/download",
+        "api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/ort-sys-2.0.0-rc.12.api.json",
+        "api_bytes": 2471,
+        "api_sha256": "fdb14ec8a1e93f71e7f5c3807bdee17ce39c79dc9716513e8c501b751da8abab",
+        "crate_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/ort-sys-2.0.0-rc.12.crate",
+        "crate_bytes": 55131,
+        "crate_sha256": "d7b497d21a8b6fbb4b5a544f8fadb77e801a09ae0add9e411d31c6f89e3c1e90",
+        "inventory_checksum_match": true,
+        "api_checksum_match": true
+      },
+      "upstream": {
+        "repository": "https://github.com/pykeio/ort",
+        "commit": "079ecb47034ec8188e3a06fc04f49ec28a6499e8",
+        "commit_url": "https://github.com/pykeio/ort/commit/079ecb47034ec8188e3a06fc04f49ec28a6499e8",
+        "commit_date": "2026-03-03T19:11:22Z",
+        "commit_subject": "fix: one environment (#542)",
+        "commit_api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream-ort-079ecb47034ec8188e3a06fc04f49ec28a6499e8.commit.json",
+        "commit_api_sha256": "cbb79723075ff97e263d662b50a0ee3dd40117edf131a6441a37190de9be7dd2",
+        "cargo_vcs_path": "ort-sys",
+        "cargo_vcs_dirty": true,
+        "cargo_toml_url": "https://raw.githubusercontent.com/pykeio/ort/079ecb47034ec8188e3a06fc04f49ec28a6499e8/ort-sys/Cargo.toml",
+        "cargo_toml_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/ort-sys/Cargo.toml",
+        "cargo_toml_sha256": "431f105a366aa18a9b063eb1c01fcd31511478e68ad6cf059bac41ce6cbbb79c",
+        "archive_cargo_toml_orig_sha256": "fc89018873eab339165af94f3d2cd37a880ea1d4c122257e1f3e0b38cbcb8011",
+        "archive_orig_matches_upstream": false,
+        "caveat": "The packaged .cargo_vcs_info.json marks the source dirty and the package version differs from the clean commit. The declared license and both license files are byte-identical; license is resolved while exact source provenance remains caveated."
+      },
+      "license_files": {
+        "LICENSE-APACHE": {"url": "https://raw.githubusercontent.com/pykeio/ort/079ecb47034ec8188e3a06fc04f49ec28a6499e8/LICENSE-APACHE", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/ort-sys/LICENSE-APACHE", "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30", "archive_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30", "archive_packaged": true, "match": true},
+        "LICENSE-MIT": {"url": "https://raw.githubusercontent.com/pykeio/ort/079ecb47034ec8188e3a06fc04f49ec28a6499e8/LICENSE-MIT", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/ort-sys/LICENSE-MIT", "sha256": "6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b", "archive_sha256": "6bba08de46289c40986a2e6b310e2da61fcea33b3c112c8320f6093f8f9cb71b", "archive_packaged": true, "match": true}
+      },
+      "status": "resolved_with_provenance_caveat"
+    },
+    {
+      "package": "portable-atomic-util 0.2.7",
+      "declared_license": "Apache-2.0 OR MIT",
+      "spdx_expression": "Apache-2.0 OR MIT",
+      "crates_io": {
+        "api_url": "https://crates.io/api/v1/crates/portable-atomic-util/0.2.7",
+        "download_url": "https://crates.io/api/v1/crates/portable-atomic-util/0.2.7/download",
+        "api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/portable-atomic-util-0.2.7.api.json",
+        "api_bytes": 1327,
+        "api_sha256": "eb07ee19d5c893e8611dea6e2709d6e9c399558b5a9bfdab37577f4125995d9c",
+        "crate_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/portable-atomic-util-0.2.7.crate",
+        "crate_bytes": 53577,
+        "crate_sha256": "c2a106d1259c23fac8e543272398ae0e3c0b8d33c88ed73d0cc71b0f1d902618",
+        "inventory_checksum_match": true,
+        "api_checksum_match": true
+      },
+      "upstream": {
+        "repository": "https://github.com/taiki-e/portable-atomic-util",
+        "commit": "ef24b51135a7c3203eea51d4a2ca9a8ee17ad00c",
+        "commit_url": "https://github.com/taiki-e/portable-atomic-util/commit/ef24b51135a7c3203eea51d4a2ca9a8ee17ad00c",
+        "commit_date": "2026-04-16T15:38:28Z",
+        "commit_subject": "Release 0.2.7",
+        "commit_api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream-portable-atomic-util-ef24b51135a7c3203eea51d4a2ca9a8ee17ad00c.commit.json",
+        "commit_api_sha256": "db0cc7878e9391ae579c930d0e88733bc565e2ce5be0e8833951bba53d1f2cb8",
+        "cargo_vcs_path": "",
+        "cargo_vcs_dirty": false,
+        "cargo_toml_url": "https://raw.githubusercontent.com/taiki-e/portable-atomic-util/ef24b51135a7c3203eea51d4a2ca9a8ee17ad00c/Cargo.toml",
+        "cargo_toml_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/portable-atomic-util/Cargo.toml",
+        "cargo_toml_sha256": "ad4f6d76623cdd475cafd744914f3e7dfe595cd4c04e30a3fa29d08f3d9432bf",
+        "archive_cargo_toml_orig_sha256": "ad4f6d76623cdd475cafd744914f3e7dfe595cd4c04e30a3fa29d08f3d9432bf",
+        "archive_orig_matches_upstream": true
+      },
+      "license_files": {
+        "LICENSE-APACHE": {"url": "https://raw.githubusercontent.com/taiki-e/portable-atomic-util/ef24b51135a7c3203eea51d4a2ca9a8ee17ad00c/LICENSE-APACHE", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/portable-atomic-util/LICENSE-APACHE", "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594", "archive_sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594", "archive_packaged": true, "match": true},
+        "LICENSE-MIT": {"url": "https://raw.githubusercontent.com/taiki-e/portable-atomic-util/ef24b51135a7c3203eea51d4a2ca9a8ee17ad00c/LICENSE-MIT", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/portable-atomic-util/LICENSE-MIT", "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3", "archive_sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3", "archive_packaged": true, "match": true}
+      },
+      "registry_trusted_publishing_sha": "592caf2d869e94190eb511009635e1e84aa8bbd8",
+      "status": "resolved"
+    },
+    {
+      "package": "winapi-i686-pc-windows-gnu 0.4.0",
+      "declared_license": "MIT/Apache-2.0",
+      "spdx_expression": "MIT OR Apache-2.0",
+      "crates_io": {
+        "api_url": "https://crates.io/api/v1/crates/winapi-i686-pc-windows-gnu/0.4.0",
+        "download_url": "https://crates.io/api/v1/crates/winapi-i686-pc-windows-gnu/0.4.0/download",
+        "api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/winapi-i686-pc-windows-gnu-0.4.0.api.json",
+        "api_bytes": 1229,
+        "api_sha256": "32192f4020548120952306602a77aee953a45e0676dfe0dcefb9302340ecbfaf",
+        "crate_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/winapi-i686-pc-windows-gnu-0.4.0.crate",
+        "crate_bytes": 2918815,
+        "crate_sha256": "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6",
+        "inventory_checksum_match": true,
+        "api_checksum_match": true
+      },
+      "upstream": {
+        "repository": "https://github.com/retep998/winapi-rs",
+        "commit": "9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa",
+        "commit_url": "https://github.com/retep998/winapi-rs/commit/9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa",
+        "commit_date": "2018-01-18T00:57:45Z",
+        "commit_subject": "Publish 0.3.4",
+        "commit_api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream-winapi-9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa.commit.json",
+        "commit_api_sha256": "a66e689964ae393fa64b9f54a39a8b11cb3f4873366543f872a592f22c928b69",
+        "release_tag": null,
+        "cargo_vcs_info_present": false,
+        "cargo_toml_url": "https://raw.githubusercontent.com/retep998/winapi-rs/9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa/i686/Cargo.toml",
+        "cargo_toml_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/winapi-i686-pc-windows-gnu/Cargo.toml",
+        "cargo_toml_sha256": "5257d6f5283ab052b6af51f578a8c74e14c31deb53a7c6cd9e6fa16135d57eb3",
+        "archive_cargo_toml_orig_sha256": "5257d6f5283ab052b6af51f578a8c74e14c31deb53a7c6cd9e6fa16135d57eb3",
+        "archive_orig_matches_upstream": true,
+        "selection_basis": "The exact release commit's i686 Cargo.toml is byte-identical to Cargo.toml.orig; no 0.4.0 tag and no .cargo_vcs_info are present."
+      },
+      "license_files": {
+        "LICENSE-APACHE": {"url": "https://raw.githubusercontent.com/retep998/winapi-rs/9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa/LICENSE-APACHE", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/winapi-i686-pc-windows-gnu/LICENSE-APACHE", "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1", "archive_sha256": null, "archive_packaged": false, "match": null},
+        "LICENSE-MIT": {"url": "https://raw.githubusercontent.com/retep998/winapi-rs/9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa/LICENSE-MIT", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/winapi-i686-pc-windows-gnu/LICENSE-MIT", "sha256": "5b19674a1db628a475850a131956ed49521b744e3dda8f5a94141f9aba681219", "archive_sha256": null, "archive_packaged": false, "match": null}
+      },
+      "status": "resolved_upstream_license_files_not_in_crate_include"
+    },
+    {
+      "package": "winapi-x86_64-pc-windows-gnu 0.4.0",
+      "declared_license": "MIT/Apache-2.0",
+      "spdx_expression": "MIT OR Apache-2.0",
+      "crates_io": {
+        "api_url": "https://crates.io/api/v1/crates/winapi-x86_64-pc-windows-gnu/0.4.0",
+        "download_url": "https://crates.io/api/v1/crates/winapi-x86_64-pc-windows-gnu/0.4.0/download",
+        "api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/winapi-x86_64-pc-windows-gnu-0.4.0.api.json",
+        "api_bytes": 1243,
+        "api_sha256": "5117670664a35ede8567cf6eeee1adebdbed522a2a9828aa3029b735b89710d0",
+        "crate_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/winapi-x86_64-pc-windows-gnu-0.4.0.crate",
+        "crate_bytes": 2947998,
+        "crate_sha256": "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f",
+        "inventory_checksum_match": true,
+        "api_checksum_match": true
+      },
+      "upstream": {
+        "repository": "https://github.com/retep998/winapi-rs",
+        "commit": "9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa",
+        "commit_url": "https://github.com/retep998/winapi-rs/commit/9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa",
+        "commit_date": "2018-01-18T00:57:45Z",
+        "commit_subject": "Publish 0.3.4",
+        "commit_api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream-winapi-9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa.commit.json",
+        "commit_api_sha256": "a66e689964ae393fa64b9f54a39a8b11cb3f4873366543f872a592f22c928b69",
+        "release_tag": null,
+        "cargo_vcs_info_present": false,
+        "cargo_toml_url": "https://raw.githubusercontent.com/retep998/winapi-rs/9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa/x86_64/Cargo.toml",
+        "cargo_toml_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/winapi-x86_64-pc-windows-gnu/Cargo.toml",
+        "cargo_toml_sha256": "d158846cdb1259d606bfbeb050e386484cb18f14db41478568114eddb76ec43e",
+        "archive_cargo_toml_orig_sha256": "d158846cdb1259d606bfbeb050e386484cb18f14db41478568114eddb76ec43e",
+        "archive_orig_matches_upstream": true,
+        "selection_basis": "The exact release commit's x86_64 Cargo.toml is byte-identical to Cargo.toml.orig; no 0.4.0 tag and no .cargo_vcs_info are present."
+      },
+      "license_files": {
+        "LICENSE-APACHE": {"url": "https://raw.githubusercontent.com/retep998/winapi-rs/9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa/LICENSE-APACHE", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/winapi-x86_64-pc-windows-gnu/LICENSE-APACHE", "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1", "archive_sha256": null, "archive_packaged": false, "match": null},
+        "LICENSE-MIT": {"url": "https://raw.githubusercontent.com/retep998/winapi-rs/9497609ef44cc9bcd16cd2411c0ee6ccaf5483aa/LICENSE-MIT", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/winapi-x86_64-pc-windows-gnu/LICENSE-MIT", "sha256": "5b19674a1db628a475850a131956ed49521b744e3dda8f5a94141f9aba681219", "archive_sha256": null, "archive_packaged": false, "match": null}
+      },
+      "status": "resolved_upstream_license_files_not_in_crate_include"
+    },
+    {
+      "package": "zerocopy-derive 0.8.48",
+      "declared_license": "BSD-2-Clause OR Apache-2.0 OR MIT",
+      "spdx_expression": "BSD-2-Clause OR Apache-2.0 OR MIT",
+      "crates_io": {
+        "api_url": "https://crates.io/api/v1/crates/zerocopy-derive/0.8.48",
+        "download_url": "https://crates.io/api/v1/crates/zerocopy-derive/0.8.48/download",
+        "api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/zerocopy-derive-0.8.48.api.json",
+        "api_bytes": 1629,
+        "api_sha256": "5c02f92c6baae1142e9c2ae9adceede5c91532ad84eb9a1fe63cd841c1cac9af",
+        "crate_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/zerocopy-derive-0.8.48.crate",
+        "crate_bytes": 97646,
+        "crate_sha256": "70e3cd084b1788766f53af483dd21f93881ff30d7320490ec3ef7526d203bad4",
+        "inventory_checksum_match": true,
+        "api_checksum_match": true
+      },
+      "upstream": {
+        "repository": "https://github.com/google/zerocopy",
+        "commit": "aa7c31671cb5ce509551edafa23c6865df83b180",
+        "commit_url": "https://github.com/google/zerocopy/commit/aa7c31671cb5ce509551edafa23c6865df83b180",
+        "commit_date": "2026-03-28T20:50:33Z",
+        "commit_subject": "Release 0.8.48 (#3157)",
+        "commit_api_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream-zerocopy-aa7c31671cb5ce509551edafa23c6865df83b180.commit.json",
+        "commit_api_sha256": "3a1c39daa5fe100caae0cd6202381e58ad730dfe806cb2e4f9b7a9c665ba46b5",
+        "cargo_vcs_path": "zerocopy-derive",
+        "cargo_vcs_dirty": false,
+        "cargo_toml_url": "https://raw.githubusercontent.com/google/zerocopy/aa7c31671cb5ce509551edafa23c6865df83b180/zerocopy-derive/Cargo.toml",
+        "cargo_toml_evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/zerocopy-derive/Cargo.toml",
+        "cargo_toml_sha256": "0cc0e1f341ed391d7c94ee98af67a002ab3e30f0e4b05a125eccce731187e9c4",
+        "archive_cargo_toml_orig_sha256": "0cc0e1f341ed391d7c94ee98af67a002ab3e30f0e4b05a125eccce731187e9c4",
+        "archive_orig_matches_upstream": true
+      },
+      "license_files": {
+        "LICENSE-APACHE": {"url": "https://raw.githubusercontent.com/google/zerocopy/aa7c31671cb5ce509551edafa23c6865df83b180/LICENSE-APACHE", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/zerocopy-derive/LICENSE-APACHE", "sha256": "9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3", "archive_sha256": "9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3", "archive_packaged": true, "match": true},
+        "LICENSE-BSD": {"url": "https://raw.githubusercontent.com/google/zerocopy/aa7c31671cb5ce509551edafa23c6865df83b180/LICENSE-BSD", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/zerocopy-derive/LICENSE-BSD", "sha256": "83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32", "archive_sha256": "83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32", "archive_packaged": true, "match": true},
+        "LICENSE-MIT": {"url": "https://raw.githubusercontent.com/google/zerocopy/aa7c31671cb5ce509551edafa23c6865df83b180/LICENSE-MIT", "evidence": "work/m11_cargo_license_network_resolution_20260830_evidence/upstream_exact/zerocopy-derive/LICENSE-MIT", "sha256": "1a2f5c12ddc934d58956aa5dbdd3255fe55fd957633ab7d0d39e4f0daa73f7df", "archive_sha256": "1a2f5c12ddc934d58956aa5dbdd3255fe55fd957633ab7d0d39e4f0daa73f7df", "archive_packaged": true, "match": true}
+      },
+      "status": "resolved"
+    }
+  ],
+  "summary": {
+    "packages_in_task": 9,
+    "tarball_sha_matches_inventory": 9,
+    "api_checksum_matches_tarball": 9,
+    "upstream_license_metadata_captured": 9,
+    "upstream_license_file_sets_captured": 9,
+    "license_status_resolved": 9,
+    "pending_license_count": 0,
+    "source_provenance_caveat_count": 2,
+    "caveats": [
+      "ort and ort-sys package archives carry .cargo_vcs_info.json dirty=true and Cargo.toml.orig differs from the clean upstream commit in non-license metadata; license fields/files still match exactly.",
+      "winapi 0.4.0 has no 0.4.0 Git tag, no .cargo_vcs_info, and the normalized crate omits the upstream LICENSE files; the i686/x86_64 Cargo.toml.orig files exactly match the 2018-01-18 release commit and upstream root LICENSE files are recorded.",
+      "The pre-existing inventory has 11 unresolved entries, while this task scope named the remaining 9 after shlex/socks; the count discrepancy is preserved rather than silently rewriting inventory."
+    ]
+  },
+  "evidence_files": {
+    "api_and_crates": "work/m11_cargo_license_network_resolution_20260830_evidence",
+    "upstream_commit_json": "upstream-*.commit.json",
+    "upstream_raw_files": "upstream_exact/<package>/",
+    "no_existing_cache_or_manifest_writes": true
+  },
+  "next_actions": [
+    "Owner may promote the nine records into a new license inventory revision after reviewing the two ort source caveats and winapi package omission.",
+    "Do not rewrite cargo_license_inventory_v1.json or historical provenance manifests in this task.",
+    "If exact source reproducibility is required, obtain a clean ort/ort-sys release commit or legal owner disposition for the dirty package metadata."
+  ]
+}

@@ -10,8 +10,8 @@ use visloc_core::types::{
 use visloc_io::colmap::{
     format_cameras_txt, format_images_txt, format_points3d_txt, parse_cameras_bin,
     parse_cameras_txt, parse_images_bin, parse_images_txt, parse_points3d_bin, parse_points3d_txt,
-    read_colmap_binary_model, read_colmap_text_model, write_colmap_text_model, ColmapMapProvider,
-    ColmapMapProviderError,
+    read_colmap_binary_model, read_colmap_text_model, write_colmap_text_model, ColmapError,
+    ColmapMapProvider, ColmapMapProviderError,
 };
 use visloc_localization::{DescriptorProvider, MapProvider};
 
@@ -113,6 +113,60 @@ fn parses_colmap_images_bin() {
     assert_eq!(keyframes[0].observations[1].keypoint_index, 2);
     assert_eq!(keyframes[1].frame.id, 11);
     assert_eq!(keyframes[1].observations[0].landmark_id, 1001);
+}
+
+#[test]
+fn rejects_huge_colmap_binary_counts_before_allocation() {
+    let mut cameras = Vec::new();
+    push_u64(&mut cameras, u64::MAX);
+    assert_invalid_binary(parse_cameras_bin(&cameras), "cameras.bin", "camera_count");
+
+    let mut images = Vec::new();
+    push_u64(&mut images, u64::MAX);
+    assert_invalid_binary(parse_images_bin(&images), "images.bin", "image_count");
+
+    let mut image_points = Vec::new();
+    push_u64(&mut image_points, 1);
+    push_image_header(&mut image_points, 10, 1, "");
+    push_u64(&mut image_points, u64::MAX);
+    assert_invalid_binary(parse_images_bin(&image_points), "images.bin", "point_count");
+
+    let mut points = Vec::new();
+    push_u64(&mut points, u64::MAX);
+    assert_invalid_binary(parse_points3d_bin(&points), "points3D.bin", "point3D_count");
+
+    assert_invalid_binary(
+        parse_points3d_bin(&points3d_bin_with_track_length(u64::MAX)),
+        "points3D.bin",
+        "track_length",
+    );
+}
+
+#[test]
+fn rejects_truncated_colmap_binary_counts_from_remaining_bytes() {
+    let mut cameras = Vec::new();
+    push_u64(&mut cameras, 1);
+    assert_invalid_binary(parse_cameras_bin(&cameras), "cameras.bin", "remaining");
+
+    let mut images = Vec::new();
+    push_u64(&mut images, 1);
+    assert_invalid_binary(parse_images_bin(&images), "images.bin", "remaining");
+
+    let mut image_points = Vec::new();
+    push_u64(&mut image_points, 1);
+    push_image_header(&mut image_points, 10, 1, "");
+    push_u64(&mut image_points, 1);
+    assert_invalid_binary(parse_images_bin(&image_points), "images.bin", "remaining");
+
+    let mut points = Vec::new();
+    push_u64(&mut points, 1);
+    assert_invalid_binary(parse_points3d_bin(&points), "points3D.bin", "remaining");
+
+    assert_invalid_binary(
+        parse_points3d_bin(&points3d_bin_with_track_length(1)),
+        "points3D.bin",
+        "remaining",
+    );
 }
 
 #[test]
@@ -404,6 +458,19 @@ fn points3d_bin() -> Vec<u8> {
     bytes
 }
 
+fn points3d_bin_with_track_length(track_length: u64) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    push_u64(&mut bytes, 1);
+    push_u64(&mut bytes, 1000);
+    for value in [1.0, 2.0, 3.0] {
+        push_f64(&mut bytes, value);
+    }
+    bytes.extend_from_slice(&[255, 128, 0]);
+    push_f64(&mut bytes, 0.25);
+    push_u64(&mut bytes, track_length);
+    bytes
+}
+
 fn push_image_header(bytes: &mut Vec<u8>, image_id: u32, camera_id: u32, name: &str) {
     push_u32(bytes, image_id);
     for value in [1.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.3] {
@@ -452,4 +519,25 @@ fn push_i64(bytes: &mut Vec<u8>, value: i64) {
 
 fn push_f64(bytes: &mut Vec<u8>, value: f64) {
     bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn assert_invalid_binary<T>(
+    result: Result<T, ColmapError>,
+    expected_file: &'static str,
+    message_fragment: &str,
+) {
+    let error = match result {
+        Ok(_) => panic!("malformed binary unexpectedly parsed"),
+        Err(error) => error,
+    };
+    match error {
+        ColmapError::InvalidBinary { file, message } => {
+            assert_eq!(file, expected_file);
+            assert!(
+                message.contains(message_fragment),
+                "expected {message_fragment:?} in {message:?}"
+            );
+        }
+        other => panic!("expected InvalidBinary, got {other:?}"),
+    }
 }

@@ -1,0 +1,196 @@
+{
+  "schema": "visloc-rs.m11.native.clean_frame4.absqr_reconfirmation.v1",
+  "status": "PASS_NATIVE_CLEAN_FRAME4_DENSE_H_B_AND_APPLIED_INC_CAPTURE",
+  "scope": {
+    "event_frame": 4,
+    "event_selection": "Established MH_01 max_frames=5 frame-4 protocol; the minimal probe does not add a frame label.",
+    "production_rust_edited": false,
+    "native_source_edited": false,
+    "native_build_performed": false,
+    "native_capture_mode": "GDB out-of-line breakpoints against the clean pinned executable; no instrumented native hook binary."
+  },
+  "native_binding": {
+    "checkout": "/root/visloc-basalt-clean-m7cr-20260823",
+    "pinned_commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+    "executable": {
+      "path": "/root/visloc-basalt-clean-m7cr-20260823/build/core-relwithdebinfo/basalt_vio",
+      "bytes": 18024832,
+      "sha256": "89e0324ccd04c3b615bf7e945aa32480a2f86524987aa00eaf152dcd6b1d242c"
+    },
+    "library": {
+      "path": "/root/visloc-basalt-clean-m7cr-20260823/build/core-relwithdebinfo/libbasalt.so",
+      "bytes": 421516504,
+      "sha256": "55f842642b370edf4025afd1d66c7b9d9011e5b4ce08efeb9d76be401b45b2cc"
+    },
+    "build": {
+      "type": "RelWithDebInfo",
+      "build_ninja": "/root/visloc-basalt-clean-m7cr-20260823/build/core-relwithdebinfo/build.ninja",
+      "build_ninja_sha256": "9715b9e6a5399365ee473608596ac9a899e84aa352b9a1287d1e56d8cbf5d437",
+      "compiler": "/usr/bin/c++ (GNU 11.4.0)",
+      "flags": "-Wall -Wextra -Werror -Wno-error=unused-parameter -ftemplate-backtrace-limit=0 -Wno-error=maybe-uninitialized -Wno-error=implicit-fallthrough -Wno-error=deprecated-declarations -Wno-error=deprecated-copy -Wno-parentheses -DEIGEN_DONT_PARALLELIZE -march=native -O3 -g -DEIGEN_INITIALIZE_MATRICES_BY_NAN -std=c++17 -fPIC"
+    },
+    "source_hashes": {
+      "src/linearization/linearization_abs_qr.cpp": "0998b9d9cad3971af8003374cd343d4b96af7b4014f9ddc23e488bf160434a7e",
+      "src/vi_estimator/sqrt_keypoint_vio.cpp": "141dc9747dfb60e19e8ab93eab3b5600a6bb95fc249afdd5e15f4d844276c5c9",
+      "include/basalt/linearization/linearization_abs_qr.hpp": "63ad54d72ee8f78ea324026ff29a1ec0b0170e53433098b140bdc57624425263"
+    }
+  },
+  "input_binding": {
+    "dataset": "/mnt/e/datasets/euroc_mav/machine_hall/MH_01_easy",
+    "dataset_manifest": "benchmarks/basalt/euroc_dataset_manifest.json",
+    "dataset_manifest_sha256": "a803db9e01f7a39f587cb9f87fd8601c8800455135ae7a2dc67f9e108003dd26",
+    "sequence_manifest_sha256": "7edae0ebf886dac64fe15044eb5df72276565970a406cf9538655228bb292099",
+    "config": "/root/visloc-basalt-clean-m7cr-20260823/data/euroc_config.json",
+    "config_sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
+    "calibration": "/root/visloc-basalt-clean-m7cr-20260823/data/euroc_ds_calib.json",
+    "calibration_sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c"
+  },
+  "run": {
+    "root": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined",
+    "command": "basalt_vio --dataset-path /mnt/e/datasets/euroc_mav/machine_hall/MH_01_easy --cam-calib /root/visloc-basalt-clean-m7cr-20260823/data/euroc_ds_calib.json --dataset-type euroc --config-path /root/visloc-basalt-clean-m7cr-20260823/data/euroc_config.json --marg-data /mnt/e/visloc-rs-runs/m11_native_clean_frame4_absqr_reconfirmation_20260901/run/combined/marg_data --show-gui 0 --save-trajectory euroc --num-threads 1 --max-frames 5",
+    "requested_num_threads": 1,
+    "observed_gdb_new_thread_events": 7,
+    "gdb_inferior_exit": "normal",
+    "gdb_script": "work/m11_native_clean_frame4_absqr_combined_probe_20260901.gdb",
+    "gdb_console": {
+      "path": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\console.log",
+      "bytes": 6938,
+      "sha256": "5731f3c1273c0840c87d762b3dfafd76dee2742f683dc928fcbd0589fd2879b4"
+    },
+    "stage_probe_log": {
+      "path": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\stage_probe.log",
+      "bytes": 2212,
+      "sha256": "80097eacc9541b4deee0f4310d741bf558236a681bbf4d3d42e62ba41956ed9e"
+    }
+  },
+  "dense_capture": {
+    "schema": "m11.native.absqr.clean.stack_boundary.v1",
+    "payload_header": "24-byte little-endian <QQQ>: rows, cols, rhs",
+    "matrix_layout": "Eigen column-major f32 H followed by column-major f32 b",
+    "shape": {
+      "rows": 75,
+      "cols": 75,
+      "rhs": 75,
+      "h_payload_bytes": 22500,
+      "b_payload_bytes": 300,
+      "total_bytes": 22824
+    },
+    "source_boundaries": {
+      "visual_total": "get_dense_H_b entry+0x383, immediately before add_dense_H_b_imu (linearization_abs_qr.cpp:581)",
+      "imu_total": "get_dense_H_b entry+0x391, immediately after add_dense_H_b_imu and before damping (linearization_abs_qr.cpp:584)",
+      "prior_before": "get_dense_H_b entry+0x39c, immediately before add_dense_H_b_marg_prior (linearization_abs_qr.cpp:587)",
+      "prior_after": "get_dense_H_b entry+0x3aa, immediately after add_dense_H_b_marg_prior and before move-out (linearization_abs_qr.cpp:589-590)",
+      "final": "byte-preserving copy of prior_after before the native H_/b_ move-out; no fragile optimized return breakpoint"
+    },
+    "stage_order": ["visual_total", "imu_total", "prior_before", "prior_after", "final"],
+    "stages": [
+      {
+        "name": "visual_total",
+        "path": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\visual_total.bin",
+        "bytes": 22824,
+        "sha256": "93a995804e8468edfc2b002c81551b23c800db54ee5e0b9b94a3894c2a0319c1"
+      },
+      {
+        "name": "imu_total",
+        "path": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\imu_total.bin",
+        "bytes": 22824,
+        "sha256": "295382e364e7a877999af17787bc6b71ae0378ed75878ae04d57702fbf467a14"
+      },
+      {
+        "name": "prior_before",
+        "path": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\prior_before.bin",
+        "bytes": 22824,
+        "sha256": "295382e364e7a877999af17787bc6b71ae0378ed75878ae04d57702fbf467a14"
+      },
+      {
+        "name": "prior_after",
+        "path": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\prior_after.bin",
+        "bytes": 22824,
+        "sha256": "4e0a098368fdf9ae290d905d2d8894ee8ca6ef98b3ce671634770a1be23a7ea6"
+      },
+      {
+        "name": "final",
+        "path": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\final.bin",
+        "bytes": 22824,
+        "sha256": "4e0a098368fdf9ae290d905d2d8894ee8ca6ef98b3ce671634770a1be23a7ea6"
+      }
+    ]
+  },
+  "increment_capture": {
+    "captured": true,
+    "path": "E:\\visloc-rs-runs\\m11_native_clean_frame4_absqr_reconfirmation_20260901\\run\\combined\\inc_entry.f32",
+    "bytes": 300,
+    "sha256": "c0e0bac95e091ed9dc94862ee93a59892e39418b8f73ec31a379c31521c4a9bf",
+    "vector_length": 75,
+    "capture_boundary": "const VecX& pose_inc at LinearizationAbsQR<float,6>::backSubstitute entry",
+    "source_binding": "sqrt_keypoint_vio.cpp:1242 performs inc=-inc; line 1245 passes inc to backSubstitute, so this is the applied/back-substitution increment after native sign negation.",
+    "first_six_f32_words": ["0x366aec00", "0x368ccd44", "0x388e7998", "0xb9894d92", "0xb87f7760", "0xb401dc00"],
+    "raw_ldlt_solve_result_captured": false,
+    "raw_ldlt_solve_reason": "The optimized local at sqrt_keypoint_vio.cpp:1217 has no addressable DWARF symbol in the minimal source-line probe; no raw pre-negation value is claimed."
+  },
+  "stage_relationships": {
+    "imu_total_equals_prior_before": true,
+    "prior_after_equals_final": true,
+    "visual_total_differs_from_imu_total": true,
+    "prior_before_differs_from_prior_after": true,
+    "relationship_basis": "Exact byte equality of the captured 22824-byte payloads."
+  },
+  "tied_same_run_cross_check": {
+    "artifact": "work/m11_absqr_tied_same_run_full_pipeline_20260831.json",
+    "artifact_sha256": "c7d5da960716a4fea3e1c980e9bc2cfc06a51bf94b63974d87ee8d93f114a72c",
+    "tied_native_executable_sha256": "9953c8ffec183aea42d72125348235d3c20e3ebdb44d75655c581d5eb881f973",
+    "tied_native_library_sha256": "69934b5cb3011b71a07bcba5a910368bb039d845f7b0722330a05d47d7e9d354",
+    "tied_native_rust_stage_result": "all five named stages exact in the tied instrumented native/Rust run",
+    "clean_vs_tied_exact": false,
+    "comparison_layout": "same 24-byte header plus column-major H and b payload",
+    "stage_comparison": {
+      "visual_total": {
+        "clean_sha256": "93a995804e8468edfc2b002c81551b23c800db54ee5e0b9b94a3894c2a0319c1",
+        "tied_sha256": "096f11b2b38cc5bea9970a40edcfe6e088b9d08840195c522083cdd7537e4744",
+        "h_word_mismatches": 238,
+        "b_word_mismatches": 3,
+        "first_h_word": {"linear_index": 1, "clean_bits": "0x47020e18", "tied_bits": "0x47020e12"},
+        "first_b_word": {"linear_index": 1, "clean_bits": "0xc5d8732d", "tied_bits": "0xc5d87329"}
+      },
+      "imu_total": {
+        "clean_sha256": "295382e364e7a877999af17787bc6b71ae0378ed75878ae04d57702fbf467a14",
+        "tied_sha256": "ab914b17e525c3c86ab96a87ae483f5ef2b4313b5ab10db84c7de655a8998905",
+        "h_word_mismatches": 228,
+        "b_word_mismatches": 3,
+        "first_h_word": {"linear_index": 1, "clean_bits": "0x47020e8f", "tied_bits": "0x47020e89"},
+        "first_b_word": {"linear_index": 1, "clean_bits": "0xc5d87341", "tied_bits": "0xc5d8733d"}
+      },
+      "prior_before": {
+        "clean_sha256": "295382e364e7a877999af17787bc6b71ae0378ed75878ae04d57702fbf467a14",
+        "tied_sha256": "ab914b17e525c3c86ab96a87ae483f5ef2b4313b5ab10db84c7de655a8998905",
+        "h_word_mismatches": 228,
+        "b_word_mismatches": 3,
+        "first_h_word": {"linear_index": 1, "clean_bits": "0x47020e8f", "tied_bits": "0x47020e89"},
+        "first_b_word": {"linear_index": 1, "clean_bits": "0xc5d87341", "tied_bits": "0xc5d8733d"}
+      },
+      "prior_after": {
+        "clean_sha256": "4e0a098368fdf9ae290d905d2d8894ee8ca6ef98b3ce671634770a1be23a7ea6",
+        "tied_sha256": "717c81ac9835350d12ab6d763f894e18cbc8a58317532284126511ed49a610e3",
+        "h_word_mismatches": 228,
+        "b_word_mismatches": 3,
+        "first_h_word": {"linear_index": 1, "clean_bits": "0x47020e8f", "tied_bits": "0x47020e89"},
+        "first_b_word": {"linear_index": 1, "clean_bits": "0xc5d87341", "tied_bits": "0xc5d8733d"}
+      },
+      "final": {
+        "clean_sha256": "4e0a098368fdf9ae290d905d2d8894ee8ca6ef98b3ce671634770a1be23a7ea6",
+        "tied_sha256": "717c81ac9835350d12ab6d763f894e18cbc8a58317532284126511ed49a610e3",
+        "h_word_mismatches": 228,
+        "b_word_mismatches": 3,
+        "first_h_word": {"linear_index": 1, "clean_bits": "0x47020e8f", "tied_bits": "0x47020e89"},
+        "first_b_word": {"linear_index": 1, "clean_bits": "0xc5d87341", "tied_bits": "0xc5d8733d"}
+      }
+    },
+    "interpretation": "The tied artifact is a valid exact native/Rust oracle for its instrumented binary, but it is not the clean pinned executable: executable, library, and source hashes differ. Therefore clean-vs-tied byte equality is a failed cross-check, not evidence that the clean capture is tied-exact."
+  },
+  "limitations": [
+    "The clean capture observes H/b at get_dense_H_b boundaries and the applied pose increment at backSubstitute; it does not capture a separate raw pre-negation ldlt.solve(b) buffer.",
+    "No clean-vs-Rust H/b or increment equality is asserted from this re-capture alone; the existing tied artifact remains the separate exact native/Rust stage oracle.",
+    "The GDB script intentionally writes all capture payloads under E:\\visloc-rs-runs; no build or large C: output was used."
+  ]
+}
+

@@ -124,6 +124,14 @@ pub struct HierarchicalSfmConfig {
     /// still fails fast — returning the triggering `Alignment` error
     /// unchanged — once the budget is spent.
     pub max_degenerate_seam_merges: usize,
+    /// Allow one bounded structural component rebuild for an alignment seam
+    /// that remains fatal after the degenerate, residual, internal-drift, and
+    /// catastrophic-consensus routes have all been considered. This changes
+    /// routing only; the rebuilt component must still pass the normal seam
+    /// acceptance gates. Data-integrity rejections (`NonFinitePoint` and
+    /// `NonUniqueCorrespondences`) are excluded.
+    /// Defaults to enabled.
+    pub last_resort_seam_merge: bool,
     /// Extend `merge_degenerate_seams`'s widen/merge remediation to
     /// `LowInlierRatio` / `NoRobustFit` seam rejections -- but *only* when
     /// [`crate::submap_overlap::seam_step_shape_diagnostic`]
@@ -165,6 +173,14 @@ pub struct HierarchicalSfmConfig {
     /// idea but measures `<= 1.014` here, because real common-mode motion
     /// cancels out of this cross-submap comparison.
     pub max_seam_internal_drift_disagreement_ratio: f64,
+    /// Severe cross-seam consensus failure below which a `LowInlierRatio`
+    /// rejection is structurally remediated even when both submaps agree in
+    /// the internal step-shape diagnostic. This is routing only: the Sim(3)
+    /// acceptance gates in [`SubmapSim3AlignmentConfig`] are unchanged.
+    /// Default `0.20`, chosen from the 2026-07-31 MH_05/MH_02 seam sweep: all
+    /// seven healthy/agreeing catastrophic seams measured `<= 0.1987`, while
+    /// the diagnosis's deliberately broader class boundary was `< 0.23`.
+    pub catastrophic_consensus_inlier_ratio_threshold: f64,
 }
 
 impl Default for HierarchicalSfmConfig {
@@ -189,9 +205,11 @@ impl Default for HierarchicalSfmConfig {
             max_parallel_local_builds: 2,
             merge_degenerate_seams: true,
             max_degenerate_seam_merges: 16,
+            last_resort_seam_merge: true,
             seam_internal_drift_gate_enabled: true,
             seam_internal_drift_window_count: 2,
             max_seam_internal_drift_disagreement_ratio: 1.15,
+            catastrophic_consensus_inlier_ratio_threshold: 0.20,
         }
     }
 }
@@ -355,105 +373,118 @@ pub fn hierarchical_sfm(
         return Err(HierarchicalSfmError::NoSubmaps);
     }
     let builder = LocalSubmapBuilder::new(config.local_submap.clone());
-    let build_one =
-        |submap_id: u64, window: &SubmapWindow| -> Result<LocalSubmap, HierarchicalSfmError> {
-            let range = window.image_range.clone();
-            let local_pairs = remap_pairs_to_submap(pairwise, range.clone());
-            let result = builder
-                .build(
-                    camera,
-                    &source_frame_ids[range.clone()],
-                    &features[range.clone()],
-                    &local_pairs,
-                )
-                .map_err(|error| HierarchicalSfmError::LocalBuild {
-                    submap_id,
-                    image_start: range.start,
-                    image_end: range.end,
-                    error,
-                });
-            // Unconditional (not gated behind VISLOC_SFM_DEBUG) per-submap build
-            // summary: cheap (fields already computed by `builder.build`), and the
-            // exhaustive-seam-failure diagnosis showed the previous logs had no
-            // per-submap point/reprojection/seed evidence at all, only the planned
-            // window list -- see NOROBUSTFIT_CLUSTER_DIAGNOSIS.md.
-            if let Ok(submap) = &result {
-                eprintln!(
-                    "hierarchical-submap-built: submap {submap_id} images {range:?} \
+    let build_one = |submap_id: u64,
+                     window: &SubmapWindow,
+                     component_rebuild: bool|
+     -> Result<LocalSubmap, HierarchicalSfmError> {
+        let range = window.image_range.clone();
+        let local_pairs = remap_pairs_to_submap(pairwise, range.clone());
+        let build_result = if component_rebuild {
+            builder.build_merged_component(
+                camera,
+                &source_frame_ids[range.clone()],
+                &features[range.clone()],
+                &local_pairs,
+            )
+        } else {
+            builder.build(
+                camera,
+                &source_frame_ids[range.clone()],
+                &features[range.clone()],
+                &local_pairs,
+            )
+        };
+        let result = build_result.map_err(|error| HierarchicalSfmError::LocalBuild {
+            submap_id,
+            image_start: range.start,
+            image_end: range.end,
+            error,
+        });
+        // Unconditional (not gated behind VISLOC_SFM_DEBUG) per-submap build
+        // summary: cheap (fields already computed by `builder.build`), and the
+        // exhaustive-seam-failure diagnosis showed the previous logs had no
+        // per-submap point/reprojection/seed evidence at all, only the planned
+        // window list -- see NOROBUSTFIT_CLUSTER_DIAGNOSIS.md.
+        if let Ok(submap) = &result {
+            eprintln!(
+                "hierarchical-submap-built: submap {submap_id} images {range:?} \
+                 component_rebuild={component_rebuild} \
                  registered={}/{} points={} mean_reproj_px={:.4} \
                  median_max_parallax_deg={:.4} camera_center_diameter={:.4} \
                  camera_center_step_median={:.6} camera_center_step_max={:.6} \
                  seed_pair_final_distance={:.6} camera_center_window_drift_ratio={:.4} \
                  seed=({}, {}) seed_match_count={}",
-                    submap.quality.registered_images,
-                    submap.quality.requested_images,
-                    submap.landmarks.len(),
-                    submap.quality.mean_reprojection_px,
-                    submap.quality.median_max_parallax_deg,
-                    submap.quality.camera_center_diameter,
-                    submap.quality.camera_center_step_median,
-                    submap.quality.camera_center_step_max,
-                    submap.quality.seed_pair_final_distance,
-                    submap.quality.camera_center_window_drift_ratio,
-                    submap.seed_source_frame_i,
-                    submap.seed_source_frame_j,
-                    submap.seed_match_count,
-                );
-            }
-            // Unconditional pathology report: the build-time scale-sanity gate
-            // (NOROBUSTFIT_CLUSTER_DIAGNOSIS.md §6(a)) already retried on
-            // alternate seed candidates inside `builder.build` (§6(b)) before
-            // surfacing this; this is the point where the window is actually
-            // about to be treated as a build failure and handed to the
-            // widen/merge machinery below, exactly like `NoSeedPair`.
-            if let Err(HierarchicalSfmError::LocalBuild {
-                error:
-                    LocalSubmapBuildError::QualityRejected {
-                        reason: crate::LocalSubmapRejectionReason::ImplausibleScale,
-                        quality,
-                    },
-                ..
-            }) = &result
-            {
-                let step_threshold = builder
-                    .config
-                    .quality
-                    .max_camera_center_displacement_outlier_ratio;
-                let step_ratio = crate::local_submap::camera_center_step_outlier_ratio(quality);
-                let seed_drift_threshold = builder.config.quality.max_seed_pair_scale_drift_ratio;
-                let seed_drift_ratio = crate::local_submap::seed_pair_scale_drift_ratio(quality);
-                let window_drift_threshold =
-                    builder.config.quality.max_camera_center_window_drift_ratio;
-                let window_drift_count = builder.config.quality.camera_center_drift_window_count;
-                eprintln!(
-                    "hierarchical-scale-pathology: submap {submap_id} images {range:?} \
+                submap.quality.registered_images,
+                submap.quality.requested_images,
+                submap.landmarks.len(),
+                submap.quality.mean_reprojection_px,
+                submap.quality.median_max_parallax_deg,
+                submap.quality.camera_center_diameter,
+                submap.quality.camera_center_step_median,
+                submap.quality.camera_center_step_max,
+                submap.quality.seed_pair_final_distance,
+                submap.quality.camera_center_window_drift_ratio,
+                submap.seed_source_frame_i,
+                submap.seed_source_frame_j,
+                submap.seed_match_count,
+            );
+        }
+        // Unconditional pathology report: the build-time scale-sanity gate
+        // (NOROBUSTFIT_CLUSTER_DIAGNOSIS.md §6(a)) already retried on
+        // alternate seed candidates inside `builder.build` (§6(b)) before
+        // surfacing this; this is the point where the window is actually
+        // about to be treated as a build failure and handed to the
+        // widen/merge machinery below, exactly like `NoSeedPair`.
+        if let Err(HierarchicalSfmError::LocalBuild {
+            error:
+                LocalSubmapBuildError::QualityRejected {
+                    reason: crate::LocalSubmapRejectionReason::ImplausibleScale,
+                    quality,
+                },
+            ..
+        }) = &result
+        {
+            let step_threshold = builder
+                .config
+                .quality
+                .max_camera_center_displacement_outlier_ratio;
+            let step_ratio = crate::local_submap::camera_center_step_outlier_ratio(quality);
+            let seed_drift_threshold = builder.config.quality.max_seed_pair_scale_drift_ratio;
+            let seed_drift_ratio = crate::local_submap::seed_pair_scale_drift_ratio(quality);
+            let window_drift_threshold =
+                builder.config.quality.max_camera_center_window_drift_ratio;
+            let window_drift_count = builder.config.quality.camera_center_drift_window_count;
+            eprintln!(
+                "hierarchical-scale-pathology: submap {submap_id} images {range:?} \
+                 component_rebuild={component_rebuild} \
                  diameter={:.4} median_step={:.6} ratio={:.4} threshold={:.4} \
                  seed_pair_final_distance={:.6} seed_drift_ratio={:.4} \
                  seed_drift_threshold={:.4} window_count={} window_drift_ratio={:.4} \
                  window_drift_threshold={:.4}; treating as build failure",
-                    quality.camera_center_diameter,
-                    quality.camera_center_step_median,
-                    step_ratio,
-                    step_threshold,
-                    quality.seed_pair_final_distance,
-                    seed_drift_ratio,
-                    seed_drift_threshold,
-                    window_drift_count,
-                    quality.camera_center_window_drift_ratio,
-                    window_drift_threshold,
-                );
-                if quality.camera_center_window_drift_ratio > window_drift_threshold {
-                    eprintln!(
-                        "hierarchical-scale-drift: submap {submap_id} images {range:?} \
+                quality.camera_center_diameter,
+                quality.camera_center_step_median,
+                step_ratio,
+                step_threshold,
+                quality.seed_pair_final_distance,
+                seed_drift_ratio,
+                seed_drift_threshold,
+                window_drift_count,
+                quality.camera_center_window_drift_ratio,
+                window_drift_threshold,
+            );
+            if quality.camera_center_window_drift_ratio > window_drift_threshold {
+                eprintln!(
+                    "hierarchical-scale-drift: submap {submap_id} images {range:?} \
+                     component_rebuild={component_rebuild} \
                      window_count={window_drift_count} \
                      window_drift_ratio={:.4} window_drift_threshold={:.4}; \
                      treating as build failure",
-                        quality.camera_center_window_drift_ratio, window_drift_threshold,
-                    );
-                }
+                    quality.camera_center_window_drift_ratio, window_drift_threshold,
+                );
             }
-            result
-        };
+        }
+        result
+    };
     // First pass: attempt every planned window, in parallel, without failing
     // fast — widening (below) needs to see every window's outcome, not just
     // the first failure, and this keeps the common (all-succeed) case exactly
@@ -463,7 +494,7 @@ pub fn hierarchical_sfm(
         windows
             .iter()
             .enumerate()
-            .map(|(id, window)| build_one(id as u64, window))
+            .map(|(id, window)| build_one(id as u64, window, false))
             .collect()
     } else {
         let pool = rayon::ThreadPoolBuilder::new()
@@ -474,7 +505,7 @@ pub fn hierarchical_sfm(
             windows
                 .par_iter()
                 .enumerate()
-                .map(|(id, window)| build_one(id as u64, window))
+                .map(|(id, window)| build_one(id as u64, window, false))
                 .collect()
         })
     };
@@ -493,10 +524,12 @@ pub fn hierarchical_sfm(
             .zip(initial)
             .collect();
         let max_merges = config.partition.max_widen_merges;
+        let max_windows_per_step = config.partition.max_widen_windows_per_step;
         let min_post_widen_overlap_images = config.partition.min_post_widen_overlap_images;
         let outputs = widen_and_build(
             windows,
             max_merges,
+            max_windows_per_step,
             min_post_widen_overlap_images,
             |window: &SubmapWindow| {
                 let key = (window.image_range.start, window.image_range.end);
@@ -505,25 +538,29 @@ pub fn hierarchical_sfm(
                 } else {
                     let submap_id = next_submap_id;
                     next_submap_id += 1;
-                    build_one(submap_id, window)
+                    build_one(submap_id, window, false)
                 }
             },
             is_build_error_widenable,
-            |merge_number, before, after, reason| match reason {
+            is_no_seed_pair_build_error,
+            |merge_units, absorbed_windows, before, after, reason| match reason {
                 // Fires for `NoSeedPair` and every build-time quality
                 // rejection. Any same-window multi-seed retry applicable to
                 // the rejection has already run inside `builder.build`; this
                 // line reports the widen/merge machinery's response.
                 WidenMergeReason::UnbuildableWindow => eprintln!(
                     "hierarchical-widen: images {before:?} failed to build (NoSeedPair or \
-                     QualityRejected); merging neighbouring window -> images {after:?} \
-                     (merge {merge_number}/{max_merges})"
+                     QualityRejected); absorbing neighbouring window(s) -> images {after:?} \
+                     (absorbed_windows_this_step={absorbed_windows}, \
+                     merge_units={merge_units}/{max_merges}, \
+                     no_seed_step_cap={max_windows_per_step})"
                 ),
                 WidenMergeReason::PostWidenOverlapSafety => eprintln!(
                     "hierarchical-widen: images {before:?} still bordered a live neighbour \
                      entirely inside the span diagnosed unseedable (min_post_widen_overlap_images \
                      = {min_post_widen_overlap_images}); absorbing that neighbour too -> images \
-                     {after:?} (merge {merge_number}/{max_merges})"
+                     {after:?} (absorbed_windows_this_step={absorbed_windows}, \
+                     merge_units={merge_units}/{max_merges}, no_seed_step_reset=1)"
                 ),
             },
         )?;
@@ -538,7 +575,7 @@ pub fn hierarchical_sfm(
             submaps,
             pair_rotations,
             config,
-            build_one,
+            |submap_id, window| build_one(submap_id, window, true),
             &mut next_submap_id,
         )?
     } else {
@@ -623,6 +660,16 @@ fn is_build_error_widenable(error: &HierarchicalSfmError) -> bool {
     )
 }
 
+fn is_no_seed_pair_build_error(error: &HierarchicalSfmError) -> bool {
+    matches!(
+        error,
+        HierarchicalSfmError::LocalBuild {
+            error: LocalSubmapBuildError::Reconstruction(IncrementalSfmError::NoSeedPair),
+            ..
+        }
+    )
+}
+
 /// Whether an [`SubmapSim3RejectionReason`] is even *eligible* for the
 /// seam-time internal-drift remediation below (before the cross-submap
 /// diagnostic is consulted at all). These two reasons are exactly the ones
@@ -664,39 +711,138 @@ fn seam_internal_drift_diagnostic(
     )
 }
 
-/// Retry [`optimize_independent_submaps`] around degenerate-geometry seam
-/// and `HighMeanResidual` rejections, and around `LowInlierRatio`/`NoRobustFit`
-/// rejections the cross-submap internal-drift diagnostic independently
-/// confirms, by merging the two implicated (already independently built)
-/// submaps' windows into one, rebuilding *only* that merged window, and
-/// splicing it back into the sequence in place of the two originals — the
-/// alignment-stage analogue of [`widen_and_build`]'s build-stage retry.
-///
-/// `submaps[i]` must correspond to `windows[i]` for every `i`
-/// (`optimize_independent_submaps` assigns submap ids positionally as
-/// `0..submaps.len()`, so a returned `Alignment` error's `source_submap_id`
-/// is always a valid index into both vectors). Only `DegenerateSourceGeometry`
-/// / `DegenerateTargetGeometry` / `HighMeanResidual` rejections, and
-/// diagnostic-confirmed `LowInlierRatio`/`NoRobustFit` rejections, are
-/// treated as widenable; every other `Alignment` rejection reason, and every
-/// non-`Alignment` error, propagates unchanged on the first occurrence.
-/// Bounded by `config.max_degenerate_seam_merges` (a single shared budget
-/// for both remediation paths). Once spent, the triggering error is
-/// returned unchanged rather than merging without bound.
-///
-/// A submap flagged defective at *both* of its seams (as the diagnosed
-/// submap 9 and submap 13 each are, see `SEAMDRIFT_CALIBRATION.md`) is only
-/// ever merged once: the first merge replaces it (and its neighbour) with a
-/// freshly rebuilt, freshly-id'd submap, so by the time the seam chain is
-/// re-evaluated on the next loop iteration the original submap no longer
-/// exists as a distinct entity to trigger a second merge for the same
-/// defect. A *second* merge only happens if a *different* seam (e.g. the
-/// other flagged submap's own pair) independently still fails -- a
-/// legitimate, separately-budgeted remediation, not a double-spend.
-///
-/// Deterministic: each retry re-evaluates the full seam chain against the
-/// same (cloned) submap contents in the same order, so the same input always
-/// produces the same sequence of merges and the same final result.
+#[derive(Debug, Clone, Copy)]
+enum SeamMergeRoute {
+    Degenerate,
+    Residual(Option<crate::submap_overlap::SeamStepShapeDiagnostic>),
+    Drift(crate::submap_overlap::SeamStepShapeDiagnostic),
+    Consensus(crate::submap_overlap::SeamStepShapeDiagnostic),
+    LastResort(Option<crate::submap_overlap::SeamStepShapeDiagnostic>),
+}
+
+impl SeamMergeRoute {
+    fn is_last_resort(self) -> bool {
+        matches!(self, Self::LastResort(_))
+    }
+
+    fn log_family(self) -> &'static str {
+        match self {
+            Self::Degenerate => "hierarchical-seam-merge",
+            Self::Residual(_) => "hierarchical-seam-residual-merge",
+            Self::Drift(_) => "hierarchical-seam-drift-merge",
+            Self::Consensus(_) => "hierarchical-seam-consensus-merge",
+            Self::LastResort(_) => "hierarchical-seam-lastresort-merge",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SeamMergeCandidate {
+    seam_index: usize,
+    rejection: SubmapSim3Rejection,
+    route: SeamMergeRoute,
+}
+
+/// Last-resort structural handling is deliberately broad across geometric
+/// alignment failures, but it must not hide malformed correspondence data.
+/// `TooFewCorrespondences` is eligible even with no correspondence evidence:
+/// such a seam cannot be aligned, so a correspondence-free component rebuild
+/// is its only possible remediation.
+fn is_last_resort_seam_rejection_eligible(rejection: &SubmapSim3Rejection) -> bool {
+    !matches!(
+        rejection.reason,
+        SubmapSim3RejectionReason::NonFinitePoint
+            | SubmapSim3RejectionReason::NonUniqueCorrespondences
+    )
+}
+
+/// Exhaustively inspect the current adjacent seam chain and retain every
+/// failure that has a structural merge route. Unlike
+/// [`optimize_independent_submaps`], this deliberately does not stop at the
+/// first rejection: a fatal/non-routable seam must not hide actionable drift,
+/// residual, degenerate, or catastrophic-consensus seams later in the round.
+fn seam_merge_candidates(
+    submaps: &[LocalSubmap],
+    pair_rotations: &[PairRotationEvidence],
+    config: &HierarchicalSfmConfig,
+) -> Vec<SeamMergeCandidate> {
+    let mut candidates = Vec::new();
+    for index in 0..submaps.len().saturating_sub(1) {
+        let source_id = index as u64;
+        let target_id = source_id + 1;
+        let Ok(overlap) = collect_submap_overlap_evidence(
+            &submaps[index],
+            &submaps[index + 1],
+            pair_rotations,
+            &config.overlap,
+        ) else {
+            continue;
+        };
+        let Err(rejection) = estimate_submap_sim3_constraint(
+            source_id,
+            target_id,
+            &overlap.point_matches,
+            &overlap.target_from_source_rotation,
+            &config.alignment,
+        ) else {
+            continue;
+        };
+        let diagnostic = seam_internal_drift_diagnostic(submaps, source_id, target_id, config);
+        let route = if matches!(
+            rejection.reason,
+            SubmapSim3RejectionReason::DegenerateSourceGeometry
+                | SubmapSim3RejectionReason::DegenerateTargetGeometry
+        ) {
+            Some(SeamMergeRoute::Degenerate)
+        } else if rejection.reason == SubmapSim3RejectionReason::HighMeanResidual {
+            Some(SeamMergeRoute::Residual(diagnostic))
+        } else if config.seam_internal_drift_gate_enabled
+            && is_seam_rejection_reason_drift_eligible(rejection.reason)
+            && diagnostic.is_some_and(|value| {
+                value.disagreement_ratio > config.max_seam_internal_drift_disagreement_ratio
+            })
+        {
+            Some(SeamMergeRoute::Drift(
+                diagnostic.expect("drift guard confirmed a diagnostic"),
+            ))
+        } else if rejection.reason == SubmapSim3RejectionReason::LowInlierRatio
+            && rejection.inlier_ratio < config.catastrophic_consensus_inlier_ratio_threshold
+            && diagnostic.is_some_and(|value| {
+                value.disagreement_ratio <= config.max_seam_internal_drift_disagreement_ratio
+            })
+        {
+            Some(SeamMergeRoute::Consensus(
+                diagnostic.expect("consensus guard confirmed a diagnostic"),
+            ))
+        } else if config.last_resort_seam_merge
+            && is_last_resort_seam_rejection_eligible(&rejection)
+        {
+            Some(SeamMergeRoute::LastResort(diagnostic))
+        } else {
+            None
+        };
+        if let Some(route) = route {
+            candidates.push(SeamMergeCandidate {
+                seam_index: index,
+                rejection,
+                route,
+            });
+        }
+    }
+    candidates
+}
+
+/// Retry alignment around every structurally merge-eligible seam. Adjacent
+/// failing seams form a connected component and are rebuilt as one union
+/// window: failures `i->i+1` and `i+1->i+2` therefore cause one build of
+/// submaps `i..=i+2`, not two pair rebuilds. Collapsing a component containing
+/// `k` seams consumes `k` units from the existing pair-merge budget. A
+/// component build first exhausts the builder's bounded alternate-seed retry
+/// for any quality rejection. If it still returns `QualityRejected` or
+/// `NoSeedPair`, one live successor (or the predecessor at the tail) is
+/// absorbed and the component is rebuilt; each absorption consumes one more
+/// unit from that same budget. The last build error is returned unchanged once
+/// no neighbour or budget remains.
 fn merge_degenerate_seams_and_optimize(
     mut windows: Vec<SubmapWindow>,
     mut submaps: Vec<LocalSubmap>,
@@ -708,166 +854,192 @@ fn merge_degenerate_seams_and_optimize(
     let max_merges = config.max_degenerate_seam_merges;
     let mut merges_used = 0usize;
     loop {
+        let candidates = seam_merge_candidates(&submaps, pair_rotations, config);
+        let remaining_budget = max_merges.saturating_sub(merges_used);
+        // A fallback seam must never jump ahead of a specific diagnosis later
+        // in the chain. Only when the exhaustive scan found no specific route
+        // do last-resort candidates participate in component selection.
+        let specific_candidates = candidates
+            .iter()
+            .filter(|candidate| !candidate.route.is_last_resort())
+            .cloned()
+            .collect::<Vec<_>>();
+        let last_resort_candidates;
+        let round_candidates = if specific_candidates.is_empty() {
+            last_resort_candidates = candidates
+                .iter()
+                .filter(|candidate| candidate.route.is_last_resort())
+                .cloned()
+                .collect::<Vec<_>>();
+            &last_resort_candidates
+        } else {
+            &specific_candidates
+        };
+        // Candidates are emitted in seam order. Select the first maximal run
+        // of adjacent seam indices that fits the remaining pair-merge budget.
+        let mut selected = None;
+        let mut cursor = 0;
+        while cursor < round_candidates.len() {
+            let start = cursor;
+            cursor += 1;
+            while cursor < round_candidates.len()
+                && round_candidates[cursor].seam_index
+                    == round_candidates[cursor - 1].seam_index + 1
+            {
+                cursor += 1;
+            }
+            let cost =
+                round_candidates[cursor - 1].seam_index - round_candidates[start].seam_index + 1;
+            if cost <= remaining_budget {
+                selected = Some(&round_candidates[start..cursor]);
+                break;
+            }
+        }
+        if let Some(component) = selected {
+            let mut first_index = component[0].seam_index;
+            let last_seam_index = component.last().expect("component is non-empty").seam_index;
+            let mut last_window_index = last_seam_index + 1;
+            let component_cost = last_seam_index - first_index + 1;
+            let merged_range =
+                windows[first_index].image_range.start..windows[last_window_index].image_range.end;
+            let mut merged_window = SubmapWindow {
+                image_range: merged_range.clone(),
+                outgoing_seam_support: windows[last_window_index].outgoing_seam_support,
+            };
+            let next_merges_used = merges_used + component_cost;
+            for candidate in component {
+                let index = candidate.seam_index;
+                let source_id = index as u64;
+                let target_id = source_id + 1;
+                let source_range = windows[index].image_range.clone();
+                let target_range = windows[index + 1].image_range.clone();
+                match candidate.route {
+                    SeamMergeRoute::Degenerate => eprintln!(
+                        "{}: submaps {source_id}..{target_id} \
+                         (images {source_range:?}..{target_range:?}) degenerate seam ({:?}); \
+                         component merging -> images {merged_range:?} \
+                         (merges {next_merges_used}/{max_merges})",
+                        candidate.route.log_family(),
+                        candidate.rejection.reason,
+                    ),
+                    SeamMergeRoute::Residual(diagnostic) => eprintln!(
+                        "{}: submaps {source_id}..{target_id} \
+                         (images {source_range:?}..{target_range:?}) high-residual seam \
+                         (mean_residual_ratio={:?} drift_disagreement_ratio={:?} \
+                         source_landmarks={} target_landmarks={}); component merging -> images \
+                         {merged_range:?} (merges {next_merges_used}/{max_merges})",
+                        candidate.route.log_family(),
+                        candidate.rejection.mean_residual_ratio,
+                        diagnostic.map(|value| value.disagreement_ratio),
+                        submaps[index].landmarks.len(),
+                        submaps[index + 1].landmarks.len(),
+                    ),
+                    SeamMergeRoute::Drift(diagnostic) => eprintln!(
+                        "{}: submaps {source_id}..{target_id} \
+                         (images {source_range:?}..{target_range:?}) internally-inconsistent seam \
+                         (reason={:?} defective_side={:?} shared_frames={} \
+                         source_change_factor={:.4} target_change_factor={:.4} \
+                         disagreement_ratio={:.4} threshold={:.4}); component merging -> images \
+                         {merged_range:?} (merges {next_merges_used}/{max_merges})",
+                        candidate.route.log_family(),
+                        candidate.rejection.reason,
+                        diagnostic.defective_side,
+                        diagnostic.shared_frames,
+                        diagnostic.source_change_factor,
+                        diagnostic.target_change_factor,
+                        diagnostic.disagreement_ratio,
+                        config.max_seam_internal_drift_disagreement_ratio,
+                    ),
+                    SeamMergeRoute::Consensus(diagnostic) => eprintln!(
+                        "{}: submaps {source_id}..{target_id} \
+                         (images {source_range:?}..{target_range:?}) catastrophic consensus \
+                         (inlier_ratio={:.4} severe_threshold={:.4} disagreement_ratio={:.4} \
+                         drift_threshold={:.4} source_landmarks={} target_landmarks={}); \
+                         component merging -> images {merged_range:?} \
+                         (merges {next_merges_used}/{max_merges})",
+                        candidate.route.log_family(),
+                        candidate.rejection.inlier_ratio,
+                        config.catastrophic_consensus_inlier_ratio_threshold,
+                        diagnostic.disagreement_ratio,
+                        config.max_seam_internal_drift_disagreement_ratio,
+                        submaps[index].landmarks.len(),
+                        submaps[index + 1].landmarks.len(),
+                    ),
+                    SeamMergeRoute::LastResort(diagnostic) => eprintln!(
+                        "{}: submaps {source_id}..{target_id} \
+                         (images {source_range:?}..{target_range:?}) fatal seam after specific \
+                         routes (reason={:?} correspondences={} inliers={} inlier_ratio={:.4} \
+                         mean_residual_ratio={:?} rotation_disagreement_deg={:?} \
+                         leave_one_out_log_scale_mad={:?} drift_diagnostic={:?} \
+                         source_landmarks={} target_landmarks={}); component merging -> images \
+                         {merged_range:?} (merges {next_merges_used}/{max_merges})",
+                        candidate.route.log_family(),
+                        candidate.rejection.reason,
+                        candidate.rejection.correspondence_count,
+                        candidate.rejection.inlier_count,
+                        candidate.rejection.inlier_ratio,
+                        candidate.rejection.mean_residual_ratio,
+                        candidate.rejection.rotation_disagreement_deg,
+                        candidate.rejection.leave_one_out_log_scale_mad,
+                        diagnostic,
+                        submaps[index].landmarks.len(),
+                        submaps[index + 1].landmarks.len(),
+                    ),
+                }
+            }
+            merges_used = next_merges_used;
+            let merged_submap = loop {
+                let submap_id = *next_submap_id;
+                *next_submap_id += 1;
+                match build_one(submap_id, &merged_window) {
+                    Ok(submap) => break submap,
+                    Err(error) if is_build_error_widenable(&error) => {
+                        let before = merged_window.image_range.clone();
+                        if merges_used >= max_merges
+                            || (first_index == 0 && last_window_index + 1 == windows.len())
+                        {
+                            eprintln!(
+                                "hierarchical-widen: component_rebuild=true images {before:?} \
+                                 remediation exhausted (merge_units={merges_used}/{max_merges}); \
+                                 fatal build error={error:?}"
+                            );
+                            return Err(error);
+                        }
+
+                        // Match normal-window widening: absorb the successor
+                        // when one exists, otherwise absorb the predecessor.
+                        if last_window_index + 1 < windows.len() {
+                            last_window_index += 1;
+                            merged_window.image_range.end =
+                                windows[last_window_index].image_range.end;
+                            merged_window.outgoing_seam_support =
+                                windows[last_window_index].outgoing_seam_support;
+                        } else {
+                            first_index -= 1;
+                            merged_window.image_range.start =
+                                windows[first_index].image_range.start;
+                        }
+                        merges_used += 1;
+                        eprintln!(
+                            "hierarchical-widen: component_rebuild=true images {before:?} failed \
+                             to build (NoSeedPair or QualityRejected) after alternate-seed \
+                             retries; absorbing neighbouring window -> images {:?} \
+                             (absorbed_windows_this_step=1, \
+                             merge_units={merges_used}/{max_merges}) error={error:?}",
+                            merged_window.image_range,
+                        );
+                    }
+                    Err(error) => return Err(error),
+                }
+            };
+            windows.splice(first_index..=last_window_index, [merged_window]);
+            submaps.splice(first_index..=last_window_index, [merged_submap]);
+            continue;
+        }
+
         match optimize_independent_submaps(submaps.clone(), pair_rotations, config) {
             Ok(atlas) => return Ok((windows, atlas)),
-            Err(HierarchicalSfmError::Alignment {
-                source_submap_id,
-                target_submap_id,
-                rejection,
-            }) if merges_used < max_merges
-                && matches!(
-                    rejection.reason,
-                    SubmapSim3RejectionReason::DegenerateSourceGeometry
-                        | SubmapSim3RejectionReason::DegenerateTargetGeometry
-                ) =>
-            {
-                let index = source_submap_id as usize;
-                debug_assert_eq!(target_submap_id, source_submap_id + 1);
-                debug_assert!(index + 1 < windows.len());
-                merges_used += 1;
-                let source_range = windows[index].image_range.clone();
-                let target_range = windows[index + 1].image_range.clone();
-                let merged_range = source_range.start..target_range.end;
-                let merged_window = SubmapWindow {
-                    image_range: merged_range.clone(),
-                    outgoing_seam_support: windows[index + 1].outgoing_seam_support,
-                };
-                eprintln!(
-                    "hierarchical-seam-merge: submaps {source_submap_id}..{target_submap_id} \
-                     (images {source_range:?}..{target_range:?}) degenerate seam \
-                     ({:?}); merging -> images {merged_range:?} (merge {merges_used}/{max_merges})",
-                    rejection.reason
-                );
-                let submap_id = *next_submap_id;
-                *next_submap_id += 1;
-                let merged_submap = build_one(submap_id, &merged_window)?;
-                windows.splice(index..=index + 1, [merged_window]);
-                submaps.splice(index..=index + 1, [merged_submap]);
-            }
-            // A marginally high mean residual with otherwise healthy seam
-            // evidence can be cross-submap triangulation noise in a
-            // landmark-sparse region. Rebuild both windows jointly without
-            // requiring one side to fail the internal-drift diagnostic.
-            Err(HierarchicalSfmError::Alignment {
-                source_submap_id,
-                target_submap_id,
-                rejection,
-            }) if merges_used < max_merges
-                && rejection.reason == SubmapSim3RejectionReason::HighMeanResidual =>
-            {
-                let index = source_submap_id as usize;
-                debug_assert_eq!(target_submap_id, source_submap_id + 1);
-                debug_assert!(index + 1 < windows.len());
-                let diagnostic = seam_internal_drift_diagnostic(
-                    &submaps,
-                    source_submap_id,
-                    target_submap_id,
-                    config,
-                );
-                merges_used += 1;
-                let source_range = windows[index].image_range.clone();
-                let target_range = windows[index + 1].image_range.clone();
-                let merged_range = source_range.start..target_range.end;
-                let merged_window = SubmapWindow {
-                    image_range: merged_range.clone(),
-                    outgoing_seam_support: windows[index + 1].outgoing_seam_support,
-                };
-                eprintln!(
-                    "hierarchical-seam-residual-merge: submaps {source_submap_id}..{target_submap_id} \
-                     (images {source_range:?}..{target_range:?}) high-residual seam \
-                     (mean_residual_ratio={:?} drift_disagreement_ratio={:?} \
-                     source_landmarks={} target_landmarks={}); merging -> images {merged_range:?} \
-                     (merge {merges_used}/{max_merges})",
-                    rejection.mean_residual_ratio,
-                    diagnostic.map(|value| value.disagreement_ratio),
-                    submaps[index].landmarks.len(),
-                    submaps[index + 1].landmarks.len(),
-                );
-                let submap_id = *next_submap_id;
-                *next_submap_id += 1;
-                let merged_submap = build_one(submap_id, &merged_window)?;
-                windows.splice(index..=index + 1, [merged_window]);
-                submaps.splice(index..=index + 1, [merged_submap]);
-            }
-            // Seam-time internal-drift remediation (LOWINLIERRATIO_DIAGNOSIS.md
-            // follow-on, option 2): a seam rejected for one of the two
-            // reasons a genuine internal defect can produce, *and* the
-            // cross-submap `seam_step_shape_diagnostic` independently
-            // confirms one side is internally inconsistent with the other's
-            // account of the same shared motion. `LowInlierRatio`/
-            // `NoRobustFit` are otherwise fail-fast --
-            // only the diagnostic-confirmed subset is widenable, exactly the
-            // narrow trigger `SEAMDRIFT_CALIBRATION.md` validated (every
-            // passing seam in the calibration run measured well under
-            // threshold, including a fast-motion stretch that defeated a
-            // cruder, single-submap version of this idea).
-            Err(HierarchicalSfmError::Alignment {
-                source_submap_id,
-                target_submap_id,
-                rejection,
-            }) if merges_used < max_merges
-                && config.seam_internal_drift_gate_enabled
-                && is_seam_rejection_reason_drift_eligible(rejection.reason)
-                && seam_internal_drift_diagnostic(
-                    &submaps,
-                    source_submap_id,
-                    target_submap_id,
-                    config,
-                )
-                .is_some_and(|diagnostic| {
-                    diagnostic.disagreement_ratio
-                        > config.max_seam_internal_drift_disagreement_ratio
-                }) =>
-            {
-                let index = source_submap_id as usize;
-                debug_assert_eq!(target_submap_id, source_submap_id + 1);
-                debug_assert!(index + 1 < windows.len());
-                let diagnostic = seam_internal_drift_diagnostic(
-                    &submaps,
-                    source_submap_id,
-                    target_submap_id,
-                    config,
-                )
-                .expect("guard above already confirmed Some(..) over threshold");
-                merges_used += 1;
-                let source_range = windows[index].image_range.clone();
-                let target_range = windows[index + 1].image_range.clone();
-                let merged_range = source_range.start..target_range.end;
-                let merged_window = SubmapWindow {
-                    image_range: merged_range.clone(),
-                    outgoing_seam_support: windows[index + 1].outgoing_seam_support,
-                };
-                eprintln!(
-                    "hierarchical-seam-drift-merge: submaps {source_submap_id}..{target_submap_id} \
-                     (images {source_range:?}..{target_range:?}) internally-inconsistent seam \
-                     (reason={:?} defective_side={:?} shared_frames={} \
-                     source_change_factor={:.4} target_change_factor={:.4} \
-                     disagreement_ratio={:.4} threshold={:.4}); merging -> images {merged_range:?} \
-                     (merge {merges_used}/{max_merges})",
-                    rejection.reason,
-                    diagnostic.defective_side,
-                    diagnostic.shared_frames,
-                    diagnostic.source_change_factor,
-                    diagnostic.target_change_factor,
-                    diagnostic.disagreement_ratio,
-                    config.max_seam_internal_drift_disagreement_ratio,
-                );
-                let submap_id = *next_submap_id;
-                *next_submap_id += 1;
-                let merged_submap = build_one(submap_id, &merged_window)?;
-                windows.splice(index..=index + 1, [merged_window]);
-                submaps.splice(index..=index + 1, [merged_submap]);
-            }
             Err(error) => {
-                // This is the pass that is actually about to fail the run
-                // (either the rejection is not a widenable degenerate-geometry
-                // reason, or the merge budget is spent). Before giving up,
-                // scan every seam in the current (final, post-merge) submap
-                // list and report all of them, not just the one that
-                // triggered `error` — the diagnosed MH_03 2700-frame attempt-3
-                // run died on a single `Alignment` error 2h18m in with zero
-                // information about any other seam. Purely observational:
-                // the error returned below is unchanged.
                 report_all_failing_seams(&windows, &submaps, pair_rotations, config);
                 return Err(error);
             }
@@ -1171,8 +1343,8 @@ fn report_all_failing_seams(
     }
     eprintln!(
         "hierarchical-seam-failure-summary: {failing} of {} seam(s) failed \
-         (run fails on the first failure seen during the merge/alignment retry loop, \
-         which may differ from seam 0)",
+         (all structurally routable components were considered before the \
+         remaining fatal failure was returned)",
         submaps.len() - 1
     );
     failing
@@ -1310,6 +1482,12 @@ pub fn optimize_independent_submaps(
                 target_landmark_id: point_match.target_landmark_id,
             });
         }
+        eprintln!(
+            "hierarchical-seam-edge: {source_id}..{target_id} accepted \
+             inlier_count={} scale={:.9}",
+            constraint.inlier_match_indices.len(),
+            constraint.target_from_source.scale,
+        );
         constraints.push(constraint);
     }
 
@@ -1653,6 +1831,7 @@ mod tests {
         let outputs = widen_and_build(
             windows,
             1,
+            1,
             0,
             |window| {
                 build_ranges.push(window.image_range.clone());
@@ -1670,7 +1849,8 @@ mod tests {
                 }
             },
             is_build_error_widenable,
-            |_, _, _, _| {},
+            is_no_seed_pair_build_error,
+            |_, _, _, _, _| {},
         )
         .expect("quality-rejected window should consume its existing widen budget");
 
@@ -1790,6 +1970,326 @@ mod tests {
             (source, target)
         }
 
+        fn with_camera_centers(mut submap: LocalSubmap, centers: &[(u64, f64)]) -> LocalSubmap {
+            submap.source_frame_ids = centers.iter().map(|&(id, _)| id).collect();
+            submap.frames = centers
+                .iter()
+                .enumerate()
+                .map(|(index, &(source_frame_id, x))| LocalSubmapFrame {
+                    local_frame_index: index,
+                    source_frame_id,
+                    pose: Pose::from_world_to_camera(
+                        UnitQuaternion::identity(),
+                        Vector3::new(-x, 0.0, 0.0),
+                    ),
+                })
+                .collect();
+            submap
+        }
+
+        fn catastrophic_correspondence(
+            shared_frame: u64,
+        ) -> (Vec<LocalSubmapLandmark>, Vec<LocalSubmapLandmark>) {
+            correspondence_count(100, shared_frame, spread_point, |id| {
+                let point = spread_point(id);
+                if id < 12 {
+                    point
+                } else {
+                    point
+                        + Vector3::new(
+                            0.35 * ((id * 17 % 23) as f64 - 11.0),
+                            0.31 * ((id * 29 % 19) as f64 - 9.0),
+                            0.27 * ((id * 37 % 17) as f64 - 8.0),
+                        )
+                }
+            })
+        }
+
+        fn midband_correspondence(
+            shared_frame: u64,
+        ) -> (Vec<LocalSubmapLandmark>, Vec<LocalSubmapLandmark>) {
+            correspondence_count(100, shared_frame, spread_point, |id| {
+                let point = spread_point(id);
+                if id < 44 {
+                    point
+                } else {
+                    point
+                        + Vector3::new(
+                            0.41 * ((id * 17 % 23) as f64 - 11.0),
+                            0.37 * ((id * 29 % 19) as f64 - 9.0),
+                            0.33 * ((id * 37 % 17) as f64 - 8.0),
+                        )
+                }
+            })
+        }
+
+        #[test]
+        fn catastrophic_consensus_without_drift_triggers_merge() {
+            let (source, target) = catastrophic_correspondence(100);
+            let centers = [(100, 0.0), (101, 1.0), (102, 2.0), (103, 3.0)];
+            let submaps = vec![
+                with_camera_centers(
+                    local_submap(100, UnitQuaternion::identity(), source),
+                    &centers,
+                ),
+                with_camera_centers(
+                    local_submap(101, UnitQuaternion::identity(), target),
+                    &centers,
+                ),
+            ];
+            let mut config = HierarchicalSfmConfig::default();
+            config.alignment.ransac_iterations = 10_000;
+            let diagnostic = seam_internal_drift_diagnostic(&submaps, 0, 1, &config)
+                .expect("four shared camera centers produce a diagnostic");
+            assert!(
+                diagnostic.disagreement_ratio <= config.max_seam_internal_drift_disagreement_ratio
+            );
+            let candidates = seam_merge_candidates(&submaps, &[rotation_link(100, 101)], &config);
+            assert_eq!(candidates.len(), 1);
+            assert!(matches!(candidates[0].route, SeamMergeRoute::Consensus(_)));
+            assert!(
+                (0.08..=0.18).contains(&candidates[0].rejection.inlier_ratio),
+                "fixture should plant a roughly 0.10 catastrophic ratio, got {}",
+                candidates[0].rejection.inlier_ratio
+            );
+
+            let calls = RefCell::new(Vec::new());
+            let mut next_id = 2;
+            let (final_windows, atlas) = merge_degenerate_seams_and_optimize(
+                vec![w(0..10), w(10..20)],
+                submaps,
+                &[rotation_link(100, 101)],
+                &config,
+                |_id, window| {
+                    calls.borrow_mut().push(window.image_range.clone());
+                    Ok(local_submap(200, UnitQuaternion::identity(), Vec::new()))
+                },
+                &mut next_id,
+            )
+            .expect("catastrophic agreeing-side consensus must rebuild");
+
+            assert_eq!(calls.into_inner(), vec![0..20]);
+            assert_eq!(final_windows.len(), 1);
+            assert!(atlas.seams.is_empty());
+        }
+
+        #[test]
+        fn adjacent_failing_seams_rebuild_one_three_submap_component() {
+            let (source0, target0) = correspondence(100, collinear_x);
+            let (source1, target1) = correspondence(200, collinear_y);
+            let mut middle_landmarks = target0;
+            middle_landmarks.extend(source1);
+            let submaps = vec![
+                local_submap(10, UnitQuaternion::identity(), source0),
+                local_submap(20, UnitQuaternion::identity(), middle_landmarks),
+                local_submap(30, UnitQuaternion::identity(), target1),
+            ];
+            let calls = RefCell::new(Vec::new());
+            let mut next_id = 3;
+            let (final_windows, atlas) = merge_degenerate_seams_and_optimize(
+                vec![w(0..10), w(10..20), w(20..30)],
+                submaps,
+                &[rotation_link(10, 20), rotation_link(20, 30)],
+                &HierarchicalSfmConfig::default(),
+                |_id, window| {
+                    calls.borrow_mut().push(window.image_range.clone());
+                    Ok(local_submap(40, UnitQuaternion::identity(), Vec::new()))
+                },
+                &mut next_id,
+            )
+            .expect("the adjacent degenerate seams must be one component");
+
+            assert_eq!(calls.into_inner(), vec![0..30]);
+            assert_eq!(final_windows.len(), 1);
+            assert!(atlas.seams.is_empty());
+        }
+
+        #[test]
+        fn component_quality_failure_absorbs_one_neighbour_then_passes() {
+            let (source, target) = correspondence(100, collinear_x);
+            let submaps = vec![
+                local_submap(10, UnitQuaternion::identity(), source),
+                local_submap(20, UnitQuaternion::identity(), target),
+                local_submap(30, UnitQuaternion::identity(), Vec::new()),
+            ];
+            let calls = RefCell::new(Vec::new());
+            let mut next_id = 3;
+            // One unit collapses the rejected seam and the second absorbs the
+            // live successor after the component build's seed retries fail.
+            let config = HierarchicalSfmConfig {
+                max_degenerate_seam_merges: 2,
+                ..Default::default()
+            };
+
+            let (final_windows, atlas) = merge_degenerate_seams_and_optimize(
+                vec![w(0..10), w(10..20), w(20..30)],
+                submaps,
+                &[rotation_link(10, 20)],
+                &config,
+                |_id, window| {
+                    calls.borrow_mut().push(window.image_range.clone());
+                    if window.image_range == (0..20) {
+                        Err(local_build_error(LocalSubmapBuildError::QualityRejected {
+                            reason: crate::LocalSubmapRejectionReason::HighReprojectionError,
+                            quality: sample_quality(),
+                        }))
+                    } else {
+                        Ok(local_submap(40, UnitQuaternion::identity(), Vec::new()))
+                    }
+                },
+                &mut next_id,
+            )
+            .expect("one shared-budget neighbour absorption should remediate the component");
+
+            assert_eq!(calls.into_inner(), vec![0..20, 0..30]);
+            assert_eq!(final_windows.len(), 1);
+            assert!(atlas.seams.is_empty());
+        }
+
+        #[test]
+        fn component_build_remediation_budget_exhaustion_is_fatal() {
+            let (source, target) = correspondence(100, collinear_x);
+            let submaps = vec![
+                local_submap(10, UnitQuaternion::identity(), source),
+                local_submap(20, UnitQuaternion::identity(), target),
+                local_submap(30, UnitQuaternion::identity(), Vec::new()),
+            ];
+            let calls = RefCell::new(Vec::new());
+            let mut next_id = 3;
+            // The seam collapse spends the only unit, leaving none for the
+            // neighbour absorption required by the failed rebuild.
+            let config = HierarchicalSfmConfig {
+                max_degenerate_seam_merges: 1,
+                ..Default::default()
+            };
+
+            let error = merge_degenerate_seams_and_optimize(
+                vec![w(0..10), w(10..20), w(20..30)],
+                submaps,
+                &[rotation_link(10, 20)],
+                &config,
+                |_id, window| {
+                    calls.borrow_mut().push(window.image_range.clone());
+                    Err(local_build_error(LocalSubmapBuildError::QualityRejected {
+                        reason: crate::LocalSubmapRejectionReason::HighReprojectionError,
+                        quality: sample_quality(),
+                    }))
+                },
+                &mut next_id,
+            )
+            .expect_err("an exhausted shared merge budget must preserve the fatal build error");
+
+            assert_eq!(calls.into_inner(), vec![0..20]);
+            assert!(matches!(
+                error,
+                HierarchicalSfmError::LocalBuild {
+                    error: LocalSubmapBuildError::QualityRejected {
+                        reason: crate::LocalSubmapRejectionReason::HighReprojectionError,
+                        ..
+                    },
+                    ..
+                }
+            ));
+        }
+
+        #[test]
+        fn specific_drift_route_takes_precedence_over_last_resort() {
+            let (source, target) = catastrophic_correspondence(100);
+            let submaps = vec![
+                with_camera_centers(
+                    local_submap(100, UnitQuaternion::identity(), source),
+                    &[(100, 0.0), (101, 1.0), (102, 2.0), (103, 3.0)],
+                ),
+                with_camera_centers(
+                    local_submap(101, UnitQuaternion::identity(), target),
+                    &[(100, 0.0), (101, 1.0), (102, 2.0), (103, 4.0)],
+                ),
+            ];
+            let mut config = HierarchicalSfmConfig::default();
+            config.alignment.ransac_iterations = 10_000;
+            let diagnostic = seam_internal_drift_diagnostic(&submaps, 0, 1, &config)
+                .expect("four shared camera centers produce a diagnostic");
+            assert!(
+                diagnostic.disagreement_ratio > config.max_seam_internal_drift_disagreement_ratio
+            );
+            let candidates = seam_merge_candidates(&submaps, &[rotation_link(100, 101)], &config);
+            assert_eq!(candidates.len(), 1);
+            assert!(matches!(candidates[0].route, SeamMergeRoute::Drift(_)));
+            assert_eq!(
+                candidates[0].route.log_family(),
+                "hierarchical-seam-drift-merge"
+            );
+
+            let calls = RefCell::new(Vec::new());
+            let mut next_id = 2;
+            merge_degenerate_seams_and_optimize(
+                vec![w(0..10), w(10..20)],
+                submaps,
+                &[rotation_link(100, 101)],
+                &config,
+                |_id, window| {
+                    calls.borrow_mut().push(window.image_range.clone());
+                    Ok(local_submap(200, UnitQuaternion::identity(), Vec::new()))
+                },
+                &mut next_id,
+            )
+            .expect("the pre-existing drift route must remain active");
+            assert_eq!(calls.into_inner(), vec![0..20]);
+        }
+
+        #[test]
+        fn later_actionable_seam_is_remediated_before_earlier_fatal_seam_returns() {
+            let fatal_source = (0..5u64)
+                .map(|id| point_landmark(id + 500, Point3::new(id as f64, 0.0, 0.0), 50))
+                .collect::<Vec<_>>();
+            let fatal_target = (0..5u64)
+                .map(|id| point_landmark(id + 600, Point3::new(id as f64, 0.0, 0.0), 50))
+                .collect::<Vec<_>>();
+            let rebuilt_fatal_target = fatal_target.clone();
+            let (degenerate_source, degenerate_target) = correspondence(100, collinear_x);
+            let mut middle_landmarks = fatal_target;
+            middle_landmarks.extend(degenerate_source);
+            let submaps = vec![
+                local_submap(10, UnitQuaternion::identity(), fatal_source),
+                local_submap(20, UnitQuaternion::identity(), middle_landmarks),
+                local_submap(30, UnitQuaternion::identity(), degenerate_target),
+            ];
+            let calls = RefCell::new(Vec::new());
+            let mut next_id = 3;
+            let config = HierarchicalSfmConfig {
+                last_resort_seam_merge: false,
+                ..Default::default()
+            };
+            let error = merge_degenerate_seams_and_optimize(
+                vec![w(0..10), w(10..20), w(20..30)],
+                submaps,
+                &[rotation_link(10, 20), rotation_link(20, 30)],
+                &config,
+                |_id, window| {
+                    calls.borrow_mut().push(window.image_range.clone());
+                    Ok(local_submap(
+                        20,
+                        UnitQuaternion::identity(),
+                        rebuilt_fatal_target.clone(),
+                    ))
+                },
+                &mut next_id,
+            )
+            .expect_err("the non-routable first seam must still be returned after remediation");
+
+            assert_eq!(calls.into_inner(), vec![10..30]);
+            assert!(matches!(
+                error,
+                HierarchicalSfmError::Alignment {
+                    rejection: SubmapSim3Rejection {
+                        reason: SubmapSim3RejectionReason::TooFewCorrespondences,
+                        ..
+                    },
+                    ..
+                }
+            ));
+        }
+
         #[test]
         fn high_mean_residual_without_drift_flag_merges() {
             let (source, target) = correspondence_count(20, 100, spread_point, |id| {
@@ -1829,60 +2329,101 @@ mod tests {
         }
 
         #[test]
-        fn low_inlier_ratio_without_drift_flag_does_not_merge() {
-            let (source, target) = correspondence_count(20, 100, spread_point, |id| {
-                let point = spread_point(id);
-                if id < 11 {
-                    point
-                } else {
-                    point
-                        + Vector3::new(
-                            0.12 + (id % 3) as f64 * 0.03,
-                            -0.10 + (id % 4) as f64 * 0.025,
-                            0.08,
-                        )
-                }
-            });
+        fn zero_correspondence_adjacent_seam_uses_last_resort_merge() {
+            let submaps = vec![
+                local_submap(10, UnitQuaternion::identity(), Vec::new()),
+                local_submap(20, UnitQuaternion::identity(), Vec::new()),
+            ];
+            let pair_rotations = vec![rotation_link(10, 20)];
+            let config = HierarchicalSfmConfig::default();
+
+            let candidates = seam_merge_candidates(&submaps, &pair_rotations, &config);
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(candidates[0].rejection.correspondence_count, 0);
+            assert_eq!(
+                candidates[0].rejection.reason,
+                SubmapSim3RejectionReason::TooFewCorrespondences
+            );
+            assert!(matches!(
+                candidates[0].route,
+                SeamMergeRoute::LastResort(None)
+            ));
+            assert_eq!(
+                candidates[0].route.log_family(),
+                "hierarchical-seam-lastresort-merge"
+            );
+
+            let calls = RefCell::new(Vec::new());
+            let mut next_id = 2;
+            let (final_windows, atlas) = merge_degenerate_seams_and_optimize(
+                vec![w(0..10), w(10..20)],
+                submaps,
+                &pair_rotations,
+                &config,
+                |_id, window| {
+                    calls.borrow_mut().push(window.image_range.clone());
+                    Ok(local_submap(30, UnitQuaternion::identity(), Vec::new()))
+                },
+                &mut next_id,
+            )
+            .expect("a zero-correspondence seam must receive a structural rebuild");
+
+            assert_eq!(calls.into_inner(), vec![0..20]);
+            assert_eq!(final_windows.len(), 1);
+            assert!(atlas.seams.is_empty());
+        }
+
+        #[test]
+        fn midband_low_inlier_ratio_without_drift_uses_last_resort_merge() {
+            let (source, target) = midband_correspondence(100);
+            let mut config = HierarchicalSfmConfig::default();
+            config.alignment.ransac_iterations = 10_000;
             let submaps = vec![
                 local_submap(10, UnitQuaternion::identity(), source),
                 local_submap(20, UnitQuaternion::identity(), target),
             ];
             assert!(
-                seam_internal_drift_diagnostic(&submaps, 0, 1, &HierarchicalSfmConfig::default())
-                    .is_none(),
+                seam_internal_drift_diagnostic(&submaps, 0, 1, &config).is_none(),
                 "the fixture intentionally has no drift evidence"
             );
 
+            let candidates = seam_merge_candidates(&submaps, &[rotation_link(10, 20)], &config);
+            assert_eq!(candidates.len(), 1);
+            assert!(matches!(
+                candidates[0].route,
+                SeamMergeRoute::LastResort(None)
+            ));
+            assert_eq!(
+                candidates[0].route.log_family(),
+                "hierarchical-seam-lastresort-merge"
+            );
+            assert!(
+                (0.42..=0.46).contains(&candidates[0].rejection.inlier_ratio),
+                "fixture should produce the uncovered ~0.44 band, got {}",
+                candidates[0].rejection.inlier_ratio
+            );
+
+            let calls = RefCell::new(Vec::new());
             let mut next_id = 2;
-            let error = merge_degenerate_seams_and_optimize(
+            let (final_windows, atlas) = merge_degenerate_seams_and_optimize(
                 vec![w(0..10), w(10..20)],
                 submaps,
                 &[rotation_link(10, 20)],
-                &HierarchicalSfmConfig::default(),
-                |id, window| {
-                    panic!(
-                        "LowInlierRatio without a drift flag must not rebuild (id {id}, images {:?})",
-                        window.image_range
-                    )
+                &config,
+                |_id, window| {
+                    calls.borrow_mut().push(window.image_range.clone());
+                    Ok(local_submap(30, UnitQuaternion::identity(), Vec::new()))
                 },
                 &mut next_id,
             )
-            .unwrap_err();
-
-            assert!(matches!(
-                error,
-                HierarchicalSfmError::Alignment {
-                    rejection: SubmapSim3Rejection {
-                        reason: SubmapSim3RejectionReason::LowInlierRatio,
-                        ..
-                    },
-                    ..
-                }
-            ));
+            .expect("the uncovered mid-band seam must receive a structural rebuild");
+            assert_eq!(calls.into_inner(), vec![0..20]);
+            assert_eq!(final_windows.len(), 1);
+            assert!(atlas.seams.is_empty());
         }
 
         #[test]
-        fn only_degenerate_geometry_reasons_trigger_a_merge() {
+        fn disabling_last_resort_preserves_fail_fast_for_too_few_correspondences() {
             // Only 5 shared correspondences (< min_correspondences = 12):
             // `TooFewCorrespondences`, a real geometric problem, must stay
             // fail-fast rather than being treated as a widenable partition
@@ -1900,11 +2441,15 @@ mod tests {
             ];
             let pair_rotations = vec![rotation_link(10, 20)];
             let mut next_id = 2u64;
+            let config = HierarchicalSfmConfig {
+                last_resort_seam_merge: false,
+                ..Default::default()
+            };
             let error = merge_degenerate_seams_and_optimize(
                 windows,
                 submaps,
                 &pair_rotations,
-                &HierarchicalSfmConfig::default(),
+                &config,
                 |id: u64, window: &SubmapWindow| -> Result<LocalSubmap, HierarchicalSfmError> {
                     panic!("build_one must not be called for a non-degenerate rejection (id {id}, images {:?})", window.image_range);
                 },
@@ -2072,12 +2617,55 @@ mod tests {
         }
 
         #[test]
+        fn last_resort_budget_exhaustion_still_returns_fatal_seam() {
+            let (first_source, first_target) = midband_correspondence(100);
+            let (_, final_target) = midband_correspondence(200);
+            let windows = vec![w(0..10), w(10..20), w(20..30)];
+            let submaps = vec![
+                local_submap(10, UnitQuaternion::identity(), first_source),
+                local_submap(20, UnitQuaternion::identity(), first_target),
+                local_submap(30, UnitQuaternion::identity(), final_target),
+            ];
+            let pair_rotations = vec![rotation_link(10, 20), rotation_link(20, 30)];
+            let calls = RefCell::new(Vec::new());
+            let mut next_id = 3u64;
+            let mut config = HierarchicalSfmConfig::default();
+            config.alignment.ransac_iterations = 10_000;
+            config.max_degenerate_seam_merges = 1;
+
+            let error = merge_degenerate_seams_and_optimize(
+                windows,
+                submaps,
+                &pair_rotations,
+                &config,
+                |_id, window| {
+                    calls.borrow_mut().push(window.image_range.clone());
+                    Ok(local_submap(20, UnitQuaternion::identity(), Vec::new()))
+                },
+                &mut next_id,
+            )
+            .expect_err("the two-seam component must not exceed the one-merge budget");
+
+            assert!(calls.into_inner().is_empty());
+            assert!(matches!(
+                error,
+                HierarchicalSfmError::Alignment {
+                    rejection: SubmapSim3Rejection {
+                        reason: SubmapSim3RejectionReason::LowInlierRatio,
+                        ..
+                    },
+                    ..
+                }
+            ));
+        }
+
+        #[test]
         fn report_all_failing_seams_counts_every_failing_seam_not_just_the_first() {
             // Three submaps chained with two independently too-few-correspondence
-            // seams (0->1 and 1->2), a real (non-widenable) geometric problem
-            // that must stay fail-fast. `merge_degenerate_seams_and_optimize`
-            // only ever *sees* the first (0->1, via `optimize_independent_submaps`'s
-            // own fail-fast loop) — this test's point is that
+            // seams (0->1 and 1->2). With last-resort routing disabled below,
+            // `merge_degenerate_seams_and_optimize` only ever *sees* the first
+            // (0->1, via `optimize_independent_submaps`'s own fail-fast loop) —
+            // this test's point is that
             // `report_all_failing_seams` independently walks every seam and
             // must find *both*, not stop after the one the caller's error
             // names.
@@ -2116,17 +2704,19 @@ mod tests {
                  12) shared landmarks and must both be reported"
             );
 
-            // And the actual run through `merge_degenerate_seams_and_optimize`
-            // is unaffected by the exhaustive scan: it still fails fast on the
-            // *first* seam (0->1), unchanged, matching
-            // `only_degenerate_geometry_reasons_trigger_a_merge`'s assertion
-            // that `TooFewCorrespondences` propagates rather than merging.
+            // With the independently-tested last-resort route disabled, the
+            // actual run is unaffected by the exhaustive reporting scan and
+            // still fails fast on the first seam (0->1), unchanged.
             let mut next_id = 3u64;
+            let config = HierarchicalSfmConfig {
+                last_resort_seam_merge: false,
+                ..Default::default()
+            };
             let error = merge_degenerate_seams_and_optimize(
                 windows,
                 submaps,
                 &pair_rotations,
-                &HierarchicalSfmConfig::default(),
+                &config,
                 |id: u64, window: &SubmapWindow| -> Result<LocalSubmap, HierarchicalSfmError> {
                     panic!("build_one must not be called for a non-degenerate rejection (id {id}, images {:?})", window.image_range);
                 },

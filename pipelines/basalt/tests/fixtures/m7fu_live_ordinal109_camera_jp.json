@@ -1,0 +1,28 @@
+{
+  "schema": "visloc-rs.basalt.m7fu.live-ordinal109-camera-jp.v1",
+  "source": "target/m7ft_ordinal109_live.json",
+  "ordinal": 109,
+  "relation": "same_timestamp_stereo",
+  "camera_params_f32_bits": [
+    "43b4d5f0", "43b44af7", "43bdb43f", "437ffa30", "be5a1edd", "3f13a2ab"
+  ],
+  "target_point_xyz_f32_bits": ["bf0ebdf2", "bec08f06", "3f40b1d1"],
+  "camera_jacobian_column_major_f32_bits": [
+    "43c3a1b0", "c2917418", "c291e436", "43e06dcc",
+    "437d6358", "432a65a0", "00000000", "00000000"
+  ],
+  "homogeneous_point_jacobian_column_major_f32_bits": [
+    "3fba6356", "be4b3e16", "3f722147", "00000000",
+    "be534c85", "3fcdb62b", "3f27a9f7", "00000000",
+    "bde1c0f0", "3997d300", "b9e136c8", "3f800000"
+  ],
+  "raw_landmark_jacobian_column_major_f32_bits": [
+    "444df834", "c2074d44", "c2000f98",
+    "4453fe6c", "c22d09a2", "41012d40"
+  ],
+  "sqrt_weight_f32_bits": "40000000",
+  "weighted_landmark_jacobian_column_major_f32_bits": [
+    "44cdf834", "c2874d44", "c2800f98",
+    "44d3fe6c", "c2ad09a2", "41812d40"
+  ]
+}

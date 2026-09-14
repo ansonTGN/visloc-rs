@@ -1,0 +1,874 @@
+{
+  "schema_version": 2,
+  "schema_id": "visloc-rs.basalt.provenance.v2",
+  "manifest_id": "basalt-provenance-v2-frozen",
+  "captured_at": "2026-09-14T03:30:00+09:00",
+  "status": "frozen",
+  "supersedes": {
+    "path": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
+    "bytes": 58757,
+    "sha256": "3a9246a242747ebc41b9ae212641b3515aa2ee33e4e80d8be1eff9e6f42968a1",
+    "schema_id": "visloc-rs.basalt.provenance.v1",
+    "immutable": true,
+    "retained_sections": [
+      "upstreams",
+      "vcpkg_resolution",
+      "m7im_verification",
+      "current_metadata",
+      "release"
+    ],
+    "policy": "v1 and its M1/M7 records remain historical; v2 never rewrites them"
+  },
+  "upstream_identity": {
+    "commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+    "tree_sha1": "b7afb830d82b45b8209cf784ad9744025d838411",
+    "license_spdx": "BSD-3-Clause",
+    "vcpkg": {
+      "repository": "https://github.com/microsoft/vcpkg.git",
+      "commit": "1e199d32ad53aab1defda61ce41c380302e3f95c",
+      "baseline": "05442024c3fda64320bd25d2251cc9807b84fb6f",
+      "overlay_ports": {
+        "basalt-headers": "aa441ba3e51050c47ba1902537792a2e4db7e43d",
+        "opengv": "91f4b19c73450833a40e463ad3648aae80b3a7f3"
+      },
+      "registry_ports": {
+        "eigen3": "5.0.1",
+        "opencv4": "4.12.0#1",
+        "sophus": "1.24.6"
+      },
+      "port_patches": {
+        "opencv4": [
+          "468de9b36740b3355f0d5cd8be2ce28b340df120.patch"
+        ],
+        "sophus": [
+          "0001-support-eigen3-5.patch"
+        ],
+        "opengv": [
+          "CMake C++17/configuration substitutions in the pinned overlay port",
+          "FindEigen CONFIG shim in the pinned overlay port"
+        ]
+      },
+      "source_ref_policy": "Registry versions are resolved to immutable upstream tag commits above; the vcpkg baseline and overlay port commit remain the reproducible package-resolution anchors."
+    }
+  },
+  "current_binding": {
+    "source": {
+      "root": "pipelines/basalt/src",
+      "file_count": 33,
+      "hash_algorithm": "sha256",
+      "hash_basis": "exact checked-out bytes; no line-ending normalization",
+      "canonical_record": "relative POSIX path|lowercase SHA256, newline-joined and sorted",
+      "source_tree_sha256": "d7d39c379011800ad47908faf133ccc4173a9980b19d1475fc96cc7906eca1f5",
+      "files": [
+        {
+          "path": "pipelines/basalt/src/adapter.rs",
+          "bytes": 12760,
+          "sha256": "0d7258c483781ce9d4148c06a571ee6c150429e7c82de80b53f4e292e8bd2d65",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/calibration.rs",
+          "bytes": 10719,
+          "sha256": "80aeddbda130764f8abe1624fa6f46e7f8c1834c166e5d61ccdffcafd75951e9",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/camera.rs",
+          "bytes": 13288,
+          "sha256": "e04af476c09f33fc499d2987a3505017c7b96f941bc2bc2c609bfd48fd754eba",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/config.rs",
+          "bytes": 9955,
+          "sha256": "093f1cd61fcf269fb8a39b8da0ce4fb3ce3b7c6444226ea8cf3313e82fa53934",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/euroc.rs",
+          "bytes": 25834,
+          "sha256": "02b36a7443d429b45c75bc1953045399577e8676decdb6a837c7fb3b7399cffd",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/fast.rs",
+          "bytes": 23070,
+          "sha256": "99ca1a8ef5b55a2d1e70410e833ff6a9b52dace2973273480386e7397e729383",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/imu/factors.rs",
+          "bytes": 142604,
+          "sha256": "495f29f1c45d88e8b68ca398a7e1f1a0dbd228ff19746a836f2d76efa922f2c3",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/imu/mod.rs",
+          "bytes": 1364,
+          "sha256": "fde2b3bfaefeaf76ad8180ac00ec6148bcd344dc0a99e4650502f6ce0e4c1601",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/imu/preintegration.rs",
+          "bytes": 18789,
+          "sha256": "563099ea23a2f63d13ac66138bf6e5b07c0bab098aa14224023479d72bf6e9f7",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/imu/sampling.rs",
+          "bytes": 3020,
+          "sha256": "87d89f0ee1e07518951e35e7edc19f5ffe1b069e5c5a46a61493819021597c87",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/initialization.rs",
+          "bytes": 6169,
+          "sha256": "cb76498fe1ade7e8788b6870ebb2faeec02fdc7f817b6ec38352c0de6d4eb1c3",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/lib.rs",
+          "bytes": 2351,
+          "sha256": "2ee7de94a3de7644ff840f0ab8c13fb9b633993688d7af829650115a7b83a42e",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/mapper/features.rs",
+          "bytes": 101734,
+          "sha256": "d6f0c19266c163c509ee6f87cbfb7257aa9b110d1249fa58aae847e60bc923a1",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/mapper/mod.rs",
+          "bytes": 136245,
+          "sha256": "dd7b38c46bb829692c76c7abd17b1eceb66d102453fb820f7794bbe36901f181",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/mapper/session.rs",
+          "bytes": 89574,
+          "sha256": "69d127357daf6d687f1f3489aed62055239170c66554b435cea868546eabfa74",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/mapper/triangulation.rs",
+          "bytes": 33333,
+          "sha256": "536d64d4ca6552b558c714f90de2e07e24ba5f3d1634ea2dd57df5eb8cdf53e4",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/patch.rs",
+          "bytes": 31758,
+          "sha256": "881b7a78c6a215536b235c82c6bf7ef158e737250f7bc2597b467206e71e19b2",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/pattern.rs",
+          "bytes": 2029,
+          "sha256": "e0bea281b6a62266441d1a6633b5b014c1d382dda81f5bd0e1b323b472fe812d",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/provenance.rs",
+          "bytes": 1349,
+          "sha256": "f52ab64c1f398612862d03db2d557fa390108a2656814bce6acb664f1979e7bb",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/pyramid.rs",
+          "bytes": 13124,
+          "sha256": "ef63434ceb0b3ef9ae4740efaa08af5e878ae0bd44a30eb0f4a5ac9c91d016b9",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/stream.rs",
+          "bytes": 60126,
+          "sha256": "84aa71e4133d5aa758dd0de317c32fd5a3108657798e7f282651ccf27bea5b65",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/streaming.rs",
+          "bytes": 7086,
+          "sha256": "f059bd245b393847e83453e8a02742d91f27e00c4b8bb8a3834615184d0c0106",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/time.rs",
+          "bytes": 5774,
+          "sha256": "3a11d726721a57eb7b16564cebe68dfb0ebe9b7286ed47ffec84cb7ee2ac035a",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/timing.rs",
+          "bytes": 37092,
+          "sha256": "5bb75101d5d4ce5a127dbe1525235b54aef14a6928fbc4c09a9cdcf2f824e3e2",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/types.rs",
+          "bytes": 3201,
+          "sha256": "674501a2997502dea838ce9aaf5dd141bfb98d5d7621b95fa387a94f92ada137",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/update.rs",
+          "bytes": 27005,
+          "sha256": "acc595d7daa70a755c13d92ec7f1f1636ceef76a6a908d37f2231e1b9b7833fe",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/vio/aom.rs",
+          "bytes": 856564,
+          "sha256": "5a95f499f1849d0bdeaf7301faf6d1108ed014f62731733406ca79d96e129dee",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/vio/estimator.rs",
+          "bytes": 301949,
+          "sha256": "8fd4b8d4b7262bf589da4c93463c47eaf36103794c0d11b5c1e12fd4fc7d5db7",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/vio/landmarks.rs",
+          "bytes": 122380,
+          "sha256": "cde9c23836b4513df8ae95c47b132360b5bc904247c53b2b52b13e0fbca2e40e",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/vio/margdata.rs",
+          "bytes": 89178,
+          "sha256": "bb5b989704b8f117f8d74f006287a1826ea72acd63988974a463b5bb9a99356b",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/vio/mod.rs",
+          "bytes": 387,
+          "sha256": "032f39f9977ce483a468bae63f4acd88c3ce4c485bdc12928e2917e8664c5742",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/vio/scalar.rs",
+          "bytes": 839,
+          "sha256": "fd88e98c2e7b18e65c03dad2463aab423d44919f68754ee9a1d7f6ccea20a199",
+          "role": "production_rust"
+        },
+        {
+          "path": "pipelines/basalt/src/vio/window.rs",
+          "bytes": 590754,
+          "sha256": "dca65766e68afe8f8a85cfdad2aafa951a88a7ee118e2fda2a821a3ec0e074e7",
+          "role": "production_rust"
+        }
+      ]
+    },
+    "tests": {
+      "root": "pipelines/basalt/tests",
+      "file_count": 48,
+      "hash_algorithm": "sha256",
+      "hash_basis": "exact checked-out bytes; no line-ending normalization",
+      "files": [
+        {
+          "path": "pipelines/basalt/tests/calibration_contract.rs",
+          "bytes": 2951,
+          "sha256": "93d3e20acadf89e6ec8c1c9454b9fb53b58db0aca3b737ce727c749662ade3f6",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/euroc_ds_calib_minimal.json",
+          "bytes": 1266,
+          "sha256": "ef0cf881086c84d7653e2be317a7bda0fd14c620a13831f6fddee65884684e22",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/klt_stream_synthetic.json",
+          "bytes": 435,
+          "sha256": "33560fa37fa47f713775af55df6bd7d53be3fd76d3c30fa0436a1d148cffee99",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m11_imu_r_f64_scaled_axis_candidate_20260908.json",
+          "bytes": 54675,
+          "sha256": "3109eda4cf9fe38be303ce58aa3633ab09179d194e11d044f30c263f3026a79e",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m11_prior39_model_frame24_native_20260909.json",
+          "bytes": 39138,
+          "sha256": "e1e776b7a21178cc6a4a0e83772e9d28c3fd0f91ad510d2b94b2eb94894e510c",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m11_prior_reanchor_rhs_schedule_20260908.json",
+          "bytes": 11252,
+          "sha256": "b6d9c2a265a32c5afe051de4258a72b403dd0365c0abe81d66b5d260e0182f0b",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m11_se2_exp_portable_cosf_witness.json",
+          "bytes": 1189,
+          "sha256": "d1ca5f7f5e85cec9783602241a2620ba83fc7bd83c840d02bc86e29203178d0a",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7bw_cam0_temporal_track2.json",
+          "bytes": 548,
+          "sha256": "2e2aaf3ed17dc25d93e634550623e75435dc025a049daa7fe660d05b300556f6",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7ca_se2_exp_native.json",
+          "bytes": 5193,
+          "sha256": "f4d12085b73d964dc6dce906c645ce0a7e922f7a558b1c7dbd02fb0d8c449bd8",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7cb_existing_stereo_gemv.json",
+          "bytes": 4028,
+          "sha256": "c31f44c6241e1c5860e00e55a5cf1fd2112c4c0f383a16cae39fe8db769ca8f6",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7ci_frame4_cam0_ldlt_boundary.json",
+          "bytes": 889,
+          "sha256": "4e1f6387ac6069be2ed08b665d5b9d55439f82081fa25f18395421c5cb860073",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7cq_frame9_cam1_stereo_update_frontier.json",
+          "bytes": 1003,
+          "sha256": "a80af5f80605367d0e322636cb87d70cc59eab69b9d146e9f766bfb00e0a771a",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7dx_clean_track1_relpose_jacobian.json",
+          "bytes": 1713,
+          "sha256": "74bf73417d0fa8e49fc2a41f94821113f6b32383b1fe939effea0a8180c12462",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7ec_clean_track2_stereo_factor.json",
+          "bytes": 728,
+          "sha256": "a31e13de0cfa90574d565fcdb21879fcac93a103bd0ff212a2fcfa58ea5f6023",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7et_ordinal0_jp_packet4.json",
+          "bytes": 1026,
+          "sha256": "007532fe27d7899434c0195f14a6316f1949be6d589cf71ee2dccce43395a4e2",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7ez_ordinal38_projection.json",
+          "bytes": 376,
+          "sha256": "42038ed5cec71b32d1c3ce6b627d255e5b7d1b09c3a8717c790e663442e9480e",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7ez_ordinal3_camera_jacobian.json",
+          "bytes": 495,
+          "sha256": "fab4830ea2bc94b88bd581a7f522c0ee9946b2da4af5548de6d38f8af77e64ca",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7fa_ordinal43_jp.json",
+          "bytes": 1654,
+          "sha256": "9f5fbea4826dc1a60fc4cbd3eb3181262e14ee7cbf693ba9b38c25f7f7e6a144",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7fb_ordinal110_projection.json",
+          "bytes": 1026,
+          "sha256": "ecbf2eae8b8384153b9676445348b1ca67ff7f9e71906eea7eef81780cd8f2fc",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7fi_ordinal13_jp.json",
+          "bytes": 1626,
+          "sha256": "a11ede6ea18de022338e9dad5f519e4abbb29992918ef6ffacf9927eccb2e56a",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7fi_ordinal311_projection.json",
+          "bytes": 897,
+          "sha256": "5ec8fadeccbf9888ee5d47db628a7a27928cef2d5f14b46d3145855bd4f8b2f3",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7fq_live_ordinal105.json",
+          "bytes": 1816,
+          "sha256": "1bb82040e22f49a9a1ea09b5a1a8b9550981fbe144e612cd8d710762a5f19e2c",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7fu_live_ordinal109_camera_jp.json",
+          "bytes": 1035,
+          "sha256": "cedf192cccfa398d35f805d1cb00b6506e2c2bfa2bf6a3daf8b596f20e91f3e1",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7fx_same_timestamp_clean_relpose_jacobian.json",
+          "bytes": 1791,
+          "sha256": "a8d212e6e9de168d816295a6e6b5f8ea68c7e8650d2c6c64ddd88a3ab990b9d8",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7gh_clean_all_relpose_jacobians.json",
+          "bytes": 19180,
+          "sha256": "19ef4259efcbf00c9242000cc1785efc01d82ed2320d743db98c0c4de57f83f0",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7gu_clean_frame4_visual.json",
+          "bytes": 7664,
+          "sha256": "dea00fdafd250080f7d1ec03b67e9714521e80cf663c9e97cc2bfc84a71f59be",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7he_native_huber_schedule.json",
+          "bytes": 9811,
+          "sha256": "b617747985e6312db751956d251f2d084b85d74974e5eb3f70536356ede268d0",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7im15_native_iter1_track119_packet_inputs_20260827.json",
+          "bytes": 2430,
+          "sha256": "41605ba75dc5e550a48da509d1788382a9eb580bdf1ee92a62d48778d82c826b",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/m7im15_step_relpose_inputs_gdb_20260827.json",
+          "bytes": 25680,
+          "sha256": "fa8130ada7f003c2f612c74a983ca337a058a3cda199b3f938bc9a60fe77294c",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/patch51_golden.json",
+          "bytes": 398,
+          "sha256": "dd68490a8155ecb6bf892141698fcb46463079f174c553110ee37b8550580109",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/raw_u16_pyramid_golden.json",
+          "bytes": 945,
+          "sha256": "cbce90e5c16545e7393293eeffab38725c84094f942f5b45f734d00d53ede9c3",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/fixtures/se2_update_golden.json",
+          "bytes": 239,
+          "sha256": "b991eb608579c3a746cefa10ade1dbe17827f24e06958ce3427e0da85775d287",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/imu_contract.rs",
+          "bytes": 3979,
+          "sha256": "06d0887ebcd5f3e96a181b0571d933161de4ae5f77ab6a09bc3a5f0419c09423",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/klt_stream_contract.rs",
+          "bytes": 9331,
+          "sha256": "d80c45271c44b3958e4a2f077f75340dc999b8d1c0f4c128ca60a9194c9404fd",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m3a_numeric_contract.rs",
+          "bytes": 3715,
+          "sha256": "0f5df670517d46e5c2d29c778d93b6f1daa96ddcef61324253802b3d1bd7c2fd",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m6_packet_contract.rs",
+          "bytes": 3017,
+          "sha256": "d49cfb5f1ba5c7a0f266bfde5cbd49f61e4177682e13294a9acb26321e3e7a1b",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m7bd_obs_pixel_exact.rs",
+          "bytes": 7456,
+          "sha256": "de941d722da856864c03be3ebb764788bfc1a3c9cbf2661701289ec5e65e5977",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m7bw_cam0_temporal_exact.rs",
+          "bytes": 3313,
+          "sha256": "b5127799cfe2e4ae34a2de2629416f77bbe2554511b7663ca7c4bae046eebb23",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m7ca_se2_exp_exact.rs",
+          "bytes": 2185,
+          "sha256": "d98a8beb33b873e9cc9cfaf8e6e1ffbc73292a345ffbf502a7fd8949f28b3d71",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m7f_camera_contract.rs",
+          "bytes": 6967,
+          "sha256": "10e98fb33d97be1f87437d8dd6343013e133714d8481a40e7002ab6e1a987ef6",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m7im15_step_relpose_inputs_gdb_20260827.rs",
+          "bytes": 6220,
+          "sha256": "3298f94e84c55b81e801c48015d416484d7d16225e34390b8285897884dfb022",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m8c_exact_bits_probe.rs",
+          "bytes": 24205,
+          "sha256": "3d267f8a752cf9814e7a88854804d173bbe6e29bd355f0282536dd00898b34c7",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m8c_feature_parity.rs",
+          "bytes": 39244,
+          "sha256": "e3c6fc005f867cde466202e3f1af78c7dced41011c486b574543a8dcd719d905",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m8c_feature_seed.rs",
+          "bytes": 7788,
+          "sha256": "696ae730eeef3ba529064b1810dcb0ec67855911faaa73030d860e39c51f838a",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m8d_pose_opt_oracle.rs",
+          "bytes": 10262,
+          "sha256": "23f4fe88d62e4b891cf13186d609b821b0c204e8aa913544fb1f6011cf917637",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m8d_track_oracle.rs",
+          "bytes": 5821,
+          "sha256": "de497004456a6453677d88673fbce8ca6159bb153c96d2befa8b837a44a2c12b",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/m8f_nfr_session.rs",
+          "bytes": 41333,
+          "sha256": "3ed86a3292ef471790a5b487c23f9406abbd0e710f2d95736aa96bb37288cd3c",
+          "role": "rust_test_or_fixture"
+        },
+        {
+          "path": "pipelines/basalt/tests/mh01_stereo_golden.rs",
+          "bytes": 13329,
+          "sha256": "f368b2c407d3e0f6522a683bc7da157b2a5178d8d07d03401d4814848681f24a",
+          "role": "rust_test_or_fixture"
+        }
+      ]
+    },
+    "contracts": {
+      "config": {
+        "path": "configs/basalt/euroc_config.json",
+        "bytes": 2401,
+        "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
+        "role": "config"
+      },
+      "calibration": {
+        "path": "benchmarks/basalt/release_inputs/euroc_ds_calib.json",
+        "bytes": 5967,
+        "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
+        "role": "calibration"
+      },
+      "protocol": {
+        "path": "benchmarks/basalt/protocols/basalt_euroc_parity_v1.json",
+        "bytes": 4348,
+        "sha256": "7957f102ffa47a67c3509cdf77942d599e7b0f5f5f2bf452987f87a55df246e5",
+        "role": "protocol"
+      },
+      "dataset_manifest": {
+        "path": "benchmarks/basalt/euroc_dataset_manifest.json",
+        "bytes": 920070,
+        "sha256": "a803db9e01f7a39f587cb9f87fd8601c8800455135ae7a2dc67f9e108003dd26",
+        "role": "dataset_manifest"
+      },
+      "workspace_cargo_toml": {
+        "path": "Cargo.toml",
+        "bytes": 6138,
+        "sha256": "5c049cc8597f7e05bf14cc50c098c09e71c0995adbbf4bee34e7c062ca868984",
+        "role": "build_input"
+      },
+      "basalt_cargo_toml": {
+        "path": "pipelines/basalt/Cargo.toml",
+        "bytes": 1071,
+        "sha256": "3d7db0a7e58d2ef86894f548e896e0c354059ca8fcf6d9d2e94ec5200b30f1e2",
+        "role": "build_input"
+      },
+      "cargo_lock": {
+        "path": "Cargo.lock",
+        "bytes": 27662,
+        "sha256": "901cfb7ee48c13b030eb9c33288813a12a0773e608a070ee1a4dbd0e028b75d0",
+        "role": "build_input"
+      },
+      "coordinator": {
+        "path": "benchmarks/basalt/phase6_coordinator.py",
+        "bytes": 272072,
+        "sha256": "9768f6306fb8125aa59d5d8f5aa24a503b9f4bb87d4480c9217392c23e5ce3f2",
+        "role": "phase6_coordinator"
+      },
+      "native_runner": {
+        "path": "benchmarks/basalt/native_wsl_runner.py",
+        "bytes": 9386,
+        "sha256": "5aae73217c65ead1ac39643aa48cb739b48df1a492dc55110996cea4ffda59c3",
+        "role": "phase6_native_runner"
+      },
+      "rust_runner": {
+        "path": "benchmarks/basalt/rust_wsl_runner.py",
+        "bytes": 12727,
+        "sha256": "b6008dfba5085c7157d064d81b2273c618d9a575c261530c18899de8b7ff234c",
+        "role": "phase6_rust_runner"
+      },
+      "golden_registry": {
+        "path": "benchmarks/basalt/m11_current_golden_registry_20260830.json",
+        "bytes": 14632,
+        "sha256": "fca72289ae4df42c2ba03900498ed5dcd13fa16421c9b564febe79ca015503ec",
+        "role": "current_golden_registry"
+      },
+      "license_inventory": {
+        "path": "benchmarks/basalt/cargo_license_inventory_v2.json",
+        "bytes": 34108,
+        "sha256": "97b3c8db56f8ebda5e98975fefe1efcfae51bab19ac3d4f911ecf6cdf55a58ef",
+        "role": "cargo_license_inventory_v2"
+      },
+      "correctness_certificate": {
+        "path": "benchmarks/basalt/release_inputs/m11_release_candidate_avx2_reuse_correctness_20260913.json",
+        "bytes": 15485,
+        "sha256": "7ce63e1c9175c1cd5c6ba8f5cc7bf7f7d2f7223de336511cc4e562bf47d2937c",
+        "role": "correctness_certificate"
+      },
+      "benchmark_readme": {
+        "path": "benchmarks/basalt/README.md",
+        "bytes": 11216,
+        "sha256": "ab66a59d92d6c5b4ccd16fc3e92bce0757f24d1ab9fb0bc95b7a876e8db15202",
+        "role": "benchmark_readme"
+      },
+      "provenance_audit": {
+        "path": "benchmarks/basalt/PROVENANCE_AUDIT.md",
+        "bytes": 8430,
+        "sha256": "1e0892f63e5d845715e95b23f57738c027d10f8e70c574d8f61db541153db53f",
+        "role": "provenance_audit"
+      },
+      "provenance_generator": {
+        "path": "benchmarks/basalt/generate_provenance_manifest_v2.py",
+        "bytes": 36456,
+        "sha256": "159197ac81160bc03c80533262fcf63aae1c19ec4ffa5362bb2db30ef2d91496",
+        "role": "provenance_generator"
+      },
+      "provenance_schema": {
+        "path": "benchmarks/basalt/schemas/provenance_manifest_v2.schema.json",
+        "bytes": 5064,
+        "sha256": "55ab07009b8d153c508879caa24451b55a1383a6f7b60a18009dea214dab54ce",
+        "role": "provenance_schema"
+      },
+      "provenance_tests": {
+        "path": "benchmarks/basalt/test_provenance_v2.py",
+        "bytes": 10221,
+        "sha256": "4cdbc7efa1bf5416e4de3613c1410b6f5123788a24054c1e33abc5fd3813ec38",
+        "role": "provenance_tests"
+      },
+      "benchmark_notice": {
+        "path": "benchmarks/basalt/NOTICE",
+        "bytes": 5814,
+        "sha256": "303760eced8131574a1d757be6f656b02672161d45ad5b466a20066d1ecfc3f9",
+        "role": "build_input"
+      },
+      "pipeline_notice": {
+        "path": "pipelines/basalt/NOTICE",
+        "bytes": 10949,
+        "sha256": "8a5fc2f9884fb4b39eaed719da407b772993a8e6ecc5ce77463b2200ed0cdbef",
+        "role": "build_input"
+      }
+    },
+    "build": {
+      "status": "bound",
+      "required_for_promotion": [
+        "executable_content_sha256",
+        "source_tree_sha256",
+        "Cargo.toml_sha256",
+        "Cargo.lock_sha256",
+        "config_sha256",
+        "calibration_sha256",
+        "protocol_sha256",
+        "dataset_manifest_sha256",
+        "timing_feature_state"
+      ],
+      "source_tree_sha256": "d7d39c379011800ad47908faf133ccc4173a9980b19d1475fc96cc7906eca1f5",
+      "cargo_toml_sha256": "5c049cc8597f7e05bf14cc50c098c09e71c0995adbbf4bee34e7c062ca868984",
+      "cargo_lock_sha256": "901cfb7ee48c13b030eb9c33288813a12a0773e608a070ee1a4dbd0e028b75d0",
+      "input_sha256": {
+        "config": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
+        "calibration": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
+        "protocol": "7957f102ffa47a67c3509cdf77942d599e7b0f5f5f2bf452987f87a55df246e5",
+        "dataset_manifest": "a803db9e01f7a39f587cb9f87fd8601c8800455135ae7a2dc67f9e108003dd26"
+      },
+      "timing_feature": {
+        "name": "basalt-timing-breakdown",
+        "state": "disabled",
+        "env_is_not_a_substitute_for_compile_feature": true
+      },
+      "compiler": {
+        "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02), host x86_64-pc-windows-msvc, LLVM 21.1.8",
+        "target": "x86_64-pc-windows-msvc",
+        "profile": "release"
+      },
+      "cargo_features": [
+        "basalt-lm-workspace-reuse"
+      ],
+      "lm_workspace_reuse": "enabled",
+      "build_command": "RUSTFLAGS=-C target-feature=+avx2,+fma cargo build --locked --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse",
+      "executable": {
+        "path": "target/m11_release_candidate_final_20260914/basalt_euroc_vio_demo.exe",
+        "bytes": 3819008,
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "role": "selected_release_executable"
+      },
+      "build_evidence": {
+        "path": "target/m11_release_candidate_final_20260914/phase6_rust_build_manifest.json",
+        "bytes": 1918,
+        "sha256": "305850963afa9d5f859b32c3c90287ebfcad771818ae016b28621f6a0c25d2a7",
+        "role": "release_build_evidence"
+      }
+    },
+    "golden": {
+      "path": "benchmarks/basalt/m11_current_golden_registry_20260830.json",
+      "bytes": 14632,
+      "sha256": "fca72289ae4df42c2ba03900498ed5dcd13fa16421c9b564febe79ca015503ec",
+      "status": "current_registry_candidate",
+      "historical_records_immutable": true,
+      "dense_abs_h_b_numeric_claim": false
+    },
+    "license": {
+      "path": "benchmarks/basalt/cargo_license_inventory_v2.json",
+      "bytes": 34108,
+      "sha256": "97b3c8db56f8ebda5e98975fefe1efcfae51bab19ac3d4f911ecf6cdf55a58ef",
+      "schema_id": "visloc-rs.cargo-license.v2",
+      "package_count": 119,
+      "licenses_resolved": 119,
+      "licenses_unresolved": 0,
+      "v1_history_preserved": true,
+      "legal_clearance_claimed": false
+    },
+    "correctness": {
+      "path": "benchmarks/basalt/release_inputs/m11_release_candidate_final2_correctness_20260914.json",
+      "bytes": 15639,
+      "sha256": "9f60e3da48ff251f06c3727e21ba9f12f3c3174aed4d36ac2af119b0f88a5573",
+      "role": "correctness_certificate",
+      "schema": "visloc.basalt.release_candidate_correctness.v1",
+      "status": "PASS_CORRECTNESS_ONLY",
+      "scope": {
+        "features": [
+          "basalt-lm-workspace-reuse"
+        ],
+        "timing_breakdown": "compile-time feature disabled",
+        "lm_workspace_reuse": "feature enabled",
+        "performance_evaluation": false
+      },
+      "executable": {
+        "path": "target/m11_release_candidate_final_20260914/basalt_euroc_vio_demo.exe",
+        "bytes": 3819008,
+        "sha256": "941B740908B2BB448D039865F6461E86DDAFE4612E7635F50D44AAEB7C46DCDF"
+      },
+      "source_binding_file_count": 33,
+      "certificate_warnings": [],
+      "replays": [
+        {
+          "name": "max52_lean",
+          "max_frames": 52,
+          "exit_code": 0,
+          "frames_processed": 52,
+          "observations_emitted": 14661,
+          "imu_samples_delivered": 512,
+          "summary_sha256": "C9BDDAFBBBA193C96C375C94464C1D9D4D594E4528AB98DC9D25403A96823E63",
+          "trajectory_csv": {
+            "bytes": 7079,
+            "sha256": "23EA4883A8726AEF1E5DA5BD9D12B66AAD683C669728B68259A0698ED538EB48"
+          },
+          "trajectory_tum": {
+            "bytes": 6353,
+            "sha256": "63DEEA29F52899D6A840B2879134D50587BB1E5841D4A89AE1685DD9F2133AFF"
+          },
+          "forbidden_absent": [
+            "trace.jsonl",
+            "marg_data",
+            "timing_breakdown.json"
+          ],
+          "exact": {
+            "trajectory_csv": true,
+            "trajectory_tum": true,
+            "observations": true,
+            "imu": true
+          }
+        },
+        {
+          "name": "max80_lean",
+          "max_frames": 80,
+          "exit_code": 0,
+          "frames_processed": 80,
+          "observations_emitted": 24256,
+          "imu_samples_delivered": 792,
+          "summary_sha256": "69A3C95A7FD401308BE1725898122B1A66DEBD28D95E155D999D1AECEE9C9EC9",
+          "trajectory_csv": {
+            "bytes": 10847,
+            "sha256": "7658A0DB9708F901C4FBC23C473862C21009ED3F9EEF54B1D48D9FAA0B9CC165"
+          },
+          "trajectory_tum": {
+            "bytes": 9764,
+            "sha256": "919A361DF16D86ADC508EF1FA13E10E7200E18BD2032C124ADC9926AF2F5419C"
+          },
+          "forbidden_absent": [
+            "trace.jsonl",
+            "marg_data",
+            "timing_breakdown.json"
+          ],
+          "exact": {
+            "trajectory_csv": true,
+            "trajectory_tum": true,
+            "observations": true,
+            "imu": true
+          }
+        },
+        {
+          "name": "max400_lean",
+          "max_frames": 400,
+          "exit_code": 0,
+          "frames_processed": 400,
+          "observations_emitted": 106981,
+          "imu_samples_delivered": 3992,
+          "summary_sha256": "29BDDB815394DBCDF552EACE54A0E188763ACDD9F82114851179BF15A8C8480A",
+          "trajectory_csv": {
+            "bytes": 53762,
+            "sha256": "26978D55E8A70D80422A0E59B5ACD892CF4C572F3F5B8FE8B38AE98D28D98CB4"
+          },
+          "trajectory_tum": {
+            "bytes": 48506,
+            "sha256": "F3CE239A3D5302AE5098D514387D30F887E5290916B2E78112B700600CD8E044"
+          },
+          "forbidden_absent": [
+            "trace.jsonl",
+            "marg_data",
+            "timing_breakdown.json"
+          ],
+          "exact": {
+            "trajectory_csv": true,
+            "trajectory_tum": true,
+            "observations": true,
+            "imu": true
+          }
+        }
+      ],
+      "aggregate": {
+        "all_exit_zero": true,
+        "all_frame_counts_exact": true,
+        "all_independent_trajectory_replays_byte_exact": true,
+        "all_observation_and_imu_counts_exact": true,
+        "performance_claimed": false
+      }
+    }
+  },
+  "artifact_policy": {
+    "current_v2_is_candidate_until_source_and_executable_are_frozen": false,
+    "historical_v1_is_immutable": true,
+    "selected_executable_is_evidence_not_distribution_payload": true,
+    "ground_truth_artifacts": [],
+    "ground_truth_evaluation": "post_run_only"
+  }
+}

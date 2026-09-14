@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://visloc-rs.local/schemas/basalt/port-manifest-v1.schema.json",
+  "title": "Basalt literal-port contract manifest v1",
+  "type": "object",
+  "required": ["schema_version", "schema_id", "manifest_id", "protocol_id", "upstream", "port", "profiles", "provenance_policy"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "schema_id": {"const": "basalt.port_manifest.v1"},
+    "manifest_id": {"const": "basalt-port-manifest-v1"},
+    "protocol_id": {"const": "basalt-euroc-parity-v1"},
+    "status": {"type": "string"},
+    "target": {"type": "string"},
+    "upstream": {
+      "type": "object",
+      "required": ["repository", "commit", "config", "calibration", "license"],
+      "properties": {
+        "repository": {"type": "string", "format": "uri"},
+        "commit": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+        "config": {"$ref": "#/$defs/reference"},
+        "calibration": {"$ref": "#/$defs/reference"},
+        "license": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "port": {"type": "object"},
+    "profiles": {"type": "object", "required": ["basalt-compat", "basalt-extended"]},
+    "provenance_policy": {"type": "object"}
+  },
+  "$defs": {
+    "reference": {
+      "type": "object",
+      "required": ["path", "sha256_required", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256_required": {"const": true},
+        "sha256": {"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{64}$"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

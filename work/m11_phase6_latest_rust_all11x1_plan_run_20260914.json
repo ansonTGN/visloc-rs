@@ -1,0 +1,1784 @@
+{
+  "cells": [
+    {
+      "command": [
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_01_easy",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\MH_01_easy\\r1\\attempt-01\\engine_output",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "command_executable_binding": {
+        "argv0": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "executable_binding": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "expected_input_frames": 3682,
+      "family": "machine_hall",
+      "formal_denominator": true,
+      "gt_entry_absence": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "input_namespace": {
+        "direct_dataset_no_sensor_copy": true,
+        "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+        "mode": "sensor_only",
+        "schema_id": "basalt.phase6.input_namespace.v1",
+        "sensor_input_view_mode": "junction",
+        "sensor_view_fingerprints": {
+          "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+          "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+          "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+          "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+          "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+          "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+          "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+          "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+          "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+          "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+          "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+        },
+        "staged_sensor_only": false,
+        "strict_gt_absence_verified": true
+      },
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "repetition": 1,
+      "representative_diagnostic": false,
+      "request_sha256": "62c66d40d447744295163b526c8fcfa76546ee1b90bea9862c54f5fe675cc813",
+      "resume_identity": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "MH_01_easy:r1",
+        "pair_position": 1,
+        "pair_size": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "rust_runtime_profile": "msvc_windows",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rss_gate_candidate_eligible": false,
+      "run_dir": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\MH_01_easy\\r1",
+      "runtime_context": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "MH_01_easy:r1",
+        "pair_position": 1,
+        "pair_position_label": "only",
+        "pair_size": 1,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "rust_runtime_profile": "msvc_windows",
+      "rust_wsl_binding": null,
+      "sensor_bytes_copied": 0,
+      "sensor_fingerprint": "695eebe2d2b6c291f3772e1e4f550e4acf72bbc71d0b9264709b366e8881bb84",
+      "sensor_input_view_mode": "junction",
+      "sensor_only_input_view": true,
+      "sensor_view_fingerprint": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+      "sequence": "MH_01_easy",
+      "source_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_01_easy",
+      "source_root_resolved": "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_01_easy",
+      "staged_sensor_only": false,
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "state": "disabled"
+      }
+    },
+    {
+      "command": [
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_02_easy",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\MH_02_easy\\r1\\attempt-01\\engine_output",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "command_executable_binding": {
+        "argv0": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "executable_binding": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "expected_input_frames": 3040,
+      "family": "machine_hall",
+      "formal_denominator": true,
+      "gt_entry_absence": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "input_namespace": {
+        "direct_dataset_no_sensor_copy": true,
+        "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+        "mode": "sensor_only",
+        "schema_id": "basalt.phase6.input_namespace.v1",
+        "sensor_input_view_mode": "junction",
+        "sensor_view_fingerprints": {
+          "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+          "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+          "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+          "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+          "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+          "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+          "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+          "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+          "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+          "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+          "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+        },
+        "staged_sensor_only": false,
+        "strict_gt_absence_verified": true
+      },
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "repetition": 1,
+      "representative_diagnostic": false,
+      "request_sha256": "394188a4f211458d6d690b52db2d0ae91398d0f61625b84bf9162be53c09a1c8",
+      "resume_identity": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "MH_02_easy:r1",
+        "pair_position": 1,
+        "pair_size": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "rust_runtime_profile": "msvc_windows",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rss_gate_candidate_eligible": false,
+      "run_dir": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\MH_02_easy\\r1",
+      "runtime_context": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "MH_02_easy:r1",
+        "pair_position": 1,
+        "pair_position_label": "only",
+        "pair_size": 1,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "rust_runtime_profile": "msvc_windows",
+      "rust_wsl_binding": null,
+      "sensor_bytes_copied": 0,
+      "sensor_fingerprint": "c2e676d9912b269f222e8823d1b8925082cec66bac773a52c9590bdeca105f73",
+      "sensor_input_view_mode": "junction",
+      "sensor_only_input_view": true,
+      "sensor_view_fingerprint": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+      "sequence": "MH_02_easy",
+      "source_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_02_easy",
+      "source_root_resolved": "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_02_easy",
+      "staged_sensor_only": false,
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "state": "disabled"
+      }
+    },
+    {
+      "command": [
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_03_medium",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\MH_03_medium\\r1\\attempt-01\\engine_output",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "command_executable_binding": {
+        "argv0": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "executable_binding": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "expected_input_frames": 2700,
+      "family": "machine_hall",
+      "formal_denominator": true,
+      "gt_entry_absence": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "input_namespace": {
+        "direct_dataset_no_sensor_copy": true,
+        "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+        "mode": "sensor_only",
+        "schema_id": "basalt.phase6.input_namespace.v1",
+        "sensor_input_view_mode": "junction",
+        "sensor_view_fingerprints": {
+          "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+          "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+          "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+          "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+          "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+          "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+          "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+          "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+          "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+          "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+          "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+        },
+        "staged_sensor_only": false,
+        "strict_gt_absence_verified": true
+      },
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "repetition": 1,
+      "representative_diagnostic": false,
+      "request_sha256": "b5b63536588202bab1d6a8386a484a296b67c4978aad21636ecca7a771a05e57",
+      "resume_identity": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "MH_03_medium:r1",
+        "pair_position": 1,
+        "pair_size": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "rust_runtime_profile": "msvc_windows",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rss_gate_candidate_eligible": false,
+      "run_dir": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\MH_03_medium\\r1",
+      "runtime_context": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "MH_03_medium:r1",
+        "pair_position": 1,
+        "pair_position_label": "only",
+        "pair_size": 1,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "rust_runtime_profile": "msvc_windows",
+      "rust_wsl_binding": null,
+      "sensor_bytes_copied": 0,
+      "sensor_fingerprint": "851b1d2e02178de21c5db7f2774bd6d00102a18c46d4c384d0db4c73b1c82289",
+      "sensor_input_view_mode": "junction",
+      "sensor_only_input_view": true,
+      "sensor_view_fingerprint": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+      "sequence": "MH_03_medium",
+      "source_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_03_medium",
+      "source_root_resolved": "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_03_medium",
+      "staged_sensor_only": false,
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "state": "disabled"
+      }
+    },
+    {
+      "command": [
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_04_difficult",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\MH_04_difficult\\r1\\attempt-01\\engine_output",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "command_executable_binding": {
+        "argv0": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "executable_binding": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "expected_input_frames": 2033,
+      "family": "machine_hall",
+      "formal_denominator": true,
+      "gt_entry_absence": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "input_namespace": {
+        "direct_dataset_no_sensor_copy": true,
+        "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+        "mode": "sensor_only",
+        "schema_id": "basalt.phase6.input_namespace.v1",
+        "sensor_input_view_mode": "junction",
+        "sensor_view_fingerprints": {
+          "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+          "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+          "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+          "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+          "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+          "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+          "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+          "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+          "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+          "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+          "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+        },
+        "staged_sensor_only": false,
+        "strict_gt_absence_verified": true
+      },
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "repetition": 1,
+      "representative_diagnostic": false,
+      "request_sha256": "d0a9d746407fb458ed9f6227c72ff1a2bb4bdbb5f781abff038746b9a4e6a105",
+      "resume_identity": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "MH_04_difficult:r1",
+        "pair_position": 1,
+        "pair_size": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "rust_runtime_profile": "msvc_windows",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rss_gate_candidate_eligible": false,
+      "run_dir": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\MH_04_difficult\\r1",
+      "runtime_context": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "MH_04_difficult:r1",
+        "pair_position": 1,
+        "pair_position_label": "only",
+        "pair_size": 1,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "rust_runtime_profile": "msvc_windows",
+      "rust_wsl_binding": null,
+      "sensor_bytes_copied": 0,
+      "sensor_fingerprint": "788a11fe09f08bc65fd2d68b073607c0e666b1b73d1e9f063faecad8247d796c",
+      "sensor_input_view_mode": "junction",
+      "sensor_only_input_view": true,
+      "sensor_view_fingerprint": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+      "sequence": "MH_04_difficult",
+      "source_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_04_difficult",
+      "source_root_resolved": "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_04_difficult",
+      "staged_sensor_only": false,
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "state": "disabled"
+      }
+    },
+    {
+      "command": [
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_05_difficult",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\MH_05_difficult\\r1\\attempt-01\\engine_output",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "command_executable_binding": {
+        "argv0": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "executable_binding": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "expected_input_frames": 2273,
+      "family": "machine_hall",
+      "formal_denominator": true,
+      "gt_entry_absence": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "input_namespace": {
+        "direct_dataset_no_sensor_copy": true,
+        "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+        "mode": "sensor_only",
+        "schema_id": "basalt.phase6.input_namespace.v1",
+        "sensor_input_view_mode": "junction",
+        "sensor_view_fingerprints": {
+          "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+          "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+          "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+          "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+          "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+          "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+          "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+          "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+          "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+          "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+          "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+        },
+        "staged_sensor_only": false,
+        "strict_gt_absence_verified": true
+      },
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "repetition": 1,
+      "representative_diagnostic": false,
+      "request_sha256": "4196c59ef672a2c7ff2890b05642045bfa585a0517d879c664a7ef5a3b83465f",
+      "resume_identity": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "MH_05_difficult:r1",
+        "pair_position": 1,
+        "pair_size": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "rust_runtime_profile": "msvc_windows",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rss_gate_candidate_eligible": false,
+      "run_dir": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\MH_05_difficult\\r1",
+      "runtime_context": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "MH_05_difficult:r1",
+        "pair_position": 1,
+        "pair_position_label": "only",
+        "pair_size": 1,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "rust_runtime_profile": "msvc_windows",
+      "rust_wsl_binding": null,
+      "sensor_bytes_copied": 0,
+      "sensor_fingerprint": "6dd8a7a426687107c8fd08bcf8a7a964123504a8f7e1827fc5a375d3d4843952",
+      "sensor_input_view_mode": "junction",
+      "sensor_only_input_view": true,
+      "sensor_view_fingerprint": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+      "sequence": "MH_05_difficult",
+      "source_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_05_difficult",
+      "source_root_resolved": "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_05_difficult",
+      "staged_sensor_only": false,
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "state": "disabled"
+      }
+    },
+    {
+      "command": [
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\V1_01_easy",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V1_01_easy\\r1\\attempt-01\\engine_output",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "command_executable_binding": {
+        "argv0": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "executable_binding": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "expected_input_frames": 2912,
+      "family": "vicon_room",
+      "formal_denominator": true,
+      "gt_entry_absence": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "input_namespace": {
+        "direct_dataset_no_sensor_copy": true,
+        "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+        "mode": "sensor_only",
+        "schema_id": "basalt.phase6.input_namespace.v1",
+        "sensor_input_view_mode": "junction",
+        "sensor_view_fingerprints": {
+          "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+          "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+          "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+          "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+          "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+          "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+          "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+          "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+          "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+          "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+          "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+        },
+        "staged_sensor_only": false,
+        "strict_gt_absence_verified": true
+      },
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "repetition": 1,
+      "representative_diagnostic": false,
+      "request_sha256": "c4b811539ae5d3506bca90600b182487590d75b9c2461dcbf4d100fa3d3f8a40",
+      "resume_identity": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V1_01_easy:r1",
+        "pair_position": 1,
+        "pair_size": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "rust_runtime_profile": "msvc_windows",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rss_gate_candidate_eligible": false,
+      "run_dir": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V1_01_easy\\r1",
+      "runtime_context": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V1_01_easy:r1",
+        "pair_position": 1,
+        "pair_position_label": "only",
+        "pair_size": 1,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "rust_runtime_profile": "msvc_windows",
+      "rust_wsl_binding": null,
+      "sensor_bytes_copied": 0,
+      "sensor_fingerprint": "e85727234f7b26f5ec3542b36f19fa19fac9a2106a442b434de1c43ad19736b0",
+      "sensor_input_view_mode": "junction",
+      "sensor_only_input_view": true,
+      "sensor_view_fingerprint": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+      "sequence": "V1_01_easy",
+      "source_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V1_01_easy",
+      "source_root_resolved": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V1_01_easy",
+      "staged_sensor_only": false,
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "state": "disabled"
+      }
+    },
+    {
+      "command": [
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\V1_02_medium",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V1_02_medium\\r1\\attempt-01\\engine_output",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "command_executable_binding": {
+        "argv0": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "executable_binding": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "expected_input_frames": 1710,
+      "family": "vicon_room",
+      "formal_denominator": true,
+      "gt_entry_absence": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "input_namespace": {
+        "direct_dataset_no_sensor_copy": true,
+        "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+        "mode": "sensor_only",
+        "schema_id": "basalt.phase6.input_namespace.v1",
+        "sensor_input_view_mode": "junction",
+        "sensor_view_fingerprints": {
+          "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+          "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+          "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+          "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+          "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+          "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+          "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+          "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+          "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+          "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+          "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+        },
+        "staged_sensor_only": false,
+        "strict_gt_absence_verified": true
+      },
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "repetition": 1,
+      "representative_diagnostic": false,
+      "request_sha256": "689bb659195e8bc379e3fa614e1d3a0fdaa36cdcb647335d01c53bd9d5df3c87",
+      "resume_identity": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V1_02_medium:r1",
+        "pair_position": 1,
+        "pair_size": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "rust_runtime_profile": "msvc_windows",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rss_gate_candidate_eligible": false,
+      "run_dir": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V1_02_medium\\r1",
+      "runtime_context": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V1_02_medium:r1",
+        "pair_position": 1,
+        "pair_position_label": "only",
+        "pair_size": 1,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "rust_runtime_profile": "msvc_windows",
+      "rust_wsl_binding": null,
+      "sensor_bytes_copied": 0,
+      "sensor_fingerprint": "8b7618452e48f2459025070045742e50737b9bea3de708ca7a4519d38c642619",
+      "sensor_input_view_mode": "junction",
+      "sensor_only_input_view": true,
+      "sensor_view_fingerprint": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+      "sequence": "V1_02_medium",
+      "source_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V1_02_medium",
+      "source_root_resolved": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V1_02_medium",
+      "staged_sensor_only": false,
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "state": "disabled"
+      }
+    },
+    {
+      "command": [
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\V1_03_difficult",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V1_03_difficult\\r1\\attempt-01\\engine_output",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "command_executable_binding": {
+        "argv0": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "executable_binding": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "expected_input_frames": 2149,
+      "family": "vicon_room",
+      "formal_denominator": true,
+      "gt_entry_absence": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "input_namespace": {
+        "direct_dataset_no_sensor_copy": true,
+        "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+        "mode": "sensor_only",
+        "schema_id": "basalt.phase6.input_namespace.v1",
+        "sensor_input_view_mode": "junction",
+        "sensor_view_fingerprints": {
+          "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+          "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+          "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+          "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+          "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+          "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+          "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+          "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+          "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+          "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+          "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+        },
+        "staged_sensor_only": false,
+        "strict_gt_absence_verified": true
+      },
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "repetition": 1,
+      "representative_diagnostic": false,
+      "request_sha256": "0d474944f4edc1433d36c5bb18b40d822a733f552ac30810aa1a757c39444457",
+      "resume_identity": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V1_03_difficult:r1",
+        "pair_position": 1,
+        "pair_size": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "rust_runtime_profile": "msvc_windows",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rss_gate_candidate_eligible": false,
+      "run_dir": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V1_03_difficult\\r1",
+      "runtime_context": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V1_03_difficult:r1",
+        "pair_position": 1,
+        "pair_position_label": "only",
+        "pair_size": 1,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "rust_runtime_profile": "msvc_windows",
+      "rust_wsl_binding": null,
+      "sensor_bytes_copied": 0,
+      "sensor_fingerprint": "7dbcfee0c216f200426a3541acd0408e259051e9c3037267413daf024f72aa8f",
+      "sensor_input_view_mode": "junction",
+      "sensor_only_input_view": true,
+      "sensor_view_fingerprint": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+      "sequence": "V1_03_difficult",
+      "source_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V1_03_difficult",
+      "source_root_resolved": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V1_03_difficult",
+      "staged_sensor_only": false,
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "state": "disabled"
+      }
+    },
+    {
+      "command": [
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\V2_01_easy",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V2_01_easy\\r1\\attempt-01\\engine_output",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "command_executable_binding": {
+        "argv0": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "executable_binding": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "expected_input_frames": 2280,
+      "family": "vicon_room",
+      "formal_denominator": true,
+      "gt_entry_absence": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "input_namespace": {
+        "direct_dataset_no_sensor_copy": true,
+        "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+        "mode": "sensor_only",
+        "schema_id": "basalt.phase6.input_namespace.v1",
+        "sensor_input_view_mode": "junction",
+        "sensor_view_fingerprints": {
+          "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+          "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+          "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+          "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+          "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+          "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+          "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+          "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+          "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+          "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+          "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+        },
+        "staged_sensor_only": false,
+        "strict_gt_absence_verified": true
+      },
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "repetition": 1,
+      "representative_diagnostic": false,
+      "request_sha256": "9265a1161e314856c1a9f97b69cd54c7d1e71b303c3d13d586858a8f1fa30d9c",
+      "resume_identity": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V2_01_easy:r1",
+        "pair_position": 1,
+        "pair_size": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "rust_runtime_profile": "msvc_windows",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rss_gate_candidate_eligible": false,
+      "run_dir": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V2_01_easy\\r1",
+      "runtime_context": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V2_01_easy:r1",
+        "pair_position": 1,
+        "pair_position_label": "only",
+        "pair_size": 1,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "rust_runtime_profile": "msvc_windows",
+      "rust_wsl_binding": null,
+      "sensor_bytes_copied": 0,
+      "sensor_fingerprint": "7eb7056dc7baeaa880e84148cdf3500e1535398ea34a0dec1cad93c241b1fb28",
+      "sensor_input_view_mode": "junction",
+      "sensor_only_input_view": true,
+      "sensor_view_fingerprint": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+      "sequence": "V2_01_easy",
+      "source_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V2_01_easy",
+      "source_root_resolved": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V2_01_easy",
+      "staged_sensor_only": false,
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "state": "disabled"
+      }
+    },
+    {
+      "command": [
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\V2_02_medium",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V2_02_medium\\r1\\attempt-01\\engine_output",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "command_executable_binding": {
+        "argv0": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "executable_binding": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "expected_input_frames": 2348,
+      "family": "vicon_room",
+      "formal_denominator": true,
+      "gt_entry_absence": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "input_namespace": {
+        "direct_dataset_no_sensor_copy": true,
+        "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+        "mode": "sensor_only",
+        "schema_id": "basalt.phase6.input_namespace.v1",
+        "sensor_input_view_mode": "junction",
+        "sensor_view_fingerprints": {
+          "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+          "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+          "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+          "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+          "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+          "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+          "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+          "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+          "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+          "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+          "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+        },
+        "staged_sensor_only": false,
+        "strict_gt_absence_verified": true
+      },
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "repetition": 1,
+      "representative_diagnostic": false,
+      "request_sha256": "cb1e7a4e371215f2c847cf3eb8ff3562f81342c7471609b640b70b3a97dd62b9",
+      "resume_identity": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V2_02_medium:r1",
+        "pair_position": 1,
+        "pair_size": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "rust_runtime_profile": "msvc_windows",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rss_gate_candidate_eligible": false,
+      "run_dir": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V2_02_medium\\r1",
+      "runtime_context": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V2_02_medium:r1",
+        "pair_position": 1,
+        "pair_position_label": "only",
+        "pair_size": 1,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "rust_runtime_profile": "msvc_windows",
+      "rust_wsl_binding": null,
+      "sensor_bytes_copied": 0,
+      "sensor_fingerprint": "2123e972c8f8e0457b149b1a3936fbc082214fb0e53d9bf57ae60faa6465f68e",
+      "sensor_input_view_mode": "junction",
+      "sensor_only_input_view": true,
+      "sensor_view_fingerprint": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+      "sequence": "V2_02_medium",
+      "source_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V2_02_medium",
+      "source_root_resolved": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V2_02_medium",
+      "staged_sensor_only": false,
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "state": "disabled"
+      }
+    },
+    {
+      "command": [
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\V2_03_difficult",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V2_03_difficult\\r1\\attempt-01\\engine_output",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "command_executable_binding": {
+        "argv0": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "executable_binding": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      },
+      "expected_input_frames": 1922,
+      "family": "vicon_room",
+      "formal_denominator": true,
+      "gt_entry_absence": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "input_namespace": {
+        "direct_dataset_no_sensor_copy": true,
+        "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+        "mode": "sensor_only",
+        "schema_id": "basalt.phase6.input_namespace.v1",
+        "sensor_input_view_mode": "junction",
+        "sensor_view_fingerprints": {
+          "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+          "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+          "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+          "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+          "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+          "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+          "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+          "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+          "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+          "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+          "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+        },
+        "staged_sensor_only": false,
+        "strict_gt_absence_verified": true
+      },
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "repetition": 1,
+      "representative_diagnostic": false,
+      "request_sha256": "23aea8d43403c69acb7f0a9154d5686b1a6dea0e3c73b7be083ad5429e1a2526",
+      "resume_identity": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V2_03_difficult:r1",
+        "pair_position": 1,
+        "pair_size": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "rust_runtime_profile": "msvc_windows",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rss_gate_candidate_eligible": false,
+      "run_dir": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914\\rust_current\\V2_03_difficult\\r1",
+      "runtime_context": {
+        "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+        "method_order": [
+          "rust_current"
+        ],
+        "pair_id": "V2_03_difficult:r1",
+        "pair_position": 1,
+        "pair_position_label": "only",
+        "pair_size": 1,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "34e98916b42b413d8db2ae124d81de1f"
+      },
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "rust_runtime_profile": "msvc_windows",
+      "rust_wsl_binding": null,
+      "sensor_bytes_copied": 0,
+      "sensor_fingerprint": "066e51315f39babe7ed3b12114c1c100d43903ba308f137db23b1140c0070dad",
+      "sensor_input_view_mode": "junction",
+      "sensor_only_input_view": true,
+      "sensor_view_fingerprint": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98",
+      "sequence": "V2_03_difficult",
+      "source_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V2_03_difficult",
+      "source_root_resolved": "E:\\datasets\\euroc_mav\\sensor_only_all11\\V2_03_difficult",
+      "staged_sensor_only": false,
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+        "state": "disabled"
+      }
+    }
+  ],
+  "dry_run": true,
+  "request": {
+    "calibration_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+    "calibration_sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
+    "cell_order_policy": {
+      "canonical_method_order": [
+        "native_core",
+        "rust_current"
+      ],
+      "id": "sequence_major_repetition_major_method_parity_v1",
+      "parity": "reverse canonical method order when (sequence_index + repetition) % 2 == 1",
+      "repetition_order": "ascending",
+      "sequence_order": "selected_protocol_order",
+      "workers_1_execution": "deterministic sequential plan order",
+      "workers_gt_1_runtime_gate": "noncanonical_parallel_order"
+    },
+    "config_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+    "config_sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
+    "dataset_manifest_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\euroc_dataset_manifest.json",
+    "dataset_manifest_sha256": "a803db9e01f7a39f587cb9f87fd8601c8800455135ae7a2dc67f9e108003dd26",
+    "dataset_root": "E:\\datasets\\euroc_mav\\sensor_only_all11",
+    "direct_dataset_no_sensor_copy": true,
+    "executable_bindings": {
+      "native_core": null,
+      "rust_current": {
+        "available": true,
+        "bytes": 3819008,
+        "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+        "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+      }
+    },
+    "formal_cell_count": 11,
+    "formal_expected_cell_count": 11,
+    "formal_matrix": {
+      "actual_cell_count": 11,
+      "diagnostic_cells_in_formal": 0,
+      "diagnostic_policy": "extra_cell_in_separate_output_root_and_aggregate",
+      "expected_cell_count": 11,
+      "formal_repetitions": 1,
+      "full_all11": false,
+      "required_full_count": 22
+    },
+    "formal_method_policies": {
+      "rust_current": {
+        "no_marg_data": true,
+        "no_trace": true,
+        "output_policy": "trajectory_only_lean"
+      }
+    },
+    "fresh_output_root": true,
+    "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+    "input_namespace": {
+      "direct_dataset_no_sensor_copy": true,
+      "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+      "mode": "sensor_only",
+      "schema_id": "basalt.phase6.input_namespace.v1",
+      "sensor_input_view_mode": "junction",
+      "sensor_view_fingerprints": {
+        "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+        "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+        "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+        "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+        "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+        "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+        "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+        "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+        "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+        "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+        "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+      },
+      "staged_sensor_only": false,
+      "strict_gt_absence_verified": true
+    },
+    "max_frames": null,
+    "methods": [
+      "rust_current"
+    ],
+    "native_provenance": null,
+    "no_marg_data": true,
+    "no_trace": true,
+    "output_policy": "trajectory_only_lean",
+    "output_root": "E:\\visloc-rs-runs\\phase6_latest_rust_all11x1_20260914",
+    "poll_seconds": 0.25,
+    "protocol_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\protocols\\basalt_euroc_parity_v1.json",
+    "protocol_sha256": "7957f102ffa47a67c3509cdf77942d599e7b0f5f5f2bf452987f87a55df246e5",
+    "repetitions": 1,
+    "representative": null,
+    "representative_output_policy": null,
+    "resource_gate_canonical": false,
+    "retention": "trajectory_summary_evaluation_manifest_logs",
+    "rss_gate_candidate_eligible": false,
+    "run_session_id": "34e98916b42b413d8db2ae124d81de1f",
+    "runtime_context": {
+      "cache_context": {
+        "calibration_sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
+        "config_sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
+        "dataset_manifest_sha256": "a803db9e01f7a39f587cb9f87fd8601c8800455135ae7a2dc67f9e108003dd26",
+        "dataset_root": "E:\\datasets\\euroc_mav\\sensor_only_all11",
+        "formal_expected_cell_count": 11,
+        "fresh_output_root": true,
+        "full_formal_matrix": false,
+        "input_namespace": {
+          "direct_dataset_no_sensor_copy": true,
+          "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+          "mode": "sensor_only",
+          "schema_id": "basalt.phase6.input_namespace.v1",
+          "sensor_input_view_mode": "junction",
+          "sensor_view_fingerprints": {
+            "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+            "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+            "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+            "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+            "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+            "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+            "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+            "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+            "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+            "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+            "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+          },
+          "staged_sensor_only": false,
+          "strict_gt_absence_verified": true
+        },
+        "max_frames": null,
+        "methods": [
+          "rust_current"
+        ],
+        "native_executable_binding": null,
+        "output_policy": "trajectory_only_lean",
+        "poll_seconds": 0.25,
+        "protocol_sha256": "7957f102ffa47a67c3509cdf77942d599e7b0f5f5f2bf452987f87a55df246e5",
+        "repetitions": 1,
+        "rss_gate_candidate_eligible": false,
+        "rust_executable_binding": {
+          "available": true,
+          "bytes": 3819008,
+          "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+          "sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf"
+        },
+        "rust_runtime_profile": "msvc_windows",
+        "rust_wsl_binding": null,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "seed": 7,
+        "sensor_bytes_copied": 0,
+        "sensor_input_view_mode": "junction",
+        "sensor_only_input_view": true,
+        "sequences": [
+          "MH_01_easy",
+          "MH_02_easy",
+          "MH_03_medium",
+          "MH_04_difficult",
+          "MH_05_difficult",
+          "V1_01_easy",
+          "V1_02_medium",
+          "V1_03_difficult",
+          "V2_01_easy",
+          "V2_02_medium",
+          "V2_03_difficult"
+        ],
+        "session_id": "34e98916b42b413d8db2ae124d81de1f",
+        "threads": 1,
+        "timeout_seconds": 43200.0,
+        "timing_feature_binding": {
+          "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+          "environment_mode": "unset",
+          "environment_requested": false,
+          "feature": "basalt-timing-breakdown",
+          "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+          "state": "disabled"
+        },
+        "workers": 1
+      },
+      "cache_context_id": "3576798998b573d14f71bd32ed5949e79be7b7865059904c7e1d20591a6cddc5",
+      "pairing": "sequence/repetition pair with explicit method position",
+      "schema_id": "basalt.phase6.runtime_context.v1",
+      "session_id": "34e98916b42b413d8db2ae124d81de1f"
+    },
+    "runtime_gate_canonical": true,
+    "runtime_gate_requirements": {
+      "fresh_output_root": true,
+      "rss_authoritative_domain": "linux-proc-process-tree",
+      "rss_gate_candidate_eligible": false,
+      "rust_runtime_profile": "msvc_windows",
+      "seed": 7,
+      "sensor_namespace_must_be_uniform": true,
+      "sensor_only_input_view": true,
+      "strict_gt_absence_verified": true,
+      "threads": 1,
+      "workers": 1
+    },
+    "rust_runtime_profile": "msvc_windows",
+    "rust_wsl_binding": null,
+    "schema_id": "basalt.phase6.coordinator.v1",
+    "seed": 7,
+    "sensor_bytes_copied": 0,
+    "sensor_input_view_mode": "junction",
+    "sensor_only_input_view": true,
+    "sensor_view_fingerprints": {
+      "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+      "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+      "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+      "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+      "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+      "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+      "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+      "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+      "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+      "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+      "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+    },
+    "sensor_view_gt_entry_absence": {
+      "MH_01_easy": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "MH_02_easy": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "MH_03_medium": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "MH_04_difficult": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "MH_05_difficult": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "V1_01_easy": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "V1_02_medium": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "V1_03_difficult": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "V2_01_easy": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "V2_02_medium": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      },
+      "V2_03_difficult": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      }
+    },
+    "sequences": [
+      "MH_01_easy",
+      "MH_02_easy",
+      "MH_03_medium",
+      "MH_04_difficult",
+      "MH_05_difficult",
+      "V1_01_easy",
+      "V1_02_medium",
+      "V1_03_difficult",
+      "V2_01_easy",
+      "V2_02_medium",
+      "V2_03_difficult"
+    ],
+    "staged_sensor_only": false,
+    "strict_gt_absence_verified": true,
+    "threads": 1,
+    "timeout_seconds": 43200.0,
+    "timing_feature_binding": {
+      "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+      "environment_mode": "unset",
+      "environment_requested": false,
+      "feature": "basalt-timing-breakdown",
+      "rust_executable_sha256": "941b740908b2bb448d039865f6461e86ddafe4612e7635f50d44aaeb7c46dcdf",
+      "state": "disabled"
+    },
+    "workers": 1,
+    "workers_policy": "canonical_sequential"
+  },
+  "request_sha256": "a74f025c4668d331b70253503055e39977ab42b6e460b055c96a50907e22dc53",
+  "resource_gate_canonical": false,
+  "run_count": 11,
+  "runtime_gate_canonical": true,
+  "runtime_gate_canonical_override": null,
+  "runtime_gate_canonical_override_reason": null,
+  "schema_id": "basalt.phase6.coordinator.v1",
+  "schema_version": 1,
+  "storage_policy": {
+    "cell_workers": 1,
+    "diagnostic_aggregate_separate": true,
+    "diagnostic_requires_separate_root": true,
+    "direct_dataset_paths": true,
+    "formal_cell_count": 11,
+    "formal_expected_cell_count": 11,
+    "formal_full_all11": false,
+    "formal_no_marg_data": true,
+    "formal_no_trace": true,
+    "formal_output_policy": "trajectory_only_lean",
+    "formal_repetitions": 1,
+    "fresh_output_root": true,
+    "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+    "gt_entry_absence_evidence": true,
+    "input_namespace": {
+      "direct_dataset_no_sensor_copy": true,
+      "gt_absence_fingerprint": "6f038d13cbd84d77c0932aed85062db2878e8fe3857f11d7e5f75c7c1fac733e",
+      "mode": "sensor_only",
+      "schema_id": "basalt.phase6.input_namespace.v1",
+      "sensor_input_view_mode": "junction",
+      "sensor_view_fingerprints": {
+        "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8",
+        "MH_02_easy": "ceff35834f7cb43ea324de867c2a62a12541af289f5ec42e774dfbc93226cf20",
+        "MH_03_medium": "f93d6174822665986bf40ace3cfa52cf7cd6939ad9bc4838f6fdb23f98a03eb6",
+        "MH_04_difficult": "b9720428e450f09c0a080a5ffbcf2aad25f3b1c5a0ef01ffd420032011f9a6af",
+        "MH_05_difficult": "e66da94778051da819ac4f316136f66eb280ed01dd104e3bb6ffba2e786d1d41",
+        "V1_01_easy": "8c0991702da3628a9b1b0219205d38d74692f9bf3b6becbe7988fbe7e9c7ce23",
+        "V1_02_medium": "ac8f0df1e0f2d613baad347386af718c676b632f5e7406eb79ffd64e159a73fa",
+        "V1_03_difficult": "78ddd1454138a069f24d54ccfd5e0b513fc6f2fe5621dc0ddcea0e7593cd9cbf",
+        "V2_01_easy": "14c9cc1b5d9c6ad0a13eaaf18c84a71e519e6edcf97970b79c4e1cbfb73e8173",
+        "V2_02_medium": "8c47bc8d2f0738b116cdf3d47a8edbd46de38070ca4ff99b27eba9b9c36c28e4",
+        "V2_03_difficult": "9101e074bb8eed7de87999e72fb911d7d305de77d44da5bea87880e0610fea98"
+      },
+      "staged_sensor_only": false,
+      "strict_gt_absence_verified": true
+    },
+    "optional_representative_retains": [
+      "marg_data",
+      "trace"
+    ],
+    "per_cell_sensor_copy_bytes": 0,
+    "representative": null,
+    "representative_separate_from_formal": true,
+    "retained_default": [
+      "trajectory",
+      "summary",
+      "evaluation",
+      "manifest",
+      "stdout.log",
+      "stderr.log"
+    ],
+    "sensor_bytes_copied": 0,
+    "sensor_input_view_mode": "junction",
+    "sensor_only_input_view": true,
+    "staged_sensor_only": false,
+    "strict_gt_absence_verified": true
+  }
+}

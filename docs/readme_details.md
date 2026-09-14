@@ -16,7 +16,7 @@ repository front page. Current entry points and headline results remain in the
 
 <p align="center">
   <a href="https://github.com/rsasaki0109/visloc-rs/actions/workflows/ci.yml"><img src="https://github.com/rsasaki0109/visloc-rs/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
-  <img src="https://img.shields.io/badge/rust-1.82%2B-f46623" alt="Rust 1.82+">
+  <img src="https://img.shields.io/badge/rust-1.83%2B-f46623" alt="Rust 1.83+">
   <img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue" alt="License: MIT OR Apache-2.0">
   <img src="https://img.shields.io/badge/core-no%20mandatory%20ML%20runtime-35d0ba" alt="No mandatory ML runtime">
 </p>

@@ -63,6 +63,11 @@
 //!     --out-dir target/euroc_online_slam_vi_image_demo \
 //!     --max-frames 400
 //! ```
+//! Basalt-faithful VIO knobs (window size / sqrt marg from the checked-in
+//! `configs/basalt/euroc_config.json`):
+//! ```sh
+//! ... --basalt-euroc-profile --motion-vi-init --local-vi-ba
+//! ```
 //! Add `--observation-confidence-ba` to run the same local-BA windows with
 //! relative learned visual weights for a uniform-vs-weighted A/B comparison.
 //!
@@ -114,7 +119,8 @@ use visloc_rs::vision::features::{
 };
 #[cfg(feature = "image-io")]
 use visloc_rs::vision::stereo_bootstrap::{
-    bootstrap_stereo_landmarks, StereoBootstrapConfig, StereoBootstrapLandmark,
+    bootstrap_stereo_landmarks, bootstrap_stereo_landmarks_from_correspondences,
+    StereoBootstrapConfig, StereoBootstrapLandmark,
 };
 #[cfg(feature = "image-io")]
 use visloc_rs::{
@@ -310,6 +316,12 @@ enum DemoMatcher {
     BruteForce(BruteForceMatcher),
     CrossCheck(CrossCheckMatcher<BruteForceMatcher>),
     MutualSoftmax(MutualSoftmaxMatcher),
+    /// Brute-force NN then drop matches above `max_distance` (optical-flow
+    /// track-id descriptors: only distance≈0 is a real association).
+    MaxDistance {
+        inner: BruteForceMatcher,
+        max_distance: f32,
+    },
 }
 
 #[cfg(feature = "image-io")]
@@ -319,6 +331,14 @@ impl Matcher for DemoMatcher {
             DemoMatcher::BruteForce(m) => m.match_descriptors(query, train),
             DemoMatcher::CrossCheck(m) => m.match_descriptors(query, train),
             DemoMatcher::MutualSoftmax(m) => m.match_descriptors(query, train),
+            DemoMatcher::MaxDistance {
+                inner,
+                max_distance,
+            } => inner
+                .match_descriptors(query, train)
+                .into_iter()
+                .filter(|m| m.distance <= *max_distance)
+                .collect(),
         }
     }
 }
@@ -349,6 +369,8 @@ enum DemoExtractor {
     /// with a clear error message pointing the operator at the
     /// feature flag and the model path.
     SuperPointOnnx(visloc_vision::features::superpoint_onnx::SuperPointOnnxExtractor),
+    /// Basalt-faithful frame-to-frame KLT; track ids become descriptors.
+    OpticalFlow(visloc_rs::vision::optical_flow::OpticalFlowFeatureExtractor),
 }
 
 #[cfg(feature = "image-io")]
@@ -396,6 +418,7 @@ impl FeatureExtractor for DemoExtractor {
                 .extract_deep(image)
                 .map(|deep| deep.into_feature_set())
                 .map_err(|err| err.to_string()),
+            DemoExtractor::OpticalFlow(e) => e.extract(image),
         }
     }
 }
@@ -539,14 +562,23 @@ impl SuperPointOfflineExtractor {
         cam0_dir: &std::path::Path,
         cam1_dir: &std::path::Path,
     ) -> Result<Self, String> {
-        let cam0_frames = load_frame_features(cam0_dir)?;
-        let cam1_frames = load_frame_features(cam1_dir)?;
+        let mut cam0_frames = load_frame_features(cam0_dir)?;
+        let mut cam1_frames = load_frame_features(cam1_dir)?;
+        // Allow partially-exported cam1 directories (e.g. during incremental export):
+        // truncate both to the shorter length so the caller can use max_frames to pick a
+        // window within the available frames, rather than requiring exact equality.
         if cam0_frames.len() != cam1_frames.len() {
-            return Err(format!(
-                "SuperPointOfflineExtractor: cam0 ({}) and cam1 ({}) feature counts differ — re-export with the same --frames count",
+            let min_len = cam0_frames.len().min(cam1_frames.len());
+            eprintln!(
+                "SuperPointOfflineExtractor: cam0 ({}) and cam1 ({}) feature counts differ; \
+                 truncating both to {} (use --max-frames ≤ {} to run within available frames)",
                 cam0_frames.len(),
                 cam1_frames.len(),
-            ));
+                min_len,
+                min_len,
+            );
+            cam0_frames.truncate(min_len);
+            cam1_frames.truncate(min_len);
         }
         Ok(Self {
             cam0_frames: std::sync::Arc::new(cam0_frames),
@@ -619,6 +651,9 @@ enum FeatureExtractorKind {
     /// ONNX model with the LightGlue-ONNX-style I/O contract (see
     /// `docs/superpoint_onnx_runtime_plan.md`).
     SuperPointOnnx,
+    /// Basalt-style frame-to-frame optical flow (Pattern51 KLT). Selected
+    /// automatically by `--basalt-euroc-profile` / `--basalt-config`.
+    OpticalFlow,
 }
 
 #[cfg(feature = "image-io")]
@@ -700,6 +735,20 @@ struct CliArgs {
     /// Schur-marginalize the outgoing navigation state into a dense FEJ prior
     /// on the next window anchor.
     local_vi_ba_marginalization: bool,
+    /// Use the square-root (SqrtToSqrt) sliding-window marginalization (Basalt
+    /// ICCV'21). Default on. Disable with `--no-sqrt-window-marginalization`.
+    local_vi_ba_use_sqrt_window_marginalization: bool,
+    /// Trailing VI-BA keyframe window depth. Defaults to
+    /// `OnlineSlamLocalBaConfig::default().window_size` (5). Basalt EuRoC uses
+    /// `vio_max_kfs = 7` via `--basalt-config`.
+    local_vi_ba_window_size: usize,
+    /// Optional path to Basalt `euroc_config.json` (or compatible). When set,
+    /// applies faithful VIO knobs (`vio_max_kfs`, `vio_sqrt_marg`, …) and
+    /// selects the optical-flow frontend.
+    basalt_config_path: Option<PathBuf>,
+    /// Optical-flow knobs used when `feature_extractor == OpticalFlow`
+    /// (from Basalt config or EuRoC defaults).
+    optical_flow_config: visloc_rs::vision::optical_flow::BasaltOpticalFlowConfig,
     /// Optional finite initialization uncertainty `(velocity, gyro bias,
     /// accel bias)` used by the first marginal prior.
     local_vi_ba_initial_prior_std_devs: Option<(f64, f64, f64)>,
@@ -794,13 +843,8 @@ struct CliArgs {
     /// ([`visloc_rs::MotionBasedViInitializerConfig::estimate_gyro_bias`]):
     /// estimate the shared gyro bias from rotation-only alignment against
     /// this window's fixed visual poses, BEFORE gravity/velocity alignment
-    /// and before the staged solve — the classical first inertial-init step
-    /// ORB-SLAM3 / VINS-Mono run before gravity alignment. Off by default.
-    /// See `docs/motion_based_vi_alignment.md`'s "Gyro-bias recovery"
-    /// section for the motivating diagnosis: the final fitted IMU rotation
-    /// residual RMS sat at 0.014-0.022 rad against the 0.01 gate,
-    /// bit-identical with/without gravity estimation (the rotation residual
-    /// is gravity-independent).
+    /// and before the staged solve. Defaults on whenever `--motion-vi-init`
+    /// is set; pass `--no-motion-vi-init-estimate-gyro-bias` to disable.
     motion_vi_init_estimate_gyro_bias: bool,
     /// When `Some(n)`, restricts descriptor matching during tracking to
     /// landmarks observed by the reference keyframe and up to `n`
@@ -885,9 +929,9 @@ struct CliArgs {
     /// stereo-matching each frame's cam0 keypoints that tracking did NOT
     /// match to an existing landmark against a freshly loaded/undistorted
     /// cam1 image, triangulating the survivors, and staging them as
-    /// `LandmarkCandidate`s for `process_frame`. Off by default so the
-    /// map stays frozen at the bootstrap landmark count, preserving
-    /// legacy behaviour.
+    /// `LandmarkCandidate`s for `process_frame`. Defaults on whenever
+    /// `--local-vi-ba` and stereo bootstrap are both active (cam1 features
+    /// required); pass `--no-stereo-landmark-replenish` to disable.
     stereo_landmark_replenish: bool,
     /// Cap on new replenishment candidates built per frame. Only
     /// meaningful when `stereo_landmark_replenish` is set.
@@ -925,6 +969,15 @@ struct CliArgs {
     /// Allow a bounded pose-prior gate widening for PnP solutions with at
     /// least 100 inliers, 0.6 inlier ratio, and 3 px mean reprojection error.
     pose_prior_visual_override: bool,
+    /// Accept the motion-model pose prior when visual tracking fails
+    /// (IMU coast). See `TrackingConfig::accept_motion_prior_on_failure`.
+    accept_motion_prior_on_failure: bool,
+    /// Cap on consecutive IMU coasts (`None` = unlimited; not recommended).
+    max_consecutive_motion_prior_coasts: Option<usize>,
+    /// Temporal re-association of previous inlier landmarks (image-free KLT analogue).
+    temporal_landmark_tracking: bool,
+    /// How many recent successful inlier sets to union for temporal matching.
+    temporal_landmark_tracking_history_frames: usize,
     /// When `true`, scale `--max-pose-jump-meters` by the number of frames
     /// elapsed since the last successful track (capped at
     /// `--pose-jump-gap-scaling-max-multiplier`, floored at 1) before
@@ -1076,6 +1129,10 @@ struct CliArgs {
     /// signal under-exploited; mutually exclusive with
     /// `--cross-check-matcher`. Off by default.
     mutual_softmax_matcher: bool,
+    /// Mutual-softmax inverse temperature (higher = peakier). Default 20.
+    mutual_softmax_temperature: f32,
+    /// Mutual-softmax dual-softmax confidence floor in (0, 1]. Default 0.2.
+    mutual_softmax_min_confidence: f32,
     /// Selects the feature extractor backing the per-frame descriptor
     /// stream. `corner` (the default) is the existing
     /// `CornerFeatureExtractor` with raw patch descriptors. `hog` is
@@ -1559,12 +1616,17 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut motion_vi_init_enabled: bool = false;
     let mut motion_vi_init_after_static_give_up: bool = false;
     let mut motion_vi_init_from_configured_bias: bool = false;
-    let mut motion_vi_init_min_keyframes: usize = 10;
-    let mut motion_vi_init_min_translation_meters: f64 = 2.0;
+    let mut motion_vi_init_min_keyframes: usize = 3;
+    let mut motion_vi_init_min_translation_meters: f64 = 0.15;
     let mut motion_vi_init_recover_scale: bool = false;
     let mut local_vi_ba_enabled: bool = false;
     let mut observation_confidence_ba_enabled: bool = false;
     let mut local_vi_ba_marginalization: bool = false;
+    let mut local_vi_ba_use_sqrt_window_marginalization: bool = true;
+    let mut local_vi_ba_window_size: usize = OnlineSlamLocalBaConfig::default().window_size;
+    let mut basalt_config_path: Option<PathBuf> = None;
+    let mut optical_flow_config =
+        visloc_rs::vision::optical_flow::BasaltOpticalFlowConfig::default();
     let mut local_vi_ba_initial_prior_std_devs: Option<(f64, f64, f64)> = None;
     let mut local_vi_ba_freeze_biases_above: Option<f64> = None;
     let mut local_vi_ba_reject_writeback_above: Option<f64> = None;
@@ -1588,18 +1650,23 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         default_adaptive_velocity_gate.max_threshold_mps;
     let mut local_vi_ba_adaptive_velocity_min_references: usize =
         default_adaptive_velocity_gate.min_reference_count;
-    let mut motion_vi_init_max_velocity_mps: Option<f64> = None;
-    let mut motion_vi_init_max_gyro_bias_rad_s: Option<f64> = None;
-    let mut motion_vi_init_max_accel_bias_mps2: Option<f64> = None;
-    let mut motion_vi_init_max_imu_nis_per_dof: Option<f64> = None;
+    // Keep motion-VI-init physically plausible by default. Without these
+    // gates, a numerically-valid but non-physical initialisation can seed
+    // extreme velocity/bias and destabilise downstream VI-BA.
+    let mut motion_vi_init_max_velocity_mps: Option<f64> = Some(8.0);
+    let mut motion_vi_init_max_gyro_bias_rad_s: Option<f64> = Some(0.5);
+    let mut motion_vi_init_max_accel_bias_mps2: Option<f64> = Some(3.0);
+    let mut motion_vi_init_max_imu_nis_per_dof: Option<f64> = Some(20_000.0);
     let mut motion_vi_init_max_rotation_residual_rms_rad: Option<f64> = None;
     let mut motion_vi_init_max_velocity_residual_rms_mps: Option<f64> = None;
     let mut motion_vi_init_max_position_residual_rms_meters: Option<f64> = None;
     let mut vi_bias_release_min_keyframes: Option<usize> = None;
     let mut vi_bias_release_min_translation_meters: Option<f64> = None;
     let mut motion_vi_init_estimate_gravity: bool = false;
+    let mut motion_vi_init_no_estimate_gravity: bool = false;
     let mut motion_vi_init_max_gravity_norm_deviation: Option<f64> = None;
     let mut motion_vi_init_estimate_gyro_bias: bool = false;
+    let mut motion_vi_init_no_estimate_gyro_bias: bool = false;
     let mut covisibility_local_map_max_keyframes: Option<usize> = None;
     let mut covisibility_local_map_min_shared: usize = 15;
     let mut covisibility_local_ba_enabled: bool = false;
@@ -1629,21 +1696,35 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut covisibility_local_ba_max_pose_rotation_correction_deg: Option<f64> = None;
     let mut covisibility_local_ba_anchor_weight: Option<f64> = None;
     let mut stereo_landmark_replenish: bool = false;
+    let mut stereo_landmark_replenish_no: bool = false;
     let mut stereo_landmark_replenish_max_per_frame: usize = 100;
+    let mut stereo_landmark_replenish_max_per_frame_overridden: bool = false;
     let mut stereo_landmark_replenish_anchor_match_radius_px: Option<f64> = None;
+    let mut stereo_landmark_replenish_anchor_match_radius_px_overridden: bool = false;
     let mut stereo_landmark_replenish_anchor_max_descriptor_distance: Option<f32> = None;
     let mut stereo_landmark_replenish_duplicate_radius_px: Option<f64> = None;
+    let mut stereo_landmark_replenish_duplicate_radius_px_overridden: bool = false;
     let mut stereo_landmark_replenish_min_parallax_deg: Option<f64> = None;
+    let mut stereo_landmark_replenish_min_parallax_deg_overridden: bool = false;
     let mut stereo_landmark_replenish_min_depth_meters: Option<f64> = None;
+    let mut stereo_landmark_replenish_min_depth_meters_overridden: bool = false;
     let mut stereo_landmark_replenish_max_depth_meters: Option<f64> = None;
+    let mut stereo_landmark_replenish_max_depth_meters_overridden: bool = false;
     let mut max_pose_jump_meters: Option<f64> = None;
     let mut pose_prior_visual_override: bool = false;
+    let mut accept_motion_prior_on_failure: bool = false;
+    let mut max_consecutive_motion_prior_coasts: Option<usize> = Some(5);
+    let mut temporal_landmark_tracking: bool = false;
+    let mut temporal_landmark_tracking_overridden: bool = false;
+    let mut temporal_landmark_tracking_history_frames: usize = 1;
     let mut pose_jump_gap_scaling: bool = false;
     let mut pose_jump_gap_scaling_max_multiplier: usize = 10;
     let mut tracking_min_inliers: usize = 0;
+    let mut tracking_min_inliers_overridden: bool = false;
     let mut tracking_min_inlier_ratio: f64 = 0.0;
     let mut tracking_max_reprojection_error: Option<f64> = None;
     let mut pnp_pose_prior_warm_start: bool = false;
+    let mut pnp_pose_prior_warm_start_overridden: bool = false;
     let mut projection_guided_tracking: bool = false;
     let mut projection_search_radius_px: f64 = 15.0;
     let mut projection_widen_factor: f64 = 2.0;
@@ -1659,10 +1740,14 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut projection_refinement_max_rotation_correction_deg: Option<f64> = None;
     let mut pnp_reprojection_threshold_px: Option<f64> = None;
     let mut motion_model: MotionModelKind = MotionModelKind::Pose;
+    let mut motion_model_overridden: bool = false;
     let mut imu_extrinsic_from_cam0: bool = false;
     let mut imu_motion_model_carry_forward_velocity: bool = false;
     let mut cross_check_matcher: bool = false;
     let mut mutual_softmax_matcher: bool = false;
+    let mut mutual_softmax_matcher_overridden: bool = false;
+    let mut mutual_softmax_temperature: f32 = 20.0;
+    let mut mutual_softmax_min_confidence: f32 = 0.2;
     let mut feature_extractor: FeatureExtractorKind = FeatureExtractorKind::Corner;
     let mut hog_max_features: usize = 1500;
     let mut hog_min_corner_score: f32 = 0.05;
@@ -1891,6 +1976,30 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                 local_vi_ba_marginalization = true;
                 args.remove(i);
             }
+            "--use-sqrt-window-marginalization" => {
+                local_vi_ba_use_sqrt_window_marginalization = true;
+                args.remove(i);
+            }
+            "--no-sqrt-window-marginalization" => {
+                local_vi_ba_use_sqrt_window_marginalization = false;
+                args.remove(i);
+            }
+            "--local-vi-ba-window-size" => {
+                local_vi_ba_window_size = args.remove(i + 1).parse()?;
+                if local_vi_ba_window_size < 2 {
+                    return Err("--local-vi-ba-window-size must be >= 2".into());
+                }
+                args.remove(i);
+            }
+            "--basalt-config" => {
+                basalt_config_path = Some(PathBuf::from(args.remove(i + 1)));
+                args.remove(i);
+            }
+            "--basalt-euroc-profile" => {
+                // Checked-in verbatim Basalt `data/euroc_config.json`.
+                basalt_config_path = Some(PathBuf::from("configs/basalt/euroc_config.json"));
+                args.remove(i);
+            }
             "--local-vi-ba-initial-prior-std-devs" => {
                 let value = args.remove(i + 1);
                 let parts: Vec<&str> = value.split(',').collect();
@@ -2063,12 +2172,20 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                 motion_vi_init_estimate_gravity = true;
                 args.remove(i);
             }
+            "--no-motion-vi-init-estimate-gravity" => {
+                motion_vi_init_no_estimate_gravity = true;
+                args.remove(i);
+            }
             "--motion-vi-init-max-gravity-norm-deviation" => {
                 motion_vi_init_max_gravity_norm_deviation = Some(args.remove(i + 1).parse()?);
                 args.remove(i);
             }
             "--motion-vi-init-estimate-gyro-bias" => {
                 motion_vi_init_estimate_gyro_bias = true;
+                args.remove(i);
+            }
+            "--no-motion-vi-init-estimate-gyro-bias" => {
+                motion_vi_init_no_estimate_gyro_bias = true;
                 args.remove(i);
             }
             "--covisibility-local-map-max-keyframes" => {
@@ -2255,13 +2372,19 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                 stereo_landmark_replenish = true;
                 args.remove(i);
             }
+            "--no-stereo-landmark-replenish" => {
+                stereo_landmark_replenish_no = true;
+                args.remove(i);
+            }
             "--stereo-landmark-replenish-max-per-frame" => {
                 stereo_landmark_replenish_max_per_frame = args.remove(i + 1).parse()?;
+                stereo_landmark_replenish_max_per_frame_overridden = true;
                 args.remove(i);
             }
             "--stereo-landmark-replenish-anchor-match-radius-px" => {
                 stereo_landmark_replenish_anchor_match_radius_px =
                     Some(args.remove(i + 1).parse()?);
+                stereo_landmark_replenish_anchor_match_radius_px_overridden = true;
                 args.remove(i);
             }
             "--stereo-landmark-replenish-anchor-max-descriptor-distance" => {
@@ -2271,18 +2394,22 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--stereo-landmark-replenish-duplicate-radius-px" => {
                 stereo_landmark_replenish_duplicate_radius_px = Some(args.remove(i + 1).parse()?);
+                stereo_landmark_replenish_duplicate_radius_px_overridden = true;
                 args.remove(i);
             }
             "--stereo-landmark-replenish-min-parallax-deg" => {
                 stereo_landmark_replenish_min_parallax_deg = Some(args.remove(i + 1).parse()?);
+                stereo_landmark_replenish_min_parallax_deg_overridden = true;
                 args.remove(i);
             }
             "--stereo-landmark-replenish-min-depth-meters" => {
                 stereo_landmark_replenish_min_depth_meters = Some(args.remove(i + 1).parse()?);
+                stereo_landmark_replenish_min_depth_meters_overridden = true;
                 args.remove(i);
             }
             "--stereo-landmark-replenish-max-depth-meters" => {
                 stereo_landmark_replenish_max_depth_meters = Some(args.remove(i + 1).parse()?);
+                stereo_landmark_replenish_max_depth_meters_overridden = true;
                 args.remove(i);
             }
             "--max-pose-jump-meters" => {
@@ -2293,8 +2420,47 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                 pose_prior_visual_override = true;
                 args.remove(i);
             }
+            "--no-pose-prior-visual-override" => {
+                pose_prior_visual_override = false;
+                args.remove(i);
+            }
+            "--accept-motion-prior-on-failure" => {
+                accept_motion_prior_on_failure = true;
+                args.remove(i);
+            }
+            "--no-accept-motion-prior-on-failure" => {
+                accept_motion_prior_on_failure = false;
+                args.remove(i);
+            }
+            "--max-consecutive-motion-prior-coasts" => {
+                let raw = args.remove(i + 1);
+                max_consecutive_motion_prior_coasts = if raw.eq_ignore_ascii_case("none") {
+                    None
+                } else {
+                    Some(raw.parse()?)
+                };
+                args.remove(i);
+            }
+            "--temporal-landmark-tracking" => {
+                temporal_landmark_tracking = true;
+                temporal_landmark_tracking_overridden = true;
+                args.remove(i);
+            }
+            "--no-temporal-landmark-tracking" => {
+                temporal_landmark_tracking = false;
+                temporal_landmark_tracking_overridden = true;
+                args.remove(i);
+            }
+            "--temporal-landmark-tracking-history-frames" => {
+                temporal_landmark_tracking_history_frames = args.remove(i + 1).parse()?;
+                args.remove(i);
+            }
             "--pose-jump-gap-scaling" => {
                 pose_jump_gap_scaling = true;
+                args.remove(i);
+            }
+            "--no-pose-jump-gap-scaling" => {
+                pose_jump_gap_scaling = false;
                 args.remove(i);
             }
             "--pose-jump-gap-scaling-max-multiplier" => {
@@ -2303,6 +2469,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--tracking-min-inliers" => {
                 tracking_min_inliers = args.remove(i + 1).parse()?;
+                tracking_min_inliers_overridden = true;
                 args.remove(i);
             }
             "--tracking-min-inlier-ratio" => {
@@ -2320,6 +2487,12 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--pnp-pose-prior-warm-start" => {
                 pnp_pose_prior_warm_start = true;
+                pnp_pose_prior_warm_start_overridden = true;
+                args.remove(i);
+            }
+            "--no-pnp-pose-prior-warm-start" => {
+                pnp_pose_prior_warm_start = false;
+                pnp_pose_prior_warm_start_overridden = true;
                 args.remove(i);
             }
             "--projection-guided-tracking" => {
@@ -2400,6 +2573,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                         .into());
                     }
                 };
+                motion_model_overridden = true;
                 args.remove(i);
             }
             "--imu-extrinsic-from-cam0" => {
@@ -2416,6 +2590,20 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--mutual-softmax-matcher" => {
                 mutual_softmax_matcher = true;
+                mutual_softmax_matcher_overridden = true;
+                args.remove(i);
+            }
+            "--no-mutual-softmax-matcher" => {
+                mutual_softmax_matcher = false;
+                mutual_softmax_matcher_overridden = true;
+                args.remove(i);
+            }
+            "--mutual-softmax-temperature" => {
+                mutual_softmax_temperature = args.remove(i + 1).parse()?;
+                args.remove(i);
+            }
+            "--mutual-softmax-min-confidence" => {
+                mutual_softmax_min_confidence = args.remove(i + 1).parse()?;
                 args.remove(i);
             }
             "--feature-extractor" => {
@@ -2425,9 +2613,12 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                     "hog" => FeatureExtractorKind::Hog,
                     "superpoint-offline" => FeatureExtractorKind::SuperPointOffline,
                     "superpoint-onnx" => FeatureExtractorKind::SuperPointOnnx,
+                    "optical-flow" | "basalt-optical-flow" | "klt" => {
+                        FeatureExtractorKind::OpticalFlow
+                    }
                     other => {
                         return Err(format!(
-                            "--feature-extractor: expected 'corner', 'hog', 'superpoint-offline', or 'superpoint-onnx', got {other:?}"
+                            "--feature-extractor: expected 'corner', 'hog', 'superpoint-offline', 'superpoint-onnx', or 'optical-flow', got {other:?}"
                         )
                         .into());
                     }
@@ -2832,9 +3023,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     if max_pose_jump_meters.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         return Err("--max-pose-jump-meters must be finite and positive".into());
     }
-    if pose_prior_visual_override && max_pose_jump_meters.is_none() {
-        return Err("--pose-prior-visual-override requires --max-pose-jump-meters".into());
-    }
+    // `--pose-prior-visual-override requires --max-pose-jump-meters` is
+    // checked after motion-VI defaults (which may fill the jump gate).
     if let Some(max_reprojection_error) = tracking_max_reprojection_error {
         if !max_reprojection_error.is_finite() || max_reprojection_error <= 0.0 {
             return Err("--tracking-max-reprojection-error must be positive or 'none'".into());
@@ -3003,6 +3193,139 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         return Err(
             "--pose-graph-refinement-pcm-pairwise-only requires --pose-graph-refinement-pcm".into(),
         );
+    }
+    if motion_vi_init_enabled {
+        if motion_vi_init_no_estimate_gravity {
+            motion_vi_init_estimate_gravity = false;
+        } else {
+            motion_vi_init_estimate_gravity = true;
+        }
+        if motion_vi_init_no_estimate_gyro_bias {
+            motion_vi_init_estimate_gyro_bias = false;
+        } else {
+            motion_vi_init_estimate_gyro_bias = true;
+        }
+    }
+    if local_vi_ba_enabled && stereo_bootstrap && !stereo_landmark_replenish_no {
+        stereo_landmark_replenish = true;
+        if motion_vi_init_enabled && !stereo_landmark_replenish_max_per_frame_overridden {
+            // Dense replenishment floods long EuRoC runs with weak points and
+            // destabilizes late-window VI-BA. Keep a conservative default cap
+            // when motion-VI-init + local VI-BA are active together.
+            stereo_landmark_replenish_max_per_frame = 10;
+        }
+        if motion_vi_init_enabled {
+            // Tighten replenishment geometry for motion-VI runs unless users
+            // explicitly override each knob.
+            if !stereo_landmark_replenish_anchor_match_radius_px_overridden {
+                stereo_landmark_replenish_anchor_match_radius_px = Some(2.0);
+            }
+            if !stereo_landmark_replenish_duplicate_radius_px_overridden {
+                stereo_landmark_replenish_duplicate_radius_px = Some(5.0);
+            }
+            if !stereo_landmark_replenish_min_parallax_deg_overridden {
+                stereo_landmark_replenish_min_parallax_deg = Some(1.5);
+            }
+            if !stereo_landmark_replenish_min_depth_meters_overridden {
+                stereo_landmark_replenish_min_depth_meters = Some(0.5);
+            }
+            if !stereo_landmark_replenish_max_depth_meters_overridden {
+                stereo_landmark_replenish_max_depth_meters = Some(15.0);
+            }
+        }
+    }
+    if local_vi_ba_enabled && motion_vi_init_enabled {
+        if local_vi_ba_reject_final_imu_nis_per_dof_above.is_none() {
+            local_vi_ba_reject_final_imu_nis_per_dof_above = motion_vi_init_max_imu_nis_per_dof;
+        }
+        if local_vi_ba_reject_velocity_above_mps.is_none() {
+            // Keep the motion-init velocity ceiling. Softening to 12 m/s
+            // with looser pose gates (gate43) let late 0.5–0.9 m writebacks
+            // through and regressed rigid ATE vs gate42.
+            local_vi_ba_reject_velocity_above_mps = motion_vi_init_max_velocity_mps;
+        }
+        if local_vi_ba_reject_gyro_bias_above_rad_s.is_none() {
+            local_vi_ba_reject_gyro_bias_above_rad_s = motion_vi_init_max_gyro_bias_rad_s;
+        }
+        if local_vi_ba_reject_accel_bias_above_mps2.is_none() {
+            local_vi_ba_reject_accel_bias_above_mps2 = motion_vi_init_max_accel_bias_mps2;
+        }
+        if local_vi_ba_reject_pose_translation_above_meters.is_none() {
+            // Gate42 best: block >0.5 m jumps. Softening to 1.0 m (gate43)
+            // accepted frames 425–480 and blew max rigid ATE to ~61 m.
+            local_vi_ba_reject_pose_translation_above_meters = Some(0.5);
+        }
+        if local_vi_ba_reject_pose_rotation_above_degrees.is_none() {
+            // Gate42 best: block >5°. Softening to 8° admitted 6–7°
+            // corrections that then path-dependently enlarged later steps.
+            local_vi_ba_reject_pose_rotation_above_degrees = Some(5.0);
+        }
+        if local_vi_ba_freeze_biases_above.is_none() {
+            local_vi_ba_freeze_biases_above = Some(0.9);
+        }
+    }
+    if motion_vi_init_enabled {
+        if !tracking_min_inliers_overridden {
+            // Gate45: rejecting <30-inlier hover poses recovered Sim(3)
+            // scale 0.013 → 0.97 and rigid ATE 1.33 → 0.11 m on MH_01 800f.
+            // Softening to 15 (gate46) path-dependently worsened both.
+            tracking_min_inliers = 30;
+        }
+        if max_pose_jump_meters.is_none() {
+            // Constant-pose prior: this is a per-frame teleport cap.
+            // EuRoC 20 Hz at 2 m/s is 0.1 m/frame; 0.2 m still allows
+            // takeoff while blocking the 0.22–0.73 m hover teleports.
+            max_pose_jump_meters = Some(0.2);
+        }
+        if keyframe_min_inliers.is_none() {
+            // Tracking may succeed at 30 inliers; promoting those frames
+            // as KFs poisons the map during hover. Keep the local map
+            // seeded from well-supported poses only.
+            keyframe_min_inliers = Some(80);
+        }
+        if !mutual_softmax_matcher_overridden && !cross_check_matcher {
+            // Gate54: mutual-softmax lifted tracking 0.37 → 0.55 while
+            // keeping Sim(3) scale ~0.79 (vs collapsed 0.01 without the
+            // inlier/jump locks). Slower than brute-force, but usable.
+            mutual_softmax_matcher = true;
+        }
+        if !motion_model_overridden {
+            // Gate62: adaptive-imu-pose + MS → tracking 0.56 / scale 0.93
+            // (vs constant-pose gate54 0.55 / 0.79). Pure `--motion-model
+            // imu` (gate61) kept scale but dropped tracking to 0.22.
+            motion_model = MotionModelKind::AdaptiveImuPose;
+            if !pnp_pose_prior_warm_start_overridden {
+                pnp_pose_prior_warm_start = true;
+            }
+        }
+        // Do NOT default accept-motion-prior-on-failure: gate67 unlimited
+        // coast hit tracking=1.0 but collapsed Sim(3) scale to 0.02
+        // (626 coasts). Cap+flag remain opt-in for gated A/B.
+        if !temporal_landmark_tracking_overridden {
+            // Image-free temporal track of previous PnP inliers — Basalt
+            // KLT analogue for the SuperPoint descriptor frontend.
+            // Gate70 (history=1): tracking 0.68 / rigid ATE 0.068 m.
+            // Gate71 (history=5): tracking collapsed to 0.24 — stale
+            // landmarks poison the temporal PnP. Keep history=1 default.
+            temporal_landmark_tracking = true;
+        }
+        // Do NOT default temporal history > 1 (gate71). Keep CLI opt-in.
+        // Do NOT default pose-prior-visual-override: gate58/60 raised
+        // tracking but collapsed Sim(3) scale. Keep opt-in.
+        // Do NOT default pose-jump-gap-scaling (gate50: scale 0.55) or
+        // covis local map (gate52). Keep those as opt-in.
+    }
+    if pose_prior_visual_override && max_pose_jump_meters.is_none() {
+        return Err("--pose-prior-visual-override requires --max-pose-jump-meters".into());
+    }
+    if !mutual_softmax_temperature.is_finite() || mutual_softmax_temperature < 0.0 {
+        return Err("--mutual-softmax-temperature must be finite and >= 0".into());
+    }
+    if !mutual_softmax_min_confidence.is_finite()
+        || mutual_softmax_min_confidence <= 0.0
+        || mutual_softmax_min_confidence > 1.0
+    {
+        return Err("--mutual-softmax-min-confidence must be in (0, 1]".into());
     }
     if !motion_vi_init_enabled
         && (motion_vi_init_max_velocity_mps.is_some()
@@ -3302,6 +3625,67 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             );
         }
     }
+    if let Some(path) = basalt_config_path.as_ref() {
+        let loaded = visloc_rs::vision::optical_flow::BasaltVioConfigFile::from_path(path)
+            .map_err(|e| format!("--basalt-config {}: {e}", path.display()))?;
+        let cfg = loaded.value0;
+        // Faithful Basalt EuRoC profile: enable the sliding-window VI-BA path
+        // and map the published knobs 1:1 where we already have plumbing.
+        local_vi_ba_enabled = true;
+        local_vi_ba_marginalization = true;
+        local_vi_ba_use_sqrt_window_marginalization = cfg.vio_sqrt_marg;
+        local_vi_ba_window_size = cfg.vio_max_kfs.max(2) as usize;
+        optical_flow_config = cfg.optical_flow.clone();
+        // Stereo LK keeps Basalt FB²=0.04. Temporal gets a looser gate so
+        // velocity-seeded tracks that survive LSSD are not culled by a
+        // sub-pixel FB residual under EuRoC rotation.
+        optical_flow_config.optical_flow_temporal_max_recovered_dist2 = Some(4.0);
+        feature_extractor = FeatureExtractorKind::OpticalFlow;
+        // Track-id descriptors are exact matches; mutual-softmax / SuperPoint
+        // cliff defaults do not apply to the Basalt OF frontend.
+        if !mutual_softmax_matcher_overridden {
+            mutual_softmax_matcher = false;
+        }
+        if !tracking_min_inliers_overridden {
+            // Stereo-seeded OF maps start with tens of landmarks; tracks thin
+            // out under FB=0.04. 8 keeps early frames alive without the
+            // SuperPoint cliff (80) defaults.
+            tracking_min_inliers = 8;
+        }
+        // SuperPoint hover gate (80) is unreachable for a ~50-landmark stereo seed.
+        keyframe_min_inliers = Some(8);
+        // Track-id maps go dark when KLT drops every ID; stereo re-bootstrap
+        // re-seeds metric landmarks under the *current* track ids.
+        if rebootstrap_after_lost_frames.is_none() {
+            rebootstrap_after_lost_frames = Some(5);
+        }
+        if rebootstrap_cooldown_frames == 60 {
+            rebootstrap_cooldown_frames = 20;
+        }
+        // Motion-VI path caps replenish at 10/frame; OF track turnover needs
+        // a higher mint rate so new stereo LMs replace dying IDs before the
+        // map goes dark in the mid-sequence cliff.
+        if !stereo_landmark_replenish_max_per_frame_overridden {
+            stereo_landmark_replenish_max_per_frame = 40;
+        }
+        eprintln!(
+            "basalt profile loaded from {} \
+             (vio_max_kfs={}, vio_sqrt_marg={}, frontend=optical-flow, \
+             of_levels={}, of_pattern={}, of_grid={})",
+            path.display(),
+            cfg.vio_max_kfs,
+            cfg.vio_sqrt_marg,
+            cfg.optical_flow.optical_flow_levels,
+            cfg.optical_flow.optical_flow_pattern,
+            cfg.optical_flow.optical_flow_detection_grid_size
+        );
+        if cfg.optical_flow.optical_flow_type != "frame_to_frame" {
+            eprintln!(
+                "warning: optical_flow_type={} (only frame_to_frame is implemented)",
+                cfg.optical_flow.optical_flow_type
+            );
+        }
+    }
     Ok(CliArgs {
         euroc_dir,
         out_dir,
@@ -3331,6 +3715,10 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         local_vi_ba_enabled,
         observation_confidence_ba_enabled,
         local_vi_ba_marginalization,
+        local_vi_ba_use_sqrt_window_marginalization,
+        local_vi_ba_window_size,
+        basalt_config_path,
+        optical_flow_config,
         local_vi_ba_initial_prior_std_devs,
         local_vi_ba_freeze_biases_above,
         local_vi_ba_reject_writeback_above,
@@ -3397,6 +3785,10 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         stereo_landmark_replenish_max_depth_meters,
         max_pose_jump_meters,
         pose_prior_visual_override,
+        accept_motion_prior_on_failure,
+        max_consecutive_motion_prior_coasts,
+        temporal_landmark_tracking,
+        temporal_landmark_tracking_history_frames,
         pose_jump_gap_scaling,
         pose_jump_gap_scaling_max_multiplier,
         tracking_min_inliers,
@@ -3422,6 +3814,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         imu_motion_model_carry_forward_velocity,
         cross_check_matcher,
         mutual_softmax_matcher,
+        mutual_softmax_temperature,
+        mutual_softmax_min_confidence,
         feature_extractor,
         hog_max_features,
         hog_min_corner_score,
@@ -3830,6 +4224,75 @@ fn undistort_feature_keypoints(
         keypoints,
         descriptors,
     }
+}
+
+/// Same-timestamp cam0→cam1 LK for OF without touching the temporal tracker.
+///
+/// Returns a cam1 [`FeatureSet`] whose descriptors are copies of the matched
+/// cam0 track-id descriptors so replenish / rebootstrap matcher paths keep
+/// working. Correspondences also pass Basalt's epipolar gate.
+#[cfg(feature = "image-io")]
+#[allow(clippy::too_many_arguments)]
+fn optical_flow_stereo_features_for_frame(
+    of_extractor: &visloc_rs::vision::optical_flow::OpticalFlowFeatureExtractor,
+    cam0_image: &GrayscaleImage,
+    cam1_image: &GrayscaleImage,
+    features_raw: &FeatureSet,
+    features_undist: &FeatureSet,
+    cam0_distortion: &RadialTangential,
+    cam0_camera: &Camera,
+    cam1_distortion: &RadialTangential,
+    cam1_camera: &Camera,
+    cam0_to_cam1: &SE3,
+    epipolar_thresh: f64,
+) -> Option<FeatureSet> {
+    let left_pts: Vec<(f32, f32)> = features_raw
+        .keypoints
+        .iter()
+        .map(|p| (p.x as f32, p.y as f32))
+        .collect();
+    let tracked = of_extractor.track_points_to(cam0_image, cam1_image, &left_pts);
+
+    let mut right_undist_by_raw = vec![None; features_raw.keypoints.len()];
+    for (raw_i, right) in tracked.into_iter().enumerate() {
+        let Some((rx, ry)) = right else {
+            continue;
+        };
+        right_undist_by_raw[raw_i] =
+            cam1_distortion.undistort_pixel(cam1_camera, Point2::new(rx as f64, ry as f64));
+    }
+
+    let mut correspondences = Vec::new();
+    let mut left_undist_idx = 0usize;
+    for (raw_i, kp) in features_raw.keypoints.iter().enumerate() {
+        let Some(undist_left) = cam0_distortion.undistort_pixel(cam0_camera, *kp) else {
+            continue;
+        };
+        debug_assert_eq!(features_undist.keypoints[left_undist_idx], undist_left);
+        if let Some(undist_right) = right_undist_by_raw[raw_i] {
+            correspondences.push((left_undist_idx, undist_right));
+        }
+        left_undist_idx += 1;
+    }
+    let correspondences = visloc_rs::vision::stereo_bootstrap::filter_correspondences_by_epipolar(
+        cam0_camera,
+        cam1_camera,
+        cam0_to_cam1,
+        &features_undist.keypoints,
+        &correspondences,
+        epipolar_thresh,
+    );
+    if correspondences.is_empty() {
+        return None;
+    }
+
+    let mut keypoints = Vec::with_capacity(correspondences.len());
+    let mut descriptors = Vec::with_capacity(correspondences.len());
+    for &(left_idx, right_px) in &correspondences {
+        keypoints.push(right_px);
+        descriptors.push(features_undist.descriptors[left_idx].clone());
+    }
+    FeatureSet::new(keypoints, descriptors).ok()
 }
 
 /// Adapt a [`FeatureSet`] into a [`Frame`] addressed to the cam0 camera id.
@@ -4540,6 +5003,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             DemoExtractor::SuperPointOnnx(extractor)
         }
+        FeatureExtractorKind::OpticalFlow => {
+            println!(
+                "using Basalt-style optical-flow frontend (levels={}, pattern={}, grid={}, max_iters={})",
+                args.optical_flow_config.optical_flow_levels,
+                args.optical_flow_config.optical_flow_pattern,
+                args.optical_flow_config.optical_flow_detection_grid_size,
+                args.optical_flow_config.optical_flow_max_iterations,
+            );
+            DemoExtractor::OpticalFlow(
+                visloc_rs::vision::optical_flow::OpticalFlowFeatureExtractor::new(
+                    args.optical_flow_config.clone(),
+                ),
+            )
+        }
     };
     extractor.set_camera(SuperPointCamera::Cam0);
     extractor.set_frame_idx(seed_frame_idx);
@@ -4632,54 +5109,152 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 cam1_image_path.display()
             )
         })?;
-        // For the offline-replay path, switch the extractor to cam1
-        // and to the cam1 seed frame index. The cam0/cam1 SuperPoint
-        // pre-exports are aligned by frame index (the EuRoC streams
-        // share a 20 Hz cadence), so the cam1 features at
-        // `cam1_seed_idx` correspond to the cam0 seed timestamp.
-        extractor.set_camera(SuperPointCamera::Cam1);
-        extractor.set_frame_idx(cam1_seed_idx);
-        let cam1_features_raw = extractor
-            .extract(&cam1_image)
-            .map_err(|err| format!("cam1 seed-frame feature extraction failed: {err}"))?;
-        // Restore the loop-path defaults so subsequent cam0 extracts
-        // pick up the correct stream.
-        extractor.set_camera(SuperPointCamera::Cam0);
-        stereo_cam1_features_count = cam1_features_raw.len();
-        let cam1_features =
-            undistort_feature_keypoints(cam1_distortion, cam1_camera, &cam1_features_raw);
-        stereo_cam1_features_after_undistort_count = cam1_features.len();
-        stereo_bootstrap_matches = bootstrap_stereo_landmarks(
-            &camera,
-            cam1_camera,
-            cam0_to_cam1,
-            &seed_features,
-            &cam1_features,
-            &StereoBootstrapConfig::default(),
-        );
-        let cam0_pose_camera_to_world = seed_pose.camera_to_world();
-        let rotation_camera_to_world = cam0_pose_camera_to_world
-            .rotation
-            .to_rotation_matrix()
-            .into_inner();
-        for survivor in &stereo_bootstrap_matches {
-            let world_point =
-                cam0_pose_camera_to_world.transform_point(&survivor.point_left_camera_frame);
-            stereo_world_points[survivor.left_keypoint_index] = Some(world_point);
-            stereo_world_covariances[survivor.left_keypoint_index] = Some(
-                rotation_camera_to_world
-                    * survivor.point_covariance_left_camera_frame
-                    * rotation_camera_to_world.transpose(),
+        if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
+            // Basalt stereo: LK each cam0 track into cam1 at the same timestamp
+            // on *raw* pixels, then undistort both sides before triangulation.
+            let DemoExtractor::OpticalFlow(ref of_extractor) = extractor else {
+                unreachable!("OpticalFlow kind requires OpticalFlow extractor");
+            };
+            let left_pts: Vec<(f32, f32)> = seed_features_raw
+                .keypoints
+                .iter()
+                .map(|p| (p.x as f32, p.y as f32))
+                .collect();
+            let tracked = of_extractor.track_points_to(&seed_image, &cam1_image, &left_pts);
+            stereo_cam1_features_count = tracked.iter().filter(|p| p.is_some()).count();
+
+            let mut right_undist_by_raw = vec![None; seed_features_raw.keypoints.len()];
+            for (raw_i, right) in tracked.into_iter().enumerate() {
+                let Some((rx, ry)) = right else {
+                    continue;
+                };
+                right_undist_by_raw[raw_i] =
+                    cam1_distortion.undistort_pixel(cam1_camera, Point2::new(rx as f64, ry as f64));
+            }
+
+            let mut correspondences = Vec::new();
+            let mut left_undist_idx = 0usize;
+            for (raw_i, kp) in seed_features_raw.keypoints.iter().enumerate() {
+                let Some(undist_left) = distortion.undistort_pixel(&camera, *kp) else {
+                    continue;
+                };
+                debug_assert_eq!(
+                    seed_features.keypoints[left_undist_idx], undist_left,
+                    "undistort filter order must match seed_features"
+                );
+                if let Some(undist_right) = right_undist_by_raw[raw_i] {
+                    correspondences.push((left_undist_idx, undist_right));
+                    stereo_right_pixels[left_undist_idx] = Some(undist_right);
+                }
+                left_undist_idx += 1;
+            }
+            stereo_cam1_features_after_undistort_count = correspondences.len();
+            let epi_thresh = args
+                .optical_flow_config
+                .optical_flow_epipolar_error
+                .max(0.0) as f64;
+            let before_epi = correspondences.len();
+            let correspondences =
+                visloc_rs::vision::stereo_bootstrap::filter_correspondences_by_epipolar(
+                    &camera,
+                    cam1_camera,
+                    cam0_to_cam1,
+                    &seed_features.keypoints,
+                    &correspondences,
+                    epi_thresh,
+                );
+            if before_epi != correspondences.len() {
+                eprintln!(
+                    "basalt OF stereo epipolar: {before_epi} -> {} (thresh={epi_thresh})",
+                    correspondences.len()
+                );
+            }
+            // Refresh right-pixel slots to epipolar survivors only.
+            for slot in stereo_right_pixels.iter_mut() {
+                *slot = None;
+            }
+            for &(left_idx, right_px) in &correspondences {
+                stereo_right_pixels[left_idx] = Some(right_px);
+            }
+            stereo_bootstrap_matches = bootstrap_stereo_landmarks_from_correspondences(
+                &camera,
+                cam1_camera,
+                cam0_to_cam1,
+                &seed_features.keypoints,
+                &correspondences,
+                &StereoBootstrapConfig::default(),
             );
-            stereo_right_pixels[survivor.left_keypoint_index] =
-                Some(cam1_features.keypoints[survivor.right_keypoint_index]);
-        }
-        println!(
+            let cam0_pose_camera_to_world = seed_pose.camera_to_world();
+            let rotation_camera_to_world = cam0_pose_camera_to_world
+                .rotation
+                .to_rotation_matrix()
+                .into_inner();
+            for survivor in &stereo_bootstrap_matches {
+                let world_point =
+                    cam0_pose_camera_to_world.transform_point(&survivor.point_left_camera_frame);
+                stereo_world_points[survivor.left_keypoint_index] = Some(world_point);
+                stereo_world_covariances[survivor.left_keypoint_index] = Some(
+                    rotation_camera_to_world
+                        * survivor.point_covariance_left_camera_frame
+                        * rotation_camera_to_world.transpose(),
+                );
+            }
+            println!(
+                "stereo_bootstrap(optical-flow) cam1_seed_idx={cam1_seed_idx} \
+                 lk_survivors={} triangulated_matches={}",
+                stereo_cam1_features_count,
+                stereo_bootstrap_matches.len(),
+            );
+        } else {
+            // For the offline-replay path, switch the extractor to cam1
+            // and to the cam1 seed frame index. The cam0/cam1 SuperPoint
+            // pre-exports are aligned by frame index (the EuRoC streams
+            // share a 20 Hz cadence), so the cam1 features at
+            // `cam1_seed_idx` correspond to the cam0 seed timestamp.
+            extractor.set_camera(SuperPointCamera::Cam1);
+            extractor.set_frame_idx(cam1_seed_idx);
+            let cam1_features_raw = extractor
+                .extract(&cam1_image)
+                .map_err(|err| format!("cam1 seed-frame feature extraction failed: {err}"))?;
+            // Restore the loop-path defaults so subsequent cam0 extracts
+            // pick up the correct stream.
+            extractor.set_camera(SuperPointCamera::Cam0);
+            stereo_cam1_features_count = cam1_features_raw.len();
+            let cam1_features =
+                undistort_feature_keypoints(cam1_distortion, cam1_camera, &cam1_features_raw);
+            stereo_cam1_features_after_undistort_count = cam1_features.len();
+            stereo_bootstrap_matches = bootstrap_stereo_landmarks(
+                &camera,
+                cam1_camera,
+                cam0_to_cam1,
+                &seed_features,
+                &cam1_features,
+                &StereoBootstrapConfig::default(),
+            );
+            let cam0_pose_camera_to_world = seed_pose.camera_to_world();
+            let rotation_camera_to_world = cam0_pose_camera_to_world
+                .rotation
+                .to_rotation_matrix()
+                .into_inner();
+            for survivor in &stereo_bootstrap_matches {
+                let world_point =
+                    cam0_pose_camera_to_world.transform_point(&survivor.point_left_camera_frame);
+                stereo_world_points[survivor.left_keypoint_index] = Some(world_point);
+                stereo_world_covariances[survivor.left_keypoint_index] = Some(
+                    rotation_camera_to_world
+                        * survivor.point_covariance_left_camera_frame
+                        * rotation_camera_to_world.transpose(),
+                );
+                stereo_right_pixels[survivor.left_keypoint_index] =
+                    Some(cam1_features.keypoints[survivor.right_keypoint_index]);
+            }
+            println!(
             "stereo_bootstrap cam1_seed_idx={cam1_seed_idx} cam1_features={} after_undistort={} triangulated_matches={}",
             stereo_cam1_features_count,
             stereo_cam1_features_after_undistort_count,
             stereo_bootstrap_matches.len(),
         );
+        }
     }
 
     let mut map = bootstrap_map_from_first_frame(
@@ -4779,6 +5354,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             initializer: MotionBasedViInitializerConfig {
                 min_keyframes: args.motion_vi_init_min_keyframes,
                 min_translation_meters: args.motion_vi_init_min_translation_meters,
+                max_solve_keyframes: Some(5),
                 gravity_world: args.gravity_world,
                 body_to_camera: body_to_camera.clone(),
                 viba2,
@@ -4826,6 +5402,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             reject_writeback_when_pose_rotation_above_radians: args
                 .local_vi_ba_reject_pose_rotation_above_degrees
                 .map(f64::to_radians),
+            reject_writeback_when_observation_count_below: args
+                .motion_vi_init_enabled
+                .then_some(20),
+            writeback_navigation_state_despite_pose_gate: args.motion_vi_init_enabled,
             reject_gyro_bias_above_rad_s: args.local_vi_ba_reject_gyro_bias_above_rad_s,
             reject_accel_bias_above_mps2: args.local_vi_ba_reject_accel_bias_above_mps2,
             adaptive_velocity_gate: args.local_vi_ba_adaptive_velocity_gate.then_some(
@@ -4840,7 +5420,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
             relinearise_imu_factor_bias_thresholds: args.relinearise_imu_factor_bias_thresholds,
             run_at_vi_init_promotion: args.run_local_vi_ba_at_vi_init_promotion,
-            marginalize_navigation_state: args.local_vi_ba_marginalization,
+            marginalize_navigation_state: args.local_vi_ba_marginalization
+                || args.local_vi_ba_use_sqrt_window_marginalization,
+            use_sqrt_window_marginalization: args.local_vi_ba_use_sqrt_window_marginalization,
+            window_size: args.local_vi_ba_window_size,
             initial_navigation_prior_std_devs: args.local_vi_ba_initial_prior_std_devs,
             use_observation_confidence_weights: args.observation_confidence_ba_enabled,
             ..OnlineSlamLocalBaConfig::default()
@@ -4997,6 +5580,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             },
         })
+    } else if args.local_vi_ba_marginalization && args.local_vi_ba_use_sqrt_window_marginalization {
+        Some(OnlineSlamLoopClosureRefinementConfig::recovered_factor_sink(camera.clone()))
     } else {
         None
     };
@@ -5066,9 +5651,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tracking_config = TrackingConfig {
         covisibility_local_map: covisibility_config,
         max_pose_prior_translation_error: args.max_pose_jump_meters,
-        pose_prior_visual_override: args
-            .pose_prior_visual_override
-            .then(PosePriorVisualOverrideConfig::default),
+        pose_prior_visual_override: args.pose_prior_visual_override.then(|| {
+            if args.motion_vi_init_enabled {
+                // Gate58 (50/5×) and gate60 (80/0.30/2×) both raised
+                // tracking but collapsed Sim(3) scale (→0.28 / →0.19).
+                // Gate59 (80/0.5/2×) never fired (PPT≥80 ratio p50≈0.45).
+                // Keep a conservative opt-in bar; do not default — the
+                // 0.2 m jump lock is what preserves metric scale.
+                PosePriorVisualOverrideConfig {
+                    min_inliers: 80,
+                    min_inlier_ratio: 0.50,
+                    max_mean_reprojection_error: Some(3.0),
+                    max_rotation_error_radians: Some(2.0_f64.to_radians()),
+                    max_translation_error_multiplier: 2.0,
+                    ..PosePriorVisualOverrideConfig::default()
+                }
+            } else {
+                PosePriorVisualOverrideConfig::default()
+            }
+        }),
+        accept_motion_prior_on_failure: args.accept_motion_prior_on_failure,
+        max_consecutive_motion_prior_coasts: args.max_consecutive_motion_prior_coasts,
+        temporal_landmark_tracking: args.temporal_landmark_tracking,
+        temporal_landmark_tracking_history_frames: args.temporal_landmark_tracking_history_frames,
         min_inliers: args.tracking_min_inliers,
         min_inlier_ratio: args.tracking_min_inlier_ratio,
         max_mean_reprojection_error: args.tracking_max_reprojection_error,
@@ -5131,7 +5736,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let demo_matcher = if args.mutual_softmax_matcher {
-        DemoMatcher::MutualSoftmax(MutualSoftmaxMatcher::new(MutualSoftmaxConfig::default()))
+        DemoMatcher::MutualSoftmax(MutualSoftmaxMatcher::new(MutualSoftmaxConfig {
+            temperature: args.mutual_softmax_temperature,
+            min_confidence: args.mutual_softmax_min_confidence,
+            ..MutualSoftmaxConfig::default()
+        }))
+    } else if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
+        // Track-id descriptors are exact; Lowe ratio is harmful and any
+        // non-zero NN latch onto a neighbour id poisons PnP.
+        DemoMatcher::MaxDistance {
+            inner: BruteForceMatcher { ratio: None },
+            max_distance: 1.0e-3,
+        }
     } else if args.cross_check_matcher {
         DemoMatcher::CrossCheck(CrossCheckMatcher::new(BruteForceMatcher {
             ratio: localization_config.ratio,
@@ -5151,6 +5767,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut cfg = KeyframePolicyConfig::default();
         if let Some(m) = args.keyframe_min_translation {
             cfg.min_translation = m;
+        } else if args.motion_vi_init_enabled {
+            // 1.0 m (library default) yields ~20 KFs / 400f on MH_01; gyro
+            // alignment then sits at ~0.3 rad. 0.05 m is dense enough for a
+            // 3-keyframe IMU window before VO rotation drifts.
+            cfg.min_translation = 0.05;
         }
         if let Some(gap) = args.keyframe_min_frame_gap {
             cfg.min_frame_id_gap = gap;
@@ -5464,11 +6085,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut local_vi_ba_stereo_observation_total: usize = 0;
     let mut local_vi_ba_marginalization_priors_applied: usize = 0;
     let mut local_vi_ba_marginalization_successes: usize = 0;
+    let mut local_vi_ba_recovered_marginal_factors_injected: usize = 0;
+    let mut local_vi_ba_recovered_marginal_factors_enqueued: usize = 0;
     let mut local_vi_ba_quality_gate_rejections: usize = 0;
     let mut local_vi_ba_cost_ratio_gate_rejections: usize = 0;
     let mut local_vi_ba_imu_nis_gate_rejections: usize = 0;
     let mut local_vi_ba_velocity_gate_rejections: usize = 0;
     let mut local_vi_ba_pose_correction_gate_rejections: usize = 0;
+    let mut local_vi_ba_navigation_state_partial_writebacks: usize = 0;
     let mut local_vi_ba_max_pose_translation_correction_meters: f64 = 0.0;
     let mut local_vi_ba_max_pose_rotation_correction_degrees: f64 = 0.0;
     let mut local_vi_ba_bias_magnitude_gate_rejections: usize = 0;
@@ -5664,13 +6288,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
         extractor.set_frame_idx(frame_idx);
-        let features = match extractor.extract(&image) {
-            Ok(features) => undistort_feature_keypoints(&distortion, &camera, &features),
-            Err(err) => {
-                eprintln!("skipping frame_idx={frame_idx} due to feature-extraction error: {err}");
-                continue;
-            }
-        };
+        let (features_raw, features) =
+            if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow)
+                && frame_idx == seed_frame_idx
+            {
+                // Reuse the exact FeatureSet that seeded the map so track-id
+                // descriptors match 1:1. Re-running KLT on the seed image can
+                // drop tracks and mint new ids, zeroing localization.
+                (seed_features_raw.clone(), seed_features.clone())
+            } else {
+                match extractor.extract(&image) {
+                    Ok(raw) => {
+                        let undist = undistort_feature_keypoints(&distortion, &camera, &raw);
+                        (raw, undist)
+                    }
+                    Err(err) => {
+                        eprintln!(
+                            "skipping frame_idx={frame_idx} due to feature-extraction error: {err}"
+                        );
+                        continue;
+                    }
+                }
+            };
         feature_count_sum += features.len();
         feature_count_min = feature_count_min.min(features.len());
         feature_count_max = feature_count_max.max(features.len());
@@ -5717,19 +6356,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .cam1_image_dir
                         .join(&dataset.cam1_images[cam1_idx].filename);
                     if let Ok(cam1_image) = read_common_image(&cam1_image_path) {
-                        extractor.set_camera(SuperPointCamera::Cam1);
-                        extractor.set_frame_idx(cam1_idx);
-                        let extracted = extractor.extract(&cam1_image);
-                        extractor.set_camera(SuperPointCamera::Cam0);
-                        if let Ok(raw) = extracted {
-                            let cam1_features = undistort_feature_keypoints(
+                        if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow) {
+                            // Stereo LK via track_points_to — does not touch
+                            // the cam0-temporal OF tracker state.
+                            let DemoExtractor::OpticalFlow(ref of_extractor) = extractor else {
+                                unreachable!("OpticalFlow kind requires OpticalFlow extractor");
+                            };
+                            optical_flow_stereo_features_for_frame(
+                                of_extractor,
+                                &image,
+                                &cam1_image,
+                                &features_raw,
+                                &features,
+                                &distortion,
+                                &camera,
                                 &cam1_setup.distortion,
                                 &cam1_setup.camera,
-                                &raw,
-                            );
-                            Some(cam1_features)
+                                &cam1_setup.cam0_to_cam1,
+                                args.optical_flow_config
+                                    .optical_flow_epipolar_error
+                                    .max(0.0) as f64,
+                            )
                         } else {
-                            None
+                            extractor.set_camera(SuperPointCamera::Cam1);
+                            extractor.set_frame_idx(cam1_idx);
+                            let extracted = extractor.extract(&cam1_image);
+                            extractor.set_camera(SuperPointCamera::Cam0);
+                            if let Ok(raw) = extracted {
+                                let cam1_features = undistort_feature_keypoints(
+                                    &cam1_setup.distortion,
+                                    &cam1_setup.camera,
+                                    &raw,
+                                );
+                                Some(cam1_features)
+                            } else {
+                                None
+                            }
                         }
                     } else {
                         None
@@ -6720,6 +7382,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if stats.marginalization_succeeded {
                 local_vi_ba_marginalization_successes += 1;
             }
+            local_vi_ba_recovered_marginal_factors_injected +=
+                stats.recovered_marginal_factors_injected;
+            local_vi_ba_recovered_marginal_factors_enqueued +=
+                stats.recovered_marginal_factors_enqueued;
             if stats.quality_gate_rejected {
                 local_vi_ba_quality_gate_rejections += 1;
             }
@@ -6734,6 +7400,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             if stats.pose_correction_gate_rejected {
                 local_vi_ba_pose_correction_gate_rejections += 1;
+            }
+            if stats.navigation_state_partially_written {
+                local_vi_ba_navigation_state_partial_writebacks += 1;
             }
             local_vi_ba_max_pose_translation_correction_meters =
                 local_vi_ba_max_pose_translation_correction_meters
@@ -6794,7 +7463,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 fmt_optional(final_cost.imu_velocity_residual_rms_mps),
                 fmt_optional(final_cost.imu_position_residual_rms_meters),
             ));
-            if !stats.bias_frozen && !stats.quality_gate_rejected {
+            if !stats.bias_frozen
+                && (!stats.quality_gate_rejected || stats.navigation_state_partially_written)
+            {
                 if let (Some(state), Some(latest_kf)) = (
                     slam.local_vi_ba_state.as_ref(),
                     stats.window_keyframe_ids.last().copied(),
@@ -7984,6 +8655,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          atlas_aligned_owned_landmark_count={atlas_aligned_owned_landmark_count}\n\
          atlas_welded_landmark_reduction={atlas_welded_landmark_reduction}\n\
          pose_prior_visual_override_count={pose_prior_visual_override_count}\n\
+         motion_prior_coast_count={motion_prior_coast_count}\n\
+         temporal_landmark_attempt_count={temporal_landmark_attempt_count}\n\
+         temporal_landmark_success_count={temporal_landmark_success_count}\n\
          imu_samples_consumed={imu_idx}\n\
          vi_init_preseed_samples={vi_init_preseed_samples}\n\
          seed_frame_idx={seed_frame_idx}\n\
@@ -8028,6 +8702,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          motion_vi_init_status_final={final_motion_vi_status:?}\n\
          local_vi_ba_enabled={local_vi_ba_enabled}\n\
          local_vi_ba_marginalization={local_vi_ba_marginalization}\n\
+         local_vi_ba_use_sqrt_window_marginalization={local_vi_ba_use_sqrt_window_marginalization}\n\
+         local_vi_ba_window_size={local_vi_ba_window_size}\n\
+         basalt_config_path={basalt_config_path}\n\
          local_vi_ba_general_stereo=true\n\
          local_vi_ba_initial_prior_std_devs={local_vi_ba_initial_prior_std_devs:?}\n\
          local_vi_ba_freeze_biases_above={local_vi_ba_freeze:?}\n\
@@ -8214,6 +8891,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          pose_graph_refinement_tracker_corrections_applied={pgr_tracker_corrections_applied}\n\
          max_pose_jump_meters={max_pose_jump:?}\n\
          pose_prior_visual_override={pose_prior_visual_override}\n\
+         accept_motion_prior_on_failure={accept_motion_prior_on_failure}\n\
+         temporal_landmark_tracking={temporal_landmark_tracking}\n\
+         temporal_landmark_tracking_history_frames={temporal_landmark_history}\n\
          pose_jump_gap_scaling={pose_jump_gap_scaling}\n\
          pose_jump_gap_scaling_max_multiplier={pose_jump_gap_scaling_max_multiplier}\n\
          tracking_min_inliers={tracking_min_inliers}\n\
@@ -8253,6 +8933,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          adaptive_motion_final_mode={adaptive_final_mode}\n\
          cross_check_matcher={cross_check}\n\
          mutual_softmax_matcher={mutual_softmax}\n\
+         mutual_softmax_temperature={mutual_softmax_temperature}\n\
+         mutual_softmax_min_confidence={mutual_softmax_min_confidence}\n\
          feature_extractor={feature_extractor_kind}\n\
          superpoint_features_dir={superpoint_features_dir:?}\n\
          superpoint_cam1_features_dir={superpoint_cam1_features_dir:?}\n\
@@ -8354,11 +9036,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          local_vi_ba_stereo_observation_total={local_vi_ba_stereo_observation_total}\n\
          local_vi_ba_marginalization_priors_applied={local_vi_ba_marginalization_priors_applied}\n\
          local_vi_ba_marginalization_successes={local_vi_ba_marginalization_successes}\n\
+         local_vi_ba_recovered_marginal_factors_enqueued={local_vi_ba_recovered_marginal_factors_enqueued}\n\
+         local_vi_ba_recovered_marginal_factors_injected={local_vi_ba_recovered_marginal_factors_injected}\n\
          local_vi_ba_quality_gate_rejections={local_vi_ba_quality_gate_rejections}\n\
          local_vi_ba_cost_ratio_gate_rejections={local_vi_ba_cost_ratio_gate_rejections}\n\
          local_vi_ba_imu_nis_gate_rejections={local_vi_ba_imu_nis_gate_rejections}\n\
          local_vi_ba_velocity_gate_rejections={local_vi_ba_velocity_gate_rejections}\n\
          local_vi_ba_pose_correction_gate_rejections={local_vi_ba_pose_correction_gate_rejections}\n\
+         local_vi_ba_navigation_state_partial_writebacks={local_vi_ba_navigation_state_partial_writebacks}\n\
          local_vi_ba_max_pose_translation_correction_meters={local_vi_ba_max_pose_translation_correction_meters:.9}\n\
          local_vi_ba_max_pose_rotation_correction_degrees={local_vi_ba_max_pose_rotation_correction_degrees:.9}\n\
          local_vi_ba_bias_magnitude_gate_rejections={local_vi_ba_bias_magnitude_gate_rejections}\n\
@@ -8400,6 +9085,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             0.0
         },
         pose_prior_visual_override_count = slam.tracker.stats().pose_prior_visual_override_count,
+        motion_prior_coast_count = slam.tracker.stats().motion_prior_coast_count,
+        temporal_landmark_attempt_count = slam.tracker.stats().temporal_landmark_attempt_count,
+        temporal_landmark_success_count = slam.tracker.stats().temporal_landmark_success_count,
         undistort = args.undistort,
         stereo_bootstrap_enabled = args.stereo_bootstrap,
         stereo_bootstrap_strict = args.stereo_bootstrap_strict,
@@ -8430,6 +9118,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         local_vi_ba_enabled = args.local_vi_ba_enabled,
         observation_confidence_ba_enabled = args.observation_confidence_ba_enabled,
         local_vi_ba_marginalization = args.local_vi_ba_marginalization,
+        local_vi_ba_use_sqrt_window_marginalization = args
+            .local_vi_ba_use_sqrt_window_marginalization,
+        local_vi_ba_window_size = args.local_vi_ba_window_size,
+        basalt_config_path = format!("{:?}", args.basalt_config_path),
         local_vi_ba_initial_prior_std_devs = args.local_vi_ba_initial_prior_std_devs,
         local_vi_ba_freeze = args.local_vi_ba_freeze_biases_above,
         local_vi_ba_reject_writeback = args.local_vi_ba_reject_writeback_above,
@@ -8701,6 +9393,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         pgr_tracker_corrections_applied = pose_graph_refinement_tracker_corrections_applied,
         max_pose_jump = args.max_pose_jump_meters,
         pose_prior_visual_override = args.pose_prior_visual_override,
+        accept_motion_prior_on_failure = args.accept_motion_prior_on_failure,
+        temporal_landmark_tracking = args.temporal_landmark_tracking,
+        temporal_landmark_history = args.temporal_landmark_tracking_history_frames,
         pose_jump_gap_scaling = args.pose_jump_gap_scaling,
         pose_jump_gap_scaling_max_multiplier = args.pose_jump_gap_scaling_max_multiplier,
         tracking_min_inliers = args.tracking_min_inliers,
@@ -8782,11 +9477,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         cross_check = args.cross_check_matcher,
         mutual_softmax = args.mutual_softmax_matcher,
+        mutual_softmax_temperature = args.mutual_softmax_temperature,
+        mutual_softmax_min_confidence = args.mutual_softmax_min_confidence,
         feature_extractor_kind = match args.feature_extractor {
             FeatureExtractorKind::Corner => "corner",
             FeatureExtractorKind::Hog => "hog",
             FeatureExtractorKind::SuperPointOffline => "superpoint-offline",
             FeatureExtractorKind::SuperPointOnnx => "superpoint-onnx",
+            FeatureExtractorKind::OpticalFlow => "optical-flow",
         },
         superpoint_features_dir = args.superpoint_features_dir,
         superpoint_cam1_features_dir = args.superpoint_cam1_features_dir,
@@ -8974,11 +9672,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         local_vi_ba_marginalization_priors_applied =
             local_vi_ba_marginalization_priors_applied,
         local_vi_ba_marginalization_successes = local_vi_ba_marginalization_successes,
+        local_vi_ba_recovered_marginal_factors_enqueued =
+            local_vi_ba_recovered_marginal_factors_enqueued,
+        local_vi_ba_recovered_marginal_factors_injected =
+            local_vi_ba_recovered_marginal_factors_injected,
         local_vi_ba_quality_gate_rejections = local_vi_ba_quality_gate_rejections,
         local_vi_ba_cost_ratio_gate_rejections = local_vi_ba_cost_ratio_gate_rejections,
         local_vi_ba_velocity_gate_rejections = local_vi_ba_velocity_gate_rejections,
         local_vi_ba_pose_correction_gate_rejections =
             local_vi_ba_pose_correction_gate_rejections,
+        local_vi_ba_navigation_state_partial_writebacks =
+            local_vi_ba_navigation_state_partial_writebacks,
         local_vi_ba_max_pose_translation_correction_meters =
             local_vi_ba_max_pose_translation_correction_meters,
         local_vi_ba_max_pose_rotation_correction_degrees =

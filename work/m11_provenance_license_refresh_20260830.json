@@ -1,0 +1,152 @@
+{
+  "schema_id": "visloc-rs.basalt-provenance-license-refresh.v1",
+  "captured_at": "2026-08-30",
+  "status": "candidate_only_read_only",
+  "constraints": {
+    "network": false,
+    "build": false,
+    "run": false,
+    "cargo": false,
+    "commit_or_push": false,
+    "existing_manifests_modified": false,
+    "existing_inventory_modified": false,
+    "dirty_tree_preserved": true
+  },
+  "git": {
+    "head": "e07e0c9fd1507a519097b4e0c7bac7ab2afe1977",
+    "dirty_entry_count": 1875,
+    "dirty_status_sha256": "f81a033f20ccc2e879faf69d257893f1af3552b9e60552047d659ccb0ff7a612",
+    "dirty_scope_note": "Shared worktree contains broad pre-existing production, target, test, and artifact edits; no cleanup or attribution was attempted.",
+    "first_observed_entries": [
+      "M .gitignore",
+      "M Cargo.lock",
+      "M Cargo.toml",
+      "M crates/core/src/geometry/mod.rs",
+      "M crates/io/src/euroc.rs",
+      "M crates/vision/src/dense_stereo.rs"
+    ]
+  },
+  "current_bindings": [
+    {"path": "pipelines/basalt/src/vio/aom.rs", "bytes": 642043, "sha256": "afd0a3ac9b7ef6ec4b46d3bb1f622e794af00f3fbfd20c2a8e67ca986ed4dabe", "role": "production_vio"},
+    {"path": "pipelines/basalt/src/vio/window.rs", "bytes": 426392, "sha256": "31921ad916f5756e3de1060fae7b75f0aa4b5e9613158851a89b1ae7f9e9d51b", "role": "production_vio"},
+    {"path": "pipelines/basalt/src/vio/estimator.rs", "bytes": 196458, "sha256": "a43eaa12e79eefbb3a87f2a05354032e981296d8f124cf5a52f60a77ad71b45d", "role": "production_vio"},
+    {"path": "pipelines/basalt/src/vio/margdata.rs", "bytes": 52986, "sha256": "060f18dc1f81ac0a3603e41340647e41c25a4ec7a5a5e007e0e1c3701aaa1274", "role": "production_vio"},
+    {"path": "pipelines/basalt/src/vio/landmarks.rs", "bytes": 83038, "sha256": "5eab7c4749ab92bdec249cf5e9a354cfabd66cfafbc2b328b1cd4d1fa765c831", "role": "production_vio"},
+    {"path": "pipelines/basalt/src/vio/mod.rs", "bytes": 387, "sha256": "032f39f9977ce483a468bae63f4acd88c3ce4c485bdc12928e2917e8664c5742", "role": "production_vio"},
+    {"path": "pipelines/basalt/src/mapper/session.rs", "bytes": 86477, "sha256": "247401d17669c63459de727a9ea5c10578025681c3235f9e1823414cc655102d", "role": "production_mapper"},
+    {"path": "pipelines/basalt/src/pyramid.rs", "bytes": 13124, "sha256": "ef63434ceb0b3ef9ae4740efaa08af5e878ae0bd44a30eb0f4a5ac9c91d016b9", "role": "production_frontend"},
+    {"path": "pipelines/basalt/src/stream.rs", "bytes": 26589, "sha256": "d0a48e28fbc5b6cd76211abdd75ba348d8dbf5cd663a8001b93ef141f770e6b7", "role": "production_streaming"},
+    {"path": "pipelines/basalt/src/streaming.rs", "bytes": 7086, "sha256": "f059bd245b393847e83453e8a02742d91f27e00c4b8bb8a3834615184d0c0106", "role": "production_streaming"},
+    {"path": "pipelines/basalt/src/timing.rs", "bytes": 34793, "sha256": "320294ad25ca3b036e42148f8c53e819ac8fac8c21151bde96e69c6d4a57c5be", "role": "production_timing"},
+    {"path": "pipelines/basalt/src/euroc.rs", "bytes": 22661, "sha256": "d4773ada60baefab6190c0bd45af8610f78ad0e0e640d402ccf59be6f4ac270b", "role": "production_dataset"},
+    {"path": "benchmarks/basalt/phase6_coordinator.py", "bytes": 253824, "sha256": "c966edbea2ed16532bc1cc93d4f0f419acb15be2d5be0e826b06fdf589471093", "role": "coordinator"},
+    {"path": "benchmarks/basalt/native_wsl_runner.py", "bytes": 9386, "sha256": "5aae73217c65ead1ac39643aa48cb739b48df1a492dc55110996cea4ffda59c3", "role": "runner"},
+    {"path": "benchmarks/basalt/rust_wsl_runner.py", "bytes": 12727, "sha256": "b6008dfba5085c7157d064d81b2273c618d9a575c261530c18899de8b7ff234c", "role": "runner"},
+    {"path": "tests/test_basalt_phase6_coordinator.py", "bytes": 83883, "sha256": "803d8650f784820bd7289b9c292abc3a2c5a6e9eee417c6c9685ef74b272f305", "role": "focused_tests"},
+    {"path": "Cargo.toml", "bytes": 6107, "sha256": "a54be7cfad7700b24a6ae3af5dc7efa5a2c04bcc2f3b28e68e304db0ec3f3e54", "role": "workspace_manifest"},
+    {"path": "pipelines/basalt/Cargo.toml", "bytes": 1072, "sha256": "7c1533a4a3c50efeaa6e1428467690f2e7b82b58a0df1ae770a60dbbe2f30ad6", "role": "basalt_manifest"},
+    {"path": "benchmarks/basalt/protocols/basalt_euroc_parity_v1.json", "bytes": 4348, "sha256": "7957f102ffa47a67c3509cdf77942d599e7b0f5f5f2bf452987f87a55df246e5", "role": "protocol"},
+    {"path": "benchmarks/basalt/euroc_dataset_manifest.json", "bytes": 920070, "sha256": "a803db9e01f7a39f587cb9f87fd8601c8800455135ae7a2dc67f9e108003dd26", "role": "dataset_manifest"},
+    {"path": "configs/basalt/euroc_config.json", "bytes": 2401, "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa", "role": "config"},
+    {"path": "target/euroc_ds_calib.json", "bytes": 5967, "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c", "role": "calibration"},
+    {"path": "benchmarks/basalt/README.md", "bytes": 9105, "sha256": "336209dd7313423de0b2a35b2d9c56632f08011896f3ee57b8a264b2654177ad", "role": "documentation"},
+    {"path": "benchmarks/basalt/NOTICE", "bytes": 5253, "sha256": "307e6d77cd2b57c5548f3e650629d659c3aab62729f32bc87b5119b4a5d30841", "role": "notice"},
+    {"path": "pipelines/basalt/NOTICE", "bytes": 10486, "sha256": "24e7aaee0388d60053e382fc60aa1bd241f8912599c7d5358ea57403cfb1484c", "role": "notice"},
+    {"path": "benchmarks/basalt/PROVENANCE_AUDIT.md", "bytes": 7022, "sha256": "5762872a6714106ce8fbae39fe0173617afe0d4f6d7ac449d5a9c02a9bd323c6", "role": "provenance"},
+    {"path": "pipelines/basalt/PROVENANCE.md", "bytes": 4443, "sha256": "fe736d8c8f2aba4522b0e22176b630d702c4e4bee3ff770a1638c1a9a4337781", "role": "provenance"},
+    {"path": "benchmarks/basalt/upstream_manifest.json", "bytes": 20565, "sha256": "2cf7552f2c25e8f987de428ce05b0637b08cc40cd7481d0c13aaf55325f8e00a", "role": "historical_upstream_manifest"},
+    {"path": "benchmarks/basalt/basalt_provenance_manifest_v1.json", "bytes": 46494, "sha256": "76c08147035efaccffa9abeec6bd80d8a9f75d46a0e5331231d43ce8b747c513", "role": "existing_provenance_manifest"},
+    {"path": "benchmarks/basalt/cargo_license_inventory_v1.json", "bytes": 32441, "sha256": "e44bf59a68b1f70a847716a102eae3bbabb355f093e111e86dd272d6ba60e42a", "role": "existing_license_inventory"},
+    {"path": "benchmarks/basalt/verify_provenance.py", "bytes": 25128, "sha256": "9f56c826ecc05c784f72229bb03958b2270090ba62c7de34b7ce6ad04ecdd764", "role": "provenance_verifier"},
+    {"path": "benchmarks/basalt/verify_manifest.ps1", "bytes": 6331, "sha256": "8734e083c7117d2860af0c449d07f99cf91075288406146e858b66b89d919ef2", "role": "provenance_verifier"},
+    {"path": "Cargo.lock", "bytes": 26592, "sha256": "bc06922e3b6cf36766c292514a7a7681af322dfaa50ac14d40e915d48760ea35", "role": "lockfile"}
+  ],
+  "executable_artifacts": [
+    {"path": "target/m11_final_hardened_ms_20260830/release/examples/basalt_euroc_vio_demo.exe", "bytes": 2998784, "sha256": "3de5563b13fa32ae14c95c97ee06a83da085a77516f63346593ea76ab2640e21", "binding_status": "present_candidate"},
+    {"path": "target/m11_diag_snapshot_final_ms_20260830/release/examples/basalt_euroc_vio_demo.exe", "bytes": 2930176, "sha256": "72e95d1579eb956d1e038d77df7d50d29113e7486aa8547ce3352217beb7a826", "binding_status": "present_candidate"},
+    {"path": "target/m11_pyramid_scratch_reuse_ms_20260830/release/examples/basalt_euroc_vio_demo.exe", "bytes": 2991616, "sha256": "df7f9fbb8c384fd097df8e6c2021f67af566af893858569ffcd7ab211eefa132", "binding_status": "present_candidate"},
+    {"path": "target/m11_timing_optin_default_ms_20260830/release/examples/basalt_euroc_vio_demo.exe", "bytes": 2929152, "sha256": "a345e29e2d7d41cbde0d928452fbc98bdcdc79702a401609c5b2bd6a54e11574", "binding_status": "present_candidate"},
+    {"path": "target/m11_rust_wall_gap_profile_ms_20260830/release/examples/basalt_euroc_vio_demo.exe", "bytes": 2991104, "sha256": "0d90f4cc0804662ad0837a4807e342842fbf9ca6043796d262b0c9849a6b7db5", "binding_status": "present_candidate"},
+    {"path": "target/m11_lm_default_off_final_ms_20260830/release/examples/basalt_euroc_vio_demo.exe", "bytes": 2930688, "sha256": "4b4c16fa4c37889de080b91ae720932bc298c49b13380c2dc335823244dfa3df", "binding_status": "present_candidate"},
+    {"path": "target/m11_lm_reducer_workspace_reuse_ms_20260830/release/examples/basalt_euroc_vio_demo.exe", "bytes": 2991616, "sha256": "b23715237e52176c28860427500fd7ae6a4f06b9cbdcf178f55764d4b6f111a2", "binding_status": "present_candidate"},
+    {"path": "target/m11_integrated_workspace_hardened_ms_20260830/release/examples/basalt_euroc_vio_demo.exe", "bytes": 2997760, "sha256": "ee15645b2bd338d9ca00e9e615144400d42f54dd2e783fb2f95273238543c7bf", "binding_status": "present_candidate"},
+    {"path": "target/m10_landmark_direct_pack_ms_20260829/release/examples/basalt_euroc_vio_demo.exe", "bytes": 2987008, "sha256": "f8d55647dce428a39139282da7af4ed0ddd24823a78d2c1fbb226969816fc151", "binding_status": "previously_promoted"}
+  ],
+  "stale_manifest_candidate": {
+    "manifest": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
+    "existing_manifest_sha256": "76c08147035efaccffa9abeec6bd80d8a9f75d46a0e5331231d43ce8b747c513",
+    "stale_entry_count": 7,
+    "entries": [
+      {"path": "pipelines/basalt/src/euroc.rs", "old_sha256": "6450993435d85886c3637ee171c8c2c6f8b0747e85aa297f6ed4bd53cc8eb5f8", "current_sha256": "d4773ada60baefab6190c0bd45af8610f78ad0e0e640d402ccf59be6f4ac270b", "bytes": 22661},
+      {"path": "pipelines/basalt/src/pyramid.rs", "old_sha256": "eddbcb22d2a73a07495a9ff9a3c9f581b14683f816fce88d5917dda7e7a4b2e2", "current_sha256": "ef63434ceb0b3ef9ae4740efaa08af5e878ae0bd44a30eb0f4a5ac9c91d016b9", "bytes": 13124},
+      {"path": "pipelines/basalt/src/stream.rs", "old_sha256": "af9cee372b397eff8e0d792a9a025c6273bbd1292e677214af823e388befde66", "current_sha256": "d0a48e28fbc5b6cd76211abdd75ba348d8dbf5cd663a8001b93ef141f770e6b7", "bytes": 26589},
+      {"path": "pipelines/basalt/src/timing.rs", "old_sha256": "5d875ea31b8ed8e9994a3c22c0900a8b457c1f9b6036686975a305e2f9241df6", "current_sha256": "320294ad25ca3b036e42148f8c53e819ac8fac8c21151bde96e69c6d4a57c5be", "bytes": 34793},
+      {"path": "pipelines/basalt/src/vio/aom.rs", "old_sha256": "ed81107813a9661198e954be1ff1a6a70e72ab8d5e128778bda66539e7d0ab34", "current_sha256": "afd0a3ac9b7ef6ec4b46d3bb1f622e794af00f3fbfd20c2a8e67ca986ed4dabe", "bytes": 642043},
+      {"path": "pipelines/basalt/src/vio/estimator.rs", "old_sha256": "9d01169e5ff5a616c5a9787b375d688c1d3e729b2087c2557ac9955f7c6edca3", "current_sha256": "a43eaa12e79eefbb3a87f2a05354032e981296d8f124cf5a52f60a77ad71b45d", "bytes": 196458},
+      {"path": "pipelines/basalt/src/vio/window.rs", "old_sha256": "7532712ade077732f15156904de3022a66cf85b96dc3baa9baeaf3316acb7123", "current_sha256": "31921ad916f5756e3de1060fae7b75f0aa4b5e9613158851a89b1ae7f9e9d51b", "bytes": 426392}
+    ],
+    "upstream_manifest_key_file_sha_stale_count": 0,
+    "upstream_manifest_note": "upstream_manifest.json key_file_sha256 entries remain byte-matching; its 2026-08-21 capture date and historical scope do not make it a current Rust release manifest."
+  },
+  "cargo_license_evidence": {
+    "inventory": "benchmarks/basalt/cargo_license_inventory_v1.json",
+    "inventory_sha256": "e44bf59a68b1f70a847716a102eae3bbabb355f093e111e86dd272d6ba60e42a",
+    "lockfile_sha256": "bc06922e3b6cf36766c292514a7a7681af322dfaa50ac14d40e915d48760ea35",
+    "inventory_unresolved_count": 11,
+    "local_registry_roots_checked": [
+      "C:/Users/rsasa/.cargo/registry/src",
+      "C:/Users/rsasa/.cargo/registry/cache",
+      "\\\\wsl$\\Ubuntu-22.04\\root\\.cargo\\registry/src",
+      "\\\\wsl$\\Ubuntu-22.04\\root\\.cargo\\registry/cache",
+      "\\\\wsl$\\Ubuntu-22.04\\root\\.cargo\\registry/index"
+    ],
+    "resolved_from_local_evidence": [
+      {
+        "package": "shlex 1.3.0",
+        "spdx_expression": "MIT OR Apache-2.0",
+        "source_root": "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/shlex-1.3.0",
+        "crate_cache": "/root/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/shlex-1.3.0.crate",
+        "crate_sha256": "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64",
+        "cargo_toml_sha256": "d7eb8c4bce681b4dd1dfc2c98c649754390775f38f4796d491948ddbb53aa2ef",
+        "license_files": {
+          "LICENSE-MIT": "4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1",
+          "LICENSE-APACHE": "553fffcd9b1cb158bc3e9edc35da85ca5c3b3d2e61c883ebcfa8a65814b583"
+        },
+        "license_files_status": "present",
+        "checksum_matches_inventory": true
+      },
+      {
+        "package": "socks 0.3.4",
+        "spdx_expression": "MIT/Apache-2.0",
+        "source_root": "/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/socks-0.3.4",
+        "crate_cache": "/root/.cargo/registry/cache/index.crates.io-1949cf8c6b5b557f/socks-0.3.4.crate",
+        "crate_sha256": "f0c3dbbd9ae980613c6dd8e28a9407b50509d3803b57624d5dfe8315218cd58b",
+        "cargo_toml_sha256": "c56aca1ab75aee42bce82cf5f772d49b7d8ccb048434833f9ffeee832357a0ed",
+        "license_files": {
+          "LICENSE-MIT": "b68cdf814c41180614110bb1ae36c58f7de5ed701683e2f7dad366e683493111",
+          "LICENSE-APACHE": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08"
+        },
+        "license_files_status": "present",
+        "checksum_matches_inventory": true
+      }
+    ],
+    "legal_disposition_pending": [
+      {"package": "cc 1.2.61", "evidence": "WSL index record exists; source/cache/license file absent"},
+      {"package": "http 1.4.0", "evidence": "no local WSL or Windows source/cache/index record found"},
+      {"package": "libloading 0.9.0", "evidence": "WSL index record exists; source/cache/license file absent"},
+      {"package": "ort 2.0.0-rc.12", "evidence": "no local WSL or Windows source/cache/index record found"},
+      {"package": "ort-sys 2.0.0-rc.12", "evidence": "no local WSL or Windows source/cache/index record found"},
+      {"package": "portable-atomic-util 0.2.7", "evidence": "WSL index record exists; source/cache/license file absent"},
+      {"package": "winapi-i686-pc-windows-gnu 0.4.0", "evidence": "WSL index record exists; source/cache/license file absent"},
+      {"package": "winapi-x86_64-pc-windows-gnu 0.4.0", "evidence": "WSL index record exists; source/cache/license file absent"},
+      {"package": "zerocopy-derive 0.8.48", "evidence": "WSL index record exists; source/cache/license file absent"}
+    ],
+    "inventory_update_recommendation": "Do not rewrite the immutable inventory in this bounded audit. A future generator run may promote shlex/socks to resolved only after owner approval; the other nine remain legal-disposition-pending."
+  },
+  "next_actions": [
+    "Owner review the seven current Rust source hash replacements before editing basalt_provenance_manifest_v1.json.",
+    "Bind one explicitly selected current executable to source/config/calibration/protocol/dataset and timing-feature state; do not claim all candidate EXEs are interchangeable.",
+    "Resolve the nine pending package licenses from a trusted local package source or legal review; network is required if no local evidence is supplied.",
+    "Keep BSD-3-Clause upstream Basalt NOTICE and existing historical manifests immutable."
+  ]
+}

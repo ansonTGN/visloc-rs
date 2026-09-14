@@ -1,0 +1,210 @@
+{
+  "schema": "visloc-rs.basalt.faithful-port-final-closure.v1",
+  "created_at": "2026-09-14T00:00:00+09:00",
+  "status": "PASS_NATIVE_EQUIVALENT",
+  "completion_percent": 100,
+  "scope": {
+    "upstream_project": "Basalt",
+    "upstream_commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+    "rust_worktree": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819",
+    "rust_branch": "main",
+    "audited_head_before_closure_commit": "0734a881433615ff86ed2f55844aa66dbd249d5f",
+    "production_source_tree_sha256": "d7d39c379011800ad47908faf133ccc4173a9980b19d1475fc96cc7906eca1f5",
+    "claim": "EuRoC stereo-inertial VIO and offline mapper are functionally complete and native-equivalent under the recorded gates. VIO dense checkpoints are bit-exact at the pinned clean oracle; mapper match graph is exact and final points are tolerance-equivalent, not claimed bit-exact."
+  },
+  "release_binaries": {
+    "windows_msvc": {
+      "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-msvc\\release\\examples\\basalt_euroc_vio_demo.exe",
+      "bytes": 3819008,
+      "sha256": "941B740908B2BB448D039865F6461E86DDAFE4612E7635F50D44AAEB7C46DCDF"
+    },
+    "linux_wsl": {
+      "path": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\target-linux\\release\\examples\\basalt_euroc_vio_demo",
+      "bytes": 3962664,
+      "sha256": "A952F6D94304C387EB9A720B07E534A59F9DBDAB51AF55EC205CE44AC9B19F7F"
+    }
+  },
+  "requirements": [
+    {
+      "id": "vio_functionality",
+      "status": "pass",
+      "evidence": "Full visloc-basalt library suite: 374 passed, 0 failed, 59 ignored. Implemented frontend, stereo/IMU ingestion, initialization, IMU preintegration, ABS_QR LM, FEJ, square-root marginalization, lifecycle and lean-output paths."
+    },
+    {
+      "id": "vio_dense_numeric_behavior",
+      "status": "pass_bit_exact_at_pinned_oracle",
+      "evidence": "Frame 4 iteration 0 has exact IEEE-754 f32 H 5625/5625 and b 75/75 at visual_total, imu_total, prior_before, prior_after and final."
+    },
+    {
+      "id": "all11_formal_gt_free",
+      "status": "pass",
+      "evidence": "22/22 selected native+Rust cells succeeded; all 11 sequences pass ATE, coverage, RPE rotation, RPE translation, Sim3 scale, runtime and sensor-only namespace gates. The aggregate's only not_evaluable field is cross-domain RSS, supplied by the separate same-domain resource gate."
+    },
+    {
+      "id": "runtime_and_rss",
+      "status": "pass",
+      "evidence": "Fresh current-binary 3-repetition alternating same-domain gate: runtime median ratio 1.1331991441714082 and RSS median ratio 0.5633835819729751, both below 1.5."
+    },
+    {
+      "id": "offline_mapper_native_packet_e2e",
+      "status": "pass_native_equivalent",
+      "evidence": "Real native frame51 schema4 packet: 120 pairs, 15299 raw matches, 14139 inliers, zero inlier-set mismatches, 397 tracks, 382 landmarks and 3583 observations on both sides; all final Rust points are within 1 mm of native. Point coordinates are tolerance-equivalent rather than bit-exact."
+    },
+    {
+      "id": "schema4_fej_lifecycle_cross_target",
+      "status": "pass_exact",
+      "evidence": "Windows and Linux 52/80/400-frame lean replays have byte-exact CSV/TUM trajectories and lifecycle JSONL; forbidden trace, MargData and timing outputs are absent."
+    },
+    {
+      "id": "release_golden_license_provenance",
+      "status": "pass",
+      "evidence": "Release binary/source/input bindings, current golden registry, frozen provenance v2, active provenance v1 and selected license payload verify. Cargo license inventory resolves 119/119 packages; legal clearance is explicitly not claimed."
+    },
+    {
+      "id": "storage_and_change_control",
+      "status": "pass",
+      "evidence": "Heavy datasets, builds and runs are under E:. C: received no new bulk outputs. No push was performed and unrelated untracked files remain untouched."
+    }
+  ],
+  "formal_all11": {
+    "artifact": "work/m11_phase6_latest_combined_all11x1_20260914.json",
+    "sha256": "47AFEA5BD83EA10BFA985424D5F9121A1C4A3B687004613C994654CD9DF7E907",
+    "selected_cells": 22,
+    "successes": 22,
+    "full_all11": true,
+    "missing_metric_rows": 0,
+    "selected_manifest_and_evaluation_hashes_bound": true,
+    "rss_note": "Per-sequence RSS is intentionally not_evaluable in this Windows-Rust/Linux-native aggregate because the domains differ; use runtime_and_rss_gate."
+  },
+  "runtime_and_rss_gate": {
+    "artifact": "E:\\visloc-rs-runs\\basalt_goal_release_final_runtime3_20260914\\phase6_gate_report.json",
+    "sha256": "7F8D8F9EB93E0C7107F54633A04C0010D1601AAF2A759D3C0969462C6694C44B",
+    "overall_status": "pass",
+    "cells": 6,
+    "successful_cells": 6,
+    "workers": 1,
+    "threads": 1,
+    "seed": 7,
+    "native_runtime_seconds": {
+      "mean": 388.2848837665903,
+      "median": 380.35565780010074,
+      "worst": 450.5221983999945
+    },
+    "rust_runtime_seconds": {
+      "mean": 436.72442836655927,
+      "median": 431.0187058998272,
+      "worst": 449.6498084999621
+    },
+    "runtime_median_ratio": 1.1331991441714082,
+    "native_rss_bytes": {
+      "mean": 52240384.0,
+      "median": 52441088.0,
+      "worst": 52858880.0
+    },
+    "rust_rss_bytes": {
+      "mean": 29545813.333333332,
+      "median": 29544448.0,
+      "worst": 29679616.0
+    },
+    "rss_median_ratio": 0.5633835819729751,
+    "domain": "same Linux /proc process-tree RSS; common Windows coordinator process-tree-command wall",
+    "preserved_one_shot_failure": {
+      "artifact": "work/m11_release_final_runtime_pair_aggregate_20260914.json",
+      "sha256": "B3348EF606E27662DE90394FB4E5009B2C1F0BD712940B8B13AED922266124BE",
+      "runtime_ratio": 1.51786282016717,
+      "status": "fail_preserved_as_order_cache_variance_evidence"
+    }
+  },
+  "dense_numeric_gate": {
+    "artifact": "work/m11_absqr_dense_pipeline_current_release_20260914.json",
+    "sha256": "B96FBD56E1DE88497EE38629D6FAEF7234432C12FFA084ACC404D1D4AAB7BB2E",
+    "status": "PASS",
+    "stages": 5,
+    "h_exact_per_stage": "5625/5625",
+    "b_exact_per_stage": "75/75"
+  },
+  "mapper_gate": {
+    "artifact": "work/m11_mapper_colpiv_fullv_parity_20260914.json",
+    "sha256": "AF9FE51AE37017B926D4631F588294E02F8C6A4DCCEB37AC448EBE4971958DD4",
+    "status": "PASS_EXACT_MATCH_GRAPH",
+    "mapper_source_sha256": "D6F0C19266C163C509EE6F87CBFB7257AA9B110D1249FA58AAE847E60BC923A1",
+    "graph_claim": "exact",
+    "point_claim": "all points within 1 mm of native; no bit-exact point claim"
+  },
+  "release_evidence": [
+    {
+      "artifact": "benchmarks/basalt/release_inputs/m11_rust_wsl_exactness_final2_20260914.json",
+      "sha256": "19D0FE0A0568F609B3384394F2E22E43CDEF8FD85BFFB4D0E7CBD1997B0B56CF",
+      "status": "pass"
+    },
+    {
+      "artifact": "benchmarks/basalt/release_inputs/m11_release_candidate_final2_correctness_20260914.json",
+      "sha256": "9F60E3DA48FF251F06C3727E21BA9F12F3C3174AED4D36AC2AF119B0F88A5573",
+      "status": "PASS_CORRECTNESS_ONLY"
+    },
+    {
+      "artifact": "benchmarks/basalt/release_inputs/m11_rust_wsl_provenance_final2_20260914.json",
+      "sha256": "B8ADC1B8E40C735969571DF3DBA83BD4EAC7BE2997CC7BE4C9A431D83B4D2D0B"
+    },
+    {
+      "artifact": "benchmarks/basalt/m11_current_golden_registry_20260830.json",
+      "sha256": "FCA72289AE4DF42C2BA03900498ED5DCD13FA16421C9B564FEBE79CA015503EC",
+      "status": "current_direct_pack_registry"
+    },
+    {
+      "artifact": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
+      "sha256": "3FE589C4FBA81D8B6127FB1101E04EF05707436CC2A593717AF645E4E6F98DB2"
+    },
+    {
+      "artifact": "benchmarks/basalt/basalt_release_manifest_v1.json",
+      "sha256": "479757369DA4CD1AE3D15A9F80E1461C59BB0DD64AB9A829A15E4A54F6A8A825"
+    },
+    {
+      "artifact": "benchmarks/basalt/basalt_provenance_manifest_v2.json",
+      "sha256": "384FFF8DD3E1480B89CFC18AF6C9D8EF493606B6D2D81975C698D5BEBA9331B3",
+      "status": "frozen"
+    },
+    {
+      "artifact": "benchmarks/basalt/cargo_license_inventory_v2.json",
+      "sha256": "97B3C8DB56F8EBDA5E98975FEFE1EFCFAE51BAB19AC3D4F911ECF6CDF55A58EF",
+      "packages": 119,
+      "resolved": 119,
+      "unresolved": 0,
+      "legal_clearance_claimed": false
+    },
+    {
+      "artifact": "work/m11_selected_license_graph_20260913.json",
+      "sha256": "A6779A901805284C7F0A529A9550BDF4315963D0C1DCCD3A17F02D143A51A790",
+      "status": "pass_selected_graph_reconciled"
+    },
+    {
+      "artifact": "work/m11_candidate_license_payload_manifest_20260913.json",
+      "sha256": "7865FDB77E8C2BB019F85EA6262E344EABEF6B34412D15DFF233376691A0FA9C",
+      "status": "pass_candidate_selected_license_payload_staged"
+    }
+  ],
+  "final_verification": {
+    "cargo_test_visloc_basalt_lib": "374 passed; 0 failed; 59 ignored",
+    "cargo_fmt_check": "pass",
+    "git_diff_check": "pass",
+    "refresh_release_provenance_check": "pass",
+    "verify_provenance": "pass",
+    "provenance_pytests": "15 passed",
+    "tracked_tree_before_closure_files": "clean"
+  },
+  "storage": {
+    "bulk_root": "E:\\visloc-rs-runs",
+    "dataset_and_sensor_only_views": "E:",
+    "c_drive_free_gib_at_closure": 10.74,
+    "e_drive_free_gib_at_closure": 280.60,
+    "new_bulk_output_on_c": false
+  },
+  "limitations": [
+    "Mapper point coordinates are tolerance-equivalent within 1 mm; they are not claimed bit-exact.",
+    "The all11 aggregate cannot compare RSS across Windows Rust and Linux native domains; the separate current-binary 3-repetition same-domain gate supplies the formal RSS claim.",
+    "A single-repetition runtime pair failed at 1.51786282016717 and is preserved. The prescribed alternating three-repetition median gate passed at 1.1331991441714082.",
+    "The license inventory is complete, but this engineering audit does not claim legal clearance."
+  ],
+  "remaining_required_work": [],
+  "push_performed": false
+}

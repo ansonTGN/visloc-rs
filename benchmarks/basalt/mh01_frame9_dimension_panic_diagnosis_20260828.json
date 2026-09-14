@@ -1,0 +1,36 @@
+{
+  "schema": "visloc.basalt.mh01_frame9_dimension_panic.v1",
+  "status": "diagnosed",
+  "read_only": true,
+  "panic": {
+    "run": "target/basalt_mh01_qmat_fused_80f_20260828",
+    "frame": 9,
+    "source_location": "pipelines/basalt/src/vio/aom.rs:4705",
+    "assertion": {"left": 27, "right": 21},
+    "meaning": "27x27 compact prior entered a 21x21-only GEMV helper"
+  },
+  "evidence": {
+    "replay_log": "target/basalt_mh01_qmat_fused_80f_20260828/replay.log",
+    "manifest": "target/basalt_mh01_qmat_fused_80f_20260828/run_manifest.json",
+    "marginal_boundary": "target/basalt_mh01_qmat_fused_80f_20260828/marg.json",
+    "captured_event0": {"keep_columns": 21, "marginal_columns": 39, "prior_shape": [21, 21], "q2_shape": [96, 60]},
+    "failed_executable_timestamp": "2026-08-28T20:38:46",
+    "current_source_timestamp": "2026-08-28T21:31:48"
+  },
+  "lifecycle": {
+    "frame4": "KF0 becomes pose-only; first prior is 6+15=21 columns",
+    "frame9": "KF7 becomes pose-only; retained pose0 + pose7 + state8 is 6+6+15=27 columns",
+    "upstream_reference": "benchmarks/basalt/m7x_window_schedule_oracle.md:37-43"
+  },
+  "owner": {
+    "call_chain": [
+      "pipelines/basalt/src/vio/window.rs:2531-2617",
+      "pipelines/basalt/src/vio/aom.rs:3856-3873",
+      "pipelines/basalt/src/vio/aom.rs:4662-4693",
+      "pipelines/basalt/src/vio/aom.rs:4696-4709"
+    ],
+    "current_worktree_fix": "shape-guarded 21x21 dispatch; dynamic GEMV otherwise"
+  },
+  "regression": "27x27 Prior factor reducer smoke; assert no panic and finite 27-vector, plus MH01 frame-9 integration prior shape check",
+  "production_changed": false
+}

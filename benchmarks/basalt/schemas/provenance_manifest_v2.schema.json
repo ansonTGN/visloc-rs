@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://visloc-rs.local/schemas/basalt/provenance-manifest-v2.schema.json",
+  "title": "visloc-rs Basalt current provenance manifest v2 candidate",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "schema_id",
+    "manifest_id",
+    "captured_at",
+    "status",
+    "supersedes",
+    "upstream_identity",
+    "current_binding",
+    "artifact_policy"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "schema_id": {"const": "visloc-rs.basalt.provenance.v2"},
+    "manifest_id": {"type": "string", "minLength": 1},
+    "captured_at": {"type": "string", "minLength": 1},
+    "status": {"enum": ["current_candidate_not_frozen", "frozen"]},
+    "supersedes": {"$ref": "#/$defs/file_record_with_history"},
+    "upstream_identity": {"type": "object", "required": ["commit", "tree_sha1", "vcpkg"]},
+    "current_binding": {
+      "type": "object",
+      "required": ["source", "tests", "contracts", "build", "golden", "license", "correctness"],
+      "properties": {
+        "source": {"$ref": "#/$defs/tree_binding"},
+        "tests": {"$ref": "#/$defs/tree_binding"},
+        "contracts": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/file_record"}},
+        "build": {"$ref": "#/$defs/build_binding"},
+        "golden": {"$ref": "#/$defs/file_record"},
+        "license": {"$ref": "#/$defs/license_binding"},
+        "correctness": {"$ref": "#/$defs/correctness_binding"}
+      }
+    },
+    "artifact_policy": {
+      "type": "object",
+      "required": ["current_v2_is_candidate_until_source_and_executable_are_frozen", "historical_v1_is_immutable", "ground_truth_artifacts"],
+      "properties": {
+        "current_v2_is_candidate_until_source_and_executable_are_frozen": {"type": "boolean"},
+        "historical_v1_is_immutable": {"const": true},
+        "ground_truth_artifacts": {"const": []},
+        "ground_truth_evaluation": {"type": "string"}
+      }
+    }
+  },
+  "$defs": {
+    "file_record": {
+      "type": "object",
+      "required": ["path", "bytes", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "role": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "file_record_with_history": {
+      "allOf": [
+        {"$ref": "#/$defs/file_record"},
+        {"type": "object", "required": ["immutable"], "properties": {"immutable": {"const": true}}}
+      ]
+    },
+    "tree_binding": {
+      "type": "object",
+      "required": ["root", "file_count", "hash_algorithm", "hash_basis", "files"],
+      "properties": {
+        "root": {"type": "string"},
+        "file_count": {"type": "integer", "minimum": 0},
+        "hash_algorithm": {"const": "sha256"},
+        "hash_basis": {"type": "string"},
+        "canonical_record": {"type": "string"},
+        "source_tree_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "files": {"type": "array", "items": {"$ref": "#/$defs/file_record"}}
+      }
+    },
+    "build_binding": {
+      "type": "object",
+      "required": ["status", "required_for_promotion", "source_tree_sha256", "input_sha256", "timing_feature", "executable"],
+      "properties": {
+        "status": {"enum": ["pending_executable", "pending_feature_binding", "bound"]},
+        "required_for_promotion": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "source_tree_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "input_sha256": {"type": "object", "minProperties": 4},
+        "timing_feature": {"type": "object", "required": ["name", "state"], "properties": {"name": {"const": "basalt-timing-breakdown"}, "state": {"enum": ["enabled", "disabled", "unknown"]}}},
+        "compiler": {"type": "object", "required": ["rustc", "target", "profile"]},
+        "cargo_features": {"type": "array", "items": {"type": "string"}},
+        "lm_workspace_reuse": {"enum": ["enabled", "disabled", "unknown"]},
+        "executable": {"anyOf": [{"$ref": "#/$defs/file_record"}, {"type": "null"}]},
+        "build_evidence": {"anyOf": [{"$ref": "#/$defs/file_record"}, {"type": "null"}]}
+      }
+    },
+    "license_binding": {
+      "allOf": [
+        {"$ref": "#/$defs/file_record"},
+        {"type": "object", "required": ["schema_id", "package_count", "licenses_resolved", "licenses_unresolved"], "properties": {"schema_id": {"const": "visloc-rs.cargo-license.v2"}, "package_count": {"const": 119}, "licenses_resolved": {"const": 119}, "licenses_unresolved": {"const": 0}}}
+      ]
+    },
+    "correctness_binding": {
+      "allOf": [
+        {"$ref": "#/$defs/file_record"},
+        {"type": "object", "required": ["schema", "status", "replays"], "properties": {"schema": {"const": "visloc.basalt.release_candidate_correctness.v1"}, "status": {"const": "PASS_CORRECTNESS_ONLY"}, "replays": {"type": "array", "minItems": 3}}}
+      ]
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,44 @@
+{
+  "schema": "basalt.m7im15.dual_relpose_comparison.v1",
+  "date": "2026-08-27",
+  "pair": "frame0/cam0 -> frame3/cam1",
+  "native_capture": "target/m7im15_step_relpose_inputs_gdb_20260827.json",
+  "native_tmp_capture": "target/m7im15_step_relpose_tmp_capture_20260827.log",
+  "rust_test": "pipelines/basalt/src/vio/aom.rs::m7im15_relpose_dual_pass_native_drel_and_intermediates",
+  "state_and_solver_context": {
+    "iter0_start_state_exact_lanes": "80/80",
+    "iter1_start_state_exact_lanes": "80/80",
+    "iter1_frame3_pose_linearized_exact_lanes": "16/16",
+    "iter1_inc_post_neg_exact_lanes": "38/75",
+    "iter1_H_exact_lanes": "5603/5625",
+    "iter1_b_exact_lanes": "75/75",
+    "iter1_Hdiag_exact_lanes": "75/75"
+  },
+  "cases": [
+    {
+      "pass": 0,
+      "native_tmp_qxyw_txyz": ["3c31fe46", "bc520562", "bf33585a", "3f36a0a8", "bd27a81a", "bd05555f", "bb8ddf30"],
+      "generic_tmp_qxyw_txyz": ["3c31fe46", "bc520562", "bf33585a", "3f36a0a8", "bd27a81a", "bd05555f", "bb8ddf30"],
+      "candidate_tmp_qxyw_txyz": ["3c31fe46", "bc520562", "bf33585b", "3f36a0a7", "bd27a81a", "bd05555f", "bb8ddf30"],
+      "generic_tmp_exact_lanes": "7/7",
+      "candidate_tmp_exact_lanes": "5/7",
+      "generic_drel_d_h_exact_lanes": "36/36",
+      "candidate_drel_d_h_exact_lanes": "23/36",
+      "drel_mismatch_indices": []
+    },
+    {
+      "pass": 1,
+      "native_tmp_qxyw_txyz": ["3c342b3c", "bc4f602d", "bf3355a4", "3f36a35f", "bd235394", "bd83bd75", "bc801294"],
+      "generic_tmp_qxyw_txyz": ["3c342b3c", "bc4f602d", "bf3355a4", "3f36a35f", "bd235394", "bd83bd76", "bc801294"],
+      "candidate_tmp_qxyw_txyz": ["3c342b3c", "bc4f602d", "bf3355a5", "3f36a35f", "bd235394", "bd83bd76", "bc801294"],
+      "generic_tmp_exact_lanes": "6/7",
+      "candidate_tmp_exact_lanes": "5/7",
+      "generic_drel_d_h_exact_lanes": "30/36",
+      "candidate_drel_d_h_exact_lanes": "19/36",
+      "drel_mismatch_indices": [18, 20, 24, 26, 30, 32],
+      "native_drel_bits_at_mismatch": ["3d8687db", "bb8c8d8c", "bbecbb07", "3d8841e7", "3b7e5e58", "3d12b627"],
+      "generic_drel_bits_at_mismatch": ["3d8687dc", "bb8c8d8a", "bbecbb09", "3d8841e8", "3b7e5e61", "3d12b628"]
+    }
+  ],
+  "conclusion": "FEJ poseLin and iter1 start state are exact. The first shared-pair divergence in this focused chain is the final tmp translation y (one ULP at pass 1); the out-of-line candidate does not preserve pass 0 and is rejected. No production patch is recorded by this artifact."
+}

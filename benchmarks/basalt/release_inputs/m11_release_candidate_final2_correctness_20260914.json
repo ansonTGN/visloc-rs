@@ -1,0 +1,433 @@
+{
+  "schema": "visloc.basalt.release_candidate_correctness.v1",
+  "artifact": "m11_release_candidate_final2_correctness_20260914",
+  "created_utc": "2026-09-13T18:19:42+00:00",
+  "status": "PASS_CORRECTNESS_ONLY",
+  "scope": {
+    "workspace_root": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819",
+    "fresh_target_dir": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\target\\m11_release_candidate_final_20260914",
+    "features": [
+      "basalt-lm-workspace-reuse"
+    ],
+    "timing_breakdown": "compile-time feature disabled",
+    "lm_workspace_reuse": "feature enabled",
+    "performance_evaluation": false,
+    "commit": false,
+    "push": false
+  },
+  "build": {
+    "status": "success",
+    "exit_code": 0,
+    "command": [
+      "cargo",
+      "build",
+      "--locked",
+      "--release",
+      "--example",
+      "basalt_euroc_vio_demo",
+      "--features",
+      "basalt-lm-workspace-reuse"
+    ],
+    "rustflags": "-C target-feature=+avx2,+fma",
+    "build_evidence": {
+      "path": "target/m11_release_candidate_final_20260914/phase6_rust_build_manifest.json",
+      "bytes": 1918,
+      "sha256": "305850963AFA9D5F859B32C3C90287EBFCAD771818AE016B28621F6A0C25D2A7"
+    },
+    "executable": {
+      "path": "target/m11_release_candidate_final_20260914/basalt_euroc_vio_demo.exe",
+      "bytes": 3819008,
+      "sha256": "941B740908B2BB448D039865F6461E86DDAFE4612E7635F50D44AAEB7C46DCDF"
+    }
+  },
+  "source_binding": {
+    "hash_algorithm": "SHA256",
+    "files": [
+      {
+        "path": "pipelines/basalt/src/adapter.rs",
+        "bytes": 12760,
+        "sha256": "0D7258C483781CE9D4148C06A571EE6C150429E7C82DE80B53F4E292E8BD2D65"
+      },
+      {
+        "path": "pipelines/basalt/src/calibration.rs",
+        "bytes": 10719,
+        "sha256": "80AEDDBDA130764F8ABE1624FA6F46E7F8C1834C166E5D61CCDFFCAFD75951E9"
+      },
+      {
+        "path": "pipelines/basalt/src/camera.rs",
+        "bytes": 13288,
+        "sha256": "E04AF476C09F33FC499D2987A3505017C7B96F941BC2BC2C609BFD48FD754EBA"
+      },
+      {
+        "path": "pipelines/basalt/src/config.rs",
+        "bytes": 9955,
+        "sha256": "093F1CD61FCF269FB8A39B8DA0CE4FB3CE3B7C6444226EA8CF3313E82FA53934"
+      },
+      {
+        "path": "pipelines/basalt/src/euroc.rs",
+        "bytes": 25834,
+        "sha256": "02B36A7443D429B45C75BC1953045399577E8676DECDB6A837C7FB3B7399CFFD"
+      },
+      {
+        "path": "pipelines/basalt/src/fast.rs",
+        "bytes": 23070,
+        "sha256": "99CA1A8EF5B55A2D1E70410E833FF6A9B52DACE2973273480386E7397E729383"
+      },
+      {
+        "path": "pipelines/basalt/src/imu/factors.rs",
+        "bytes": 142604,
+        "sha256": "495F29F1C45D88E8B68CA398A7E1F1A0DBD228FF19746A836F2D76EFA922F2C3"
+      },
+      {
+        "path": "pipelines/basalt/src/imu/mod.rs",
+        "bytes": 1364,
+        "sha256": "FDE2B3BFAEFEAF76AD8180AC00EC6148BCD344DC0A99E4650502F6CE0E4C1601"
+      },
+      {
+        "path": "pipelines/basalt/src/imu/preintegration.rs",
+        "bytes": 18789,
+        "sha256": "563099EA23A2F63D13AC66138BF6E5B07C0BAB098AA14224023479D72BF6E9F7"
+      },
+      {
+        "path": "pipelines/basalt/src/imu/sampling.rs",
+        "bytes": 3020,
+        "sha256": "87D89F0EE1E07518951E35E7EDC19F5FFE1B069E5C5A46A61493819021597C87"
+      },
+      {
+        "path": "pipelines/basalt/src/initialization.rs",
+        "bytes": 6169,
+        "sha256": "CB76498FE1ADE7E8788B6870EBB2FAEEC02FDC7F817B6EC38352C0DE6D4EB1C3"
+      },
+      {
+        "path": "pipelines/basalt/src/lib.rs",
+        "bytes": 2351,
+        "sha256": "2EE7DE94A3DE7644FF840F0AB8C13FB9B633993688D7AF829650115A7B83A42E"
+      },
+      {
+        "path": "pipelines/basalt/src/mapper/features.rs",
+        "bytes": 101734,
+        "sha256": "D6F0C19266C163C509EE6F87CBFB7257AA9B110D1249FA58AAE847E60BC923A1"
+      },
+      {
+        "path": "pipelines/basalt/src/mapper/mod.rs",
+        "bytes": 136245,
+        "sha256": "DD7B38C46BB829692C76C7ABD17B1ECEB66D102453FB820F7794BBE36901F181"
+      },
+      {
+        "path": "pipelines/basalt/src/mapper/session.rs",
+        "bytes": 89574,
+        "sha256": "69D127357DAF6D687F1F3489AED62055239170C66554B435CEA868546EABFA74"
+      },
+      {
+        "path": "pipelines/basalt/src/mapper/triangulation.rs",
+        "bytes": 33333,
+        "sha256": "536D64D4CA6552B558C714F90DE2E07E24BA5F3D1634EA2DD57DF5EB8CDF53E4"
+      },
+      {
+        "path": "pipelines/basalt/src/patch.rs",
+        "bytes": 31758,
+        "sha256": "881B7A78C6A215536B235C82C6BF7EF158E737250F7BC2597B467206E71E19B2"
+      },
+      {
+        "path": "pipelines/basalt/src/pattern.rs",
+        "bytes": 2029,
+        "sha256": "E0BEA281B6A62266441D1A6633B5B014C1D382DDA81F5BD0E1B323B472FE812D"
+      },
+      {
+        "path": "pipelines/basalt/src/provenance.rs",
+        "bytes": 1349,
+        "sha256": "F52AB64C1F398612862D03DB2D557FA390108A2656814BCE6ACB664F1979E7BB"
+      },
+      {
+        "path": "pipelines/basalt/src/pyramid.rs",
+        "bytes": 13124,
+        "sha256": "EF63434CEB0B3EF9AE4740EFAA08AF5E878AE0BD44A30EB0F4A5AC9C91D016B9"
+      },
+      {
+        "path": "pipelines/basalt/src/stream.rs",
+        "bytes": 60126,
+        "sha256": "84AA71E4133D5AA758DD0DE317C32FD5A3108657798E7F282651CCF27BEA5B65"
+      },
+      {
+        "path": "pipelines/basalt/src/streaming.rs",
+        "bytes": 7086,
+        "sha256": "F059BD245B393847E83453E8A02742D91F27E00C4B8BB8A3834615184D0C0106"
+      },
+      {
+        "path": "pipelines/basalt/src/time.rs",
+        "bytes": 5774,
+        "sha256": "3A11D726721A57EB7B16564CEBE68DFB0EBE9B7286ED47FFEC84CB7EE2AC035A"
+      },
+      {
+        "path": "pipelines/basalt/src/timing.rs",
+        "bytes": 37092,
+        "sha256": "5BB75101D5D4CE5A127DBE1525235B54AEF14A6928FBC4C09A9CDCF2F824E3E2"
+      },
+      {
+        "path": "pipelines/basalt/src/types.rs",
+        "bytes": 3201,
+        "sha256": "674501A2997502DEA838CE9AAF5DD141BFB98D5D7621B95FA387A94F92ADA137"
+      },
+      {
+        "path": "pipelines/basalt/src/update.rs",
+        "bytes": 27005,
+        "sha256": "ACC595D7DAA70A755C13D92EC7F1F1636CEEF76A6A908D37F2231E1B9B7833FE"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/aom.rs",
+        "bytes": 856564,
+        "sha256": "5A95F499F1849D0BDEAF7301FAF6D1108ED014F62731733406CA79D96E129DEE"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/estimator.rs",
+        "bytes": 301949,
+        "sha256": "8FD4B8D4B7262BF589DA4C93463C47EAF36103794C0D11B5C1E12FD4FC7D5DB7"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/landmarks.rs",
+        "bytes": 122380,
+        "sha256": "CDE9C23836B4513DF8AE95C47B132360B5BC904247C53B2B52B13E0FBCA2E40E"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/margdata.rs",
+        "bytes": 89178,
+        "sha256": "BB5B989704B8F117F8D74F006287A1826EA72ACD63988974A463B5BB9A99356B"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/mod.rs",
+        "bytes": 387,
+        "sha256": "032F39F9977CE483A468BAE63F4ACD88C3CE4C485BDC12928E2917E8664C5742"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/scalar.rs",
+        "bytes": 839,
+        "sha256": "FD88E98C2E7B18E65C03DAD2463AAB423D44919F68754EE9A1D7F6CCEA20A199"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/window.rs",
+        "bytes": 590754,
+        "sha256": "DCA65766E68AFE8F8A85CFDAD2AAFA951A88A7EE118E2FDA2A821A3EC0E074E7"
+      }
+    ]
+  },
+  "protocol_binding": {
+    "protocol": "basalt_euroc_parity_v1",
+    "path": "benchmarks/basalt/protocols/basalt_euroc_parity_v1.json",
+    "bytes": 4348,
+    "sha256": "7957F102FFA47A67C3509CDF77942D599E7B0F5F5F2BF452987F87A55DF246E5",
+    "correctness_profile": "lean_no_marg_no_trace"
+  },
+  "input_binding": {
+    "dataset_root": "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_01_easy",
+    "sensor_only": true,
+    "gt_argument_passed_to_engine": false,
+    "dataset_manifest": {
+      "path": "benchmarks/basalt/euroc_dataset_manifest.json",
+      "bytes": 920070,
+      "sha256": "A803DB9E01F7A39F587CB9F87FD8601C8800455135AE7A2DC67F9E108003DD26"
+    },
+    "calibration": {
+      "path": "benchmarks/basalt/release_inputs/euroc_ds_calib.json",
+      "bytes": 5967,
+      "sha256": "AD8C5A18C48C55DACF61D18EBBC18CD7D4F3ACCCD5840BD5A5CD8646ADB6271C"
+    },
+    "config": {
+      "path": "configs/basalt/euroc_config.json",
+      "bytes": 2401,
+      "sha256": "82937BD6493E592EF89572D31260C10F7437B4FB3FF1FDA179375713966E34FA"
+    },
+    "engine_flags": [
+      "--no-marg-data",
+      "--no-trace"
+    ],
+    "environment": {
+      "VISLOC_BASALT_TIMING_BREAKDOWN": "unset"
+    }
+  },
+  "replays": [
+    {
+      "name": "max52_lean",
+      "max_frames": 52,
+      "exit_code": 0,
+      "output_dir": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\correctness_replays\\max52_lean",
+      "independent_repeat_dir": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\correctness_replays\\max52_lean_repeat2",
+      "argv": [
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\target\\m11_release_candidate_final_20260914\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_01_easy",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\correctness_replays\\max52_lean",
+        "--max-frames",
+        "52",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "summary": {
+        "frames_requested": 52,
+        "frames_processed": 52,
+        "cam0_manifest_frames": 3682,
+        "cam1_manifest_timestamps": 3682,
+        "imu_samples_loaded": 36820,
+        "imu_samples_delivered": 512,
+        "observations_emitted": 14661,
+        "summary_sha256": "C9BDDAFBBBA193C96C375C94464C1D9D4D594E4528AB98DC9D25403A96823E63"
+      },
+      "artifacts": {
+        "trajectory_csv": {
+          "bytes": 7079,
+          "sha256": "23EA4883A8726AEF1E5DA5BD9D12B66AAD683C669728B68259A0698ED538EB48"
+        },
+        "trajectory_tum": {
+          "bytes": 6353,
+          "sha256": "63DEEA29F52899D6A840B2879134D50587BB1E5841D4A89AE1685DD9F2133AFF"
+        },
+        "files": [
+          "summary.txt",
+          "trajectory.csv",
+          "trajectory.tum"
+        ],
+        "forbidden_absent": [
+          "trace.jsonl",
+          "marg_data",
+          "timing_breakdown.json"
+        ]
+      },
+      "authoritative": {
+        "trajectory_csv_byte_exact": true,
+        "trajectory_tum_byte_exact": true,
+        "obs_exact": true,
+        "imu_exact": true,
+        "basis": "independent same-input replay; exact trajectory bytes and exact observation/IMU counts"
+      }
+    },
+    {
+      "name": "max80_lean",
+      "max_frames": 80,
+      "exit_code": 0,
+      "output_dir": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\correctness_replays\\max80_lean",
+      "independent_repeat_dir": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\correctness_replays\\max80_lean_repeat2",
+      "argv": [
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\target\\m11_release_candidate_final_20260914\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_01_easy",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\correctness_replays\\max80_lean",
+        "--max-frames",
+        "80",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "summary": {
+        "frames_requested": 80,
+        "frames_processed": 80,
+        "cam0_manifest_frames": 3682,
+        "cam1_manifest_timestamps": 3682,
+        "imu_samples_loaded": 36820,
+        "imu_samples_delivered": 792,
+        "observations_emitted": 24256,
+        "summary_sha256": "69A3C95A7FD401308BE1725898122B1A66DEBD28D95E155D999D1AECEE9C9EC9"
+      },
+      "artifacts": {
+        "trajectory_csv": {
+          "bytes": 10847,
+          "sha256": "7658A0DB9708F901C4FBC23C473862C21009ED3F9EEF54B1D48D9FAA0B9CC165"
+        },
+        "trajectory_tum": {
+          "bytes": 9764,
+          "sha256": "919A361DF16D86ADC508EF1FA13E10E7200E18BD2032C124ADC9926AF2F5419C"
+        },
+        "files": [
+          "summary.txt",
+          "trajectory.csv",
+          "trajectory.tum"
+        ],
+        "forbidden_absent": [
+          "trace.jsonl",
+          "marg_data",
+          "timing_breakdown.json"
+        ]
+      },
+      "authoritative": {
+        "trajectory_csv_byte_exact": true,
+        "trajectory_tum_byte_exact": true,
+        "obs_exact": true,
+        "imu_exact": true,
+        "basis": "independent same-input replay; exact trajectory bytes and exact observation/IMU counts"
+      }
+    },
+    {
+      "name": "max400_lean",
+      "max_frames": 400,
+      "exit_code": 0,
+      "output_dir": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\correctness_replays\\max400_lean",
+      "independent_repeat_dir": "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\correctness_replays\\max400_lean_repeat2",
+      "argv": [
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\target\\m11_release_candidate_final_20260914\\basalt_euroc_vio_demo.exe",
+        "--euroc-dir",
+        "E:\\datasets\\euroc_mav\\sensor_only_all11\\MH_01_easy",
+        "--calibration",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+        "--config",
+        "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+        "--out-dir",
+        "E:\\visloc-rs-runs\\basalt_goal_release_final_20260914\\correctness_replays\\max400_lean",
+        "--max-frames",
+        "400",
+        "--no-marg-data",
+        "--no-trace"
+      ],
+      "summary": {
+        "frames_requested": 400,
+        "frames_processed": 400,
+        "cam0_manifest_frames": 3682,
+        "cam1_manifest_timestamps": 3682,
+        "imu_samples_loaded": 36820,
+        "imu_samples_delivered": 3992,
+        "observations_emitted": 106981,
+        "summary_sha256": "29BDDB815394DBCDF552EACE54A0E188763ACDD9F82114851179BF15A8C8480A"
+      },
+      "artifacts": {
+        "trajectory_csv": {
+          "bytes": 53762,
+          "sha256": "26978D55E8A70D80422A0E59B5ACD892CF4C572F3F5B8FE8B38AE98D28D98CB4"
+        },
+        "trajectory_tum": {
+          "bytes": 48506,
+          "sha256": "F3CE239A3D5302AE5098D514387D30F887E5290916B2E78112B700600CD8E044"
+        },
+        "files": [
+          "summary.txt",
+          "trajectory.csv",
+          "trajectory.tum"
+        ],
+        "forbidden_absent": [
+          "trace.jsonl",
+          "marg_data",
+          "timing_breakdown.json"
+        ]
+      },
+      "authoritative": {
+        "trajectory_csv_byte_exact": true,
+        "trajectory_tum_byte_exact": true,
+        "obs_exact": true,
+        "imu_exact": true,
+        "basis": "independent same-input replay; exact trajectory bytes and exact observation/IMU counts"
+      }
+    }
+  ],
+  "aggregate": {
+    "all_exit_zero": true,
+    "all_frame_counts_exact": true,
+    "all_independent_trajectory_replays_byte_exact": true,
+    "all_observation_and_imu_counts_exact": true,
+    "performance_claimed": false
+  }
+}

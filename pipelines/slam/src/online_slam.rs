@@ -2264,6 +2264,33 @@ pub struct OnlineSlamLoopClosureRefinementConfig {
     pub solver: LoopRefinementSolver,
 }
 
+impl OnlineSlamLoopClosureRefinementConfig {
+    /// Pose-graph mirror that registers keyframes for recovered marginal factors
+    /// without ever triggering PGO (Basalt mapper sink).
+    pub fn recovered_factor_sink(camera: Camera) -> Self {
+        Self {
+            camera,
+            verifier_config: LoopClosureVerifierConfig::default(),
+            verifier: LoopRefinementVerifier::EssentialMatrix,
+            pose_graph_config: PoseGraphSe3Config::default(),
+            fixed_loop_edge_weight: None,
+            loop_pose_information: None,
+            gnc: None,
+            pcm: None,
+            covariance_gate: None,
+            pcm_batch_rescreen: false,
+            marginalization_window: None,
+            marginalization_sparsify: false,
+            trigger_every_new_constraints: usize::MAX,
+            appearance_candidates: None,
+            fuse_loop_observations: false,
+            loop_welding_ba: None,
+            propagate_corrections: false,
+            solver: LoopRefinementSolver::Se3,
+        }
+    }
+}
+
 /// Running state for the online loop-closure + pose-graph refinement
 /// stage. Lives on [`OnlineSlamPipeline`] when
 /// [`OnlineSlamConfig::pose_graph_refinement`] is `Some`.
@@ -3091,6 +3118,16 @@ where
             &mut loop_closure_candidates,
             metric_points_camera,
         );
+        if self
+            .local_vi_ba_state
+            .as_ref()
+            .is_some_and(|s| !s.pending_recovered_pose_factors.is_empty())
+        {
+            let injected = self.maybe_inject_recovered_factors();
+            if let Some(ref mut stats) = local_vi_ba.as_mut() {
+                stats.recovered_marginal_factors_injected = injected;
+            }
+        }
 
         OnlineSlamResult {
             tracking,
@@ -4689,13 +4726,32 @@ where
     /// treating Stage A as "no longer pending" here.
     fn vi_initialization_pending(&self) -> bool {
         self.vi_init_state.as_ref().is_some_and(|static_state| {
-            static_state.completed.is_none()
-                && self
-                    .vi_motion_init_state
-                    .as_ref()
-                    .is_none_or(|motion_state| {
-                        motion_state.completed.is_none() && !motion_state.velocity_stage_fired()
-                    })
+            // Static VI init has not yet succeeded.
+            let static_not_done = static_state.completed.is_none();
+            if !static_not_done {
+                return false;
+            }
+            // When the static init gave up, unblock only if there is no motion-init
+            // stage configured (no hope of a better initialisation) OR if the
+            // motion-init stage has already succeeded (velocity + bias are valid).
+            // If motion-init is configured but has not yet succeeded, remain pending
+            // so IMU factors carrying stale biases are not fed into local VI-BA.
+            let static_gave_up = static_state.gave_up.is_some();
+            match self.vi_motion_init_state.as_ref() {
+                None => {
+                    // No motion-init stage: unblock once the static stage gives up.
+                    !static_gave_up
+                }
+                Some(motion_state) => {
+                    if motion_state.completed.is_some() || motion_state.velocity_stage_fired() {
+                        // Motion-init succeeded: unblock regardless of static outcome.
+                        false
+                    } else {
+                        // Motion-init configured but not yet done: stay pending.
+                        true
+                    }
+                }
+            }
         })
     }
 
@@ -4711,6 +4767,82 @@ where
             return None;
         }
         crate::online_slam_vi_ba::run_local_vi_ba(&mut self.map, state)
+    }
+
+    /// After a successful VI-BA window shift, harvest the `SqrtNavMarginal`
+    /// produced by [`crate::nonlinear_factor_recovery`] and inject the resulting
+    /// Chow-Liu relative-pose factors into the pose graph.
+    ///
+    /// No-op when:
+    /// - the sqrt-window marginalization path is disabled,
+    /// - no `sqrt_nav_marginal` is available (first window),
+    /// - there is no active `pose_graph_state`, or
+    /// - there are fewer than 2 retained keyframes (single-node tree has no edges).
+    fn maybe_inject_recovered_factors(&mut self) -> usize {
+        let vi_ba_state = match self.local_vi_ba_state.as_mut() {
+            Some(s) => s,
+            None => return 0,
+        };
+        if !vi_ba_state.config.use_sqrt_window_marginalization {
+            return 0;
+        }
+        let pending = std::mem::take(&mut vi_ba_state.pending_recovered_pose_factors);
+        if pending.is_empty() {
+            return 0;
+        }
+        let pg_state = match self.pose_graph_state.as_mut() {
+            Some(s) => s,
+            None => {
+                vi_ba_state.pending_recovered_pose_factors = pending;
+                return 0;
+            }
+        };
+        let mut injected = 0usize;
+        let mut retry = Vec::new();
+        for (id_i, id_j, f) in pending {
+            let pose_i = Self::pose_graph_pose_or_map(&self.map, pg_state, id_i);
+            let pose_j = Self::pose_graph_pose_or_map(&self.map, pg_state, id_j);
+            let (pose_i, pose_j) = match (pose_i, pose_j) {
+                (Some(pi), Some(pj)) => (pi, pj),
+                _ => {
+                    retry.push((id_i, id_j, f));
+                    continue;
+                }
+            };
+            let relative = relative_world_to_camera(&pose_i, &pose_j);
+            if f.omega_relative.nrows() != 6 || f.omega_relative.ncols() != 6 {
+                continue;
+            }
+            let mut information = nalgebra::Matrix6::<f64>::zeros();
+            for row in 0..6 {
+                for col in 0..6 {
+                    information[(row, col)] = f.omega_relative[(row, col)];
+                }
+            }
+            pg_state.graph.add_edge_with_information(
+                id_i,
+                id_j,
+                relative,
+                PoseGraphEdgeKind::Sequential,
+                information,
+            );
+            injected += 1;
+        }
+        vi_ba_state.pending_recovered_pose_factors = retry;
+        injected
+    }
+
+    fn pose_graph_pose_or_map(
+        map: &VisualMap,
+        pg_state: &mut OnlineSlamLoopClosureRefinementState,
+        keyframe_id: u64,
+    ) -> Option<Pose> {
+        if let Some(pose) = pg_state.graph.poses.get(&keyframe_id) {
+            return Some(pose.clone());
+        }
+        let pose = map.keyframes.get(&keyframe_id)?.frame.pose.clone()?;
+        pg_state.graph.add_pose(keyframe_id, pose.clone());
+        Some(pose)
     }
 
     /// Run visual-only covisibility local BA when a new keyframe has just

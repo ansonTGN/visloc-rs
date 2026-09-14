@@ -16,7 +16,18 @@ class FeatureMatrixTests(unittest.TestCase):
         manifest = tomllib.loads(read("Cargo.toml"))
         self.assertEqual(
             set(manifest["features"].keys()),
-            {"default", "image-io", "onnx-inference", "onnx-cuda"},
+            {
+                "default",
+                "image-io",
+                "onnx-inference",
+                "onnx-cuda",
+                # Internal, narrowly-scoped visloc-basalt opt-ins (timing
+                # sidecar / instrumentation, and capacity-only LM workspace
+                # reuse). Intentionally not part of the Tier 1/Tier 2
+                # user-facing support-surface table below.
+                "basalt-timing-breakdown",
+                "basalt-lm-workspace-reuse",
+            },
         )
 
         doc = read("docs/feature_matrix.md")
@@ -43,7 +54,7 @@ class FeatureMatrixTests(unittest.TestCase):
     def test_feature_matrix_msrv_matches_root_manifest_and_ci(self):
         manifest = tomllib.loads(read("Cargo.toml"))
         msrv = manifest["package"]["rust-version"]
-        self.assertEqual(msrv, "1.82")
+        self.assertEqual(msrv, "1.83")
 
         doc = read("docs/feature_matrix.md")
         ci = read(".github/workflows/ci.yml")

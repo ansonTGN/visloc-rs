@@ -1,0 +1,366 @@
+{
+  "function_elf_offset": "0x275af0",
+  "rows": [
+    {
+      "huber_weight_bits": "3ed33295",
+      "norm_bits": "401b273e",
+      "observation_ordinal": 5,
+      "raw_residual_bits": [
+        "3f0bdc40",
+        "40172980"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "40bc1115",
+      "sqrt_weight_bits": "3fa46b04",
+      "sqrt_weight_numerator_bits": "3f246b04",
+      "target_cam": 1,
+      "target_frame_id": 2,
+      "track_id": 2
+    },
+    {
+      "huber_weight_bits": "3f0ca525",
+      "norm_bits": "3fe8fbcd",
+      "observation_ordinal": 5,
+      "raw_residual_bits": [
+        "3ccff000",
+        "3fe8f600"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "4054095b",
+      "sqrt_weight_bits": "3fbdc00e",
+      "sqrt_weight_numerator_bits": "3f3dc00e",
+      "target_cam": 1,
+      "target_frame_id": 2,
+      "track_id": 9
+    },
+    {
+      "huber_weight_bits": "3f0501f2",
+      "norm_bits": "3ff65ca3",
+      "observation_ordinal": 4,
+      "raw_residual_bits": [
+        "3efdf300",
+        "3fee0a80"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "406d162a",
+      "sqrt_weight_bits": "3fb886ba",
+      "sqrt_weight_numerator_bits": "3f3886ba",
+      "target_cam": 0,
+      "target_frame_id": 2,
+      "track_id": 12
+    },
+    {
+      "huber_weight_bits": "3ea6fd76",
+      "norm_bits": "40443a2b",
+      "observation_ordinal": 6,
+      "raw_residual_bits": [
+        "3f308280",
+        "403f3380"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "4116691f",
+      "sqrt_weight_bits": "3f923374",
+      "sqrt_weight_numerator_bits": "3f123374",
+      "target_cam": 0,
+      "target_frame_id": 3,
+      "track_id": 12
+    },
+    {
+      "huber_weight_bits": "3e782149",
+      "norm_bits": "40840f4f",
+      "observation_ordinal": 9,
+      "raw_residual_bits": [
+        "3e344600",
+        "4083f088"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "41883f94",
+      "sqrt_weight_bits": "3f7c08c7",
+      "sqrt_weight_numerator_bits": "3efc08c7",
+      "target_cam": 1,
+      "target_frame_id": 4,
+      "track_id": 18
+    },
+    {
+      "huber_weight_bits": "3e8cbfc1",
+      "norm_bits": "4068cfc1",
+      "observation_ordinal": 7,
+      "raw_residual_bits": [
+        "3f416780",
+        "4063bc40"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "4153b937",
+      "sqrt_weight_bits": "3f863926",
+      "sqrt_weight_numerator_bits": "3f063926",
+      "target_cam": 1,
+      "target_frame_id": 3,
+      "track_id": 19
+    },
+    {
+      "huber_weight_bits": "3f6a08ae",
+      "norm_bits": "3f8c038f",
+      "observation_ordinal": 2,
+      "raw_residual_bits": [
+        "bd9e2800",
+        "3f8baa20"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "3f9927ca",
+      "sqrt_weight_bits": "3ff4c54a",
+      "sqrt_weight_numerator_bits": "3f74c54a",
+      "target_cam": 0,
+      "target_frame_id": 1,
+      "track_id": 27
+    },
+    {
+      "huber_weight_bits": "3e598d78",
+      "norm_bits": "40969efc",
+      "observation_ordinal": 9,
+      "raw_residual_bits": [
+        "3e8a9200",
+        "40965f30"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "41b13d63",
+      "sqrt_weight_bits": "3f6bfea1",
+      "sqrt_weight_numerator_bits": "3eebfea1",
+      "target_cam": 1,
+      "target_frame_id": 4,
+      "track_id": 28
+    },
+    {
+      "huber_weight_bits": "3f7a90ef",
+      "norm_bits": "3f82c69e",
+      "observation_ordinal": 2,
+      "raw_residual_bits": [
+        "bd7ed000",
+        "3f828880"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "3f859ca6",
+      "sqrt_weight_bits": "3ffd44bc",
+      "sqrt_weight_numerator_bits": "3f7d44bc",
+      "target_cam": 0,
+      "target_frame_id": 1,
+      "track_id": 37
+    },
+    {
+      "huber_weight_bits": "3e7373e1",
+      "norm_bits": "408698d6",
+      "observation_ordinal": 8,
+      "raw_residual_bits": [
+        "3e2ed400",
+        "40867c70"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "418d88b6",
+      "sqrt_weight_bits": "3f79a5c3",
+      "sqrt_weight_numerator_bits": "3ef9a5c3",
+      "target_cam": 0,
+      "target_frame_id": 4,
+      "track_id": 38
+    },
+    {
+      "huber_weight_bits": "3f1239d0",
+      "norm_bits": "3fe0177c",
+      "observation_ordinal": 5,
+      "raw_residual_bits": [
+        "3d9a1000",
+        "3fdfe280"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "4044291b",
+      "sqrt_weight_bits": "3fc17a6b",
+      "sqrt_weight_numerator_bits": "3f417a6b",
+      "target_cam": 1,
+      "target_frame_id": 2,
+      "track_id": 46
+    },
+    {
+      "huber_weight_bits": "3eb41d19",
+      "norm_bits": "4035edf8",
+      "observation_ordinal": 6,
+      "raw_residual_bits": [
+        "3d9ad000",
+        "4035dd80"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "41014a5e",
+      "sqrt_weight_bits": "3f97d656",
+      "sqrt_weight_numerator_bits": "3f17d656",
+      "target_cam": 0,
+      "target_frame_id": 3,
+      "track_id": 46
+    },
+    {
+      "huber_weight_bits": "3f16b699",
+      "norm_bits": "3fd96b62",
+      "observation_ordinal": 2,
+      "raw_residual_bits": [
+        "3df36000",
+        "3fd8e300"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "4038a739",
+      "sqrt_weight_bits": "3fc46cae",
+      "sqrt_weight_numerator_bits": "3f446cae",
+      "target_cam": 0,
+      "target_frame_id": 1,
+      "track_id": 49
+    },
+    {
+      "huber_weight_bits": "3f3a9998",
+      "norm_bits": "3faf9b08",
+      "observation_ordinal": 5,
+      "raw_residual_bits": [
+        "bde6b000",
+        "3faf0340"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "3ff0eaa5",
+      "sqrt_weight_bits": "3fda9004",
+      "sqrt_weight_numerator_bits": "3f5a9004",
+      "target_cam": 1,
+      "target_frame_id": 2,
+      "track_id": 55
+    },
+    {
+      "huber_weight_bits": "3ee1d34d",
+      "norm_bits": "40111a6f",
+      "observation_ordinal": 4,
+      "raw_residual_bits": [
+        "be535000",
+        "40108040"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "40a47dea",
+      "sqrt_weight_bits": "3faa0441",
+      "sqrt_weight_numerator_bits": "3f2a0441",
+      "target_cam": 0,
+      "target_frame_id": 2,
+      "track_id": 66
+    },
+    {
+      "huber_weight_bits": "3f7ed5c1",
+      "norm_bits": "3f8095ce",
+      "observation_ordinal": 5,
+      "raw_residual_bits": [
+        "bddcb000",
+        "3f7fafc0"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "3f812c4b",
+      "sqrt_weight_bits": "3fff6ab5",
+      "sqrt_weight_numerator_bits": "3f7f6ab5",
+      "target_cam": 1,
+      "target_frame_id": 2,
+      "track_id": 72
+    },
+    {
+      "huber_weight_bits": "3f5d8746",
+      "norm_bits": "3f93eaf6",
+      "observation_ordinal": 2,
+      "raw_residual_bits": [
+        "be24d800",
+        "3f9279c0"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "3faaef5d",
+      "sqrt_weight_bits": "3fee242c",
+      "sqrt_weight_numerator_bits": "3f6e242c",
+      "target_cam": 0,
+      "target_frame_id": 1,
+      "track_id": 73
+    },
+    {
+      "huber_weight_bits": "3e2e325f",
+      "norm_bits": "40bc1bef",
+      "observation_ordinal": 3,
+      "raw_residual_bits": [
+        "bef1a000",
+        "40bb8080"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "420a390a",
+      "sqrt_weight_bits": "3f532c7e",
+      "sqrt_weight_numerator_bits": "3ed32c7e",
+      "target_cam": 1,
+      "target_frame_id": 1,
+      "track_id": 87
+    },
+    {
+      "huber_weight_bits": "3daa8f4c",
+      "norm_bits": "41401ed0",
+      "observation_ordinal": 5,
+      "raw_residual_bits": [
+        "bf935b00",
+        "413f3c40"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "43102e3c",
+      "sqrt_weight_bits": "3f13c160",
+      "sqrt_weight_numerator_bits": "3e93c160",
+      "target_cam": 1,
+      "target_frame_id": 2,
+      "track_id": 87
+    },
+    {
+      "huber_weight_bits": "3ed26700",
+      "norm_bits": "401bbd5e",
+      "observation_ordinal": 7,
+      "raw_residual_bits": [
+        "beb6c800",
+        "401a0e00"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "40bd7db9",
+      "sqrt_weight_bits": "3fa41bb3",
+      "sqrt_weight_numerator_bits": "3f241bb3",
+      "target_cam": 1,
+      "target_frame_id": 3,
+      "track_id": 92
+    },
+    {
+      "huber_weight_bits": "3e69bb7b",
+      "norm_bits": "408c31ce",
+      "observation_ordinal": 8,
+      "raw_residual_bits": [
+        "bf4ac000",
+        "4089e280"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "41998d07",
+      "sqrt_weight_bits": "3f749ce8",
+      "sqrt_weight_numerator_bits": "3ef49ce8",
+      "target_cam": 0,
+      "target_frame_id": 4,
+      "track_id": 93
+    },
+    {
+      "huber_weight_bits": "3e6cfe69",
+      "norm_bits": "408a43e6",
+      "observation_ordinal": 9,
+      "raw_residual_bits": [
+        "bf2d7400",
+        "40888e00"
+      ],
+      "relation": "cross_time",
+      "residual_squared_bits": "41955a8d",
+      "sqrt_weight_bits": "3f76504b",
+      "sqrt_weight_numerator_bits": "3ef6504b",
+      "target_cam": 1,
+      "target_frame_id": 4,
+      "track_id": 93
+    }
+  ],
+  "schedule": {
+    "huber_weight": "vdivss huber_delta / norm",
+    "norm": "vsqrtss residual_squared",
+    "residual_squared": "vmulss x*x; vfmadd231ss y*y + x2; vaddss +0",
+    "sqrt_weight": "vdivss numerator / observation_stddev",
+    "sqrt_weight_numerator": "sqrtf(huber_weight)"
+  },
+  "schema": "visloc-rs.basalt.m7he-native-huber-schedule.v1",
+  "source_binary": "clean m7cr pinned libbasalt.so"
+}

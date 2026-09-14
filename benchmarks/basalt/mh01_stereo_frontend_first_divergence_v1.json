@@ -1,0 +1,107 @@
+{
+  "schema": "basalt.m3.frontend_first_divergence.v1",
+  "upstream_commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+  "dataset": "E:\\datasets\\euroc_mav\\machine_hall\\MH_01_easy",
+  "calibration": "target/euroc_ds_calib.json",
+  "calibration_sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
+  "config": "target/euroc_config.json",
+  "config_sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
+  "transition": {
+    "from_frame": 17,
+    "to_frame": 18,
+    "camera": 0
+  },
+  "first_id_set_divergence_before_fix": {
+    "frame": 18,
+    "upstream_only": [723],
+    "rust_only": [1050]
+  },
+  "first_id_set_divergence_after_fix": {
+    "frames": 0,
+    "upstream_only": [],
+    "rust_only": []
+  },
+  "upstream_fast_tie": {
+    "frame": 13,
+    "cell_origin": [701, 315],
+    "threshold": 10,
+    "edge_threshold": 19,
+    "upstream_pre_sort": [
+      [715, 318, 13], [731, 318, 10], [746, 319, 11], [723, 320, 10],
+      [716, 325, 10], [747, 329, 13], [731, 331, 10], [717, 334, 14],
+      [729, 334, 13], [731, 335, 14], [720, 337, 10], [743, 340, 10],
+      [731, 341, 14], [719, 343, 12], [737, 343, 11], [739, 344, 15],
+      [726, 345, 10], [731, 345, 12], [747, 348, 11], [741, 351, 10],
+      [709, 353, 15], [707, 356, 15]
+    ],
+    "upstream_sorted_prefix": [[707, 356, 15], [709, 353, 15], [739, 344, 15]],
+    "rust_pre_sort_before_fix": [
+      [715, 318, 13], [731, 318, 10], [723, 320, 10], [716, 325, 10],
+      [731, 331, 10], [717, 334, 14], [729, 334, 13], [731, 335, 14],
+      [720, 337, 10], [731, 341, 14], [719, 343, 12], [726, 345, 10],
+      [731, 345, 12], [709, 353, 15], [707, 356, 15]
+    ],
+    "rust_sorted_prefix_before_fix": [[709, 353, 15], [707, 356, 15]],
+    "rust_removed_before_sort": [
+      [746, 319, 11], [747, 329, 13], [743, 340, 10], [737, 343, 11],
+      [739, 344, 15], [747, 348, 11], [741, 351, 10]
+    ],
+    "upstream_selected": [707, 356],
+    "rust_selected_before_fix": [709, 353],
+    "rust_selected_after_fix": [707, 356],
+    "proof": "Upstream cv::FAST sorts the complete sub-image candidate vector by response and applies full-image EDGE_THRESHOLD only while accepting sorted points. Rust applied that edge filter before response-only sort; the seven listed candidates changed the libstdc++ introsort permutation of the equal-response 15-valued tie, selecting a different corner. Moving only that filter after sort restores the upstream candidate and order."
+  },
+  "stage_trace": {
+    "upstream_frame17_id723": {
+      "old": [715.49, 309.529],
+      "forward": [711.467, 321.784],
+      "recovered": [715.554, 309.487],
+      "fb_squared": 0.0058419,
+      "accepted": true
+    },
+    "upstream_frame18_id723": {
+      "old": [711.467, 321.784],
+      "forward": [702.441, 348.827],
+      "recovered": [711.51, 321.725],
+      "fb_squared": 0.00524139,
+      "accepted": true
+    },
+    "rust_frame18_id723_before_fix": {
+      "old": [713.19909668, 319.691864014],
+      "forward": [704.870422363, 344.639953613],
+      "recovered": [712.723449707, 320.833007812],
+      "fb_squared": 1.528449177742,
+      "threshold": 0.04,
+      "accepted": false,
+      "reject": "FrameFbSquared"
+    },
+    "rust_frame18_id723_after_fix": {
+      "old": [711.467163086, 321.783905029],
+      "forward": [702.440917969, 348.826782227],
+      "recovered": [711.509643555, 321.725372314],
+      "fb_squared": 0.005230668932,
+      "threshold": 0.04,
+      "accepted": true
+    },
+    "allocator": {
+      "frame17_next_before": 889,
+      "frame17_candidates": 79,
+      "frame17_next_after": 968,
+      "frame18_upstream_next_before": 968,
+      "frame18_upstream_candidates": 82,
+      "frame18_upstream_next_after": 1050,
+      "frame18_rust_before_fix_candidates": 83,
+      "frame18_rust_before_fix_next_after": 1051,
+      "frame18_rust_after_fix_candidates": 82,
+      "frame18_rust_after_fix_next_after": 1050
+    }
+  },
+  "hook_artifacts": {
+    "upstream_fast_trace": "target/upstream_fast_trace.csv",
+    "upstream_fast_trace_sha256": "50915f677a8bad1e90eb076b13846982d645b2b3116b9e873d54a32ac78cb189",
+    "upstream_flow_trace": "target/upstream_flow_trace.txt",
+    "upstream_flow_trace_sha256": "58b8f5fa7f19cfee8cfa569b3ed6152b9569b071b6732810d1257b77189a53e5",
+    "rust_fixed_endpoint80": "target/rust_mh01_endpoint80_fixed.jsonl",
+    "rust_fixed_endpoint80_sha256": "0af491bbb6ec5dad8d4719a9864a7aabf85bebcd9b7a2d5c00af645dd1a215ee"
+  }
+}

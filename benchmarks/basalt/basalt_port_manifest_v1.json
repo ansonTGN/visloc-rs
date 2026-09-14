@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "schema_id": "basalt.port_manifest.v1",
+  "manifest_id": "basalt-port-manifest-v1",
+  "protocol_id": "basalt-euroc-parity-v1",
+  "status": "m0_contract",
+  "target": "literal upstream Basalt EuRoC stereo-inertial VIO and offline mapper",
+  "upstream": {
+    "repository": "https://github.com/VladyslavUsenko/basalt",
+    "commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+    "tree_sha1": "b7afb830d82b45b8209cf784ad9744025d838411",
+    "hash_basis": "checked-out working-tree bytes on Ubuntu-22.04 WSL2 (LF)",
+    "config": {
+      "path": "data/euroc_config.json",
+      "sha256_required": true,
+      "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+    },
+    "calibration": {
+      "path": "data/euroc_ds_calib.json",
+      "sha256_required": true,
+      "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c"
+    },
+    "license": "BSD-3-Clause"
+  },
+  "port": {
+    "rust_root": "pipelines/basalt",
+    "upstream_components": [
+      "basalt_vio",
+      "basalt_mapper",
+      "Double Sphere camera model",
+      "raw uint16 image pyramid",
+      "direct KLT optical flow",
+      "IMU preintegration and initialization",
+      "ABS_QR sliding-window solver",
+      "square-root marginalization and FEJ",
+      "MargData and nonlinear factor recovery"
+    ],
+    "shared_primitives_allowed": [
+      "image buffers",
+      "timestamp parsing",
+      "generic SE(3) math"
+    ],
+    "generic_paths_forbidden_in_compat": [
+      "descriptor matching",
+      "PnP keyframe gate",
+      "rebootstrap",
+      "independent submap welding",
+      "Sim(3) rescue alignment",
+      "ground-truth seed"
+    ]
+  },
+  "profiles": {
+    "basalt-compat": {
+      "upstream_equivalence": true,
+      "temporal_forward_backward_squared_threshold": 0.04,
+      "velocity_seed": false,
+      "rebootstrap": false,
+      "sim3_welding": false
+    },
+    "basalt-extended": {
+      "upstream_equivalence": false,
+      "notes": "Experimental improvements are scored in a separate namespace."
+    }
+  },
+  "provenance_policy": {
+    "upstream_commit_is_frozen": true,
+    "config_and_calibration_hashes_are_required_before_m1": true,
+    "engine_manifest_is_written_after_exit": true,
+    "ground_truth_is_post_exit_only": true,
+    "runtime_and_peak_rss_are_required": true
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "visloc-rs.basalt.m7ec.clean-track2-stereo-factor.v1",
+  "factor": "same-timestamp frame 0 cam 0 -> cam 1, track 2, iteration 0",
+  "direction_xy_f32_bits": ["beba3c0f", "be195391"],
+  "inverse_distance_f32_bits": "3e42a1b2",
+  "observation_f32_bits": ["42517d4a", "43046ac8"],
+  "q_xyzw_f32_bits": ["bbefaaa9", "b9eadbb0", "ba8bff3a", "3f7ffe35"],
+  "t_xyz_f32_bits": ["bde1c0f0", "3997d300", "b9e136c8"],
+  "target_point_xyz_f32_bits": ["bf26f362", "be7d2383", "3f3c2d9d"],
+  "projection_uv_f32_bits": ["42518143", "43046250"],
+  "raw_residual_uv_f32_bits": ["3b7e4000", "bd078000"],
+  "landmark_jacobian_column_major_f32_bits": [
+    "44486188", "c1c7d418", "c1ccfe70", "44561706", "c21c3dda", "40c8c0c7"
+  ]
+}
