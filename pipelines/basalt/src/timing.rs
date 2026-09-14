@@ -112,7 +112,7 @@ pub enum TimingBucket {
 /// Cumulative timing sidecar state.
 ///
 /// The fields are public so a harness can inspect the in-memory contract, but
-/// mutation is kept behind [`Self::start`] and [`Self::finish`] to make it
+/// mutation is kept behind `Self::start` and `Self::finish` to make it
 /// difficult to accidentally record a nested region as a second total.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TimingBreakdown {

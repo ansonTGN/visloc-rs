@@ -15,7 +15,7 @@ pub const BASALT_HEADERS_UPSTREAM_REPOSITORY: &str =
     "https://gitlab.com/VladyslavUsenko/basalt-headers";
 
 /// Immutable header dependency revision referenced by Basalt's vcpkg port at
-/// [`BASALT_UPSTREAM_SHA`](crate::provenance::BASALT_UPSTREAM_SHA).
+/// [`BASALT_UPSTREAM_SHA`].
 pub const BASALT_HEADERS_UPSTREAM_SHA: &str = "aa441ba3e51050c47ba1902537792a2e4db7e43d";
 
 #[cfg(test)]

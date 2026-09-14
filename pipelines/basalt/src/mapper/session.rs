@@ -2,7 +2,7 @@
 //! boundary.
 //!
 //! The lower-level mapper functions intentionally operate on one
-//! [`MargData`](crate::vio::margdata::MargData) packet at a time.  Upstream
+//! [`MargData`] packet at a time.  Upstream
 //! `NfrMapper` does not, however: it reduces and factor-recovers each packet,
 //! then retains the valid frame poses, recovered factors, and raw images in a
 //! long-lived mapper object.  Keeping that boundary explicit prevents a

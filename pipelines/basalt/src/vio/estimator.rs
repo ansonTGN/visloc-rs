@@ -739,7 +739,7 @@ impl BasaltVioEstimator {
     /// The estimator still performs the same solve, writeback, marginal prior
     /// update, and active-window maintenance.  It suppresses only MargData;
     /// trace diagnostics remain available for compatibility.  Call
-    /// [`Self::process_without_marg_data_no_trace`] when both output classes
+    /// `Self::process_without_marg_data_no_trace` when both output classes
     /// are intentionally disabled.
     pub fn process_without_marg_data(
         &mut self,

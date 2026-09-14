@@ -256,7 +256,7 @@ pub struct DescriptorMatch {
 /// Legacy synthetic-input helper retained for the existing NFR test/API.
 ///
 /// The M8c image frontend never calls this ID-ordered truncation path; use
-/// [`detect_keypoints_mapping`](features::detect_keypoints_mapping) for raw
+/// [`detect_keypoints_mapping`] for raw
 /// mapper images.
 pub fn detect_keypoints(mut points: Vec<Keypoint>, config: OfflineMapperConfig) -> Vec<Keypoint> {
     points.sort_by_key(|p| p.id);
@@ -970,7 +970,7 @@ impl GlobalBaOptimizerState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MapperState {
     /// Compatibility translation view.  The optimizer itself updates
-    /// [`se3_poses`] in the full six-dimensional Basalt pose chart.
+    /// `se3_poses` in the full six-dimensional Basalt pose chart.
     pub poses: std::collections::BTreeMap<u64, [f64; 3]>,
     /// Full `T_w_i` estimates after the solve (translation additive, rotation
     /// left-multiplied, exactly as `PoseState::incPose`).
