@@ -22,6 +22,7 @@ use rand::SeedableRng;
 use visloc_core::geometry::{Pose, SE3};
 use visloc_core::types::Camera;
 
+use crate::pnp::gp3p::gp3p_solve;
 use crate::pnp::{Correspondence2D3D, GaussNewtonPoseRefiner, P3PGrunert};
 use crate::ransac::{PnPRansac, RobustPoseEstimator};
 
@@ -359,9 +360,27 @@ pub struct GeneralizedRansacReport {
     pub refinement_applied: bool,
 }
 
+/// Which minimal solver [`GeneralizedPnPRansac`] uses to generate pose
+/// hypotheses from a minimal sample. Port of the C3 task's "keep the
+/// existing 6-point DLT path selectable (option) for A/B" instruction:
+/// [`MinimalSolver::Gp3p`] (the default, matching COLMAP's
+/// `EstimateGeneralizedAbsolutePose` -> `GP3PEstimator`,
+/// `estimators/generalized_pose.cc:131-190`, `RANSAC<GP3PEstimator,...>`
+/// sampling exactly 3 correspondences per trial) is the faithful C3 port;
+/// [`MinimalSolver::Dlt6pt`] keeps this port's pre-C3 6-point linear DLT
+/// path (see `generalized.rs`'s module doc and
+/// [`GeneralizedDltPoseEstimator`]) available for A/B parity checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MinimalSolver {
+    #[default]
+    Gp3p,
+    Dlt6pt,
+}
+
 /// Deterministic pixel-space RANSAC for one generalized rig frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GeneralizedPnPRansac {
+    pub minimal_solver: MinimalSolver,
     pub pose_estimator: GeneralizedDltPoseEstimator,
     pub pose_refiner: Option<GeneralizedGaussNewtonPoseRefiner>,
     pub iterations: usize,
@@ -373,6 +392,7 @@ pub struct GeneralizedPnPRansac {
 impl Default for GeneralizedPnPRansac {
     fn default() -> Self {
         Self {
+            minimal_solver: MinimalSolver::default(),
             pose_estimator: GeneralizedDltPoseEstimator::default(),
             pose_refiner: Some(GeneralizedGaussNewtonPoseRefiner::default()),
             iterations: 256,
@@ -381,6 +401,31 @@ impl Default for GeneralizedPnPRansac {
             seed: 7,
         }
     }
+}
+
+/// Generates GP3P's up-to-8 candidate `world -> rig` poses from a minimal
+/// 3-correspondence sample, drawn from possibly different sensors of the
+/// rig (`rig.ray_rig` handles the per-sensor bearing/origin transform into
+/// the shared rig frame, same helper [`GeneralizedDltPoseEstimator`] uses).
+fn gp3p_hypotheses(
+    rig: &GeneralizedCameraRig,
+    correspondences: &[GeneralizedCorrespondence2D3D],
+    sample_idx: [usize; 3],
+    seed: u64,
+) -> Vec<Pose> {
+    let mut origins = [Point3::origin(); 3];
+    let mut bearings = [Vector3::zeros(); 3];
+    let mut points = [Point3::origin(); 3];
+    for (k, &idx) in sample_idx.iter().enumerate() {
+        let correspondence = &correspondences[idx];
+        let Some((origin, bearing)) = rig.ray_rig(correspondence) else {
+            return Vec::new();
+        };
+        origins[k] = origin;
+        bearings[k] = bearing;
+        points[k] = correspondence.point3d;
+    }
+    gp3p_solve(&origins, &bearings, &points, seed)
 }
 
 impl GeneralizedPnPRansac {
@@ -398,7 +443,10 @@ impl GeneralizedPnPRansac {
         correspondences: &[GeneralizedCorrespondence2D3D],
         pose_prior: Option<&Pose>,
     ) -> Option<GeneralizedRansacReport> {
-        let sample_size = GeneralizedDltPoseEstimator::MINIMUM_CORRESPONDENCES;
+        let sample_size = match self.minimal_solver {
+            MinimalSolver::Gp3p => 3,
+            MinimalSolver::Dlt6pt => GeneralizedDltPoseEstimator::MINIMUM_CORRESPONDENCES,
+        };
         if correspondences.len() < sample_size
             || self.iterations == 0
             || !self.reprojection_threshold.is_finite()
@@ -418,30 +466,56 @@ impl GeneralizedPnPRansac {
         let mut central_hypotheses = 0usize;
         for iteration in 0..self.iterations {
             indices.shuffle(&mut rng);
-            let sample = indices
-                .iter()
-                .take(sample_size)
-                .map(|index| correspondences[*index].clone())
-                .collect::<Vec<_>>();
-            let Some(pose) = self.pose_estimator.estimate_pose(rig, &sample) else {
-                continue;
+            let hypotheses: Vec<Pose> = match self.minimal_solver {
+                MinimalSolver::Dlt6pt => {
+                    let sample = indices
+                        .iter()
+                        .take(sample_size)
+                        .map(|index| correspondences[*index].clone())
+                        .collect::<Vec<_>>();
+                    self.pose_estimator
+                        .estimate_pose(rig, &sample)
+                        .into_iter()
+                        .collect()
+                }
+                MinimalSolver::Gp3p => {
+                    // A per-trial seed derived from the RANSAC seed and
+                    // trial index — deterministic for a fixed `self.seed`
+                    // (task requirement), distinct per trial so different
+                    // trials don't repeat GP3P's own internal auxiliary
+                    // randomness (see `gp3p.rs`'s module doc).
+                    let trial_seed = self
+                        .seed
+                        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        .wrapping_add(iteration as u64);
+                    gp3p_hypotheses(
+                        rig,
+                        correspondences,
+                        [indices[0], indices[1], indices[2]],
+                        trial_seed,
+                    )
+                }
             };
-            dlt_hypotheses += 1;
-            let score = score_pose(rig, &pose, correspondences, self.reprojection_threshold);
-            if score.is_better_than(&best_score) {
-                best_pose = Some(pose);
-                best_score = score;
-                if let Some(confidence) = self.confidence {
-                    let inlier_ratio =
-                        best_score.inliers.len() as f64 / correspondences.len() as f64;
-                    if inlier_ratio >= 1.0 {
-                        required_iterations = iteration + 1;
-                    } else if inlier_ratio > 0.0 && confidence > 0.0 && confidence < 1.0 {
-                        let denominator = (1.0 - inlier_ratio.powi(sample_size as i32)).ln();
-                        if denominator < -1.0e-12 {
-                            required_iterations = required_iterations
-                                .min(((1.0 - confidence).ln() / denominator).ceil().max(1.0)
-                                    as usize);
+            if !hypotheses.is_empty() {
+                dlt_hypotheses += 1;
+            }
+            for pose in &hypotheses {
+                let score = score_pose(rig, pose, correspondences, self.reprojection_threshold);
+                if score.is_better_than(&best_score) {
+                    best_pose = Some(pose.clone());
+                    best_score = score;
+                    if let Some(confidence) = self.confidence {
+                        let inlier_ratio =
+                            best_score.inliers.len() as f64 / correspondences.len() as f64;
+                        if inlier_ratio >= 1.0 {
+                            required_iterations = iteration + 1;
+                        } else if inlier_ratio > 0.0 && confidence > 0.0 && confidence < 1.0 {
+                            let denominator = (1.0 - inlier_ratio.powi(sample_size as i32)).ln();
+                            if denominator < -1.0e-12 {
+                                required_iterations = required_iterations
+                                    .min(((1.0 - confidence).ln() / denominator).ceil().max(1.0)
+                                        as usize);
+                            }
                         }
                     }
                 }
@@ -457,7 +531,15 @@ impl GeneralizedPnPRansac {
         // transform them to the rig frame, then score them against *all*
         // sensors. Sensor choice affects hypothesis generation only; the
         // accepted body pose and nonlinear refinement remain fully pooled.
-        for sensor_index in 0..rig.sensors().len() {
+        // Only applies to the [`MinimalSolver::Dlt6pt`] A/B path — GP3P is
+        // already an exact minimal solver and COLMAP's own
+        // `EstimateGeneralizedAbsolutePose` has no analogous per-sensor
+        // bootstrap step.
+        for sensor_index in 0..(if self.minimal_solver == MinimalSolver::Dlt6pt {
+            rig.sensors().len()
+        } else {
+            0
+        }) {
             let sensor_correspondences = correspondences
                 .iter()
                 .filter(|correspondence| correspondence.sensor_index == sensor_index)
@@ -525,13 +607,25 @@ impl GeneralizedPnPRansac {
             .iter()
             .map(|index| correspondences[*index].clone())
             .collect::<Vec<_>>();
-        let refit_pose = self
-            .pose_estimator
-            .estimate_pose(rig, &inliers)
-            .filter(|pose| {
-                let score = score_pose(rig, pose, correspondences, self.reprojection_threshold);
-                !best_score.is_better_than(&score)
-            });
+        // COLMAP's `EstimateGeneralizedAbsolutePose` (plain `RANSAC`, no
+        // local-optimization refit step) returns the best minimal-sample
+        // model directly into `RefineGeneralizedAbsolutePose` — so the
+        // intermediate linear-DLT refit below is specific to this port's
+        // A/B [`MinimalSolver::Dlt6pt`] path, where it compensates for the
+        // 6-point DLT's higher noise sensitivity; it is skipped for
+        // [`MinimalSolver::Gp3p`] to match COLMAP's flow exactly (the
+        // Gauss-Newton `pose_refiner` step below still runs either way,
+        // matching `RefineGeneralizedAbsolutePose`).
+        let refit_pose = if self.minimal_solver == MinimalSolver::Dlt6pt {
+            self.pose_estimator
+                .estimate_pose(rig, &inliers)
+                .filter(|pose| {
+                    let score = score_pose(rig, pose, correspondences, self.reprojection_threshold);
+                    !best_score.is_better_than(&score)
+                })
+        } else {
+            None
+        };
         let mut pose = refit_pose.or(best_pose)?;
         let refit_score = score_pose(rig, &pose, correspondences, self.reprojection_threshold);
         let mut refinement_applied = false;
@@ -782,6 +876,97 @@ mod tests {
             "translation error {translation_error}"
         );
         assert!(report.mean_reprojection_error < 1.0e-5);
+    }
+
+    /// C3 task item: "RANSAC recovers it with 30% outliers" for the GP3P
+    /// minimal solver path specifically (not relying on
+    /// [`GeneralizedPnPRansac::default`] happening to already be
+    /// [`MinimalSolver::Gp3p`], in case that default ever changes).
+    #[test]
+    fn gp3p_ransac_recovers_pose_with_thirty_percent_outliers() {
+        let rig = test_rig();
+        let truth = truth_pose();
+        let mut correspondences = synthetic_correspondences(&rig, &truth);
+        // 24 correspondences total (see `synthetic_correspondences`); flip
+        // 7 (~29%) into gross pixel outliers.
+        for index in [0usize, 3, 7, 10, 14, 18, 22] {
+            correspondences[index].point2d.x += 120.0 + index as f64;
+            correspondences[index].point2d.y -= 75.0;
+        }
+        let report = GeneralizedPnPRansac {
+            minimal_solver: MinimalSolver::Gp3p,
+            iterations: 1024,
+            reprojection_threshold: 1.0,
+            ..GeneralizedPnPRansac::default()
+        }
+        .estimate(&rig, &correspondences)
+        .unwrap();
+        let (rotation_error, translation_error) = pose_errors(&report.pose, &truth);
+        assert_eq!(report.inliers.len(), correspondences.len() - 7);
+        assert!(rotation_error < 1.0e-6, "rotation error {rotation_error}");
+        assert!(
+            translation_error < 1.0e-6,
+            "translation error {translation_error}"
+        );
+    }
+
+    /// C3 task item: determinism with a fixed seed, at the RANSAC level
+    /// (covers both GP3P's own internal auxiliary-randomness seeding, per
+    /// `gp3p.rs`'s module doc, and the RANSAC sample-shuffling `SmallRng`).
+    #[test]
+    fn gp3p_ransac_is_deterministic_for_a_fixed_seed() {
+        let rig = test_rig();
+        let truth = truth_pose();
+        let mut correspondences = synthetic_correspondences(&rig, &truth);
+        for index in [1usize, 6, 11, 16, 21] {
+            correspondences[index].point2d.x += 90.0 + index as f64;
+            correspondences[index].point2d.y -= 55.0;
+        }
+        let config = GeneralizedPnPRansac {
+            minimal_solver: MinimalSolver::Gp3p,
+            iterations: 512,
+            reprojection_threshold: 1.0,
+            seed: 4242,
+            ..GeneralizedPnPRansac::default()
+        };
+        let a = config.estimate(&rig, &correspondences).unwrap();
+        let b = config.estimate(&rig, &correspondences).unwrap();
+        assert_eq!(a.inliers, b.inliers);
+        assert_eq!(
+            a.pose.world_to_camera.rotation,
+            b.pose.world_to_camera.rotation
+        );
+        assert_eq!(
+            a.pose.world_to_camera.translation,
+            b.pose.world_to_camera.translation
+        );
+    }
+
+    /// A/B: the pre-C3 6-point DLT path stays selectable and functional.
+    #[test]
+    fn dlt6pt_minimal_solver_still_selectable_and_recovers_pose() {
+        let rig = test_rig();
+        let truth = truth_pose();
+        let mut correspondences = synthetic_correspondences(&rig, &truth);
+        for index in [1usize, 6, 11, 16, 21] {
+            correspondences[index].point2d.x += 90.0 + index as f64;
+            correspondences[index].point2d.y -= 55.0;
+        }
+        let report = GeneralizedPnPRansac {
+            minimal_solver: MinimalSolver::Dlt6pt,
+            iterations: 512,
+            reprojection_threshold: 1.0,
+            ..GeneralizedPnPRansac::default()
+        }
+        .estimate(&rig, &correspondences)
+        .unwrap();
+        let (rotation_error, translation_error) = pose_errors(&report.pose, &truth);
+        assert_eq!(report.inliers.len(), 19);
+        assert!(rotation_error < 1.0e-6, "rotation error {rotation_error}");
+        assert!(
+            translation_error < 1.0e-6,
+            "translation error {translation_error}"
+        );
     }
 
     #[test]

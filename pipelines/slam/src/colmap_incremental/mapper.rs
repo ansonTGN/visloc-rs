@@ -33,18 +33,21 @@
 //!   but not expected to fire on the real OpenLORIS runs in §8). This
 //!   reverses an earlier (incorrect) reading in an intermediate draft of
 //!   this port's planning notes.
-//! - **`register_next_general_frame` uses
-//!   `GeneralizedDltPoseEstimator`/`GeneralizedPnPRansac` (6-point linear
-//!   DLT) as the minimal solver**, not COLMAP's true 3-point polynomial
-//!   GP3P (`estimators/solvers/generalized_absolute_pose.cc`) — per the
-//!   task brief's explicit instruction, this is **the C3 GP3P gap**. Since
-//!   Path B is (per the point above) the dominant/only path exercised in
-//!   this control run, this deviation directly raises the effective
-//!   per-attempt correspondence floor from COLMAP's 3 to this port's 6,
-//!   for essentially every registration attempt — expected to be the
-//!   single largest source of any registered-frame shortfall vs COLMAP,
-//!   and should be read together with the C2 report's registration
-//!   statistics.
+//! - **`register_next_general_frame` now uses COLMAP's true 3-point
+//!   polynomial GP3P by default** (`GeneralizedPnPRansac` with
+//!   `minimal_solver: MinimalSolver::Gp3p`,
+//!   `visloc_vision::pnp::gp3p::gp3p_solve`, ported from PoseLib's
+//!   `gp3p`/`re3q3` — see that module's doc for the full algorithm and its
+//!   own documented deviations), matching COLMAP's
+//!   `EstimateGeneralizedAbsolutePose` -> `GP3PEstimator`
+//!   (`estimators/generalized_pose.cc:131-190`,
+//!   `estimators/solvers/generalized_absolute_pose.cc`) per-attempt
+//!   correspondence floor of 3, not 6. This closes the former **C3 GP3P
+//!   gap**: the pre-C3 6-point linear-DLT minimal solver
+//!   (`GeneralizedDltPoseEstimator`) is kept selectable via
+//!   `Options::pose_solver = PoseSolverBackend::Dlt6pt` for A/B parity
+//!   checks only, per the task brief's "keep the existing 6-point DLT path
+//!   selectable (option) for A/B" instruction.
 //! - **`camera.has_prior_focal_length`** has no field in this port's
 //!   `Camera` (`crates/core/src/types/camera.rs`) — modeled as always
 //!   `true` (see above), a direct, documented consequence of this port's
@@ -57,7 +60,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use visloc_core::geometry::SE3;
 use visloc_vision::pnp::{
     Correspondence2D3D, GaussNewtonPoseRefiner, GeneralizedCameraRig,
-    GeneralizedCorrespondence2D3D, GeneralizedPnPRansac, P3PGrunert, RigSensor,
+    GeneralizedCorrespondence2D3D, GeneralizedPnPRansac, MinimalSolver, P3PGrunert, RigSensor,
 };
 use visloc_vision::ransac::{PnPRansac, RobustPoseEstimator};
 use visloc_vision::two_view::CorrespondenceGraph;
@@ -70,12 +73,28 @@ use super::observation_manager::{camera_has_bogus_params, ObservationManager};
 use super::reconstruction::{Reconstruction, TrackElement};
 use super::types::{CameraT, FrameT, ImageT, Point3DT, RigT, SensorT};
 
+/// Which minimal solver [`IncrementalMapper::register_next_general_frame`]
+/// (Path B) uses inside its `GeneralizedPnPRansac`. See module doc's C3
+/// deviation note. `Gp3p` is the faithful COLMAP-matching default; `Dlt6pt`
+/// is this port's pre-C3 6-point linear DLT path, kept selectable for A/B
+/// parity checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PoseSolverBackend {
+    #[default]
+    Gp3p,
+    Dlt6pt,
+}
+
 /// Port of `IncrementalMapper::Options` (`.h:70-173`), control-relevant
 /// subset, defaulted to the pinned control's exact values (per this
 /// module's scope — see module doc and `docs/colmap_rig_mapper_port_plan.md`
 /// §0.1/§1.2) rather than COLMAP's own upstream defaults where they differ.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Options {
+    /// C3: which minimal solver Path B's RANSAC uses. Not part of COLMAP's
+    /// own `Options` surface (COLMAP always uses GP3P) — added purely as
+    /// this port's A/B switch, see [`PoseSolverBackend`].
+    pub pose_solver: PoseSolverBackend,
     pub init_min_num_inliers: usize,
     pub init_max_error: f64,
     pub init_max_forward_motion: f64,
@@ -98,6 +117,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            pose_solver: PoseSolverBackend::default(),
             init_min_num_inliers: 100,
             init_max_error: 4.0,
             init_max_forward_motion: 0.95,
@@ -606,13 +626,11 @@ impl IncrementalMapper {
             }
         }
 
-        // `GeneralizedDltPoseEstimator::MINIMUM_CORRESPONDENCES == 6` — the
-        // C3 GP3P gap (this port's minimal solver needs 6 correspondences,
-        // COLMAP's true GP3P needs 3, see this module's doc). Counted
-        // separately from the (usually stricter) `abs_pose_min_num_inliers`
-        // gate below so the C2 report can quantify how often the DLT floor
-        // itself — not the control's own inlier-count policy — is the
-        // reason a Path B attempt could not even be tried.
+        // `GeneralizedDltPoseEstimator::MINIMUM_CORRESPONDENCES == 6` — kept
+        // as a diagnostic counter for the A/B `Dlt6pt` path (see module doc
+        // C3 deviation note); with the default `Gp3p` solver COLMAP's own
+        // 3-correspondence floor applies instead (checked next, via
+        // `abs_pose_min_num_inliers`, which the control already sets >= 3).
         if gcorrs.len() < 6 {
             self.path_b_rejected_lt6_corrs += 1;
         }
@@ -620,7 +638,12 @@ impl IncrementalMapper {
             return false;
         }
 
+        let minimal_solver = match options.pose_solver {
+            PoseSolverBackend::Gp3p => MinimalSolver::Gp3p,
+            PoseSolverBackend::Dlt6pt => MinimalSolver::Dlt6pt,
+        };
         let ransac = GeneralizedPnPRansac {
+            minimal_solver,
             reprojection_threshold: options.abs_pose_max_error,
             seed: options.random_seed,
             ..GeneralizedPnPRansac::default()

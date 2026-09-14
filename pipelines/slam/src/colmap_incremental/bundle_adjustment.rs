@@ -43,35 +43,46 @@
 //!    §0.1/§1.2) never varies camera intrinsics, and
 //!    `BaRigObservation`/`rig_residual_jacobians` in `bundle.rs` never
 //!    exposes them as parameters, so there is nothing to wire up.
-//! 3. **Point variable/constant default policy is a documented
-//!    simplification of `ParameterizePoints`
-//!    (`bundle_adjustment_ceres.cc:538-555`).** COLMAP's actual rule: a
-//!    point is held constant iff `track.Length() > num_observations_added`
-//!    (i.e. **not every** observation of that point was added as a
-//!    residual to *this* problem) or it is in `ConstantPoints()`;
-//!    `VariablePoints()` works by additionally pulling in the point's
-//!    *remaining* observations from images outside `config.Images()` as
-//!    extra fixed-pose residuals (`AddPointToProblem`,
-//!    `bundle_adjustment_ceres.cc:819+`) so `track.Length() ==
-//!    num_observations` holds and it becomes free. This port does **not**
-//!    implement that extra-residual pull-in (it would require adding
-//!    residuals against frames outside the config with their pose
-//!    hard-coded as data, which `bundle.rs`'s `BaRigObservation` doesn't
-//!    support without a variable pose parameter block per observation).
-//!    Instead: a point is **constant** unless (a) explicitly in
-//!    `constant_point3d_ids` (always constant), or (b) in
-//!    `variable_point3d_ids` (always variable, trusting the caller — this
-//!    is what `AdjustLocalBundle` passes the recently-modified point set
-//!    as, per `incremental_mapper.cc:1072-1080`), or (c) **every** track
-//!    element's image is inside `config.image_ids` (COLMAP's actual
-//!    `track.Length() == num_observations` condition, reproduced exactly
-//!    for the common case of a point fully inside the current window).
-//!    This slightly under-optimizes points that are new/short-track *and*
-//!    not fully contained in the window (COLMAP would still refine them
-//!    via the extra pull-in; this port leaves them constant unless the
-//!    caller explicitly requests variable) — flagged as a known,
-//!    conservative gap, not a correctness bug (constant points still
-//!    constrain poses; they just don't themselves improve).
+//! 3. **Point variable/constant policy now faithfully ports
+//!    `ParameterizePoints` (`bundle_adjustment_ceres.cc:538-555`) plus
+//!    `AddPointToProblem` (`bundle_adjustment_ceres.cc:819-879`).** COLMAP's
+//!    rule: a point is held constant iff `track.Length() >
+//!    num_observations_added` (i.e. **not every** observation of that point
+//!    was added as a residual to *this* problem) or it is in
+//!    `ConstantPoints()`; `VariablePoints()` (only — see below for why
+//!    `ConstantPoints()` needs no pull-in) works by additionally pulling in
+//!    the point's *remaining* observations from images outside
+//!    `config.Images()` as extra residuals with that image's pose baked in
+//!    as fixed data (`AddPointToProblem`), so `track.Length() ==
+//!    num_observations` holds and it becomes free. This port implements
+//!    that pull-in (see [`solve`]'s "Deviation 3" comment) by adding the
+//!    outside image's *frame* to the `bundle.rs` problem via `add_pose` +
+//!    `fix_pose` (a frame added and immediately fixed is bit-for-bit
+//!    equivalent to COLMAP's `ReprojErrorConstantPoseCostFunctor`/
+//!    `RigReprojErrorConstantRigCostFunctor` with a baked-constant pose: the
+//!    residual formula and its point-Jacobian are identical whether the pose
+//!    value is "a Ceres parameter block that happens to be constant" or "not
+//!    a parameter block at all", and `bundle.rs`'s existing fixed-pose
+//!    handling already excludes it from the reduced camera system) —
+//!    relying on this port's calling convention (`mapper.rs` always adds or
+//!    constant-fixes a frame's images as a whole unit, module doc point 1)
+//!    to guarantee an outside track element's frame is never *also* a
+//!    variable frame already in `config.Images()` under a different image id
+//!    of the same frame (COLMAP itself does not enforce this and would, in
+//!    that corner case, add a second residual that treats the same physical
+//!    pose as a frozen snapshot disconnected from its live parameter block —
+//!    not reachable by this port's callers).
+//!    **`ConstantPoints()` does *not* need the same pull-in**: COLMAP does
+//!    call `AddPointToProblem` for them too, but since this control never
+//!    refines camera intrinsics (deviation 2) every pulled-in residual for a
+//!    constant point would have *both* its point (`SetParameterBlockConstant`
+//!    via `ParameterizePoints`) and its camera params
+//!    (`SetParameterBlockConstant` via `ParameterizeCameras`,
+//!    `constant_camera` is always true here) held constant — i.e. zero free
+//!    parameters, hence zero contribution to the Jacobian/gradient/Hessian
+//!    of the reduced system either way. Skipping it is therefore a provably
+//!    numerically-inert simplification for this control, not a deviation in
+//!    the solved system.
 //! 4. **Gauge fixing is whole-pose / whole-point**, not COLMAP's per-DoF
 //!    `SetParameterization` trick (fixing e.g. only the X-translation
 //!    component of one frame while leaving its other 5 DoF free).
@@ -299,11 +310,28 @@ pub fn solve(
             });
         }
     }
+    // Port of `DefaultBundleAdjuster`'s constructor calling `AddPointToProblem`
+    // for every point in `config.VariablePoints()`/`config.ConstantPoints()`
+    // (`bundle_adjustment_ceres.cc:616-621`), independent of whether that
+    // point had any observation among `config.Images()` at all.
+    for &pid in &config.variable_point3d_ids {
+        added_points.insert(pid);
+    }
+    for &pid in &config.constant_point3d_ids {
+        added_points.insert(pid);
+    }
+
+    // Frames pulled in purely to hold a fixed, baked-constant pose for a
+    // variable point's out-of-window observations (see module doc deviation
+    // 3 / `AddPointToProblem`). Never written back to `recon` below (only
+    // `frame_ids`, computed above from `config.image_ids` alone, is).
+    let mut pulled_frame_ids: BTreeSet<FrameT> = BTreeSet::new();
+
     for &point3d_id in &added_points {
         let xyz = recon.point3d(point3d_id).xyz;
         ba.add_landmark(point3d_id, xyz);
-        // Deviation 3: see module doc for the exact policy this
-        // approximates from `ParameterizePoints`.
+        // Deviation 3: see module doc for the exact `ParameterizePoints`
+        // policy this reproduces.
         let track_fully_in_window = recon
             .point3d(point3d_id)
             .track
@@ -313,6 +341,44 @@ pub fn solve(
             && (config.variable_point3d_ids.contains(&point3d_id) || track_fully_in_window);
         if !variable {
             ba.fix_landmark(point3d_id);
+            continue;
+        }
+        if config.variable_point3d_ids.contains(&point3d_id) && !track_fully_in_window {
+            // `AddPointToProblem` (`bundle_adjustment_ceres.cc:819-879`):
+            // pull in every remaining track observation from images outside
+            // `config.Images()`, with that image's pose baked in as fixed
+            // data, so the point sees its *entire* track (matching
+            // `ParameterizePoints`'s `track.Length() == num_observations`
+            // free condition exactly instead of only seeing the in-window
+            // subset).
+            let track = recon.point3d(point3d_id).track.clone();
+            for el in &track {
+                if config.image_ids.contains(&el.image_id) {
+                    continue; // already added above (`AddImageToProblem`).
+                }
+                let image = recon.image(el.image_id);
+                let frame_id = image.frame_id;
+                if !frame_ids.contains(&frame_id) && pulled_frame_ids.insert(frame_id) {
+                    let rig_from_world = recon.frame(frame_id).rig_from_world().clone();
+                    ba.add_pose(
+                        frame_id,
+                        Pose {
+                            world_to_camera: rig_from_world,
+                        },
+                    );
+                    ba.fix_pose(frame_id);
+                }
+                let camera = recon.camera(image.camera_id).clone();
+                let sensor_from_rig = sensor_from_rig_for_image(recon, el.image_id);
+                let xy = image.points2d[el.point2d_idx].xy;
+                ba.add_rig_observation(BaRigObservation {
+                    keyframe_id: frame_id,
+                    landmark_id: point3d_id,
+                    xy,
+                    camera,
+                    sensor_from_rig,
+                });
+            }
         }
     }
 
@@ -574,6 +640,105 @@ mod tests {
                 "frame {frame_id} native translation {a:?} vs legacy {b:?}"
             );
         }
+    }
+
+    /// C3 task item A: a point explicitly requested variable
+    /// (`config.add_variable_point`, mirroring `AdjustLocalBundle`'s
+    /// "recently modified" point set,
+    /// `incremental_mapper.cc:1072-1080`) but whose track has an
+    /// observation from a frame *outside* the local window must still be
+    /// pulled in fully (`AddPointToProblem`,
+    /// `bundle_adjustment_ceres.cc:819-879`) and move under optimization —
+    /// contrasted with a second point with the same out-of-window shape
+    /// that is *not* explicitly requested variable, which must stay exactly
+    /// constant (`ParameterizePoints`, `bundle_adjustment_ceres.cc:538-555`:
+    /// `track.Length() > num_observations` for the implicit/default case).
+    /// The outside frame pulled in purely to supply the fixed pose for the
+    /// extra residual must itself stay bit-identical (never a free
+    /// parameter — `AddPointToProblem` bakes it as constant data).
+    #[test]
+    fn local_ba_pulls_in_out_of_window_observation_for_variable_point() {
+        let scene = build_synthetic_rig_scene(6, 5);
+        let mut recon = reconstruction_from_cache(&scene.db);
+        for (&frame_id, gt) in &scene.ground_truth_rig_from_world {
+            recon.frame_mut(frame_id).set_rig_from_world(gt.clone());
+            recon.register_frame(frame_id);
+        }
+
+        // Two points, each observed by every frame 0..=5 (full track); each
+        // uses its own `point2d_idx` (`0`/`1`, matching its position in
+        // `ground_truth_points`, which `build_synthetic_rig_scene` uses as
+        // every image's `points2d` order).
+        let gt_a = scene.ground_truth_points[0];
+        let gt_b = scene.ground_truth_points[1];
+        let track_for = |idx: usize| {
+            let mut track = Vec::new();
+            for &(i1, i2) in &scene.images_per_frame {
+                track.push(TrackElement {
+                    image_id: i1,
+                    point2d_idx: idx,
+                });
+                track.push(TrackElement {
+                    image_id: i2,
+                    point2d_idx: idx,
+                });
+            }
+            track
+        };
+        let p_a = recon.add_point3d(gt_a, track_for(0));
+        let p_b = recon.add_point3d(gt_b, track_for(1));
+
+        let noise = Vector3::new(0.05, -0.03, 0.02);
+        let perturbed_a = gt_a + noise;
+        let perturbed_b = gt_b + noise;
+        recon.point3d_mut(p_a).xyz = perturbed_a;
+        recon.point3d_mut(p_b).xyz = perturbed_b;
+
+        // Window = frames 0..=3; frames 4,5 are outside the window and
+        // never added to `config.Images()`. Both points' tracks include
+        // observations from the outside frames (every frame, by
+        // construction above).
+        let window_frames: [u64; 4] = [0, 1, 2, 3];
+        let outside_frame = 5u64;
+        let outside_pose_before = recon.frame(outside_frame).rig_from_world().clone();
+
+        let mut config = BundleAdjustmentConfig::new();
+        for &frame_id in &window_frames {
+            let (i1, i2) = scene.images_per_frame[frame_id as usize];
+            config.add_image(i1);
+            config.add_image(i2);
+        }
+        config.set_constant_rig_from_world_pose(window_frames[0]);
+        config.set_constant_rig_from_world_pose(*window_frames.last().unwrap());
+        // Only p_a is explicitly requested variable; p_b is left to the
+        // default policy (track not fully in window -> stays constant).
+        config.add_variable_point(p_a);
+
+        let options = BundleAdjustmentOptions::global();
+        assert!(solve(&options, &config, &mut recon), "BA solve failed");
+
+        let moved = (recon.point3d(p_a).xyz - perturbed_a).norm();
+        assert!(
+            moved > 1e-4,
+            "explicitly-variable out-of-window point p_a did not move ({moved})"
+        );
+        let err_a = (recon.point3d(p_a).xyz - gt_a).norm();
+        assert!(
+            err_a < 0.02,
+            "p_a did not converge using its full (pulled-in) track: error {err_a}"
+        );
+
+        assert_eq!(
+            recon.point3d(p_b).xyz,
+            perturbed_b,
+            "p_b (not explicitly variable, track not fully in window) must stay exactly constant"
+        );
+
+        assert_eq!(
+            recon.frame(outside_frame).rig_from_world(),
+            &outside_pose_before,
+            "outside frame pulled in only to supply a fixed pose must stay bit-identical"
+        );
     }
 
     /// C2.5 task item 6(d): frames in `constant_frame_ids` and points in
