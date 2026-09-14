@@ -25,6 +25,7 @@ pub mod mapper_impl;
 pub mod observation_manager;
 pub mod pipeline;
 pub mod reconstruction;
+pub(crate) mod rig_ba_solver;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod types;

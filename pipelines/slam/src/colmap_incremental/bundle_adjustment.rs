@@ -185,9 +185,27 @@ impl BundleAdjustmentConfig {
 /// `LocalBundleAdjustment`/`GlobalBundleAdjustment` factories). See module
 /// doc deviation 5 for why only `max_iterations` is threaded through to
 /// `bundle.rs`'s `BaConfig`.
+/// C2.5: which BA solver backend `solve` dispatches to. `Native`
+/// ([`super::rig_ba_solver`]) is a from-scratch, contiguous-`Vec`,
+/// `rayon`-parallel, block-Cholesky-Schur Levenberg-Marquardt solver written
+/// to replace `Legacy`'s measured ~340ms/iteration BTreeMap-indexed, dense-
+/// Schur `bundle::BundleAdjustment::optimize` path (infeasible past ~10k
+/// frames at global-BA scale). `Legacy` is kept selectable for
+/// regression/parity checks (`rig_ba_solver`'s `native_vs_legacy_*` tests)
+/// and as an escape hatch. See `super::rig_ba_solver`'s module doc for the
+/// Native solver's full design (residual model, parameterization, trust
+/// region, citations).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BaBackend {
+    #[default]
+    Native,
+    Legacy,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BundleAdjustmentOptions {
     pub max_num_iterations: usize,
+    pub backend: BaBackend,
 }
 
 impl BundleAdjustmentOptions {
@@ -195,12 +213,14 @@ impl BundleAdjustmentOptions {
     pub fn local() -> Self {
         Self {
             max_num_iterations: 25,
+            backend: BaBackend::default(),
         }
     }
     /// `kDefaultCeresGlobalMaxNumIterations` (`incremental_pipeline.cc:48`).
     pub fn global() -> Self {
         Self {
             max_num_iterations: 50,
+            backend: BaBackend::default(),
         }
     }
 }
@@ -340,11 +360,16 @@ pub fn solve(
     let n_obs = ba.rig_observations.len();
     let n_lm = ba.landmarks.len();
     let n_fixed_lm = ba.fixed_landmarks.len();
-    let Ok(result) = ba.optimize(&ba_config) else {
+    let solved = match options.backend {
+        BaBackend::Legacy => ba.optimize(&ba_config),
+        BaBackend::Native => super::rig_ba_solver::optimize(&mut ba, options.max_num_iterations),
+    };
+    let Ok(result) = solved else {
         return false;
     };
     eprintln!(
-        "BA_SOLVE frames={} obs={n_obs} landmarks={n_lm} fixed_landmarks={n_fixed_lm} iterations={} elapsed_ms={}",
+        "BA_SOLVE backend={:?} frames={} obs={n_obs} landmarks={n_lm} fixed_landmarks={n_fixed_lm} iterations={} elapsed_ms={}",
+        options.backend,
         frame_ids.len(),
         result.iterations.len(),
         started.elapsed().as_millis()
@@ -432,9 +457,8 @@ mod tests {
             config.set_constant_rig_from_world_pose(frame_id);
         }
 
-        let options = BundleAdjustmentOptions {
-            max_num_iterations: 50,
-        };
+        let mut options = BundleAdjustmentOptions::global();
+        options.max_num_iterations = 50;
         assert!(solve(&options, &config, &mut recon), "BA solve failed");
 
         for (j, gt_xyz) in scene.ground_truth_points.iter().enumerate() {
@@ -449,5 +473,142 @@ mod tests {
                 "frame {frame_id} translation error {dt} too large after BA"
             );
         }
+    }
+
+    /// Shared setup for the Native/Legacy-parity and constant-frame/point
+    /// tests below: same perturbed synthetic rig scene as
+    /// `solve_converges_synthetic_rig_scene`, factored out so both backends
+    /// run from an identical starting point.
+    fn build_scene(
+        num_frames: usize,
+    ) -> (
+        crate::colmap_incremental::reconstruction::Reconstruction,
+        BundleAdjustmentConfig,
+        Vec<u64>,
+        [u64; 2],
+    ) {
+        let scene = build_synthetic_rig_scene(num_frames, 3);
+        let mut recon = reconstruction_from_cache(&scene.db);
+        for (&frame_id, gt) in &scene.ground_truth_rig_from_world {
+            recon.frame_mut(frame_id).set_rig_from_world(gt.clone());
+            recon.register_frame(frame_id);
+        }
+        let mut point3d_ids = Vec::new();
+        for (j, gt_xyz) in scene.ground_truth_points.iter().enumerate() {
+            let mut track = Vec::new();
+            for &(i1, i2) in &scene.images_per_frame {
+                track.push(TrackElement {
+                    image_id: i1,
+                    point2d_idx: j,
+                });
+                track.push(TrackElement {
+                    image_id: i2,
+                    point2d_idx: j,
+                });
+            }
+            point3d_ids.push(recon.add_point3d(*gt_xyz, track));
+        }
+        let anchors = [0u64, (scene.images_per_frame.len() - 1) as u64];
+        let noise = Vector3::new(0.03, -0.02, 0.015);
+        for &frame_id in scene.ground_truth_rig_from_world.keys() {
+            if anchors.contains(&frame_id) {
+                continue;
+            }
+            let mut pose = recon.frame(frame_id).rig_from_world().clone();
+            pose.translation += noise;
+            recon.frame_mut(frame_id).set_rig_from_world(pose);
+        }
+        for &pid in &point3d_ids {
+            let xyz = recon.point3d(pid).xyz;
+            recon.point3d_mut(pid).xyz = xyz + Vector3::new(0.02, -0.015, 0.01);
+        }
+        let mut config = BundleAdjustmentConfig::new();
+        for &(i1, i2) in &scene.images_per_frame {
+            config.add_image(i1);
+            config.add_image(i2);
+        }
+        for &pid in &point3d_ids {
+            config.add_variable_point(pid);
+        }
+        for &frame_id in &anchors {
+            config.set_constant_rig_from_world_pose(frame_id);
+        }
+        (recon, config, point3d_ids, anchors)
+    }
+
+    /// C2.5 task item 6(c): `Native` and `Legacy` solve the *same* problem
+    /// (identical starting poses/points, gauge, iteration budget) to the
+    /// same final cost and the same poses/points, within the task's 1e-6
+    /// relative tolerance.
+    #[test]
+    fn native_vs_legacy_same_problem_same_result() {
+        let (mut recon_native, config_native, point_ids, _anchors) = build_scene(5);
+        let (mut recon_legacy, config_legacy, _point_ids2, _anchors2) = build_scene(5);
+
+        let mut native_options = BundleAdjustmentOptions::global();
+        native_options.max_num_iterations = 30;
+        native_options.backend = BaBackend::Native;
+        let mut legacy_options = native_options;
+        legacy_options.backend = BaBackend::Legacy;
+
+        assert!(solve(&native_options, &config_native, &mut recon_native));
+        assert!(solve(&legacy_options, &config_legacy, &mut recon_legacy));
+
+        for &pid in &point_ids {
+            let a = recon_native.point3d(pid).xyz;
+            let b = recon_legacy.point3d(pid).xyz;
+            let diff = (a - b).norm();
+            let scale = b.coords.norm().max(1.0);
+            assert!(
+                diff / scale < 1e-6,
+                "point {pid} native {a:?} vs legacy {b:?} (relative diff {})",
+                diff / scale
+            );
+        }
+        for &frame_id in recon_native.reg_frame_ids() {
+            let a = recon_native.frame(frame_id).rig_from_world();
+            let b = recon_legacy.frame(frame_id).rig_from_world();
+            let dt = (a.translation - b.translation).norm();
+            assert!(
+                dt < 1e-6 * b.translation.norm().max(1.0),
+                "frame {frame_id} native translation {a:?} vs legacy {b:?}"
+            );
+        }
+    }
+
+    /// C2.5 task item 6(d): frames in `constant_frame_ids` and points in
+    /// `constant_point3d_ids` are left exactly unchanged by `Native`.
+    #[test]
+    fn native_constant_frames_and_points_unchanged() {
+        let (mut recon, mut config, point_ids, anchors) = build_scene(5);
+        // Anchors are already constant (gauge); additionally fix one more
+        // frame and one more (otherwise-variable) point explicitly.
+        let extra_constant_frame = 2u64;
+        config.set_constant_rig_from_world_pose(extra_constant_frame);
+        let extra_constant_point = point_ids[0];
+        config.add_constant_point(extra_constant_point);
+
+        let before_frame = recon.frame(extra_constant_frame).rig_from_world().clone();
+        let before_point = recon.point3d(extra_constant_point).xyz;
+        let before_anchor0 = recon.frame(anchors[0]).rig_from_world().clone();
+
+        let options = BundleAdjustmentOptions::global();
+        assert!(solve(&options, &config, &mut recon), "BA solve failed");
+
+        assert_eq!(
+            recon.frame(extra_constant_frame).rig_from_world(),
+            &before_frame,
+            "explicitly-constant frame moved"
+        );
+        assert_eq!(
+            recon.point3d(extra_constant_point).xyz,
+            before_point,
+            "explicitly-constant point moved"
+        );
+        assert_eq!(
+            recon.frame(anchors[0]).rig_from_world(),
+            &before_anchor0,
+            "gauge-anchor frame moved"
+        );
     }
 }

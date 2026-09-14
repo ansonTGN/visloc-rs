@@ -176,3 +176,102 @@ pub(crate) fn build_synthetic_rig_scene(num_frames: usize, window: usize) -> Syn
 pub(crate) fn point2_dist(a: Point2<f64>, b: Point2<f64>) -> f64 {
     (a - b).norm()
 }
+
+/// C2.5 profiling harness: a `bundle::BundleAdjustment` (not a full
+/// `Reconstruction`/`DatabaseCache` — this is deliberately built directly at
+/// the BA-problem level, bypassing the triangulator/mapper, so a 2-3k-point,
+/// 100k+-observation problem can be generated in milliseconds) sized to
+/// resemble the real tier-1000 global-BA problem that exposed
+/// `rig_ba_solver`'s O(track_len²)-per-point allocation/`BTreeMap` blowup
+/// (`frames=333 obs=179623 landmarks=2541`, i.e. ~71 observations/point —
+/// long tracks from corridor revisits, not the short 2-8-observation tracks
+/// typical of a single pass). A 2-camera rig (matching the OpenLORIS-style
+/// baseline) moves in a straight line; `num_points` landmarks are centered
+/// on evenly-spread frames and visible for `track_span` consecutive frames
+/// each (both cameras), so `avg observations/point ≈ 2 · (track_span + 1)`
+/// and every point's *frame* track length is `track_span + 1` — reproducing
+/// the O(k²) elimination-pair blowup a corridor-revisit scene causes,
+/// without needing real data.
+pub(crate) fn build_large_synthetic_ba_problem(
+    num_frames: usize,
+    num_points: usize,
+    track_span: usize,
+) -> crate::bundle::BundleAdjustment {
+    use crate::bundle::{BaRigObservation, BundleAdjustment};
+    use visloc_core::geometry::Pose;
+    use visloc_core::types::Camera as CoreCamera;
+
+    let camera1 = CoreCamera::pinhole(1, 640, 480, 500.0, 500.0, 320.0, 240.0);
+    let camera2 = CoreCamera::pinhole(2, 640, 480, 500.0, 500.0, 320.0, 240.0);
+    let cam2_from_rig = SE3::new(
+        UnitQuaternion::from_euler_angles(0.0, 0.02, 0.0),
+        Vector3::new(-0.15, 0.0, 0.0),
+    );
+
+    let mut ba = BundleAdjustment::new(camera1.clone());
+    let mut gt_poses: Vec<SE3> = Vec::with_capacity(num_frames);
+    for k in 0..num_frames {
+        let translation = Vector3::new(0.05 * k as f64, 0.01 * (k as f64 * 0.3).sin(), 0.0);
+        let yaw = 0.002 * k as f64;
+        let pose = SE3::new(
+            UnitQuaternion::from_euler_angles(0.0, yaw, 0.0),
+            translation,
+        );
+        gt_poses.push(pose.clone());
+        ba.add_pose(
+            k as u64,
+            Pose {
+                world_to_camera: pose,
+            },
+        );
+    }
+    ba.fix_pose(0);
+    ba.fix_pose((num_frames - 1) as u64);
+
+    let half_span = track_span / 2;
+    for j in 0..num_points {
+        let center = (j * num_frames) / num_points.max(1);
+        let center_pose = &gt_poses[center];
+        let lateral = ((j % 7) as f64 - 3.0) * 0.3;
+        let vertical = ((j % 5) as f64 - 2.0) * 0.2;
+        let depth = 2.5 + (j % 4) as f64 * 0.5;
+        let point_cam = Point3::new(lateral, vertical, depth);
+        let point_world = center_pose.inverse().transform_point(&point_cam);
+        let landmark_id = j as u64;
+        ba.add_landmark(landmark_id, point_world);
+
+        let lo = center.saturating_sub(half_span);
+        let hi = (center + half_span).min(num_frames.saturating_sub(1));
+        for i in lo..=hi {
+            let pose = &gt_poses[i];
+            for (camera, sensor_from_rig) in [
+                (&camera1, SE3::identity()),
+                (&camera2, cam2_from_rig.clone()),
+            ] {
+                let p_rig = pose.transform_point(&point_world);
+                let p_sensor = sensor_from_rig.transform_point(&p_rig);
+                if p_sensor.z <= 0.2 {
+                    continue;
+                }
+                let Some(xy) = camera.project(&p_sensor) else {
+                    continue;
+                };
+                if xy.x < 0.0
+                    || xy.x >= camera.width as f64
+                    || xy.y < 0.0
+                    || xy.y >= camera.height as f64
+                {
+                    continue;
+                }
+                ba.add_rig_observation(BaRigObservation {
+                    keyframe_id: i as u64,
+                    landmark_id,
+                    xy,
+                    camera: camera.clone(),
+                    sensor_from_rig,
+                });
+            }
+        }
+    }
+    ba
+}
