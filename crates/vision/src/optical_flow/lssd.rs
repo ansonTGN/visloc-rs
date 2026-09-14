@@ -17,6 +17,11 @@ pub struct LssdPatch {
 }
 
 impl LssdPatch {
+    // The fixed-size `PATTERN51_SIZE` pattern is intentionally walked by
+    // index (not `.iter().enumerate()`) because several bodies below index
+    // more than one array (e.g. `out.data`, `j`) in lockstep over the same
+    // `PATTERN51_SIZE` range.
+    #[allow(clippy::needless_range_loop)]
     pub fn from_image(
         image: &GrayImage,
         pos: (f32, f32),
@@ -104,6 +109,7 @@ impl LssdPatch {
     }
 
     /// Returns translation increment `(dx, dy)` to add to the image point.
+    #[allow(clippy::needless_range_loop)]
     pub fn track_step(
         &self,
         image: &GrayImage,

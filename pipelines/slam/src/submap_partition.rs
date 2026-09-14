@@ -336,6 +336,7 @@ pub enum WidenMergeReason {
 /// pure function of the (deterministic) merged window and its unmerged
 /// predecessor, so the same windows and the same sequence of build outcomes
 /// always produce the same merges and the same output order.
+#[allow(clippy::too_many_arguments)]
 pub fn widen_and_build<T, E>(
     mut windows: Vec<SubmapWindow>,
     max_merges: usize,

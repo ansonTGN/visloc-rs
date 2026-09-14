@@ -671,6 +671,9 @@ fn track_direction_from_seed_impl(
         }
         let mut level_transform =
             AffineCompact2f::new(*transform.linear(), *transform.translation() / scale);
+        // `iteration` is read only by the `#[cfg(test)]` observer hook below;
+        // keep the name (rather than `_iteration`) so that branch still compiles.
+        #[allow(unused_variables)]
         for iteration in 0..config.max_iterations {
             let residual = patch
                 .residual(current_image, &level_transform)

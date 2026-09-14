@@ -874,7 +874,7 @@ impl MotionBasedViInitializer {
             // Record the attempt BEFORE the magnitude gate below, mirroring
             // `last_gravity_alignment`'s rationale: a rejected estimate is
             // exactly as diagnostically interesting as an accepted one.
-            self.last_gyro_bias_alignment = Some(alignment.clone());
+            self.last_gyro_bias_alignment = Some(alignment);
             let magnitude_rad_s = alignment.bias_gyro.norm();
             if let Some(limit) = self.config.max_gyro_bias_magnitude_rad_s {
                 if magnitude_rad_s > limit {

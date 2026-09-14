@@ -5,11 +5,8 @@
 //! landmark are eliminated together by ABS_QR; this is important because a
 //! single two-row observation cannot constrain a three-parameter landmark.
 
-#[cfg(test)]
-use super::aom::compact_trial_preparation_for_test;
 use super::aom::{
-    active_diagnostic_lm_iteration, anchored_visual_reprojection_factor_f32_with_time_cam,
-    anchored_visual_reprojection_factor_f32_with_time_cam_fej_mode,
+    active_diagnostic_lm_iteration, anchored_visual_reprojection_factor_f32_with_time_cam_fej_mode,
     anchored_visual_reprojection_factor_with_time_cam, back_substitute_landmark,
     back_substitute_landmark_upstream_f32_with_track, emit_full70_factor_oracle,
     full70_f32_bits_matrix, full70_f32_bits_vector, landmark_nullspace_projection,
@@ -18,6 +15,10 @@ use super::aom::{
     LmConfig, LmDiagnosticEvent, LmFailure, LmLinearization, LmProblem, LmResult, LmTraceEntry,
     LmTrialBinding, LmTrialPreparation, LmTrialToken, ReducedNormalSystem, VisualChainF32,
     WhitenedFactorRowStack,
+};
+#[cfg(test)]
+use super::aom::{
+    anchored_visual_reprojection_factor_f32_with_time_cam, compact_trial_preparation_for_test,
 };
 use super::landmarks::{sophus_so3_product, InverseDistanceLandmark, StereographicDirection};
 use super::scalar::ScalarMode;
@@ -38,13 +39,13 @@ use nalgebra::{
 use serde_json::{json, Value as JsonValue};
 use std::{
     cell::Cell,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, HashMap},
     env,
     ffi::{OsStr, OsString},
     fmt::Write as FmtWrite,
     fs,
     fs::OpenOptions,
-    io::{BufWriter, Write as IoWrite},
+    io::Write as IoWrite,
     ops::AddAssign,
     path::PathBuf,
     sync::{Mutex, OnceLock},
@@ -748,12 +749,12 @@ fn diagnostic_env_snapshot_from_current() -> DiagnosticEnvSnapshot {
 // process environment.
 static DIAGNOSTIC_ENV_SNAPSHOT: OnceLock<DiagnosticEnvSnapshot> = OnceLock::new();
 
-/// Scope the f64 IMU observer to the explicit link walk in
-/// `initial_window_diagnostics`.  The diagnostic prepass first calls
-/// `WindowProblem::linearize`, which also reaches `imu_factor_with_trace`;
-/// that call must not be mistaken for the authoritative one-link capture.
-/// A thread-local flag keeps this boundary local even if an estimator is
-/// driven from more than one worker thread.
+// Scope the f64 IMU observer to the explicit link walk in
+// `initial_window_diagnostics`.  The diagnostic prepass first calls
+// `WindowProblem::linearize`, which also reaches `imu_factor_with_trace`;
+// that call must not be mistaken for the authoritative one-link capture.
+// A thread-local flag keeps this boundary local even if an estimator is
+// driven from more than one worker thread.
 thread_local! {
     static INITIAL_IMU_F64_CAPTURE_SCOPE: Cell<bool> = const { Cell::new(false) };
     static INITIAL_IMU_F64_CAPTURE_LINK_INDEX: Cell<Option<usize>> = const { Cell::new(None) };
@@ -13884,7 +13885,7 @@ mod tests {
         let Some(input) = std::env::var_os("VISLOC_BASALT_SQRT_TRACE_INPUT") else {
             return;
         };
-        let Some(dump) = std::env::var_os("VISLOC_BASALT_SQRT_DUMP_QJ") else {
+        let Some(_dump) = std::env::var_os("VISLOC_BASALT_SQRT_DUMP_QJ") else {
             panic!("exact QR replay requires qtrace output");
         };
         let (jacobian, rhs, keep, marg) =

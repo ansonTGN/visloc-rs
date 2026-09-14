@@ -127,7 +127,6 @@ pub enum MotionViInitializationStatus {
     },
 }
 
-#[allow(clippy::large_enum_variant)]
 /// State-transition event exposed on [`crate::OnlineSlamResult::vi_motion_init`].
 /// `Some` only on the frame where the motion-based stage actually
 /// changed state.

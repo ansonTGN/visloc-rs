@@ -398,6 +398,7 @@ impl LocalSubmapBuilder {
     /// bounded alternate-seed retry before the caller considers widening the
     /// component. `NoSeedPair` has no candidate to exclude and therefore
     /// returns immediately for the caller's widen remediation.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn build_merged_component(
         &self,
         camera: &Camera,
@@ -408,6 +409,7 @@ impl LocalSubmapBuilder {
         self.build_with_retry_scope(camera, source_frame_ids, features, pairwise, true)
     }
 
+    #[allow(clippy::result_large_err)]
     fn build_with_retry_scope(
         &self,
         camera: &Camera,

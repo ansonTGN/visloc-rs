@@ -1,8 +1,6 @@
 //! Basalt landmark and keyframe contracts, independent of generic PnP.
 use crate::camera::DoubleSphereCamera;
-use nalgebra::{
-    Matrix3, Matrix3x2, Matrix4, Point2, Point3, Quaternion, UnitQuaternion, Vector3, Vector4,
-};
+use nalgebra::{Matrix3, Matrix3x2, Matrix4, Point2, Point3, UnitQuaternion, Vector3, Vector4};
 use std::collections::BTreeMap;
 use visloc_core::geometry::SE3;
 

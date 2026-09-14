@@ -4766,8 +4766,7 @@ where
         if !should_trigger || vi_initialization_pending {
             return None;
         }
-        let result = crate::online_slam_vi_ba::run_local_vi_ba(&mut self.map, state);
-        result
+        crate::online_slam_vi_ba::run_local_vi_ba(&mut self.map, state)
     }
 
     /// After a successful VI-BA window shift, harvest the `SqrtNavMarginal`

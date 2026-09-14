@@ -3,6 +3,11 @@
 // operations where bit-level compatibility requires it.
 #![deny(unsafe_code)]
 #![recursion_limit = "256"]
+// `dead_code` and the style-only clippy lints this crate suppresses are
+// configured package-wide in Cargo.toml's `[lints]` table (rather than here)
+// so the same allow-list also covers this crate's `examples/`/`tests/`
+// binaries, which are separate crate roots that inner `#![allow]` attributes
+// in this file would not reach.
 //! Basalt-compatible VI-SLAM foundations.
 //!
 //! The crate deliberately owns its calibration, camera, timestamp, and IMU

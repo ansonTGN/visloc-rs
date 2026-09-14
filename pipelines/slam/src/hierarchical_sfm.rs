@@ -749,11 +749,11 @@ struct SeamMergeCandidate {
 /// such a seam cannot be aligned, so a correspondence-free component rebuild
 /// is its only possible remediation.
 fn is_last_resort_seam_rejection_eligible(rejection: &SubmapSim3Rejection) -> bool {
-    match rejection.reason {
+    !matches!(
+        rejection.reason,
         SubmapSim3RejectionReason::NonFinitePoint
-        | SubmapSim3RejectionReason::NonUniqueCorrespondences => false,
-        _ => true,
-    }
+            | SubmapSim3RejectionReason::NonUniqueCorrespondences
+    )
 }
 
 /// Exhaustively inspect the current adjacent seam chain and retain every
@@ -2114,10 +2114,12 @@ mod tests {
             ];
             let calls = RefCell::new(Vec::new());
             let mut next_id = 3;
-            let mut config = HierarchicalSfmConfig::default();
             // One unit collapses the rejected seam and the second absorbs the
             // live successor after the component build's seed retries fail.
-            config.max_degenerate_seam_merges = 2;
+            let config = HierarchicalSfmConfig {
+                max_degenerate_seam_merges: 2,
+                ..Default::default()
+            };
 
             let (final_windows, atlas) = merge_degenerate_seams_and_optimize(
                 vec![w(0..10), w(10..20), w(20..30)],
@@ -2154,10 +2156,12 @@ mod tests {
             ];
             let calls = RefCell::new(Vec::new());
             let mut next_id = 3;
-            let mut config = HierarchicalSfmConfig::default();
             // The seam collapse spends the only unit, leaving none for the
             // neighbour absorption required by the failed rebuild.
-            config.max_degenerate_seam_merges = 1;
+            let config = HierarchicalSfmConfig {
+                max_degenerate_seam_merges: 1,
+                ..Default::default()
+            };
 
             let error = merge_degenerate_seams_and_optimize(
                 vec![w(0..10), w(10..20), w(20..30)],
@@ -2252,8 +2256,10 @@ mod tests {
             ];
             let calls = RefCell::new(Vec::new());
             let mut next_id = 3;
-            let mut config = HierarchicalSfmConfig::default();
-            config.last_resort_seam_merge = false;
+            let config = HierarchicalSfmConfig {
+                last_resort_seam_merge: false,
+                ..Default::default()
+            };
             let error = merge_degenerate_seams_and_optimize(
                 vec![w(0..10), w(10..20), w(20..30)],
                 submaps,
@@ -2435,8 +2441,10 @@ mod tests {
             ];
             let pair_rotations = vec![rotation_link(10, 20)];
             let mut next_id = 2u64;
-            let mut config = HierarchicalSfmConfig::default();
-            config.last_resort_seam_merge = false;
+            let config = HierarchicalSfmConfig {
+                last_resort_seam_merge: false,
+                ..Default::default()
+            };
             let error = merge_degenerate_seams_and_optimize(
                 windows,
                 submaps,
@@ -2700,8 +2708,10 @@ mod tests {
             // actual run is unaffected by the exhaustive reporting scan and
             // still fails fast on the first seam (0->1), unchanged.
             let mut next_id = 3u64;
-            let mut config = HierarchicalSfmConfig::default();
-            config.last_resort_seam_merge = false;
+            let config = HierarchicalSfmConfig {
+                last_resort_seam_merge: false,
+                ..Default::default()
+            };
             let error = merge_degenerate_seams_and_optimize(
                 windows,
                 submaps,

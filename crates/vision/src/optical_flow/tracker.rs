@@ -286,6 +286,7 @@ impl OpticalFlowTracker {
 /// `x_ref,y_ref` locate the template in `from`; `x_init,y_init` seed the
 /// search in `to` (full-resolution). Same-point init recovers identity /
 /// stereo; temporal tracking seeds with the last displacement.
+#[allow(clippy::too_many_arguments)]
 fn track_point(
     from_pyr: &[GrayImage],
     to_pyr: &[GrayImage],
@@ -314,9 +315,7 @@ fn track_point(
             return None;
         }
         for _ in 0..max_iters {
-            let Some((dx, dy)) = patch.track_step(&to_pyr[level], (x, y), pattern) else {
-                return None;
-            };
+            let (dx, dy) = patch.track_step(&to_pyr[level], (x, y), pattern)?;
             // Basalt: transform *= SE2::exp(inc); translation-only → +=.
             x += dx;
             y += dy;
@@ -371,9 +370,11 @@ mod tests {
         let img0 = GrayImage::from_luma8(128, 96, data).unwrap();
         let img1 = shift_image(&img0, 3, -2);
 
-        let mut cfg = BasaltOpticalFlowConfig::default();
-        cfg.optical_flow_levels = 3;
-        cfg.optical_flow_max_iterations = 5;
+        let mut cfg = BasaltOpticalFlowConfig {
+            optical_flow_levels: 3,
+            optical_flow_max_iterations: 5,
+            ..Default::default()
+        };
         cfg.optical_flow_max_recovered_dist2 = 0.04;
         let mut tracker = OpticalFlowTracker::new(cfg.clone());
         tracker.tracks.push(TrackedKeypoint {
@@ -415,9 +416,11 @@ mod tests {
         // 8px shift is hard from a zero seed at FB=0.04; prior velocity helps.
         let img1 = shift_image(&img0, 8, -4);
 
-        let mut cfg = BasaltOpticalFlowConfig::default();
-        cfg.optical_flow_levels = 3;
-        cfg.optical_flow_max_iterations = 5;
+        let mut cfg = BasaltOpticalFlowConfig {
+            optical_flow_levels: 3,
+            optical_flow_max_iterations: 5,
+            ..Default::default()
+        };
         cfg.optical_flow_max_recovered_dist2 = 0.04;
         let mut tracker = OpticalFlowTracker::new(cfg.clone());
         tracker.tracks.push(TrackedKeypoint {
@@ -461,9 +464,11 @@ mod tests {
             *v = ((*v as f32) * 1.4).min(255.0) as u8;
         }
 
-        let mut cfg = BasaltOpticalFlowConfig::default();
-        cfg.optical_flow_levels = 2;
-        cfg.optical_flow_max_iterations = 5;
+        let mut cfg = BasaltOpticalFlowConfig {
+            optical_flow_levels: 2,
+            optical_flow_max_iterations: 5,
+            ..Default::default()
+        };
         cfg.optical_flow_max_recovered_dist2 = 0.25;
         let mut tracker = OpticalFlowTracker::new(cfg.clone());
         tracker.tracks.push(TrackedKeypoint {

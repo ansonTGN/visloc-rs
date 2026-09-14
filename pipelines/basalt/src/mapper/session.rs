@@ -36,8 +36,11 @@ use crate::{
         query_bow_candidates, FeaturePipelineError, MapperImageFeatures, MapperImageId,
     },
     pyramid::{ImageError, RawU16Image},
-    vio::margdata::{MargData, OfImageData, MARGDATA_SCHEMA_VERSION_V3},
+    vio::margdata::{MargData, OfImageData},
 };
+// Only exercised by the `tests` module's fixtures below (via `use super::*;`).
+#[cfg(test)]
+use crate::vio::margdata::MARGDATA_SCHEMA_VERSION_V3;
 
 use super::{
     extract_nonlinear_factors, global_ba_with_state, linearize_mapper_observation,
