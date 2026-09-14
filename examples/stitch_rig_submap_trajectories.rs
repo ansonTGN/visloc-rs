@@ -3730,7 +3730,7 @@ mod tests {
                 .components
                 .iter()
                 .map(|component| component.image_count)
-                .sum()
+                .sum::<usize>()
         );
     }
 
