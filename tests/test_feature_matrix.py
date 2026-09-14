@@ -43,7 +43,7 @@ class FeatureMatrixTests(unittest.TestCase):
     def test_feature_matrix_msrv_matches_root_manifest_and_ci(self):
         manifest = tomllib.loads(read("Cargo.toml"))
         msrv = manifest["package"]["rust-version"]
-        self.assertEqual(msrv, "1.82")
+        self.assertEqual(msrv, "1.83")
 
         doc = read("docs/feature_matrix.md")
         ci = read(".github/workflows/ci.yml")

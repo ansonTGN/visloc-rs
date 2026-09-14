@@ -34,8 +34,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Rust 1.82.0
-        uses: dtolnay/rust-toolchain@1.82.0
+      - name: Install Rust 1.83.0
+        uses: dtolnay/rust-toolchain@1.83.0
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

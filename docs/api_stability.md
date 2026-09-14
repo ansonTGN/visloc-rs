@@ -102,10 +102,10 @@ Changes should still be additive where possible, but these layers may need refin
 Feature support is defined in [feature_matrix.md](feature_matrix.md).
 
 - Tier 1: `--no-default-features`, default, and `image-io`. These are checked
-  on Linux and Windows, and the `image-io` path is part of the Rust 1.82 MSRV
+  on Linux and Windows, and the `image-io` path is part of the Rust 1.83 MSRV
   check.
 - Tier 2 opt-in: `onnx-inference`. This path may download ONNX Runtime binaries
-  and tracks current stable Rust rather than the Rust 1.82 MSRV.
+  and tracks current stable Rust rather than the Rust 1.83 MSRV.
 - Tier 2 hardware-gated: `onnx-cuda`. This path requires CUDA-capable runners
   and is not part of the default CI gate.
 

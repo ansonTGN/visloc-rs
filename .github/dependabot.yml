@@ -12,7 +12,7 @@ updates:
         patterns:
           - "*"
     ignore:
-      # nalgebra 0.34+ requires Rust 1.87; the project MSRV is 1.82 (see the
+      # nalgebra 0.34+ requires Rust 1.87; the project MSRV is 1.83 (see the
       # `msrv` CI job and rust-toolchain.toml). Bump deliberately with an MSRV
       # change, not via Dependabot.
       - dependency-name: "nalgebra"
@@ -27,7 +27,7 @@ updates:
         versions: [">=0.9"]
       # image is exact-pinned (=0.25.5) on purpose: newer 0.25.x patches pull
       # transitive deps (e.g. moxcms) that require edition2024 / Rust >= 1.85,
-      # breaking the 1.82 MSRV image-io build. Bump together with an MSRV change.
+      # breaking the 1.83 MSRV image-io build. Bump together with an MSRV change.
       - dependency-name: "image"
         versions: [">0.25.5"]
 
@@ -39,6 +39,6 @@ updates:
       - dependencies
       - github-actions
     ignore:
-      # The `msrv` CI job pins this action to the declared MSRV (1.82.0) on
+      # The `msrv` CI job pins this action to the declared MSRV (1.83.0) on
       # purpose; it must not track the latest toolchain release.
       - dependency-name: "dtolnay/rust-toolchain"

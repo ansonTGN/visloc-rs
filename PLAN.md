@@ -30,7 +30,7 @@ Repository:
 - Earlier functional milestone: COLMAP South Building deep-frontend
   localization sweep (`deep_localization_demo --sweep`) emits classical,
   single-scale deep, and `deep-ms` rows across 25 (map, query) pairs.
-- Rust MSRV: 1.82
+- Rust MSRV: 1.83
 - Unsafe code is forbidden.
 - Main math dependency: `nalgebra`
 

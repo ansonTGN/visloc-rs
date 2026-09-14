@@ -52,7 +52,7 @@ body:
       description: OS, Rust version, and relevant dataset/map format.
       placeholder: |
         Ubuntu 24.04
-        rustc 1.82.0
+        rustc 1.83.0
         COLMAP text model
   - type: checkboxes
     id: checks
