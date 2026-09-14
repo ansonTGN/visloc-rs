@@ -202,10 +202,25 @@ impl Reconstruction {
             .get(&image_id)
             .unwrap_or_else(|| panic!("image {image_id} does not exist"))
     }
+    pub fn image_mut(&mut self, image_id: ImageT) -> &mut Image {
+        self.images
+            .get_mut(&image_id)
+            .unwrap_or_else(|| panic!("image {image_id} does not exist"))
+    }
     pub fn point3d(&self, point3d_id: Point3DT) -> &Point3D {
         self.points3d
             .get(&point3d_id)
             .unwrap_or_else(|| panic!("point3D {point3d_id} does not exist"))
+    }
+    pub fn point3d_mut(&mut self, point3d_id: Point3DT) -> &mut Point3D {
+        self.points3d
+            .get_mut(&point3d_id)
+            .unwrap_or_else(|| panic!("point3D {point3d_id} does not exist"))
+    }
+    /// All current point3D ids, as a snapshot `Vec` (COLMAP's `Point3DIds()`
+    /// returns a set; callers here only ever iterate it).
+    pub fn point3d_ids(&self) -> Vec<Point3DT> {
+        self.points3d.keys().copied().collect()
     }
 
     pub fn rigs(&self) -> &BTreeMap<RigT, Rig> {
@@ -346,6 +361,42 @@ impl Reconstruction {
                 point2d.point3d_id = Some(point3d_id);
             }
         }
+    }
+
+    /// Approximation of `Reconstruction::MergePoints3D`
+    /// (`reconstruction.cc`, not fetched for this port — see module doc;
+    /// `docs/colmap_rig_mapper_port_plan.md` scoped `reconstruction.cc`'s
+    /// algorithmic bodies out of C1, and this port continues that for the
+    /// one call site that needs it, `IncrementalTriangulator::MergeTracks`).
+    /// Combines the two points' tracks and takes the track-length-weighted
+    /// mean position/color, keeping `id1`'s slot; matches the documented
+    /// COLMAP contract ("the merged point's position is the weighted
+    /// average of the two previous points' positions, weighted by their
+    /// track lengths") without reproducing its exact source.
+    pub fn merge_points3d(&mut self, id1: Point3DT, id2: Point3DT) -> Point3DT {
+        let p1 = self
+            .points3d
+            .remove(&id1)
+            .unwrap_or_else(|| panic!("point3D {id1} does not exist"));
+        let p2 = self
+            .points3d
+            .remove(&id2)
+            .unwrap_or_else(|| panic!("point3D {id2} does not exist"));
+        let n1 = p1.track.len() as f64;
+        let n2 = p2.track.len() as f64;
+        let total = n1 + n2;
+        let xyz = Point3::from((p1.xyz.coords * n1 + p2.xyz.coords * n2) / total);
+        let mut color = [0u8; 3];
+        for ((out, &c1), &c2) in color.iter_mut().zip(&p1.color).zip(&p2.color) {
+            *out = (((c1 as f64) * n1 + (c2 as f64) * n2) / total) as u8;
+        }
+        let mut merged = Point3D::new(xyz);
+        merged.color = color;
+        merged.track = p1.track;
+        merged.track.extend(p2.track);
+        self.points3d.insert(id1, merged);
+        self.link_track(id1);
+        id1
     }
 
     /// Port of `DeletePoint3D` (`reconstruction.h:167`): removes the point

@@ -17,11 +17,24 @@
 //! model in isolation before any decision is made about the relationship
 //! between the two mappers (see the port plan's §3.1).
 
+pub mod bundle_adjustment;
 pub mod database_cache;
+pub mod incremental_triangulator;
+pub mod mapper;
+pub mod mapper_impl;
+pub mod observation_manager;
+pub mod pipeline;
 pub mod reconstruction;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod types;
 
+pub use bundle_adjustment::{BundleAdjustmentConfig, BundleAdjustmentOptions, Gauge};
 pub use database_cache::{DatabaseCache, DatabaseCacheError};
+pub use incremental_triangulator::IncrementalTriangulator;
+pub use mapper::{IncrementalMapper, LocalBundleAdjustmentReport, Options as MapperOptions};
+pub use observation_manager::{ObservationManager, VisibilityPyramid};
+pub use pipeline::{run as run_pipeline, ModelResult, PipelineOptions, RunResult};
 pub use reconstruction::{Camera, Image, Point2D, Point3D, Reconstruction, TrackElement};
 pub use types::{
     CameraT, DataT, Frame, FrameT, ImageT, Point2DT, Point3DT, Rig, RigT, SensorT, SensorType,

@@ -117,6 +117,25 @@ impl DatabaseCache {
         Self::default()
     }
 
+    /// Build a `DatabaseCache` directly from its constituent parts (e.g. a
+    /// synthetic scene, or a future non-file-based loader) rather than the
+    /// `generalized-rig-manifest-v1`/features/pairs-export file triple.
+    pub fn from_parts(
+        rigs: BTreeMap<RigT, Rig>,
+        cameras: BTreeMap<CameraT, Camera>,
+        frames: BTreeMap<FrameT, Frame>,
+        images: BTreeMap<ImageT, Image>,
+        correspondence_graph: CorrespondenceGraph,
+    ) -> Self {
+        Self {
+            rigs,
+            cameras,
+            frames,
+            images,
+            correspondence_graph,
+        }
+    }
+
     pub fn num_rigs(&self) -> usize {
         self.rigs.len()
     }
