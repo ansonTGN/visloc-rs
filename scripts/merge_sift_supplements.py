@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+"""Prefix-preserving, per-image SIFT supplement merge primitives.
+
+Novelty is measured against the original bank only. Supplement orientation
+variants remain distinct. No all-image descriptor bank or pair matrix is built.
+"""
+
+import math
+import os
+from pathlib import Path
+import tempfile
+import argparse
+import hashlib
+import json
+
+HEADER = b"# visloc adaptive feature bank: legacy prefix + spatially novel compatible supplement\n"
+
+
+def publish_file(destination, chunks, staging_directory=None):
+    """Publish complete bytes without overwriting an existing destination.
+
+    A temporary file is fsynced then hard-linked atomically to
+    the destination (link fails if it exists). A crash can leave an unreferenced
+    temporary file, never a partially written destination. A supplied staging
+    directory must share the destination filesystem. This primitive does
+    not implement bank-level completion or restart validation.
+    """
+    destination = Path(destination)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=".sift-merge-", dir=staging_directory or destination.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            for chunk in chunks:
+                stream.write(chunk)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, destination)
+    finally:
+        os.unlink(temporary)
+
+
+def feature_rows(lines):
+    for line in lines:
+        if line.strip() and not line.lstrip().startswith(b"#"):
+            yield line
+
+
+def position(row):
+    fields = row.split()
+    if len(fields) < 2:
+        raise ValueError("feature row lacks coordinates")
+    x, y = map(float, fields[:2])
+    if not math.isfinite(x) or not math.isfinite(y):
+        raise ValueError("nonfinite feature coordinates")
+    return x, y
+
+
+def merged_rows(base_lines, supplement_lines):
+    """Yield original row bytes then novel supplement rows, with a 1px radius.
+
+    Retains only base coordinates for one image; it does not retain descriptors.
+    Callers must finish consuming this generator before publishing output.
+    """
+    grid = {}
+    for row in feature_rows(base_lines):
+        x, y = position(row)
+        grid.setdefault((math.floor(x), math.floor(y)), []).append((x, y))
+        yield row
+    for row in feature_rows(supplement_lines):
+        x, y = position(row)
+        ix, iy = math.floor(x), math.floor(y)
+        if not any((x - a) ** 2 + (y - b) ** 2 <= 1.0
+                   for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+                   for a, b in grid.get((ix + dx, iy + dy), ())):
+            yield row
+
+
+def bank_chunks(base, supplement, selected):
+    with base.open("rb") as stream:
+        if selected:
+            with supplement.open("rb") as additions:
+                yield HEADER
+                yield from merged_rows(stream, additions)
+        else:
+            yield from iter(lambda: stream.read(1024 * 1024), b"")
+
+
+def write_bank(base, supplement, selection, output, resume=False, hardlink_unselected=False):
+    names = selection["image_names"]
+    if len(names) != len(set(names)):
+        raise ValueError("duplicate selected image")
+    if any(Path(name).name != name or name in (".", "..") for name in names):
+        raise ValueError("selected image names must be basenames")
+    selected = {Path(name).stem + "_features.txt" for name in names}
+    if len(selected) != len(names):
+        raise ValueError("colliding feature filenames")
+    expected = {p.name for p in base.iterdir() if p.name.endswith("_features.txt")}
+    if not expected or not selected <= expected:
+        raise ValueError("empty base or selected image missing from base")
+    if output.resolve() in (base.resolve(), supplement.resolve()):
+        raise ValueError("output must not be an input directory")
+    output.mkdir(exist_ok=resume)
+    extra = {p.name for p in output.iterdir()} - expected
+    if extra:
+        raise ValueError(f"unexpected output entries: {sorted(extra)[:5]}")
+    written = reused = 0
+    inventory = hashlib.sha256()
+    for name in sorted(expected):
+        destination = output / name
+        chunks = bank_chunks(base / name, supplement / name, name in selected)
+        hasher = hashlib.sha256()
+        size = 0
+
+        def measured():
+            nonlocal size
+            for chunk in chunks:
+                hasher.update(chunk)
+                size += len(chunk)
+                yield chunk
+
+        if destination.exists() or destination.is_symlink():
+            if not resume or destination.is_symlink() or not destination.is_file():
+                raise ValueError(f"unusable existing output: {name}")
+            for _ in measured():
+                pass
+            actual = hashlib.sha256()
+            with destination.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    actual.update(chunk)
+            if destination.stat().st_size != size or actual.digest() != hasher.digest():
+                raise ValueError(f"existing output differs from regenerated bytes: {name}")
+            reused += 1
+        else:
+            # Keep orphaned staging files outside the bank after SIGKILL.
+            # Hard-link publication requires the parent and bank to share a
+            # filesystem; EXDEV fails closed without publishing partial bytes.
+            if hardlink_unselected and name not in selected:
+                source = base / name
+                if source.is_symlink() or not source.is_file():
+                    raise ValueError(f"hardlink source must be a regular nonsymlink file: {name}")
+                for _ in measured():
+                    pass
+                # Opt-in immutable-bank contract: never modify either link in
+                # place. EXDEV fails closed; do not silently copy across disks.
+                os.link(source, destination)
+            else:
+                publish_file(destination, measured(), staging_directory=output.parent)
+            written += 1
+        inventory.update(f"{name}\t{size}\t{hasher.hexdigest()}\n".encode())
+    return {"files": len(expected), "written": written, "reused": reused,
+            "inventory_sha256": inventory.hexdigest()}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    for flag in ("base", "supplement", "selection", "output"):
+        parser.add_argument("--" + flag, type=Path, required=True)
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--hardlink-unselected", action="store_true",
+                        help="Share unchanged base files on the same filesystem; both banks must remain immutable")
+    args = parser.parse_args()
+    result = write_bank(args.base, args.supplement,
+                        json.loads(args.selection.read_text()), args.output, args.resume,
+                        args.hardlink_unselected)
+    print(json.dumps(result, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

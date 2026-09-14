@@ -1,4 +1,8 @@
 #![forbid(unsafe_code)]
+// The DPVO-port and verification modules document internal (crate-private)
+// items extensively; intra-doc links to them are intentional and resolve
+// under --document-private-items. Tolerated repo-wide until that doc pass.
+#![allow(rustdoc::private_intra_doc_links, rustdoc::broken_intra_doc_links)]
 //! Minimal online SLAM orchestration.
 //!
 //! This crate wires tracking and local mapping together. It is not a full SLAM
@@ -8,12 +12,44 @@
 //! from 2D reprojection residuals.
 
 pub mod bundle;
+// Experimental, explicitly selected square-root landmark elimination.
+mod landmark_qr;
+mod process_memory;
 pub use bundle::{
     build_sqrt_factor_rows, BaConfig, BaError, BaGeneralStereoObservation, BaGncResult,
-    BaIterationStats, BaObservation, BaResult, BaStereoObservation, BiasRandomWalkFactor,
-    BundleAdjustment, BundleAdjustmentRefiner, GravityPrior, NavigationStatePrior,
-    PairwisePoseFactor, PerPoseGravityObservation, PerPoseGravityPrior, PositionPrior,
-    PositionPriorObservation, SqrtStack,
+    BaIterationStats, BaObservation, BaResult, BaRigObservation, BaStereoObservation,
+    BiasRandomWalkFactor, BundleAdjustment, BundleAdjustmentRefiner, GravityPrior,
+    MatrixFreeBaAdaptiveDampingIterationStats, MatrixFreeBaAdaptiveDampingResult,
+    MatrixFreeBaColumnScalingIterationStats, MatrixFreeBaColumnScalingOptions,
+    MatrixFreeBaColumnScalingResult, MatrixFreeBaError, MatrixFreeBaIterationStats,
+    MatrixFreeBaOptions, MatrixFreeBaRestartIterationStats, MatrixFreeBaRestartOptions,
+    MatrixFreeBaRestartResult, MatrixFreeBaResult, NavigationStatePrior, PairwisePoseFactor,
+    PerPoseGravityObservation, PerPoseGravityPrior, PositionPrior, PositionPriorObservation,
+    SqrtStack,
+};
+
+pub mod camera_rig;
+pub use camera_rig::{
+    incremental_sfm_with_per_image_cameras, reconstruct_global_sfm_with_per_image_cameras,
+    PerImageCameraError, PerImageCameraGlobalError, PerImageCameraIncrementalError,
+    PerImageCameras,
+};
+
+pub mod rig_sfm;
+pub use rig_sfm::{
+    incremental_rig_sfm, metric_temporal_quadrilateral_tracks,
+    metric_temporal_quadrilateral_tracks_in_frame_gap, refine_rig_sfm_with_fixed_frame_rotations,
+    RigBaBackend, RigBaStats, RigFrame, RigFrameImage, RigSfmConfig, RigSfmError, RigSfmResult,
+    RigSfmWorkStats, RigTrackBuilder,
+};
+
+pub mod rig_correspondence;
+pub use rig_correspondence::{
+    build_rig_correspondence, build_rig_correspondence_csr,
+    build_rig_correspondence_csr_from_features, preview_rig_correspondence_stats,
+    preview_rig_correspondence_stats_from_features, RigCorrespondenceBuild,
+    RigCorrespondenceBuildError, RigCorrespondenceCsr, RigCorrespondenceCsrBuilder,
+    RigCorrespondencePreviewStats, RigObservationId,
 };
 
 pub mod covisibility_ba;
@@ -29,8 +65,12 @@ pub use covisibility_ba::{
 
 pub mod incremental_sfm;
 pub use incremental_sfm::{
-    incremental_sfm, preview_track_build_stats, IncrementalSfmConfig, IncrementalSfmError,
-    IncrementalSfmResult, NextImagePolicy, PairwiseMatches, SfmTrack, TrackBuildStats, TrackSource,
+    incremental_sfm, incremental_sfm_with_initial_poses,
+    incremental_sfm_with_sequence_fallback_overrides, incremental_sfm_with_track_membership,
+    preview_pair_confidence_conflicts, preview_track_build_stats,
+    run_fixed_rotation_support_bundle_adjustment, run_fixed_support_bundle_adjustment,
+    IncrementalSfmConfig, IncrementalSfmError, IncrementalSfmResult, NextImagePolicy,
+    PairConfidenceConflictStats, PairwiseMatches, SfmTrack, TrackBuildStats, TrackSource,
 };
 
 pub mod local_submap;
@@ -62,6 +102,14 @@ pub use submap_alignment::{
     SubmapSim3RejectionReason, VerifiedSubmapConstraint,
 };
 
+pub mod rig_submap_alignment;
+pub use rig_submap_alignment::{
+    estimate_rig_submap_camera_centre_constraint, estimate_rig_submap_sim3_constraint,
+    RigSubmapAlignmentConfig, RigSubmapAlignmentDiagnostics, RigSubmapAlignmentError,
+    RigSubmapAlignmentMethod, RigSubmapAlignmentRejection, RigSubmapAlignmentRejectionReason,
+    RigSubmapAlignmentResult, RigSubmapBoundarySampling, RigSubmapInputSide,
+};
+
 pub mod hierarchical_submap_graph;
 pub use hierarchical_submap_graph::{
     HierarchicalSubmapGraph, HierarchicalSubmapGraphError, HierarchicalSubmapId,
@@ -87,6 +135,18 @@ pub mod ordered_view_graph;
 pub use ordered_view_graph::{
     generate_ordered_pairs, OrderedPairCandidate, OrderedPairGeneratorConfig, OrderedPairHints,
     OrderedPairSource,
+};
+
+pub mod global_sfm;
+pub use global_sfm::{
+    average_positions, average_rotations, bearing_alignment_error_deg,
+    estimate_free_centres_from_prior_rays, estimate_free_poses_from_prior_rays,
+    filter_pose_priors_by_edge_disagreement, filter_pose_priors_by_free_centre_residual,
+    filter_pose_priors_by_track_quality, gt_bearing_in_prior_frame, pair_correspondences,
+    pair_essential_mean_sampson_error, prior_free_essential_gt_bearing_error_deg,
+    reconstruct_global_sfm, reconstruct_global_sfm_with_priors, relative_pose_from_essential,
+    rematch_essential_admission_ok, GlobalReconstructionError, GlobalReconstructionTuning,
+    GlobalSfmEdge, GlobalSfmPoses,
 };
 
 pub mod imu_preintegration;

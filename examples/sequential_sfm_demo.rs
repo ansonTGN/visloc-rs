@@ -49,6 +49,12 @@
 //! `docs/sfm_vs_colmap_benchmark.md`). `--retriangulate` (simple path only)
 //! re-triangulates tracks after the final BA — a structure-density lever,
 //! ATE-neutral, off by default.
+//! `--next-image-policy auto|visibility|count` controls the next-PnP ranking;
+//! the demo default is `auto`, which runs visibility first, compares the
+//! historical count ranking whenever visibility is incomplete, and may use
+//! the existing post-refinement completion pass only when it strictly
+//! increases registration. The public library default remains historical
+//! count.
 //! `--post-refinement-registration` enables one bounded completion sweep after
 //! the final iterative refinement: each still-missing image gets one fresh PnP
 //! attempt against the filtered/re-triangulated structure, followed by another
@@ -59,10 +65,13 @@
 //! It requires three-view reprojection plus a verified-edge cycle and rolls the
 //! added tracks and BA back if the original clean tracks' residual worsens. It is
 //! experimental and off by default.
-//! `--structureless-registration` runs one bounded pass after ordinary
+//! `--structureless-registration` runs bounded passes after ordinary
 //! post-refinement PnP. A missing image needs at least three registered verified
 //! neighbours whose independently recovered rotations agree; their camera-
 //! centre direction lines recover translation scale in the existing model.
+//! Passes repeat until a pass registers nothing (budget
+//! `--structureless-max-rounds`, default 4), so an island can chain inward
+//! through a bridge whose index is higher than the images it unlocks.
 //! It is experimental and off by default.
 //! `--pose-guided-track-augmentation` keeps the separately matched
 //! `--pose-graph-offsets` out of initial union-find construction, then attaches
@@ -276,6 +285,7 @@ struct Args {
     next_image_policy: NextImagePolicy,
     post_refinement_registration: bool,
     structureless_registration: bool,
+    structureless_max_rounds: usize,
     geometry_guided_conflict_recovery: bool,
     track_source: TrackSource,
     hierarchical: bool,
@@ -330,9 +340,13 @@ fn parse_args_from(mut a: Vec<String>) -> Result<Args, String> {
     let mut colmap_style = false;
     let mut min_tri_angle = 2.0f64;
     let mut refine_intrinsics = false;
-    let mut next_image_policy = NextImagePolicy::VisibilityPyramid;
+    // Keep the library/API default at CorrespondenceCount while making the
+    // sequential demo's no-flag workflow use the robust Auto policy. The
+    // historical count and visibility strategies remain explicit flags.
+    let mut next_image_policy = NextImagePolicy::Auto;
     let mut post_refinement_registration = false;
     let mut structureless_registration = false;
+    let mut structureless_max_rounds = 4usize;
     let mut geometry_guided_conflict_recovery = false;
     let mut track_source = TrackSource::UnionFind;
     let mut hierarchical = false;
@@ -416,11 +430,12 @@ fn parse_args_from(mut a: Vec<String>) -> Result<Args, String> {
             "--refine-intrinsics" => refine_intrinsics = true,
             "--next-image-policy" => {
                 next_image_policy = match a.remove(i + 1).as_str() {
+                    "auto" => NextImagePolicy::Auto,
                     "visibility" => NextImagePolicy::VisibilityPyramid,
                     "count" => NextImagePolicy::CorrespondenceCount,
                     value => {
                         return Err(format!(
-                            "--next-image-policy must be visibility or count, got {value}"
+                            "--next-image-policy must be auto, visibility, or count, got {value}"
                         ))
                     }
                 }
@@ -428,6 +443,9 @@ fn parse_args_from(mut a: Vec<String>) -> Result<Args, String> {
             "--seed-trials" => seed_trials = a.remove(i + 1).parse().map_err(|e| format!("{e}"))?,
             "--post-refinement-registration" => post_refinement_registration = true,
             "--structureless-registration" => structureless_registration = true,
+            "--structureless-max-rounds" => {
+                structureless_max_rounds = a.remove(i + 1).parse().map_err(|e| format!("{e}"))?
+            }
             "--geometry-conflict-recovery" => geometry_guided_conflict_recovery = true,
             "--track-source" => {
                 track_source = match a.remove(i + 1).as_str() {
@@ -575,6 +593,7 @@ fn parse_args_from(mut a: Vec<String>) -> Result<Args, String> {
         next_image_policy,
         post_refinement_registration,
         structureless_registration,
+        structureless_max_rounds,
         geometry_guided_conflict_recovery,
         track_source,
         hierarchical,
@@ -676,6 +695,9 @@ fn verify_pairs(
                     image_i: i,
                     image_j: j,
                     matches,
+                    two_view_config: None,
+                    essential_matches: None,
+                    essential_matrix: None,
                 },
                 image_j_from_i: rel.previous_to_current.rotation,
             })
@@ -811,6 +833,7 @@ impl ObservationDisjointSet {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Triangulate new multi-view tracks from wide matches whose endpoints are both
 /// absent from the trusted reconstructed structure. Duplicate-image components,
 /// two-view-only components, low parallax, failed cheirality, and any observation
@@ -1646,6 +1669,9 @@ fn merge_pairwise_graphs(
                 image_i,
                 image_j,
                 matches,
+                two_view_config: None,
+                essential_matches: None,
+                essential_matrix: None,
             }
         })
         .collect::<Vec<_>>();
@@ -2010,6 +2036,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         next_image_policy: args.next_image_policy,
         post_refinement_registration: args.post_refinement_registration,
         structureless_registration: args.structureless_registration,
+        structureless_max_rounds: args.structureless_max_rounds,
         geometry_guided_conflict_recovery: args.geometry_guided_conflict_recovery,
         track_source: args.track_source,
         min_triangulation_angle_deg: args.min_tri_angle,
@@ -2415,6 +2442,9 @@ mod tests {
             image_i: 0,
             image_j: 1,
             matches: vec![(0, 0), (1, 1), (2, 2)],
+            two_view_config: None,
+            essential_matches: None,
+            essential_matrix: None,
         };
         let clustered = PairwiseMatches {
             matches: vec![(0, 0)],
@@ -2469,6 +2499,9 @@ mod tests {
             image_i: 0,
             image_j: 1,
             matches: vec![(0, 1), (0, 0), (0, 2)],
+            two_view_config: None,
+            essential_matches: None,
+            essential_matrix: None,
         }];
         let proposals =
             pose_guided_observation_proposals(&camera, &features, &poses, &tracks, &pairs, 2.0);
@@ -2511,6 +2544,9 @@ mod tests {
             image_i: 0,
             image_j: 1,
             matches: vec![(0, 0)],
+            two_view_config: None,
+            essential_matches: None,
+            essential_matrix: None,
         }];
         let merges = pose_guided_track_merge_proposals(&camera, &poses, &tracks, &pairs, 2.0);
         assert_eq!(merges.len(), 1);
@@ -2549,11 +2585,17 @@ mod tests {
                 image_i: 0,
                 image_j: 1,
                 matches: vec![(0, 0)],
+                two_view_config: None,
+                essential_matches: None,
+                essential_matrix: None,
             },
             PairwiseMatches {
                 image_i: 1,
                 image_j: 2,
                 matches: vec![(0, 0)],
+                two_view_config: None,
+                essential_matches: None,
+                essential_matrix: None,
             },
         ];
         let tracks = pose_guided_new_tracks(&camera, &features, &poses, &[], &pairs, 3, 2.0, 2.0);
@@ -2641,17 +2683,26 @@ mod tests {
             image_i: 0,
             image_j: 2,
             matches: vec![(1, 3), (2, 4)],
+            two_view_config: None,
+            essential_matches: None,
+            essential_matrix: None,
         }];
         let wide = vec![
             PairwiseMatches {
                 image_i: 0,
                 image_j: 2,
                 matches: vec![(1, 3), (5, 6)],
+                two_view_config: None,
+                essential_matches: None,
+                essential_matrix: None,
             },
             PairwiseMatches {
                 image_i: 1,
                 image_j: 3,
                 matches: vec![(7, 8)],
+                two_view_config: None,
+                essential_matches: None,
+                essential_matrix: None,
             },
         ];
         let merged = merge_pairwise_graphs(&base, &wide);

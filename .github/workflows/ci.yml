@@ -6,6 +6,28 @@ on:
   pull_request:
 
 jobs:
+  ceres-reference:
+    name: Ceres frozen-reference tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install standalone reference dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++ libceres-dev
+          dpkg-query -W g++ libceres-dev libeigen3-dev libsuitesparse-dev
+
+      - name: Build and test bounded Ceres reference
+        run: |
+          ceres_build_dir=$(mktemp -d)
+          g++ -std=c++17 -O2 -Wall -Wextra -Werror -I/usr/include/eigen3 \
+            tools/ceres_rig_reference/ceres_rig_reference.cc -lceres -lglog \
+            -o "$ceres_build_dir/ceres_rig_reference"
+          "$ceres_build_dir/ceres_rig_reference" --self-test
+
   msrv:
     runs-on: ubuntu-latest
     steps:
@@ -51,13 +73,14 @@ jobs:
 
       - name: Python tests
         run: |
-          python3 -m pip install --quiet --disable-pip-version-check pillow
+          python3 -m pip install --quiet --disable-pip-version-check pillow numpy pytest opencv-python-headless py7zr
           python3 -m unittest discover -s tests -p 'test_*.py'
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
       - name: Benchmark registry
         run: |
           python3 scripts/benchmark_registry.py validate benchmarks/registry/readme_claims_v1.json benchmarks/registry/claim_matrix_v1.json benchmarks/registry/runs
-          python3 scripts/benchmark_registry.py check-generated
+          python3 scripts/benchmark_registry.py check-generated --readme docs/readme_details.md
 
       - name: Documentation links
         run: scripts/check_docs_links.sh

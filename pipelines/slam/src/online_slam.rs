@@ -5999,11 +5999,21 @@ mod bias_release_promotion_tests {
         // (required for `OnlineSlamPipeline::new` to succeed at all).
         let seed_gravity = OnlineSlamImuConfig::default().gravity_world;
 
-        let mut vi_init_config = OnlineSlamViInitConfig::default();
-        vi_init_config.initializer.gravity_world = seed_gravity;
+        let vi_init_config = OnlineSlamViInitConfig {
+            initializer: VisualInertialInitializerConfig {
+                gravity_world: seed_gravity,
+                ..VisualInertialInitializerConfig::default()
+            },
+            ..OnlineSlamViInitConfig::default()
+        };
 
-        let mut motion_config = OnlineSlamMotionViInitConfig::default();
-        motion_config.initializer.gravity_world = seed_gravity;
+        let motion_config = OnlineSlamMotionViInitConfig {
+            initializer: MotionBasedViInitializerConfig {
+                gravity_world: seed_gravity,
+                ..MotionBasedViInitializerConfig::default()
+            },
+            ..OnlineSlamMotionViInitConfig::default()
+        };
 
         let config = OnlineSlamConfig {
             imu: Some(OnlineSlamImuConfig::default()),
