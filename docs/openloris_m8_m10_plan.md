@@ -9,7 +9,301 @@ time and peak RSS in both mapper-only and native end-to-end comparisons.
 This plan is outcome-gated. ANN retrieval, bridge discovery, track repair, and
 BA changes are possible means, not milestone success by themselves.
 
-## Latest checkpoint (2026-09-09)
+## Latest checkpoint (2026-09-13)
+
+Component-aware v4 reduced retrieval work but failed its quality gate. A
+GT-free multi-model replay of the frozen base registered 1,933/2,500 frames;
+the remaining 567 frames still had 5,378 verified pairs but could not form a
+multi-sensor metric seed. Treating the registered model and two contiguous
+unregistered runs as components, and removing same-component candidates
+before exact reranking, cut the mean ANN pool from 1,246.30 to 315.97
+(-74.6%). Rank-8 sequence survival plus a degree-two budget yielded only 20
+rig pairs, 80 image pairs, and 50 incident images.
+
+That compute reduction did not recover a bridge. SIFT verified no pair;
+bounded ALIKED plus LightGlue verified 47/80 pairs and 1,714 correspondences,
+but no rig pair supplied two consistent sensor rotations, so the unchanged
+cycle gate admitted zero and mapping was correctly skipped. A post-hoc GT
+diagnosis, performed only after admission, showed all 20 candidates were
+false perceptual aliases: the nearest was 12.07 m away and none was within
+5 m. The component filter is retained, but EigenPlaces single-frame ranking
+is rejected as the sole signal. The next development arm adds a wider,
+GT-free multi-scale sequence score before local matching; it must be frozen
+on 5k and then produce a cycle-consistent bridge on a fresh 10k interval.
+See
+[m9-openloris-component-bridge-5000-dev-v1.json](../benchmarks/electro/m9-openloris-component-bridge-5000-dev-v1.json).
+
+The frozen v3 policy has now completed its first unobserved 5k evaluation and
+is rejected for quality/runtime promotion. Streaming EigenPlaces extraction
+completed 2,500 rig rows in 676.43 s without an OOM; radius-two ANN took
+12.53 s / 17,636 KiB and selected 61 rig pairs. Its mean exact-rerank pool was
+still 1,246.30 rows, roughly half the database, so it also fails the intended
+10k compute-scaling gate. Existing-pair exclusion left 244 image pairs over
+only 160 incident images.
+
+The bounded SIFT control retained 195 pairs and 7,250 correspondences but
+admitted no rotation-consistent cycle. ALIKED plus LightGlue retained all 244
+pairs and 79,683 correspondences, yet the unchanged 3-degree gate admitted
+only the same 939--1003 pair already found in the 2.5k development interval;
+no admitted pair touches the new interval. The Python oracle took 380.49 s and
+peaked at 2,296,036 KiB, so it remains diagnostic-only.
+
+Because the overlay was non-empty, a frozen generalized-rig mapper A/B was
+still completed before opening GT. Both arms registered exactly 1,933/2,500
+frames, produced identical pose-header and point-cloud hashes, and scored the
+same 2.02107 m Sim(3) RMSE / 3.68377 m p95 over 3,174 GT-scored images. The
+candidate instead added 0.76 s wall time and 30,068 KiB peak RSS. Do not carry
+v3 or the Python runtime to 10k and do not promote this result to the README.
+The next arm must use GT-free reconstruction-component/frontier state to form
+bounded cross-component bridge runs, retain the same learned-local verifier
+and cycle gate, and require a new-interval admission before mapping. See
+[m9-openloris-bounded-aliked-lightglue-5000-holdout-v1.json](../benchmarks/electro/m9-openloris-bounded-aliked-lightglue-5000-holdout-v1.json).
+
+A bounded learned-local oracle has now passed the unchanged rotation-cycle gate
+for the first time. COLMAP-compatible guided rematching increased the existing
+SIFT arm from 5,261 to 6,865 correspondences but still admitted no rig pair.
+Official ALIKED n16 plus LightGlue-ALIKED, restricted to the same 68 incident
+images and 104 pairs, produced byte-identical feature and match hashes in two
+runs. The Rust full verifier retained all 104 pairs and 61,949 correspondences;
+the fixed 3-degree gate admitted rig pair 939–1003 with 0.214-degree sensor
+rotation dispersion, versus 26.05 degrees from SIFT.
+
+This is a geometry proof, not a performance promotion. The 2.5k generalized
+mapper control already registers all 1,250 frames; the two admitted image pairs
+leave camera poses, points, and 0.859958 px reprojection unchanged while adding
+1.78 s and about 20 MiB. The isolated PyTorch oracle also peaks at 2.07–2.10
+GiB, above the runtime target. Freeze v3 and the cycle gate and move to an
+unobserved 5k interval before investing in an ONNX/streamed deployment path.
+See
+[m9-openloris-bounded-aliked-lightglue-2500-dev-v1.json](../benchmarks/electro/m9-openloris-bounded-aliked-lightglue-2500-dev-v1.json).
+
+The geometry-first v3 development arm is also stopped before mapping. A
+post-hoc GT opportunity audit—never consumed by retrieval, matching, or
+admission—showed no complete 0.5 m three-frame revisit in the scorable 1k
+interval, but thousands at 2.5k. Therefore 1k cannot require a non-empty loop,
+and 2.5k is now explicitly a development set rather than holdout evidence.
+Published top-32 ANN candidates already cover 98.9% of 2.5k frames having a
+0.5 m long-range proximity opportunity. The v2 distance-ratio gate discarded
+all five proximity pairs that also had a descriptor three-frame path.
+
+V3 consequently tested a bounded 26-rig-pair rank/path shortlist with the
+distance ratio diagnostic-only, while keeping the frozen matcher and mandatory
+rotation-cycle gate. Materialization produced 104 image pairs; the verifier
+retained 96 with 5,261 correspondences. The cycle gate still admitted zero.
+The proximity path around frames 937–940 versus 1001–1004 has 17–28 degree
+multi-sensor rotation dispersion, so frozen SIFT/two-view geometry—not ANN
+coverage—is now the quality bottleneck. The 3 degree gate is not relaxed and
+no mapping was run. See
+[m9-openloris-rank-path-cycle-2500-dev-v1.json](../benchmarks/electro/m9-openloris-rank-path-cycle-2500-dev-v1.json).
+
+ANN multi-probe infrastructure now has a retained speed/memory improvement.
+Default radius one remains byte-identical. A 1k exact-only sweep selected
+12 tables, 14 bits, all 14 one-bit probes, and Hamming radius two at a declared
+recall@32 floor of 0.94; it achieves 0.94706 and preserves the exact same 15
+strict selected pairs. On 2.5k, three interleaved repeats reduce median ANN
+wall from 4.48 to 2.98 s (1.50x), median RSS from 10,048 to 9,972 KiB, and mean
+exact-rerank pool from 861.86 to 637.01 rows. All control and candidate
+artifacts are byte-identical within their arms. This promotes ANN
+infrastructure only: the 15 selected edges remain the rejected false loop, so
+there is no mapping-quality claim. See
+[m9-openloris-ann-radius2-2500-v1.json](../benchmarks/electro/m9-openloris-ann-radius2-2500-v1.json).
+
+The fixed learned-retrieval arm has now completed its 2.5k safety/scaling
+audit and is stopped before 5k. Streaming EigenPlaces extraction produced
+1,250 rig rows in 313.43 s at 146,648 KiB sampled RSS. Fixed K32/t12/b9/p9
+ANN emitted 33,062 candidates under the 40,000 cap in 4.06 s / 9,868 KiB,
+but its mean exact-rerank pool was 861.86 rows, about 69% of the database.
+Thus output memory remains bounded while the current bucket geometry does not
+establish acceptable 10k compute scaling.
+
+More importantly, the only 15 selected rig pairs were exactly the already
+known frame 307–315 versus 372–379 false sequence; the additional 750 rig rows
+contributed no selected pair. Frozen matching again accepted all 60 expanded
+image pairs (3,578 correspondences), and the fixed rotation-cycle gate admitted
+zero. Merging that empty result reproduced the 16,321-pair 2.5k base snapshot
+byte-for-byte, so mapping would be a duplicate control run and was correctly
+skipped. This is a safety pass, not a quality win. Do not run the unchanged arm
+at 5k/10k; the next retrieval design must reduce the query pool and produce a
+non-empty cycle-consistent set at 1k before promotion. Full hashes and resource
+records are in
+[m9-openloris-learned-retrieval-2500-safety-v1.json](../benchmarks/electro/m9-openloris-learned-retrieval-2500-safety-v1.json).
+
+The post-verification rig-rotation cycle gate now passes its 1k safety test.
+Its thresholds were fixed before the audit: at least two sensor-pair essential
+rotations per rig pair, at most 3 degrees of common-rig-frame dispersion, and
+a complete forward or reverse three-frame path whose representative rotations
+also agree within 3 degrees. Four of the 15 strict retrieval pairs passed the
+individual dispersion test, but none formed a complete qualifying path, so no
+image pair was admitted. Merging the empty admission snapshot left the frozen
+base byte-identical; rerunning the mapper would add no evidence. This is a
+**safety pass, not a quality win**. The same fixed policy now proceeds to a
+2.5k non-empty/scaling audit, and mapping is allowed only if at least one edge
+survives. See
+[m9-openloris-rotation-cycle-1k-v1.json](../benchmarks/electro/m9-openloris-rotation-cycle-1k-v1.json).
+
+A second, predeclared ambiguity arm has also failed at 1k. It required mutual
+rank below two, bidirectional cosine-distance ratio at most 0.8 against the
+next unrelated sequence, a forward-or-reverse three-frame path, and at most
+two additions incident to any frame. This reduced 2,783 rig pairs to 15 and 60
+image pairs; all 60 still passed the frozen verifier. The additions changed the
+automatic metric seed from frame 26 to 313, so `--seed-frame` was added as a
+default-off A/B control. Its default path and fixed-frame control both reproduce
+the frozen model hashes exactly.
+
+With frame 26 fixed in both arms, the 60-pair candidate retained 1,000/1,000
+images but regressed RMSE from 0.02270 m to 0.10019 m, p95 from 0.03778 m to
+0.16418 m, reprojection by 7.39%, mapper time by 5.54%, and sampled RSS by
+0.68%. The 15 selected rig pairs are one apparent sequence between frames
+307–315 and 372–379; the result proves that descriptor sequence continuity plus
+independent two-view verification can still create a false place identity in a
+repetitive corridor. This arm is also stopped before repeat/larger tiers. See
+[m9-openloris-learned-retrieval-strict-1k-ab-v1.json](../benchmarks/electro/m9-openloris-learned-retrieval-strict-1k-ab-v1.json).
+
+The next gate moves after two-view verification without using GT or a
+reconstructed pose: convert each sensor-pair essential rotation to the common
+rig frame, require low multi-sensor rotation dispersion for each rig pair, and
+require those rig rotations to agree along a contiguous forward/reverse
+sequence path. Only cycle-consistent edges may enter track construction. If
+the 1k result is empty, record the gate as a safety pass but not a quality win;
+then audit whether a non-empty set appears at 2.5k before any mapping claim.
+
+The first learned long-range retrieval arm has now been matched, merged before
+track construction, mapped, scored, and **rejected at 1k**. The canonical
+materializer revalidated retrieval/snapshot/rig hashes, removed all 6,869
+existing image pairs, expanded 2,783 selected rig pairs into 10,958 unique new
+image pairs, and preserved an attribution ledger. Frozen ratio-0.8,
+cross-checked, `min_matches=12` verification accepted 10,919 additions in 343
+restartable shards. Their verifier configuration hash matches the base, and a
+disjoint merge produced 17,788 total verified pairs before track construction.
+
+The default mapper then regressed from 1,000/1,000 to 998/1,000 images, RMSE
+from 0.02270 m to 0.11772 m, p95 from 0.03778 m to 0.17203 m, reprojection from
+0.67164 px to 0.74489 px, and sampled RSS from 96,048 to 151,452 KiB. The
+existing pair-confidence track builder restored full registration, but still
+regressed RMSE by 33.6%, p95 by 1.16%, reprojection by 13.7%, mapper wall by
+55.9%, and RSS by 72.1%. No OOM occurred and GT was used only after model
+publication. Per the fail-fast contract, no repeat or 2.5k/5k/10k promotion is
+allowed for this candidate set. Full hashes and both A/Bs are frozen in
+[m9-openloris-learned-retrieval-1k-ab-v1.json](../benchmarks/electro/m9-openloris-learned-retrieval-1k-ab-v1.json).
+
+The failure is informative: 10,919/10,958 additions surviving the frozen
+two-view verifier is not selective enough for this repetitive corridor, and
+hard pre-track insertion over-connects the correspondence graph. The next arm
+must be declared before mapping and remain descriptor-only at selection time:
+require an explicit nearest-neighbour rank margin, a bidirectional contiguous
+sequence path (not merely two neighbouring votes), and a much smaller fixed
+per-frame addition budget. Audit its 1k survival curve first; keep local
+matching and geometry frozen; run the same fail-fast 1k A/B only if the set is
+materially smaller. The current all-edge arm is not to be tuned on GT or run at
+larger tiers.
+
+The learned-retrieval feasibility gate now passes on the frozen 1k tier. The
+first arm is the official MIT-licensed EigenPlaces ResNet18/512 checkpoint,
+exported as one 45,754,260-byte opset-17 ONNX file. Strict weight loading,
+Torch/ORT parity (maximum absolute difference `2.01e-7`), dynamic spatial
+inputs, model/license hashes, and the exact grayscale/resize/rig aggregation
+protocol are pinned. The model remains external and benchmark execution never
+downloads it.
+
+The new `VLVPRD01` store processes one sensor image at a time, averages the two
+synchronized descriptors into one L2-normalized rig-frame row, checkpoints a
+checksummed `.partial` file, and atomically renames only a complete artifact.
+A forced timeout after two of eight rows resumed at row two and produced the
+same SHA-256 as a fresh run. The complete 500-rig-frame / 1,000-image artifact
+took 133.13 s on CPU at 640x480, used 146,940 KiB peak RSS, and occupies
+1,028,160 bytes.
+
+The deterministic mmap LSH audit (K=32, 12 tables, 9 bits, all nine one-bit
+probes, minimum gap 64) achieved exact recall@32 `0.982125` without an N x N
+score/state allocation. It took 1.33 s / 5,180 KiB, emitted 13,215 unique pairs
+under the 16,000=`32N` cap, and selected 2,783 only when retrieval was reciprocal
+**and** at least two adjacent query frames supported the same remote sequence.
+An independent repeat was byte-identical. Full model/runtime/source hashes,
+commands, resource records, negative ABI finding, and limitations are frozen in
+[m9-openloris-learned-retrieval-1k-v1.json](../benchmarks/electro/m9-openloris-learned-retrieval-1k-v1.json).
+This closes descriptor/ANN infrastructure only. The subsequent all-edge 1k arm
+described above failed mapping quality and resource gates; broad corridor LSH
+pools still require a large-tier growth gate for any future, stricter arm.
+
+The first continuous generated-artifact native run is complete. The detached
+service exited successfully without resume; all 17 stages completed with exit
+code zero, and an independent post-run traversal revalidated every recorded
+artifact checkpoint. Measured wall time was 17,006.10 s, sampled aggregate
+peak RSS was 1,806,376 KiB under a 2 GiB / swap-disabled cgroup, and no OOM was
+recorded. The cgroup reached its hard charged-memory limit 366,806 times, so
+the result passes the RSS/OOM gate but does not establish an absence of memory
+pressure.
+
+Against the frozen COLMAP control, the run's 816.39 s mapping stage is 20.41x
+faster than COLMAP's 16,663.88 s mapper. Its continuous 17,006.10 s wall is
+1.13x faster than COLMAP's 19,256.60 s measured phase sum, and sampled RSS is
+17.0% below COLMAP's process HWM. This is not yet a same-method cold benchmark:
+the native OS cache was uncontrolled, the COLMAP total is a phase sum rather
+than a continuous wall measurement, and neither side has the required three
+accepted repeats.
+
+The output exactly reproduces the connected filtered atlas: 9,998 images,
+4,999 supported rig frames, 0.581744 px mean reprojection, 0.388993 m RMSE,
+and 0.638173 m p95. Registration, reprojection, and p95 beat or match COLMAP;
+RMSE remains 1.22% above COLMAP's 0.384307 m target. Therefore the continuous
+execution and resource diagnostic passes, but M8 quality and M9/M10 acceptance
+remain open. Frozen hashes, stage times, comparison arithmetic, and caveats are
+in
+[m8-native-e2e-v1.json](../benchmarks/electro/m8-native-e2e-v1.json).
+
+The final bounded correspondence-ownership difference from COLMAP has now been
+tested and rejected. The default-off recursive-Create prototype scored at most
+32 registered neighbours and 128 deterministic ray-pair hypotheses per
+partition, published at most four mutually exclusive residual partitions, and
+never assigned one observation to multiple tracks. Its release tests and
+clippy passed, and its default-OFF 1k control reproduced all three previous
+model hashes exactly.
+
+The 1k candidate retained 1,000/1,000 images and published 6,774 partitions /
+25,057 observations, but RMSE regressed from 0.0290996 to 0.0295248 m (+1.46%),
+p95 from 0.0436789 to 0.0444145 m (+1.68%), and mean reprojection from 0.743284
+to 0.757226 px (+1.88%). It was stopped before 2.5k and its source changes were
+reverted. The apparent single-run wall/RSS reductions are not promoted because
+the quality gate failed and the control-then-candidate cache state was not
+controlled. Commands, counters, hashes, cgroup records, and scores are frozen
+in
+[m8-openloris-dynamic-recursive-create-ab.json](../benchmarks/electro/m8-openloris-dynamic-recursive-create-ab.json).
+
+This exhausts bounded ownership changes over the existing correspondence graph.
+The next quality boundary is one isolated **learned long-range retrieval arm**;
+it must add identity evidence that is independent of the current local-feature
+VLAD ranking and must not use reconstructed poses or GT for selection:
+
+1. **Complete:** EigenPlaces ResNet18/512 model/license/SHA/preprocessing/output
+   dimension and manifest ordering are pinned; the resumable one-image-at-a-time
+   atomic writer passes real-data restart equality.
+2. **Complete at 1k:** deterministic mmap ANN operates on rig frames, has
+   recall@32 `0.982125`, emits no more than 32N candidates, and records pool,
+   wall, RSS and hashes without N x N score/state allocation. Its broad pool
+   remains a scaling gate at larger tiers.
+3. **Rejected as initially specified:** emitting all previously absent pairs
+   with reciprocal
+   descriptor support plus descriptor-only sequence consistency: at least two
+   adjacent query rig frames must retrieve a consistent remote rig-frame
+   neighbourhood. This gate may use manifest order but not poses, local-match
+   counts, verifier inliers, reconstructed components, or GT.
+4. **Completed for the rejected arm:** match only those bounded additions with the frozen local features and the
+   unchanged geometric verifier. Merge accepted edges into the structure input
+   before track construction, rather than appending them after the structure
+   prefix as in the rejected ANN80k diagnostic. Preserve a separate addition
+   ledger so every changed track and registration can be attributed to a new
+   verified edge.
+5. **Failed before repeat:** run control/candidate/repeat on frozen 1k under 2 GiB first. Require equal or
+   better registration, RMSE, p95, reprojection, mapper wall, and sampled RSS;
+   model publication precedes GT scoring. Stop and revert on any regression.
+   Only a complete pass proceeds to 2.5k, 5k, 10k, cold-cache three-repeat
+   timing, full-process restart, and 100k I/O closure.
+
+The learned model is not currently present in the repository, so model
+acquisition/export and license/hash pinning are an explicit feasibility gate,
+not something the implementation may silently download during a benchmark.
+
+## Previous infrastructure checkpoint (2026-09-09)
 
 The shared-snapshot path now has complete dense worker parity on the retained
 10k feature bank: all 2,500 shards/80,000 candidates reproduce every legacy
@@ -28,6 +322,43 @@ pipeline restart. The retained atlas still misses the frozen COLMAP RMSE gate.
 
 ### Remaining execution order
 
+Capacity audit after connected mapping v2: root free space is about 2.4 GiB,
+external free space about 1.6 GiB. Independently counting allocated blocks of
+regular files (deduplicating inodes within each directory, excluding symlinks)
+gives 1,855,483,904 bytes for full-base-v2 and 4,770,639,872 bytes for
+full-dense-v1: **6,626,123,776 bytes before adaptive/matching/mapping outputs**.
+Thus the current all-banks-retained executor cannot start safely even if its
+conservative 16 GiB guard were reduced. Native shared output adds 485,498,880
+bytes, dense shared output 1,071,497,216 bytes and targeted shared output
+17,616,896 bytes in the observed runs; these are not a complete lifetime upper
+bound and do not include all adaptive/admission/model artifacts or slack.
+No data was removed for this audit. The approximately 30 GiB EuRoC frozen
+feature bank remains protected by the nonregression contract. Obtain additional
+storage or implement and verify artifact release/recomputation lifetimes before
+a cold launch; do not bypass the guard or substitute retained banks and call it
+cold E2E.
+
+Checkpoint update: full dense extraction now passes all 20,000 feature/loci
+hashes with a terminal detached measurement (9,789.925 s, sampled aggregate
+peak RSS 1,776,952 KiB, no OOM; `m8-full-dense-extraction-v1.json`). Full base
+feature parity also passes, but its earlier aggregate resource ledger remains
+incomplete. Neither result establishes continuous E2E.
+
+The newly bound chain prefix registration → repair admission → target selection
+→ target candidates → shared matching/merge → final admission now reproduces
+the seven selected frames, 14,319 candidates, 448 matching shards and final
+snapshot digest. Evidence: `m8-repair-admission-bound-v1.json`,
+`m8-targeted-selection-bound-v1.json`, `m8-targeted-candidates-bound-v1.json`,
+`m8-targeted-shared-bound-v1.json`, `m8-targeted-admission-bound-v1.json`.
+Intermediate model files are not all identical; selection equality is the
+verified downstream contract. These were separately launched stages with
+retained upstream inputs, not one cold pipeline. Do not rerun unchanged source
+models merely to extend this chain. The next implementation must assemble the
+complete executor, including source mapping and atlas integration, with pinned
+inputs, explicit dependencies, restart validation and artifact lifetime budgets.
+The synthetic stress fixture is archived with verified contents; restore it
+before any readback rerun (see `replay_storage_cleanup.md`).
+
 1. Runner dependency binding and actual runner restart evidence are merged
    (PR130/131). Shared output remains opt-in.
 2. Full10k Python runner validation now passes: all 2,500 bound shards match
@@ -35,14 +366,20 @@ pipeline restart. The retained atlas still misses the frozen COLMAP RMSE gate.
    the matching worker or change prior chunks. See
    `m8-full-native-shared-runner-v1.json` (PR132 merged). This is retained
    feature/candidate validation, not full pipeline extraction or restart.
+   Native matching also passes on the regenerated full10k base bank: all 2,188
+   shared shards match legacy records, merged bytes and completed resume pass,
+   and the detached service has a terminal resource report. See
+   `m8-native-shared-full-v1.json`. Retained candidates remain outside generation
+   timing; this does not close the continuous pipeline gate.
 3. Assemble one executable, version-pinned native DAG covering base and dense
    extraction, retrieval, adaptive selection, matching, repair/targeted
    selection, source mapping and atlas integration. The dense bank also supplies
    supplemental features; do not extract those 692 images twice. Preflight disk
    space and an aggregate process-tree memory cap before launching extraction.
    Measure a continuous cold run and a separately labelled resumed run, not a
-   sum of historical phase times. Four-image base and one dense extraction
-   shard parity are preflights, not full extraction completion.
+   sum of historical phase times. Full dense extraction is now verified as
+   described above; the base aggregate resource ledger still needs closure
+   through the continuous execution.
    Current building blocks: PR133's opt-in immutable adaptive bank sharing
    passed full10k parity/resume with 9,308 shared files and 692 independent files;
    PR134's compiler binds 21 source commands to 23 atlas nodes. Dedicated cgroup

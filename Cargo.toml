@@ -75,6 +75,7 @@ onnx-cuda = ["onnx-inference", "visloc-vision/onnx-cuda"]
 nalgebra = { workspace = true }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = { workspace = true }
+memmap2 = "0.9"
 visloc-core = { path = "crates/core", version = "0.1.0" }
 visloc-vision = { path = "crates/vision", version = "0.1.0" }
 visloc-io = { path = "crates/io", version = "0.1.0" }
@@ -160,6 +161,18 @@ required-features = ["image-io", "onnx-inference"]
 name = "vpr_global_descriptor_demo"
 path = "examples/vpr_global_descriptor_demo.rs"
 required-features = ["image-io", "onnx-inference"]
+
+[[example]]
+name = "learned_retrieval_candidates"
+path = "examples/learned_retrieval_candidates.rs"
+
+[[example]]
+name = "materialize_learned_rig_candidates"
+path = "examples/materialize_learned_rig_candidates.rs"
+
+[[example]]
+name = "admit_learned_rig_rotation_cycles"
+path = "examples/admit_learned_rig_rotation_cycles.rs"
 
 [[example]]
 name = "euroc_dpvo_vo_demo"
