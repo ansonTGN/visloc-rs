@@ -28,6 +28,12 @@ not an end-to-end COLMAP comparison. The frozen measurements
 and output hashes are in
 [`m6-ann-streaming.json`](benchmarks/electro/m6-ann-streaming.json).
 
+Separately, the [Visual-Inertial SLAM (Basalt Rust port)](#visual-inertial-slam-basalt-rust-port)
+— a distinct, tightly-coupled stereo-inertial VIO stack, not the vision-only
+SfM/SLAM pipeline above — matches native Basalt's ATE to **within 0.1%** on
+every one of the 11 EuRoC sequences at seed 7, with **0.563×** native's peak
+RSS on the same-domain Linux runtime/RSS gate (1.133× runtime ratio).
+
 **OpenLORIS 10k — calibrated-rig quality comparison:** visloc's experimental
 observation-backed atlas preserves the connected frame counts and meets the
 p95 target, but **RMSE parity is still open**.
@@ -311,6 +317,218 @@ independent gauges and must not be mistaken for one connected reconstruction.
   <sub>Online stereo SLAM on EuRoC MH_01 — onboard camera and the live map growing in real time: uninterrupted tracking throughout the shown 583-frame measured segment (100% coverage, 0.344 m rigid ATE RMSE), with the landmark map grown by stereo landmark replenishment. Still version: <a href="docs/assets/hero_euroc_mh01_light.png">light</a> · <a href="docs/assets/hero_euroc_mh01_dark.png">dark</a>.</sub>
 </p>
 
+## Visual-Inertial SLAM (Basalt Rust port)
+
+This is a separate, faithful Rust port of upstream
+[Basalt](https://github.com/VladyslavUsenko/basalt) commit `0f3b2b52` — a
+tightly-coupled stereo-inertial VIO estimator plus an offline structure-from-motion
+mapper — living in [`pipelines/basalt`](pipelines/basalt) and exercised end to
+end by [`examples/basalt_euroc_vio_demo.rs`](examples/basalt_euroc_vio_demo.rs).
+It is not the vision-only stereo SLAM stack used in the SfM/SLAM sections above:
+Basalt fuses IMU preintegration directly into the sliding-window optimizer, and
+this port targets upstream numerical and structural fidelity (matching Basalt's
+own frontend, factors, and marginalization) on the standard EuRoC benchmark,
+not a from-scratch design.
+
+### Pipeline
+
+```mermaid
+flowchart LR
+    IMG["Stereo cam0 / cam1 PNGs<br/>euroc.rs"] --> PYR["Basalt image pyramid<br/>pyramid.rs"]
+    PYR --> FAST["FAST-9 grid detector<br/>fast.rs"]
+    FAST --> OF["Frame-to-frame optical flow<br/>Pattern51 patches<br/>stream.rs / patch.rs / pattern.rs"]
+    OF --> EPI["Stereo epipolar filter<br/>adapter.rs"]
+    IMU["IMU samples"] --> PRE["IMU preintegration<br/>imu/preintegration.rs, imu/sampling.rs"]
+    EPI --> INIT["Initialization<br/>initialization.rs"]
+    PRE --> INIT
+    INIT --> LM["ABS_QR LM sliding window + FEJ<br/>vio/estimator.rs, vio/window.rs, vio/aom.rs"]
+    LM --> MARG["Square-root marginalization<br/>vio/margdata.rs"]
+    MARG --> OUT["Trajectory (TUM / CSV) + MargData packets<br/>adapter.rs"]
+    OUT --> MAP["Offline mapper<br/>mapper/mod.rs, mapper/session.rs"]
+    MAP --> MATCH["Keyframe matching + 5-pt Stewenius RANSAC<br/>mapper/features.rs"]
+    MATCH --> TRI["Triangulation + bundle adjustment<br/>mapper/triangulation.rs"]
+    TRI --> PTS["map.json / points.json / poses.json"]
+```
+
+<p align="center"><sub>Node labels are the actual source modules under
+<a href="pipelines/basalt/src">pipelines/basalt/src</a>. Marginalization
+(<code>sqrt_to_sqrt_marginalize</code> in <code>vio/margdata.rs</code>) runs
+every frame; a MargData packet is only written to disk when Basalt selects a
+keyframe for removal, which is what feeds the offline mapper.</sub></p>
+
+### All-11 EuRoC accuracy (Rust port vs native Basalt)
+
+Same sensor-only replay, same seed (7), single run per sequence, ATE
+translation RMSE with SE(3) Umeyama alignment (evo-style, nearest-timestamp
+association, 10 ms tolerance) against the official EuRoC Vicon/Leica ground
+truth. Every cell below comes from
+[`work/m11_phase6_latest_combined_all11x1_20260914.json`](work/m11_phase6_latest_combined_all11x1_20260914.json)
+(`gate_report.comparisons[*].gates`); coverage is the tracked-pose fraction and
+"pass" is that artifact's own per-sequence accuracy/coverage/RPE/scale gate
+verdict, not an external judgment.
+
+| Sequence | Rust ATE (m) | Native Basalt ATE (m) | Coverage | Sim(3) scale (Rust) | Gates |
+| --- | ---: | ---: | ---: | ---: | :---: |
+| MH_01_easy | 0.0657 | 0.0657 | 100.0% | 1.0142 | pass |
+| MH_02_easy | 0.0577 | 0.0577 | 100.0% | 1.0083 | pass |
+| MH_03_medium | 0.0617 | 0.0617 | 100.0% | 1.0094 | pass |
+| MH_04_difficult | 0.1143 | 0.1143 | 99.95% | 1.0110 | pass |
+| MH_05_difficult | 0.1445 | 0.1446 | 100.0% | 1.0043 | pass |
+| V1_01_easy | 0.0432 | 0.0432 | 100.0% | 1.0155 | pass |
+| V1_02_medium | 0.0454 | 0.0454 | 100.0% | 1.0157 | pass |
+| V1_03_difficult | 0.0534 | 0.0534 | 100.0% | 1.0106 | pass |
+| V2_01_easy | 0.0390 | 0.0390 | 100.0% | 1.0119 | pass |
+| V2_02_medium | 0.0493 | 0.0492 | 100.0% | 1.0063 | pass |
+| V2_03_difficult | 0.2298 | 0.2300 | 99.95% | 0.9883 | pass |
+
+<p align="center"><sub>22/22 cells (11 sequences × Rust/native) succeeded; the
+artifact's own RSS field is deliberately <code>not_evaluable</code> there
+because the Windows-Rust and Linux-native RSS domains differ — see the
+dedicated runtime/RSS table below for the same-domain measurement.</sub></p>
+
+### How the Rust port and native Basalt compare against published VIO systems
+
+The table below puts our own measured numbers next to numbers **reported in
+papers** for other systems — this is context, not a like-for-like benchmark.
+The published columns are ORB-SLAM3's Table II
+(Campos et al., *ORB-SLAM3: An Accurate Open-Source Library for Visual,
+Visual-Inertial and Multi-Map SLAM*, T-RO 2021,
+[arXiv:2007.11898](https://arxiv.org/abs/2007.11898)), which reports the
+**median ATE RMSE after 10 executions per sequence**, SE(3)-aligned to
+processed ground truth, using the full trajectory. Its VINS-Mono
+(monocular-inertial) row was obtained by the ORB-SLAM3 authors running the
+released VINS-Mono code with its default configuration, not lifted from the
+original VINS-Mono paper (Qin et al., T-RO 2018,
+[arXiv:1708.03852](https://arxiv.org/abs/1708.03852)).
+
+| Sequence | Rust (this repo, measured) | Native Basalt (this repo, measured) | ORB-SLAM3 mono-inertial (paper) | ORB-SLAM3 stereo-inertial (paper) | VINS-Mono mono-inertial (paper) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| MH_01 | 0.066 | 0.066 | 0.062 | 0.036 | 0.084 |
+| MH_02 | 0.058 | 0.058 | 0.037 | 0.033 | 0.105 |
+| MH_03 | 0.062 | 0.062 | 0.046 | 0.035 | 0.074 |
+| MH_04 | 0.114 | 0.114 | 0.075 | 0.051 | 0.122 |
+| MH_05 | 0.144 | 0.145 | 0.057 | 0.082 | 0.147 |
+| V1_01 | 0.043 | 0.043 | 0.049 | 0.038 | 0.047 |
+| V1_02 | 0.045 | 0.045 | 0.015 | 0.014 | 0.066 |
+| V1_03 | 0.053 | 0.053 | 0.037 | 0.024 | 0.180 |
+| V2_01 | 0.039 | 0.039 | 0.042 | 0.032 | 0.056 |
+| V2_02 | 0.049 | 0.049 | 0.021 | 0.014 | 0.090 |
+| V2_03 | 0.230 | 0.230 | 0.027 | 0.024 | 0.244 |
+
+<p align="center"><sub>All values are ATE RMSE in metres, lower is better.
+Our Rust/native-Basalt numbers are a single seeded run per sequence
+(protocol above); the ORB-SLAM3/VINS-Mono columns are best-of/median-of-many
+runs on the authors' own hardware, published years earlier. Different
+hardware, run counts, and (for ORB-SLAM3's pure-monocular mode elsewhere in
+its own table) alignment convention mean this is not an apples-to-apples
+comparison — read it as "same public benchmark, different papers/repos,"
+not a leaderboard claim. The existing
+<a href="docs/euroc_loop_closure_benchmark.md">EuRoC loop-closure benchmark</a>
+already cites the same ORB-SLAM3 Table II for visloc-rs's separate
+vision-only stereo SLAM stack; the numbers here are for this different,
+IMU-fused Basalt port and should not be mixed with that comparison.</sub></p>
+
+### Native-equivalence parity
+
+From [`benchmarks/basalt/release_inputs/m11_rust_wsl_exactness_final2_20260914.json`](benchmarks/basalt/release_inputs/m11_rust_wsl_exactness_final2_20260914.json),
+[`work/m11_absqr_dense_pipeline_current_release_20260914.json`](work/m11_absqr_dense_pipeline_current_release_20260914.json),
+and [`work/m11_mapper_colpiv_fullv_parity_20260914.json`](work/m11_mapper_colpiv_fullv_parity_20260914.json):
+
+| Parity check | Result |
+| --- | --- |
+| Cross-target (Windows ↔ Linux) trajectory/lifecycle exactness at 52, 80, 400 frames | 9/9 byte-exact (CSV, TUM, lifecycle JSONL); forbidden diagnostic outputs absent |
+| Dense ABS_QR linear system, frame 4 iteration 0 (visual/IMU/prior-before/prior-after/final stages) | H 5625/5625 and b 75/75 IEEE-754 f32 bit-exact at every stage |
+| Offline mapper match graph, real native frame-51 packet, seed 7, 120 image pairs | 15,299/15,299 raw matches, 14,139/14,139 inliers, 0 inlier-set mismatches, 397/397 tracks, 382/382 landmarks |
+| Offline mapper final point coordinates | All 3,583 reconstructed observations within 1 mm of native (native-equivalent, not claimed bit-exact) |
+
+### Runtime and peak RSS vs native
+
+Same-domain Linux measurements only (workers=1, threads=1, seed=7); Windows
+Rust vs Linux native is not a valid RSS comparison and is excluded here (see
+caveats below).
+
+MH_01_easy formal adjacent pair, from
+[`benchmarks/basalt/release_inputs/m11_fast9_formal_gate_20260913.json`](benchmarks/basalt/release_inputs/m11_fast9_formal_gate_20260913.json):
+
+| Metric | Rust | Native | Ratio |
+| --- | ---: | ---: | ---: |
+| Wall time | 511.1 s | 469.1 s | 1.090 |
+| Peak RSS | 29.5 MB | 52.9 MB | 0.559 |
+
+Three-repetition alternating-order formal gate on the final release binary,
+from [`work/m11_basalt_faithful_port_final_closure_20260914.md`](work/m11_basalt_faithful_port_final_closure_20260914.md):
+
+| Metric | Native | Rust | Ratio |
+| --- | ---: | ---: | ---: |
+| Runtime median | 380.4 s | 431.0 s | 1.133 |
+| RSS median | 52.4 MB | 29.5 MB | 0.563 |
+
+Both ratios pass the 1.5× gate; Rust is slower but uses roughly half the
+peak RSS of the native C++/Eigen/Pangolin build in this measurement domain.
+
+### Figures
+
+<p align="center">
+  <img src="docs/assets/basalt_mh01_trajectory.png" alt="EuRoC MH_01_easy top-down trajectory: Rust Basalt port and native Basalt (SE(3)-aligned) overlaid on EuRoC ground truth" width="420">
+  <img src="docs/assets/basalt_v101_trajectory.png" alt="EuRoC V1_01_easy top-down trajectory: Rust Basalt port and native Basalt (SE(3)-aligned) overlaid on EuRoC ground truth" width="420">
+</p>
+<p align="center">
+  <img src="docs/assets/basalt_all11_ate_bar.png" alt="Bar chart of per-sequence ATE translation RMSE, Rust port vs native Basalt, across all 11 EuRoC sequences" width="820">
+</p>
+
+<p align="center"><sub>Trajectories are SE(3)-Umeyama-aligned to EuRoC ground
+truth per sequence (same alignment the ATE table above uses); the native
+Basalt curve overlaps the Rust curve almost exactly, which is the expected
+picture given the ATE parity above. Ground truth is used here only to draw
+these plots, never fed to the estimator, and is not included in any release
+manifest. Regenerate with
+<a href="scripts/plot_basalt_readme_figures.py">scripts/plot_basalt_readme_figures.py</a>
+from the all-11 gate report plus local EuRoC TUM/CSV trajectory outputs.</sub></p>
+
+### Run it
+
+Build with AVX2/FMA and the LM-workspace-reuse optimization used for the
+measurements above:
+
+```bash
+RUSTFLAGS="-C target-feature=+avx2,+fma" \
+  cargo build --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse
+```
+
+Then replay one EuRoC sequence (`--calibration` and `--config` below are
+checked into this repository; `--euroc-dir` is an external dataset path):
+
+```bash
+cargo run --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse -- \
+  --euroc-dir /path/to/MH_01_easy \
+  --calibration benchmarks/basalt/release_inputs/euroc_ds_calib.json \
+  --config configs/basalt/euroc_config.json \
+  --out-dir target/basalt_mh01 \
+  --max-frames 80
+```
+
+This writes `trajectory.tum`, `trajectory.csv`, `trace.jsonl`, a
+`marg_data/` directory of per-keyframe MargData JSON packets (the offline
+mapper's input), and `summary.txt` under `--out-dir`. Pass `--no-trace`
+and/or `--no-marg-data` to drop the diagnostic trace and MargData output
+respectively; `--help` lists every flag. The example never reads a ground-truth
+file — all outputs are produced causally from sensor data and estimator state.
+
+### Honest caveats
+
+- The offline mapper matches native's match graph exactly but its final point
+  coordinates are only verified within 1 mm of native, not bit-exact.
+- A one-shot runtime measurement failed at ratio 1.518 (above the 1.5×
+  gate) before the formal three-repetition median above passed; that failure
+  is intentionally preserved as variance evidence rather than discarded.
+- The Cargo license inventory resolves 119/119 package licenses, but legal
+  clearance was not sought or claimed — this is an engineering audit, not a
+  legal one.
+- The all-11 aggregate's Windows-Rust vs Linux-native RSS comparison is
+  marked `not_evaluable` in its own artifact because the two platforms'
+  RSS-measurement domains differ; only the same-domain Linux gate above is
+  used as the RSS claim.
+
 ## Quickstart
 
 Requires Rust 1.83+.
@@ -393,6 +611,7 @@ previously lived here.
 - **Choose and run a demo:** [demo index](docs/demo_strategy.md), [public COLMAP map-reuse demo](docs/public_data_demo.md), [GNSS-prior tracking](docs/gnss_demo.md), and [interactive KITTI trajectory viewer](https://rsasaki0109.github.io/visloc-rs/kitti3d/).
 - **Understand supported configurations:** [feature matrix](docs/feature_matrix.md), [API stability](docs/api_stability.md), [COLMAP compatibility](docs/colmap_compatibility.md), and [migration notes](docs/migration.md).
 - **Inspect VO and loop-closure evidence:** [KITTI multi-sequence](docs/kitti_multiseq_benchmark.md), [KITTI loop closure](docs/kitti_loop_closure_benchmark.md), [EuRoC loop closure](docs/euroc_loop_closure_benchmark.md), [TUM RGB-D](docs/tum_rgbd_benchmark.md), and [tracking persistence](docs/tracking_persistence_benchmark.md).
+- **Inspect VI-SLAM (Basalt Rust port) evidence:** [faithful-port final closure report](work/m11_basalt_faithful_port_final_closure_20260914.md) and [upstream oracle / provenance](benchmarks/basalt/README.md).
 - **Inspect SfM evidence:** [EuRoC reconstruction](docs/euroc_sfm_benchmark.md), [sequential SfM vs COLMAP](docs/sfm_vs_colmap_benchmark.md), [unordered SfM](docs/unordered_sfm_benchmark.md), and [registry evidence for the head-to-head](docs/generated/sfm_vs_colmap_headtohead.md).
 - **Inspect learned frontend evidence:** [SuperPoint ONNX/CUDA](docs/superpoint_onnx_cuda_benchmark.md), [LightGlue ONNX](docs/lightglue_onnx_benchmark.md), and [single-binary deep stereo SLAM](docs/inprocess_slam_benchmark.md).
 - **Inspect mapping and optimization evidence:** [learned retrieval for relocalization](docs/learned_retrieval_relocalization.md), [multi-session lifelong mapping](docs/multi_session_lifelong_benchmark.md), and [pose-graph / BA internals with GTSAM parity](docs/pgo_internals.md).
