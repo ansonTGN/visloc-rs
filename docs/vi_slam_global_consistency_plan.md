@@ -87,8 +87,20 @@ HashBoW loop candidates + 5-pt RANSAC + non-linear factor recovery + global
 optimisation) is being run on all 11 sequences from the fresh MargData under
 `E:\visloc-rs-runs\basalt_lc_ceiling_20260914\vio_marg\<SEQ>\`. Results will land in
 `E:\visloc-rs-runs\basalt_mapper_all11_20260915\summary.{json,md}` (branch
-`exp/basalt-mapper-all11`). MH_01 smoke test: ~6.3 GB RSS at 454 keyframes, >30 min
-wall at the time of writing — a memory/time data point in itself.
+`exp/basalt-mapper-all11`; driver `scripts/run_basalt_mapper_all11.py`, mapper
+invoked as `basalt_mapper_offline_demo --marg-dir <SEQ>/marg_data --calibration
+benchmarks/basalt/release_inputs/euroc_ds_calib.json --config
+configs/basalt/euroc_config.json`).
+
+MH_01 (complete): 454 packets → 461 keyframes, 12,935 accepted pairs from HashBoW
+temporal + loop queries, two optimisation rounds converged.
+**Keyframe ATE SE(3) 0.0658 m, full-trajectory ATE SE(3) 0.0647 m vs VIO 0.066 m —
+about 2 % gain**, i.e. no better than the raw VIO and behind both the custom pose
+graph (0.055 m) and ORB-SLAM3 (0.036 m). Sim(3) ATE is 0.012 m, so what remains
+is mostly a mild scale/gauge drift rather than local error. Cost: 18 min wall,
+6.3 GB peak RSS for one sequence. The remaining 10 sequences are running; on this
+evidence the native mapper's BoW + relative-pose stage is not the missing piece,
+which points Stage 1 at the L1/L2 design below rather than at the mapper as-is.
 
 ## 2. Diagnosis
 
@@ -163,7 +175,7 @@ measurements in §1.1; every claim cites an artifact path.
 
 | Stage | Work | Pass | Kill / pivot |
 | --- | --- | --- | --- |
-| 0 (running) | Native Basalt mapper on all 11 (L0 + NFR + BoW loops, no L1) | Beats ORB-SLAM3 on any sequence → build L1/L2 on the mapper's factor graph | Fails to improve on VIO → its BoW/RANSAC stage is the weak link; L1/L2 start from the Stage-A/B code instead |
+| 0 (running; MH_01 done: +2 %) | Native Basalt mapper on all 11 (L0 + NFR + BoW loops, no L1) | Beats ORB-SLAM3 on any sequence → build L1/L2 on the mapper's factor graph | Fails to improve on VIO (MH_01 already does) → its BoW/RANSAC stage is the weak link; L1/L2 start from the Stage-A/B code and reuse only the NFR factor recovery |
 | 1 | Offline L1 + L2 on **V1_02** first, then MH_01: projection-based association → sequence-long tracks; NFR factors + reprojection factors; PCM + GNC loop acceptance; batch global BA | V1_02 ≤ 0.025 m, MH_01 ≤ 0.040 m | V1_02 does not improve → local VIO is the limit → Stage 1b |
 | 1b | Basalt front-end strengthening only if 1 fails: more features per frame, longer patch lifetime, SuperPoint descriptors for association | V1_02 improves | No improvement → the Basalt-as-L0 premise is wrong; reconsider OKVIS2-style VIO |
 | 2 | All 11 offline, resumable, per-sequence wall/RSS recorded | ≥ 6/11 wins vs ORB-SLAM3 measured; no sequence worse than VIO | < 4/11 → stop and write the honest negative |
