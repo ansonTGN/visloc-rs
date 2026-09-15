@@ -36,6 +36,7 @@ use crate::{TimingBreakdown, TimingBucket};
 use nalgebra::{
     DMatrix, DVector, Matrix3, Matrix4, Point2, Quaternion, SymmetricEigen, UnitQuaternion, Vector3,
 };
+use rayon::prelude::*;
 use serde_json::{json, Value as JsonValue};
 use std::{
     cell::Cell,
@@ -6500,13 +6501,31 @@ fn checked_lm_linearization_cost(linearization: &LmLinearization) -> Result<f64,
 }
 
 impl WindowProblem {
-    fn linearize_view<V: WindowValueView>(&self, values: &V) -> Result<LmLinearization, LmFailure> {
+    fn linearize_view<V: WindowValueView + Sync>(
+        &self,
+        values: &V,
+    ) -> Result<LmLinearization, LmFailure> {
         let layout = self.layout();
         let mut factors = self.prior_factors_view(values);
-        for landmark_index in 0..self.landmarks.len() {
-            if let Some(factor) = self.visual_factor_view(values, landmark_index) {
-                factors.push(factor);
-            }
+        // Each landmark's visual factor depends only on that landmark's own
+        // anchor/observation state views (`values`, shared and read-only)
+        // and its own landmark index -- there is no shared mutable state
+        // between landmarks (`visual_factor_view` builds and returns a fresh
+        // local `WhitenedFactorRowStack`, it does not accumulate into any
+        // caller-owned state). Computing every landmark's factor in
+        // parallel and then pushing the `Some` results into `factors`
+        // serially, in the same ascending `landmark_index` order the
+        // sequential loop always used, reproduces the identical factor list
+        // -- and therefore every downstream f32 rounding tree that depends
+        // on factor order, e.g. the landmark-reduction accumulation --
+        // bit-for-bit; only *when* each pure per-landmark factor is
+        // computed changes, never its value or its position in `factors`.
+        let visual_factors: Vec<Option<WhitenedFactorRowStack>> = (0..self.landmarks.len())
+            .into_par_iter()
+            .map(|landmark_index| self.visual_factor_view(values, landmark_index))
+            .collect();
+        for factor in visual_factors.into_iter().flatten() {
+            factors.push(factor);
         }
         for link in self.imu_links.iter().cloned() {
             if let Some(factor) = self.imu_factor_view(values, link.clone()) {

@@ -12,6 +12,7 @@ use nalgebra::{
     DMatrix, DVector, Matrix2x3, Matrix3, Matrix3x2, Matrix6, Point2, Point3, Quaternion, SMatrix,
     UnitQuaternion, Vector2, Vector3, Vector6,
 };
+use rayon::prelude::*;
 use serde_json::json;
 use std::{
     cell::Cell,
@@ -6478,6 +6479,45 @@ fn reduce_landmark_factors_f32_checked_with_options(
         }
     }
 
+    // Every landmark/visual factor's H/b contribution below depends only on
+    // that one factor's own already-projected `(jacobian, residual)` pair
+    // (computed above, serially, into `projected`); there is no shared
+    // mutable state between factors here, matching upstream Basalt's own
+    // `tbb::parallel_reduce` over landmark blocks. Precomputing every
+    // contribution in parallel and then folding each into `visual_h` /
+    // `visual_b` **serially below, in the exact same factor-index order the
+    // sequential loop always visited them in** reproduces the identical
+    // `+=` sequence -- and therefore the identical f32 rounding tree --
+    // as calling `eigen_visual_gram_packet_tail_f32` /
+    // `accumulate_transpose_vector_f32_eigen` inline did; only *when* each
+    // pure contribution is computed changes, never its value, its order of
+    // use, or the two audited kernels' own internal arithmetic (both are
+    // called completely unmodified below, just against a scratch
+    // zero-accumulator for the vector case so the contribution can be
+    // captured instead of accumulated in place).
+    let visual_factor_indices: Vec<usize> = factors
+        .iter()
+        .enumerate()
+        .filter(|(_, factor)| factor.landmark_jacobian.ncols() != 0)
+        .map(|(index, _)| index)
+        .collect();
+    let visual_contributions: Vec<(DMatrix<f32>, DVector<f32>)> = visual_factor_indices
+        .par_iter()
+        .map(|&index| {
+            let factor = &factors[index];
+            let (jacobian, residual, _) = &projected[index];
+            let h = if factor.kind == FactorKind::Visual {
+                eigen_visual_gram_packet_tail_f32(jacobian)
+            } else {
+                jacobian.transpose() * jacobian
+            };
+            let mut b = DVector::<f32>::zeros(jacobian.ncols());
+            accumulate_transpose_vector_f32_eigen(&mut b, jacobian, residual, false);
+            (h, b)
+        })
+        .collect();
+    let mut visual_contribution_cursor = 0usize;
+
     let mut factor_index = 0;
     while factor_index < factors.len() {
         let factor = &factors[factor_index];
@@ -6506,12 +6546,11 @@ fn reduce_landmark_factors_f32_checked_with_options(
             } else {
                 None
             };
-            if factor.kind == FactorKind::Visual {
-                visual_h += eigen_visual_gram_packet_tail_f32(jacobian);
-            } else {
-                visual_h += jacobian.transpose() * jacobian;
-            }
-            accumulate_transpose_vector_f32_eigen(&mut visual_b, jacobian, residual, false);
+            let (contribution_h, contribution_b) =
+                &visual_contributions[visual_contribution_cursor];
+            visual_contribution_cursor += 1;
+            visual_h += contribution_h;
+            visual_b += contribution_b;
             if let (Some(writer), Some(prefix)) = (visual_prefix_trace.as_mut(), prefix) {
                 writer.finish_visual_prefix(prefix, &visual_h, &visual_b)?;
             }
@@ -20062,8 +20101,13 @@ mod tests {
         assert_eq!(active_diagnostic_lm_iteration(), None);
     }
 
-    #[test]
-    fn m11_full70_frame4_ordered_f32_legacy_compact_model_recovery_parity() {
+    /// Builds the 70-factor (1 prior + 61 visual landmark + 4x(IMU+bias))
+    /// frame-4 fixture shared by [`m11_full70_frame4_ordered_f32_legacy_compact_model_recovery_parity`]
+    /// and the parallel-landmark-reduction bit-identity test below. Kept as
+    /// its own helper so both tests build the exact same factor set from
+    /// one source of truth instead of two independently hand-maintained
+    /// copies drifting apart.
+    fn build_full70_frame4_factors() -> (Vec<WhitenedFactorRowStack>, usize) {
         let state_dof = 75;
         let prior_jacobian = DMatrix::from_fn(15, state_dof, |row, column| {
             if column == row {
@@ -20172,6 +20216,12 @@ mod tests {
         }
 
         validate_full70_frame4_factors(&factors, state_dof).expect("strict frame-4 factor order");
+        (factors, state_dof)
+    }
+
+    #[test]
+    fn m11_full70_frame4_ordered_f32_legacy_compact_model_recovery_parity() {
+        let (factors, state_dof) = build_full70_frame4_factors();
         let legacy = reduce_landmark_factors_f32_checked(&factors, state_dof, 1e-10)
             .expect("legacy f32 frame-4 reduction");
         let compact = reduce_landmark_factors_f32_checked_with_compact_back_substitution(
@@ -20327,6 +20377,117 @@ mod tests {
         assert!(payload["recovery"]["landmark_steps"]
             .as_array()
             .is_some_and(|steps| steps.iter().all(|step| step["bitwise_equal"] == true)));
+    }
+
+    /// Proves the per-landmark parallel H/b contribution pre-pass in
+    /// `reduce_landmark_factors_f32_checked_with_options` is bit-identical
+    /// regardless of the rayon thread-pool size it runs under. Reuses the
+    /// real 70-factor (1 prior + 61 visual landmark + 4x(IMU+bias)) frame-4
+    /// fixture from [`m11_full70_frame4_ordered_f32_legacy_compact_model_recovery_parity`]
+    /// as the dense H/b oracle: the reduction is run inside three separately
+    /// scoped rayon thread pools (1, 4, and 8 threads -- 1 thread forces the
+    /// same effectively-serial execution order the pre-parallelization code
+    /// always used), and the resulting `h`/`b` (plus the derived compact
+    /// back-substitution landmark recovery and the model cost decrease used
+    /// by the LM trial step) must match exactly, to the bit, across all
+    /// three. Landmark contributions are pure functions of their own
+    /// already-projected `(jacobian, residual)`, folded into `visual_h` /
+    /// `visual_b` by a `+=` sequence that is unconditionally serial and in
+    /// original factor-index order (see the comment above that fold in
+    /// `reduce_landmark_factors_f32_checked_with_options`), so thread count
+    /// must not be observable in the result.
+    #[test]
+    fn m11_full70_frame4_parallel_landmark_reduction_is_thread_count_invariant() {
+        let (factors, state_dof) = build_full70_frame4_factors();
+        let state_step =
+            DVector::from_fn(state_dof, |column, _| (column as f64 - 23.0) * 0.0078125);
+
+        let mut previous: Option<(ReducedNormalSystemF32, f64, Vec<Vec<f64>>)> = None;
+        for threads in [1usize, 4, 8] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("scoped rayon pool");
+            let reduced = pool
+                .install(|| {
+                    reduce_landmark_factors_f32_checked_with_compact_back_substitution(
+                        &factors, state_dof, 1e-10,
+                    )
+                })
+                .expect("f32 frame-4 reduction");
+
+            // The model cost decrease consumes the same per-factor Q1/Q2
+            // payloads the parallel pre-pass feeds from; check it is also
+            // unaffected, since an LM trial step depends on it every
+            // iteration.
+            let model_decrease = pool
+                .install(|| model_cost_decrease_f32(&factors, &state_step, 1e-10))
+                .expect("model cost decrease");
+            assert!(
+                model_decrease.is_finite(),
+                "model decrease not finite at threads={threads}"
+            );
+
+            let compact_batch = reduced
+                .compact_back_substitution
+                .as_ref()
+                .expect("all 61 visual factors have compact entries");
+            assert_eq!(compact_batch.entries.len(), 61);
+            let recovered_steps: Vec<Vec<f64>> = compact_batch
+                .entries
+                .iter()
+                .map(|entry| {
+                    let step = pool
+                        .install(|| {
+                            back_substitute_landmark_compact_entry_f32(
+                                entry,
+                                &compact_batch.storage,
+                                &state_step,
+                                1e-10,
+                            )
+                        })
+                        .expect("compact visual recovery");
+                    assert!(
+                        step.iter().all(|value| value.is_finite()),
+                        "landmark recovery not finite at threads={threads}"
+                    );
+                    step.iter().copied().collect::<Vec<f64>>()
+                })
+                .collect();
+
+            if let Some((previous_reduced, previous_decrease, previous_steps)) = previous.as_ref() {
+                assert!(
+                    full70_matrix_bits_match(&previous_reduced.h, &reduced.h),
+                    "H differs at threads={threads}"
+                );
+                assert!(
+                    full70_vector_bits_match(&previous_reduced.b, &reduced.b),
+                    "b differs at threads={threads}"
+                );
+                assert_eq!(
+                    previous_decrease.to_bits(),
+                    model_decrease.to_bits(),
+                    "model cost decrease differs at threads={threads}"
+                );
+                assert_eq!(previous_steps.len(), recovered_steps.len());
+                for (entry_index, (previous_step, step)) in
+                    previous_steps.iter().zip(&recovered_steps).enumerate()
+                {
+                    assert_eq!(previous_step.len(), step.len());
+                    for (lane, (previous_value, value)) in
+                        previous_step.iter().zip(step).enumerate()
+                    {
+                        assert_eq!(
+                            previous_value.to_bits(),
+                            value.to_bits(),
+                            "landmark recovery factor {entry_index} lane {lane} differs at threads={threads}"
+                        );
+                    }
+                }
+            }
+
+            previous = Some((reduced, model_decrease, recovered_steps));
+        }
     }
 
     #[test]

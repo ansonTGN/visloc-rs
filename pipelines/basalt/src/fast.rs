@@ -12,6 +12,7 @@
 use std::collections::HashSet;
 
 use nalgebra::Vector2;
+use rayon::prelude::*;
 
 use crate::pyramid::RawU16Image;
 
@@ -111,107 +112,133 @@ impl GridFastDetector {
             ));
         }
 
-        let mut result = Vec::new();
-        for cell_x in 0..cells_x {
-            for cell_y in 0..cells_y {
-                if occupied.contains(&(cell_x, cell_y)) {
-                    continue;
-                }
+        // Each unoccupied cell's threshold-escalating FAST-9 search is a
+        // pure function of that cell's own `(x0, y0)` sub-image plus the
+        // shared, read-only `image` and `self.config` -- no cell reads or
+        // writes another cell's `score_grid` or candidate list. Computing
+        // every cell's point(s) in parallel and then extending `result`
+        // serially, in the exact same `cell_x` outer / `cell_y` inner
+        // visitation order the sequential nested loop always used,
+        // reproduces the identical `result` vector (and therefore the
+        // identical downstream new-track-id assignment order in the
+        // frontend) regardless of thread count; only *when* each
+        // independent cell's search runs changes, never its own candidate
+        // scoring, sort, or edge-threshold filtering.
+        let cell_coords: Vec<(usize, usize)> = (0..cells_x)
+            .flat_map(|cell_x| (0..cells_y).map(move |cell_y| (cell_x, cell_y)))
+            .filter(|coords| !occupied.contains(coords))
+            .collect();
+        let per_cell_points: Vec<Vec<Vector2<f32>>> = cell_coords
+            .par_iter()
+            .map(|&(cell_x, cell_y)| {
                 let x0 = x_start + cell_x * cell;
                 let y0 = y_start + cell_y * cell;
-                let mut threshold = self.config.threshold;
-                let mut selected = 0;
-                // OpenCV's FAST_t computes one score row and performs NMS
-                // against the retained neighbouring score rows.  Cache the
-                // complete cell here as the equivalent bounded form instead
-                // of recomputing as many as eight neighbour scores for every
-                // candidate pixel.
-                let mut score_grid = vec![0_i16; cell * cell];
-                while selected < self.config.points_per_cell
-                    && threshold >= self.config.min_threshold
-                {
-                    let mut candidates = Vec::new();
-                    // `cv::FAST` never examines the three-pixel border of its
-                    // *input image*.  Basalt passes a 50x50 sub-image, so
-                    // this is a cell-local border, in addition to Basalt's
-                    // full-image EDGE_THRESHOLD check below.
-                    if cell <= 6 {
-                        break;
-                    }
-                    score_grid.fill(0);
-                    for y in y0 + 3..y0 + cell - 3 {
-                        for x in x0 + 3..x0 + cell - 3 {
-                            if let Some(score) =
-                                fast_score_without_nms(image, x, y, threshold, x0, y0, cell)
-                            {
-                                score_grid[(y - y0) * cell + (x - x0)] = score;
-                            }
-                        }
-                    }
-                    for y in y0 + 3..y0 + cell - 3 {
-                        for x in x0 + 3..x0 + cell - 3 {
-                            let local_x = x - x0;
-                            let local_y = y - y0;
-                            let score = score_grid[local_y * cell + local_x];
-                            if score == 0 {
-                                continue;
-                            }
-                            let mut is_maximum = true;
-                            for dy in -1_i32..=1 {
-                                for dx in -1_i32..=1 {
-                                    if dx == 0 && dy == 0 {
-                                        continue;
-                                    }
-                                    let neighbour_x = (local_x as i32 + dx) as usize;
-                                    let neighbour_y = (local_y as i32 + dy) as usize;
-                                    if score_grid[neighbour_y * cell + neighbour_x] >= score {
-                                        is_maximum = false;
-                                        break;
-                                    }
-                                }
-                                if !is_maximum {
-                                    break;
-                                }
-                            }
-                            if is_maximum {
-                                candidates.push((score as u8, x, y));
-                            }
-                        }
-                    }
-                    // Basalt sorts the `cv::FAST` output solely by response.
-                    // `std::sort` is intentionally not stable; use the small
-                    // libstdc++-compatible introsort below so equal-response
-                    // points retain the same implementation-defined order as
-                    // the pinned GCC/OpenCV oracle.
-                    opencv_sort_by_response(&mut candidates);
+                self.detect_cell(image, x0, y0)
+            })
+            .collect();
+        let mut result = Vec::new();
+        for points in per_cell_points {
+            result.extend(points);
+        }
+        result
+    }
 
-                    for (_, x, y) in candidates {
-                        if selected >= self.config.points_per_cell {
-                            break;
-                        }
-                        // Upstream filters the full-image EDGE_THRESHOLD
-                        // only after cv::FAST's response-only sort. Keeping
-                        // out-of-bounds candidates in the sorted input is
-                        // observable when equal responses straddle the edge.
-                        if !image.in_bounds(
-                            Vector2::new(x as f32, y as f32),
-                            self.config.edge_threshold as f32,
-                        ) {
-                            continue;
-                        }
-                        result.push(Vector2::new(x as f32, y as f32));
-                        selected += 1;
+    /// Threshold-escalating FAST-9 search over one grid cell's `cell x cell`
+    /// sub-image at `(x0, y0)`. Pure and side-effect-free: every mutable
+    /// scratch buffer (`score_grid`, `candidates`) is local to this call, so
+    /// many cells can run this concurrently with no coordination.
+    fn detect_cell(&self, image: &RawU16Image, x0: usize, y0: usize) -> Vec<Vector2<f32>> {
+        let cell = self.config.cell_size;
+        let mut result = Vec::new();
+        let mut threshold = self.config.threshold;
+        let mut selected = 0;
+        // OpenCV's FAST_t computes one score row and performs NMS
+        // against the retained neighbouring score rows.  Cache the
+        // complete cell here as the equivalent bounded form instead
+        // of recomputing as many as eight neighbour scores for every
+        // candidate pixel.
+        let mut score_grid = vec![0_i16; cell * cell];
+        while selected < self.config.points_per_cell && threshold >= self.config.min_threshold {
+            let mut candidates = Vec::new();
+            // `cv::FAST` never examines the three-pixel border of its
+            // *input image*.  Basalt passes a 50x50 sub-image, so
+            // this is a cell-local border, in addition to Basalt's
+            // full-image EDGE_THRESHOLD check below.
+            if cell <= 6 {
+                break;
+            }
+            score_grid.fill(0);
+            for y in y0 + 3..y0 + cell - 3 {
+                for x in x0 + 3..x0 + cell - 3 {
+                    if let Some(score) =
+                        fast_score_without_nms(image, x, y, threshold, x0, y0, cell)
+                    {
+                        score_grid[(y - y0) * cell + (x - x0)] = score;
                     }
-                    if threshold == self.config.min_threshold {
-                        break;
-                    }
-                    // This is Basalt's literal `threshold /= 2`.  In
-                    // particular, do not clamp back up to min_threshold: a
-                    // threshold of 6 runs once and then terminates at 3, just
-                    // as the upstream loop does for its fixed lower bound 5.
-                    threshold /= 2;
                 }
             }
+            for y in y0 + 3..y0 + cell - 3 {
+                for x in x0 + 3..x0 + cell - 3 {
+                    let local_x = x - x0;
+                    let local_y = y - y0;
+                    let score = score_grid[local_y * cell + local_x];
+                    if score == 0 {
+                        continue;
+                    }
+                    let mut is_maximum = true;
+                    for dy in -1_i32..=1 {
+                        for dx in -1_i32..=1 {
+                            if dx == 0 && dy == 0 {
+                                continue;
+                            }
+                            let neighbour_x = (local_x as i32 + dx) as usize;
+                            let neighbour_y = (local_y as i32 + dy) as usize;
+                            if score_grid[neighbour_y * cell + neighbour_x] >= score {
+                                is_maximum = false;
+                                break;
+                            }
+                        }
+                        if !is_maximum {
+                            break;
+                        }
+                    }
+                    if is_maximum {
+                        candidates.push((score as u8, x, y));
+                    }
+                }
+            }
+            // Basalt sorts the `cv::FAST` output solely by response.
+            // `std::sort` is intentionally not stable; use the small
+            // libstdc++-compatible introsort below so equal-response
+            // points retain the same implementation-defined order as
+            // the pinned GCC/OpenCV oracle.
+            opencv_sort_by_response(&mut candidates);
+
+            for (_, x, y) in candidates {
+                if selected >= self.config.points_per_cell {
+                    break;
+                }
+                // Upstream filters the full-image EDGE_THRESHOLD
+                // only after cv::FAST's response-only sort. Keeping
+                // out-of-bounds candidates in the sorted input is
+                // observable when equal responses straddle the edge.
+                if !image.in_bounds(
+                    Vector2::new(x as f32, y as f32),
+                    self.config.edge_threshold as f32,
+                ) {
+                    continue;
+                }
+                result.push(Vector2::new(x as f32, y as f32));
+                selected += 1;
+            }
+            if threshold == self.config.min_threshold {
+                break;
+            }
+            // This is Basalt's literal `threshold /= 2`.  In
+            // particular, do not clamp back up to min_threshold: a
+            // threshold of 6 runs once and then terminates at 3, just
+            // as the upstream loop does for its fixed lower bound 5.
+            threshold /= 2;
         }
         result
     }

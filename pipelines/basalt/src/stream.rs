@@ -212,7 +212,11 @@ pub struct DirectKltStream {
     tracks: BTreeMap<TrackId, ActiveTrack>,
     next_track_id: TrackId,
     cumulative_rejects: RejectReasonCounters,
-    pyramid_scratch: Vec<i32>,
+    // Separate cam0/cam1 scratch buffers (rather than one shared buffer)
+    // let the two pyramids build concurrently below -- each subsample pass
+    // only ever touches its own camera's buffer.
+    pyramid_scratch_cam0: Vec<i32>,
+    pyramid_scratch_cam1: Vec<i32>,
 }
 
 impl DirectKltStream {
@@ -249,7 +253,8 @@ impl DirectKltStream {
             tracks: BTreeMap::new(),
             next_track_id: 0,
             cumulative_rejects: RejectReasonCounters::default(),
-            pyramid_scratch: Vec::new(),
+            pyramid_scratch_cam0: Vec::new(),
+            pyramid_scratch_cam1: Vec::new(),
         })
     }
 
@@ -290,19 +295,36 @@ impl DirectKltStream {
         }
 
         let pyramid_started = timing.start();
-        let cam0 = RawU16Pyramid::from_image_with_scratch(
-            frame.cam0,
-            self.config.pyramid_levels,
-            &mut self.pyramid_scratch,
-        )?;
-        let cam1 = match frame.cam1 {
-            Some(image) => Some(RawU16Pyramid::from_image_with_scratch(
-                image,
-                self.config.pyramid_levels,
-                &mut self.pyramid_scratch,
-            )?),
-            None => None,
-        };
+        // cam0 and cam1 pyramid construction are fully independent (each
+        // reads only its own camera's decoded image and writes only its own
+        // scratch buffer -- see the separate `pyramid_scratch_cam0` /
+        // `pyramid_scratch_cam1` fields), so they run concurrently here.
+        // `subsample_binomial5_with_scratch`'s own contract already
+        // guarantees a scratch buffer's retained contents cannot affect the
+        // computed pixels (every element is overwritten before it is read),
+        // so this is bit-identical to building them one after another.
+        let pyramid_levels = self.config.pyramid_levels;
+        let cam1_image = frame.cam1;
+        let (cam0_result, cam1_result) = rayon::join(
+            || {
+                RawU16Pyramid::from_image_with_scratch(
+                    frame.cam0,
+                    pyramid_levels,
+                    &mut self.pyramid_scratch_cam0,
+                )
+            },
+            || match cam1_image {
+                Some(image) => RawU16Pyramid::from_image_with_scratch(
+                    image,
+                    pyramid_levels,
+                    &mut self.pyramid_scratch_cam1,
+                )
+                .map(Some),
+                None => Ok(None),
+            },
+        );
+        let cam0 = cam0_result?;
+        let cam1 = cam1_result?;
         let current = FramePyramids { cam0, cam1 };
         timing.finish(TimingBucket::FrontendPyramid, pyramid_started);
         let mut counters = RejectReasonCounters::default();
