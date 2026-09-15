@@ -2,6 +2,36 @@
 
 ## 現在の状態（以下の過去ログより優先）
 
+### 2026-09-15 追記: 2.5k/5k 登録順LCSとframe単位pose差（plan §4.2 items 1-3）
+
+**新tool** `scripts/compare_colmap_mapper_registration.py`（+ `scripts/tests/
+test_compare_colmap_mapper_registration.py`、13 test全PASS）。COLMAP `mapper.log`と
+移植版logから初期ペア・登録順・global BAイベントを取り、対応するmodel `images.txt`の
+カメラ中心をimage名で突き合わせ、片方を他方へ1回のSim(3)（`score_openloris_model.
+umeyama`をimport）で合わせた残差をframe/登録rank別に出す。GTは読まない。証跡:
+`benchmarks/electro/m9-openloris-colmap-port-registration-diag-{2500,5000}-v1.json`。
+
+| tier | 初期ペア frame (COLMAP / 移植) | LCS full / post-init | 登録集合 | global BA (C/P) | model間Sim3残差 mean / p95 / max (m) |
+|---|---|---|---|---|---|
+| 2.5k (GP3P+colmap, 0.087) | [446,462] / [388,420] | 0.708 / 0.709 | 一致 1250/1250 | 67 / 68 | **0.032 / 0.077 / 0.093** |
+| 5k (GP3P+colmap, 0.436) | [446,462] / [388,420] | 0.796 / 0.797 | 一致 2500/2500 | 76 / 78 | **0.339 / 0.573 / 0.604** |
+
+- 初期ペアは両tierで移植版が同じimage 776/840（frames 388/420）を最初に選ぶ。COLMAPは
+  2.5kで #1082/1050→#668/684→#446/462、5kで追加 #1691/1707 を経て同#446/462に到達。
+  COLMAPの推定を通った候補順と移植版の候補順が異なる（`mapper_impl.rs` module doc
+  記載の逸脱: COLMAPのmulti-model two-view classifierをvisloc essential matrix推定+
+  id昇順tie-breakで代替）。2.5kでは登録順の一致率が低い（equal positions 477/1248、
+  最長一致run 98）が最終登録集合・component構造・geometryは一致に近い。
+- 5kは逆: 登録順はむしろ近い（LCS 0.796）のにgeometry差が約10倍（rank 0-99ですでに
+  mean 0.31 m、rank 2400+で0.60 m）。→ **5kのquality差（ATE 0.436 vs COLMAP 0.123）は
+  登録順ではなくBA/scaleの差**。2.5kの順序差はgeometryに効いていない。
+- 次の本命は (i) 初期ペア選択の忠実化（attempt列をログに出して候補順を比較、または
+  `--init-pair` overrideで感度を見る）、(ii) 5kのBA/scale診断（登録stepごとのpose差を
+  local/global BAイベントに重ねる）。pose差は単一component・登録集合一致のときのみ
+  意味を持つ点に注意。再現は上記toolの `--colmap-log/--colmap-images/--ported-log/
+  --ported-images/--rig-manifest/--image-aliases`（aliasは
+  `corridor1-1-m8-colmap/tier-10000-rig-v3/image_aliases.tsv`）。
+
 ### 2026-09-15 引き継ぎチェックポイント: COLMAP rig mapperベタ移植（branch `feat/colmap-rig-mapper-port`）
 
 **状態**: branch `feat/colmap-rig-mapper-port`（mainから16 commit先行、push済み、worktree clean、PR未作成）。
