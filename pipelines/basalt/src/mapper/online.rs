@@ -40,7 +40,7 @@
 //!    the offline path's.
 
 use std::collections::BTreeSet;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
@@ -98,28 +98,49 @@ pub enum OnlineMapperError {
 }
 
 /// Policy knobs for the online mapper's background optimization trigger.
+///
+/// A full warm-started global optimize is superlinear in pose/landmark
+/// count (dense pose-pose Hessian, `mod.rs::linearize_vision`), so running
+/// one at full iteration count on every `optimize_every_k` keyframes is
+/// itself superlinear in total sequence length. The periodic trigger below
+/// is deliberately cheap: a small `periodic_iterations` budget, a large
+/// `optimize_every_k`, and only the final pass at channel close
+/// ([`OnlineNfrMapper::finalize`]) runs the full unbounded
+/// `headless.num_opt_iter` budget -- literally `run_headless`'s tail, not a
+/// capped approximation of it.
 #[derive(Debug, Clone, Copy)]
 pub struct OnlineMapperConfig {
-    /// Run a full `build_tracks -> setup_opt -> optimize -> filter ->
-    /// optimize` pass after this many newly accepted keyframes.
+    /// Run a periodic `build_tracks -> setup_opt -> optimize ->
+    /// filter -> optimize` pass (capped at `periodic_iterations` LM
+    /// iterations per `optimize` call) after this many newly accepted
+    /// keyframes.
     pub optimize_every_k: usize,
+    /// LM iteration budget for each *periodic* optimize call (both the
+    /// pre-filter and post-filter `optimize` calls in one pass). Kept small
+    /// (default 4) because the periodic trigger's job is to keep the map
+    /// roughly consistent between loop events, not to fully converge every
+    /// time -- full convergence happens once, in `finalize`, which uses
+    /// `headless.num_opt_iter` instead.
+    pub periodic_iterations: usize,
     /// An accepted temporal match pair whose two frame IDs differ by more
     /// than this many keyframes is treated as a loop closure for the
     /// trigger policy (immediate optimize on the same packet), separate
     /// from the periodic `optimize_every_k` cadence.
     pub loop_gap_keyframes: u64,
-    /// Same knobs `NfrMapper::run_headless` uses for `optimize_pass`
+    /// Knobs `NfrMapper::run_headless` uses for `finalize`'s pass
     /// (`num_opt_iter`, `outlier_threshold`, `min_num_obs`,
-    /// `temporal_seed`). Production runs use `temporal_seed: None`, exactly
-    /// like the offline mapper's default `run_headless` call; tests use a
-    /// fixed seed for determinism.
+    /// `temporal_seed`); `num_opt_iter` is unused by the periodic trigger,
+    /// which uses `periodic_iterations` instead. Production runs use
+    /// `temporal_seed: None`, exactly like the offline mapper's default
+    /// `run_headless` call; tests use a fixed seed for determinism.
     pub headless: NfrMapperHeadlessConfig,
 }
 
 impl Default for OnlineMapperConfig {
     fn default() -> Self {
         Self {
-            optimize_every_k: 20,
+            optimize_every_k: 100,
+            periodic_iterations: 4,
             loop_gap_keyframes: 30,
             headless: NfrMapperHeadlessConfig::default(),
         }
@@ -177,6 +198,17 @@ pub struct OnlineNfrMapper {
     /// compared against this rank gap instead.
     keyframe_rank: std::collections::BTreeMap<u64, u64>,
     next_keyframe_rank: u64,
+    /// Inverted HashBoW index: hash bucket -> images whose `bow_vector`
+    /// contains that hash. `query_bow_candidates` (batch `match_all`'s own
+    /// primitive) only ever scores a database image as a candidate when it
+    /// shares at least one hash bucket with the query (`shared` in its
+    /// source); every other database image is skipped regardless of the
+    /// database's size. So querying only `hash_index`'s union of
+    /// hash-bucket members for the query's own hashes -- instead of every
+    /// detected image -- is an *exact* reduction of the candidate set
+    /// `query_bow_candidates` scans, not an approximation: see
+    /// `tests::inverted_index_candidates_equal_full_scan` below.
+    hash_index: std::collections::BTreeMap<u32, BTreeSet<TimeCamId>>,
 }
 
 impl OnlineNfrMapper {
@@ -198,6 +230,7 @@ impl OnlineNfrMapper {
             total_optimize_passes: 0,
             keyframe_rank: std::collections::BTreeMap::new(),
             next_keyframe_rank: 0,
+            hash_index: std::collections::BTreeMap::new(),
         }
     }
 
@@ -320,7 +353,7 @@ impl OnlineNfrMapper {
         let mut optimize_seconds = 0.0;
         if should_optimize {
             let start = Instant::now();
-            let _ = self.optimize_pass();
+            let _ = self.optimize_pass(self.config.periodic_iterations);
             optimize_seconds = start.elapsed().as_secs_f64();
             self.keyframes_since_optimize = 0;
             self.total_optimize_passes += 1;
@@ -381,6 +414,9 @@ impl OnlineNfrMapper {
             },
         )?;
         let key = TimeCamId::new(image.frame_id, camera_id);
+        for entry in &features.bow_vector {
+            self.hash_index.entry(entry.hash).or_default().insert(key);
+        }
         self.mapper.feature_corners.insert(key, features);
         self.keyframe_rank.entry(image.frame_id).or_insert_with(|| {
             let rank = self.next_keyframe_rank;
@@ -476,6 +512,49 @@ impl OnlineNfrMapper {
     /// the module documentation) for one newly detected image and run the
     /// same descriptor-match/RANSAC accept logic `NfrMapper::match_all`'s
     /// inner loop uses. Returns `(accepted_pair_count, loop_pair_count)`.
+    /// Build the candidate list for one query using the inverted
+    /// `hash_index` instead of a full scan of every detected image.
+    ///
+    /// Exact reduction, not an approximation: `query_bow_candidates` (the
+    /// same primitive batch `NfrMapper::match_all` uses) only ever scores a
+    /// database entry when it shares a hash bucket with the query (see
+    /// `hash_index`'s field doc), so restricting the scanned set to the
+    /// union of this query's own hash buckets' members is guaranteed to
+    /// include every image that could possibly score, and excludes only
+    /// images that would have scored zero/unshared anyway. Exposed as its
+    /// own method (rather than inlined in `match_new_keyframe`) so
+    /// `tests::inverted_index_candidates_equal_full_scan` can compare it
+    /// directly against a full-scan call with the same inputs.
+    fn bow_candidates_via_index(
+        &self,
+        query_id: TimeCamId,
+        query_features: &MapperImageFeatures,
+        match_window: usize,
+    ) -> Vec<crate::mapper::features::BowQueryCandidate> {
+        let candidate_ids = query_features
+            .bow_vector
+            .iter()
+            .filter_map(|entry| self.hash_index.get(&entry.hash))
+            .flatten()
+            .copied()
+            .collect::<BTreeSet<TimeCamId>>();
+        let database = candidate_ids
+            .iter()
+            .filter_map(|&id| {
+                self.mapper
+                    .feature_corners
+                    .get(&id)
+                    .map(|features| (MapperImageId::from(id), features))
+            })
+            .collect::<Vec<_>>();
+        query_bow_candidates(
+            MapperImageId::from(query_id),
+            query_features,
+            &database,
+            match_window,
+        )
+    }
+
     fn match_new_keyframe(&mut self, query_id: TimeCamId, seed: Option<u32>) -> (usize, usize) {
         let config = self.mapper.feature_config;
         let mut match_config = config;
@@ -485,20 +564,8 @@ impl OnlineNfrMapper {
         let Some(query_features) = self.mapper.feature_corners.get(&query_id).cloned() else {
             return (0, 0);
         };
-        let candidates = {
-            let database = self
-                .mapper
-                .feature_corners
-                .iter()
-                .map(|(&id, features)| (MapperImageId::from(id), features))
-                .collect::<Vec<_>>();
-            query_bow_candidates(
-                MapperImageId::from(query_id),
-                &query_features,
-                &database,
-                config.match_window as usize,
-            )
-        };
+        let candidates =
+            self.bow_candidates_via_index(query_id, &query_features, config.match_window as usize);
 
         let mut accepted_count = 0;
         let mut loop_count = 0;
@@ -595,10 +662,16 @@ impl OnlineNfrMapper {
     /// Rule 3: the exact tail of `NfrMapper::run_headless`
     /// (`build_tracks -> setup_opt -> optimize -> filter_outliers ->
     /// optimize`), called through the same public methods `run_headless`
-    /// itself calls. Used both by the periodic trigger and by
-    /// [`Self::finalize`].
+    /// itself calls. `num_opt_iter` is the LM iteration budget passed to
+    /// both `optimize` calls: the periodic trigger passes
+    /// `config.periodic_iterations` (small, warm-started off the persistent
+    /// `GlobalBaOptimizerState`), while [`Self::finalize`] passes
+    /// `config.headless.num_opt_iter` (the same unbounded budget
+    /// `run_headless` itself uses) so the shipped trajectory's last
+    /// optimization is not a capped approximation of the offline path's.
     fn optimize_pass(
         &mut self,
+        num_opt_iter: usize,
     ) -> Result<
         (
             NfrMapperOptimizeReport,
@@ -614,7 +687,7 @@ impl OnlineNfrMapper {
             .map_err(|_| OnlineMapperError::MissingCalibration)?;
         let first_optimize = self
             .mapper
-            .optimize(self.config.headless.num_opt_iter)
+            .optimize(num_opt_iter)
             .map_err(|_| OnlineMapperError::MissingCalibration)?;
         let filter = self
             .mapper
@@ -625,16 +698,17 @@ impl OnlineNfrMapper {
             .map_err(|_| OnlineMapperError::MissingCalibration)?;
         let second_optimize = self
             .mapper
-            .optimize(self.config.headless.num_opt_iter)
+            .optimize(num_opt_iter)
             .map_err(|_| OnlineMapperError::MissingCalibration)?;
         Ok((first_optimize, filter, second_optimize))
     }
 
-    /// Run a final `optimize_pass` (unconditionally, regardless of the
-    /// periodic trigger's cadence) and return the propagated trajectory.
-    /// Call this once the packet channel/source is exhausted.
+    /// Run a final, full-budget `optimize_pass` (unconditionally, regardless
+    /// of the periodic trigger's cadence) and return the propagated
+    /// trajectory. Call this once the packet channel/source is exhausted.
     pub fn finalize(&mut self) -> Result<OnlineFinalReport, OnlineMapperError> {
-        let (first_optimize, filter, second_optimize) = self.optimize_pass()?;
+        let (first_optimize, filter, second_optimize) =
+            self.optimize_pass(self.config.headless.num_opt_iter)?;
         self.total_optimize_passes += 1;
         Ok(OnlineFinalReport {
             first_optimize,
@@ -695,12 +769,20 @@ pub fn run_mapper_thread(
     }
 }
 
-/// Bounded producer handle used by the VIO thread. A small bound (the
-/// design doc uses 8) gives natural backpressure: if the mapper falls
-/// behind, `send` blocks the VIO thread only as long as it takes the mapper
-/// to drain one packet, and the online demo reports that stall as queue lag
-/// rather than letting memory grow unboundedly.
-pub type MapperPacketSender = SyncSender<MargData>;
+/// Producer handle used by the VIO thread.
+///
+/// Deliberately unbounded, not `SyncSender`: rule (1) in the module
+/// documentation is that the VIO thread must never block on the mapper, and
+/// a bounded channel's backpressure does exactly that the moment the mapper
+/// falls behind (observed on a full-MH_01 run: the mapper's per-keyframe
+/// query cost grows with the detected-image database size, so a small bound
+/// stalled the VIO thread for minutes at a time). A queued `MargData` is
+/// cheap to hold -- it is consumed (features extracted, raw pixels dropped)
+/// in the same `ingest_packet` call that receives it, so queue growth costs
+/// keypoints/descriptors, not images (Sec1.2 of the design doc). The online
+/// demo reports queue depth/lag as an honest diagnostic instead of relying
+/// on a bound to hide it.
+pub type MapperPacketSender = Sender<MargData>;
 
 fn empty_mapper_features() -> MapperImageFeatures {
     MapperImageFeatures {
@@ -1035,6 +1117,82 @@ mod tests {
             batch.feature_corners.len(),
             online.mapper.feature_corners.len(),
             "incremental detection must produce the same key count as batch"
+        );
+    }
+
+    /// The inverted `hash_index` lookup `match_new_keyframe` uses must
+    /// return exactly the same candidate list `query_bow_candidates` returns
+    /// from a full scan of every detected image, for every query in a
+    /// multi-packet prefix -- not merely the same *final accepted pairs*
+    /// (`incremental_matches_equal_batch` above already covers that; this
+    /// test isolates the BoW candidate-selection step itself, per the
+    /// specific guardrail that the index change must not silently narrow or
+    /// reorder candidates before RANSAC ever runs).
+    #[test]
+    fn inverted_index_candidates_equal_full_scan() {
+        let (mut packet_one, mut packet_two) = two_packets_with_images();
+        let mut online = OnlineNfrMapper::new(
+            MapperConfig::default(),
+            feature_calibration(),
+            OfflineMapperConfig::default(),
+            GlobalBaConfig::default(),
+            OnlineMapperConfig {
+                optimize_every_k: usize::MAX,
+                ..OnlineMapperConfig::default()
+            },
+        );
+        online
+            .ingest_packet(&mut packet_one, Some(TEST_SEED))
+            .expect("online ingest 1");
+        online
+            .ingest_packet(&mut packet_two, Some(TEST_SEED))
+            .expect("online ingest 2");
+
+        let match_window = online.mapper.feature_config.match_window as usize;
+        let keys = online
+            .mapper
+            .feature_corners
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
+        assert!(
+            keys.len() >= 4,
+            "fixture must produce more than one frame's worth of keys"
+        );
+        let mut checked_nonempty = false;
+        for query_id in keys {
+            let query_features = online
+                .mapper
+                .feature_corners
+                .get(&query_id)
+                .expect("key present")
+                .clone();
+
+            let via_index =
+                online.bow_candidates_via_index(query_id, &query_features, match_window);
+
+            let full_database = online
+                .mapper
+                .feature_corners
+                .iter()
+                .map(|(&id, features)| (MapperImageId::from(id), features))
+                .collect::<Vec<_>>();
+            let via_full_scan = query_bow_candidates(
+                MapperImageId::from(query_id),
+                &query_features,
+                &full_database,
+                match_window,
+            );
+
+            assert_eq!(
+                via_index, via_full_scan,
+                "inverted-index candidates must equal a full-scan call for query {query_id:?}"
+            );
+            checked_nonempty |= !via_full_scan.is_empty();
+        }
+        assert!(
+            checked_nonempty,
+            "fixture must produce at least one non-empty candidate list for this test to be meaningful"
         );
     }
 

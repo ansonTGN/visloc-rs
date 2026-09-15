@@ -4,12 +4,16 @@
 //! process's main thread) consumes images/IMU at either dataset rate
 //! (`--realtime`) or as fast as possible (default), and for every
 //! `MargData` mapper packet moves it (no JSON/base64 round trip --
-//! `EstimatorOutput::marg_data` is already an owned in-memory value) into a
-//! bounded channel to a dedicated mapper thread running
-//! `visloc_basalt::mapper_online::OnlineNfrMapper`. The VIO thread is never
-//! blocked by the mapper: `mpsc::sync_channel` backpressure only ever stalls
-//! a `send` as long as it takes the mapper to drain its previous packet, and
-//! that stall is reported as mapper queue lag, not hidden.
+//! `EstimatorOutput::marg_data` is already an owned in-memory value) into an
+//! *unbounded* channel to a dedicated mapper thread running
+//! `visloc_basalt::mapper_online::OnlineNfrMapper`. The VIO thread must
+//! never block on the mapper: a bounded channel's backpressure does exactly
+//! that the moment the mapper falls behind, which is observable and reported
+//! here instead as mapper queue depth/lag (`max_mapper_queue_depth`,
+//! `mapper_queue_lag_seconds`) -- a queued packet is cheap to hold since
+//! `ingest_packet` extracts features and drops raw pixels in the same call
+//! that receives it, so queue growth costs keypoints/descriptors, not
+//! images.
 //!
 //! See `docs/basalt_online_mapper_design.md` for the full design and
 //! `docs/vi_slam_global_consistency_plan.md` Sec1.4/3/4 for why this exists:
@@ -21,7 +25,7 @@
 //!   --euroc-dir /data/MH_01_easy \
 //!   --calibration configs/basalt/variants/official_euroc_ds/euroc_ds_calib.json \
 //!   --config configs/basalt/variants/official_euroc_ds/euroc_config.json \
-//!   --out-dir target/basalt_mh01_online --optimize-every-k 20
+//!   --out-dir target/basalt_mh01_online --optimize-every-k 100 --periodic-iterations 4
 //! ```
 
 use std::{
@@ -49,6 +53,7 @@ struct Args {
     out_dir: PathBuf,
     max_frames: Option<usize>,
     optimize_every_k: usize,
+    periodic_iterations: usize,
     realtime: bool,
 }
 
@@ -118,15 +123,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         optimize_config,
         OnlineMapperConfig {
             optimize_every_k: args.optimize_every_k,
+            periodic_iterations: args.periodic_iterations,
             ..OnlineMapperConfig::default()
         },
     );
 
-    // Bounded to 8 packets in flight: enough to absorb a short mapper stall
-    // without unbounded growth, matching the design doc's memory plan. A
-    // full channel makes `sender.send` block, which is exactly the queue
-    // lag this demo measures and reports -- never a silent unbounded queue.
-    let (sender, receiver) = mpsc::sync_channel::<MargData>(8);
+    // Unbounded: the VIO thread must never block on the mapper (rule 1 in
+    // mapper_online's module doc). A queued MargData packet is cheap to
+    // hold -- ingest_packet extracts features and drops its raw pixels in
+    // the same call that receives it -- so queue growth costs
+    // keypoints/descriptors, not images. Backpressure is measured and
+    // reported (queue depth, lag), not silently applied.
+    let (sender, receiver) = mpsc::channel::<MargData>();
     let send_times: Arc<Mutex<VecDeque<Instant>>> = Arc::new(Mutex::new(VecDeque::new()));
     let lag_seconds: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
     let aggregate: Arc<Mutex<MapperAggregate>> = Arc::new(Mutex::new(MapperAggregate::default()));
@@ -151,6 +159,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_imu = 0usize;
     let mut total_observations = 0usize;
     let mut mapper_packet_count = 0u64;
+    let mut max_queue_depth = 0usize;
     let vio_start = Instant::now();
     for index in 0..frame_limit {
         let sensor_frame = dataset.frame(index)?;
@@ -173,7 +182,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         total_observations += output.tracks.observations.len();
 
         if output.estimator.marg_data.is_mapper_packet() {
-            send_times.lock().expect("lock").push_back(Instant::now());
+            let depth_after_send = {
+                let mut guard = send_times.lock().expect("lock");
+                guard.push_back(Instant::now());
+                guard.len()
+            };
+            max_queue_depth = max_queue_depth.max(depth_after_send);
             sender
                 .send(output.estimator.marg_data)
                 .map_err(|_| "mapper thread ended before the VIO stream finished")?;
@@ -235,6 +249,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "imu_samples": total_imu,
         "observations": total_observations,
         "mapper_packets_sent": mapper_packet_count,
+        "max_mapper_queue_depth": max_queue_depth,
         "mapper_queue_lag_seconds": {"max": lag_max, "mean": lag_mean, "samples": lag_sample_count},
         "mapper": {
             "packet_count": aggregate.packet_count,
@@ -266,9 +281,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     println!("{}", serde_json::to_string_pretty(&summary)?);
     eprintln!(
-        "pacing={} rtf={:.3} lag_max={:.3}s lag_mean={:.3}s loops={} optimizes={} peak_rss={:.0}MB out={}",
-        if args.realtime { "dataset_rate" } else { "as_fast_as_possible" },
+        "pacing={} rtf={:.3} vio_wall={:.1}s total_wall={:.1}s max_queue_depth={} \
+         lag_max={:.3}s lag_mean={:.3}s loops={} optimizes={} peak_rss={:.0}MB out={}",
+        if args.realtime {
+            "dataset_rate"
+        } else {
+            "as_fast_as_possible"
+        },
         real_time_factor,
+        vio_wall_seconds,
+        total_wall_seconds,
+        max_queue_depth,
         lag_max,
         lag_mean,
         aggregate.accepted_loop_pair_count,
@@ -337,7 +360,8 @@ impl Args {
         let mut config = PathBuf::from("configs/basalt/euroc_config.json");
         let mut out_dir = PathBuf::from("target/basalt_euroc_online_slam_demo");
         let mut max_frames = None;
-        let mut optimize_every_k = 20usize;
+        let mut optimize_every_k = OnlineMapperConfig::default().optimize_every_k;
+        let mut periodic_iterations = OnlineMapperConfig::default().periodic_iterations;
         let mut realtime = false;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
@@ -364,6 +388,12 @@ impl Args {
                         .parse::<usize>()
                         .map_err(|error| format!("invalid --optimize-every-k: {error}"))?;
                 }
+                "--periodic-iterations" => {
+                    periodic_iterations = next(&mut arguments, &option)?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --periodic-iterations: {error}"))?;
+                }
                 "--realtime" => realtime = true,
                 "--as-fast-as-possible" => realtime = false,
                 unknown => return Err(format!("unknown option `{unknown}`\n\n{}", Self::usage())),
@@ -378,6 +408,7 @@ impl Args {
             out_dir,
             max_frames,
             optimize_every_k,
+            periodic_iterations,
             realtime,
         })
     }
@@ -385,7 +416,7 @@ impl Args {
     fn usage() -> String {
         "usage: basalt_euroc_online_slam_demo --euroc-dir DIR --calibration FILE \
          [--config FILE] [--out-dir DIR] [--max-frames N] [--optimize-every-k K] \
-         [--realtime | --as-fast-as-possible]"
+         [--periodic-iterations N] [--realtime | --as-fast-as-possible]"
             .into()
     }
 }
@@ -414,7 +445,14 @@ mod tests {
         let args = Args::parse(["--euroc-dir", "d", "--calibration", "c.json"].map(Into::into))
             .expect("parses");
         assert!(!args.realtime);
-        assert_eq!(args.optimize_every_k, 20);
+        assert_eq!(
+            args.optimize_every_k,
+            OnlineMapperConfig::default().optimize_every_k
+        );
+        assert_eq!(
+            args.periodic_iterations,
+            OnlineMapperConfig::default().periodic_iterations
+        );
     }
 
     #[test]
@@ -428,11 +466,14 @@ mod tests {
                 "--realtime",
                 "--optimize-every-k",
                 "5",
+                "--periodic-iterations",
+                "2",
             ]
             .map(Into::into),
         )
         .expect("parses");
         assert!(args.realtime);
         assert_eq!(args.optimize_every_k, 5);
+        assert_eq!(args.periodic_iterations, 2);
     }
 }
