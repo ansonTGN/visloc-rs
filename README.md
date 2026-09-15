@@ -171,6 +171,24 @@ corrections propagated to every VIO frame — what the table above scores),
 VIO + batch-mapper commands are unchanged and still documented in the
 [VI-SLAM benchmark details](docs/vi_slam_benchmarks.md#run-it).
 
+Add `--pipeline` to run the frontend (dataset decode + optical flow) and the
+estimator on two threads instead of one -- mirroring upstream Basalt's
+`OpticalFlow` thread / estimator thread split -- and `--threads N` to size
+the `rayon` pool used by the frontend's per-track temporal KLT (unset lets
+`rayon` size itself to `std::thread::available_parallelism()`). Both are
+pure wall-clock optimizations: every frame is still processed in the same
+order with the same arithmetic, so `trajectory.tum` is byte-for-byte
+identical to a serial `--threads 1` run given the same inputs.
+
+```bash
+cargo run --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse -- \
+  --euroc-dir /path/to/MH_01_easy \
+  --calibration benchmarks/basalt/release_inputs/euroc_ds_calib.json \
+  --config configs/basalt/euroc_config.json \
+  --out-dir target/basalt_mh01 \
+  --pipeline --pipeline-capacity 4 --threads 12
+```
+
 ## Quickstart
 
 Requires Rust 1.83+ only — no C++/OpenCV/CUDA toolchain.
