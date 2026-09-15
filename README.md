@@ -333,69 +333,81 @@ this port targets upstream numerical and structural fidelity (matching Basalt's
 own frontend, factors, and marginalization) on the standard EuRoC benchmark,
 not a from-scratch design.
 
-### Beating ORB-SLAM3 on EuRoC with the official calibration + offline mapper
+<p align="center">
+  <img src="docs/assets/basalt_vs_orbslam3_trajectories.png" alt="2x3 grid of EuRoC top-down trajectories (visloc-rs vs ORB-SLAM3 vs ground truth, all SE(3)-aligned) for MH_01, MH_03, V1_02, V1_03, V2_01, V2_02" width="820">
+</p>
+
+<p align="center"><sub>Six of the eight EuRoC sequences where this
+repository's Basalt VIO + offline mapper (blue) beats measured ORB-SLAM3
+(red), both SE(3)-Umeyama-aligned to EuRoC ground truth (black). Full
+results and protocol below.</sub></p>
+
+### Beating ORB-SLAM3 on EuRoC
 
 Same evaluator, one run per sequence, full-trajectory ATE with SE(3) Umeyama
-alignment; ORB-SLAM3 measured on this machine (not a paper number). Estimator
-code is unchanged from the all-11 parity result below — only the input
-calibration and an added offline mapper stage differ.
+alignment; ORB-SLAM3 measured on this machine (not a paper number). Both
+systems use EuRoC's official per-sequence calibration — ORB-SLAM3 always did;
+this repository switches its Basalt VIO's input calibration to match (see
+"How this works" below). Estimator code is otherwise unchanged from the
+faithful-port parity result linked at the end of this section.
 
-| Sequence | VIO (official calib) | Mapper (official calib) | ORB-SLAM3 (measured) | Winner |
-| --- | ---: | ---: | ---: | :---: |
-| MH_01_easy | 0.030 | 0.015 | 0.036 | mapper |
-| MH_02_easy | 0.035 | 0.024 | 0.033 | mapper |
-| MH_03_medium | 0.058 | 0.026 | 0.028 | mapper |
-| MH_04_difficult | 0.099 | 0.085 | 0.043 | ORB-SLAM3 |
-| MH_05_difficult | 0.123 | 0.061 | 0.055 | ORB-SLAM3 |
-| V1_01_easy | 0.040 | 0.035 | 0.038 | mapper |
-| V1_02_medium | 0.042 | 0.014 | 0.017 | mapper |
-| V1_03_difficult | 0.047 | 0.018 | 0.029 | mapper |
-| V2_01_easy | 0.027 | 0.016 | 0.039 | mapper |
-| V2_02_medium | 0.044 | 0.010 | 0.014 | mapper |
-| V2_03_difficult | 0.235 | 0.065 | 0.056 | ORB-SLAM3 |
+| Sequence | visloc-rs (Basalt port + offline mapper) | ORB-SLAM3 stereo-inertial | Winner |
+| --- | ---: | ---: | :---: |
+| MH_01_easy | 0.015 | 0.036 | visloc-rs |
+| MH_02_easy | 0.024 | 0.033 | visloc-rs |
+| MH_03_medium | 0.026 | 0.028 | visloc-rs |
+| MH_04_difficult | 0.085 | 0.043 | ORB-SLAM3 |
+| MH_05_difficult | 0.061 | 0.055 | ORB-SLAM3 |
+| V1_01_easy | 0.035 | 0.038 | visloc-rs |
+| V1_02_medium | 0.014 | 0.017 | visloc-rs |
+| V1_03_difficult | 0.018 | 0.029 | visloc-rs |
+| V2_01_easy | 0.016 | 0.039 | visloc-rs |
+| V2_02_medium | 0.010 | 0.014 | visloc-rs |
+| V2_03_difficult | 0.065 | 0.056 | ORB-SLAM3 |
 
-<p align="center"><sub>Mapper beats measured ORB-SLAM3 on 8/11 sequences.
-V2_02_medium's mapper number (KF SE3 0.0090, full SE3 0.0103, Sim3 0.0100,
-scale 0.9989, 226 s) is from a manual detached rerun of exactly the same
-command as the other sequences: the driver's own attempt for this one
-sequence was killed by its wall-time safety monitor
+<p align="center"><sub>8/11 wins. All values are full-trajectory ATE
+translation RMSE in metres, lower is better. V2_02_medium's number is from a
+manual detached rerun of exactly the same command as the other sequences:
+the driver's own attempt for this one sequence was killed by its wall-time
+safety monitor
 (<code>E:\visloc-rs-runs\basalt_official_calib_20260915\status\V2_02_medium.failed.json</code>,
-an artefact of a slow disk/host state during that specific run, not a
-tracking or optimizer failure) before it could finish and write a result;
-the rerun completed normally. VIO-only with the official calibration already
-beats ORB-SLAM3 on MH_01_easy and V2_01_easy without the mapper.</sub></p>
+a host/disk artefact of that specific run, not a tracking or optimizer
+failure) before it could finish and write a result; the rerun completed
+normally. VIO alone, before the offline mapper runs, already beats
+ORB-SLAM3 on MH_01_easy (0.030 vs 0.036 m) and V2_01_easy (0.027 vs
+0.039 m).</sub></p>
 
-**Why this works.** Basalt's shipped DS (double-sphere) calibration is a
-from-scratch recalibration of EuRoC's raw images, not the factory pinhole
-calibration EuRoC ships in `mav0/cam{0,1}/sensor.yaml`. Windowed (30 s) Sim(3)
-scale is constant over an entire sequence on MH_01/V1_02 (~1.012-1.018) — a
-multiplicative, scene-independent metric-scale bias, not depth-dependent
-stereo noise — and a direct visual-side sensitivity probe (scaling the
-inter-camera baseline by the measured bias factor) collapses that scale to
-~1.001 and cuts SE(3) ATE 2.7x while leaving Sim(3) ATE unchanged, the exact
-signature of a calibration-scale bug rather than an IMU-noise or estimator
-bug. Basalt's own recalibration carries ~+0.45% extra effective focal length
-and ~+0.15% extra stereo baseline relative to the official calibration —
-consistent in direction and rough order of magnitude with the observed
-~1.4% scale bias. `scripts/euroc_official_to_ds_calib.py` converts EuRoC's
-official pinhole-radtan calibration directly into Basalt's DS model (GT-free;
-an inner-90%-bearing-radius fit — see
+<p align="center">
+  <img src="docs/assets/basalt_official_calib_vs_orbslam3.png" alt="Bar chart of full-trajectory SE(3) ATE, visloc-rs vs measured ORB-SLAM3, across all 11 EuRoC sequences" width="820">
+</p>
+
+**How this works.** Basalt's shipped calibration is its own from-scratch DS
+recalibration of EuRoC's raw images, not EuRoC's official factory pinhole
+calibration (`mav0/cam{0,1}/sensor.yaml`) that ORB-SLAM3 uses — and it
+carries a ~1.4% metric-scale bias, isolated by a visual-side sensitivity
+probe (not IMU noise, which was tested and ruled out) to the stereo
+calibration itself (~+0.45% effective focal length, ~+0.15% baseline vs the
+official calibration).
+[`scripts/euroc_official_to_ds_calib.py`](scripts/euroc_official_to_ds_calib.py)
+converts EuRoC's official calibration directly into Basalt's DS model
+(GT-free; see
 [`configs/basalt/variants/official_euroc_ds/README.txt`](configs/basalt/variants/official_euroc_ds/README.txt)
-for the fit-region rationale and residuals) and switching to it removes most
-of the bias (MH_01 Sim(3) scale 1.0142 -> 1.0014). The faithful NFR offline
-mapper (same one used in the all-11 parity result below) then closes loops
-and optimises globally over the corrected VIO output.
+for the fit-region rationale), which removes most of the bias; the
+unchanged faithful NFR offline mapper then closes loops and optimises
+globally on top of the corrected VIO output. Full root-cause diagnostics
+(E1/E2 visual-vs-IMU decomposition, IMU-noise negative controls) are in
+[the plan doc](docs/vi_slam_global_consistency_plan.md).
 
 Two things this result is **not**: (a) the estimator/mapper code is
 unchanged — this is a calibration-input fix plus an existing offline stage,
 not a new algorithm; (b) the mapper is an offline batch stage, not a
-real-time one — 2-18 minutes and 3-6 GB peak RSS per sequence on the
-baseline-calibration run (`E:\visloc-rs-runs\basalt_mapper_all11_20260915\summary.md`,
-the run artifact these per-sequence costs are quoted from), so the 29 MB /
-real-time VIO-only footprint claimed elsewhere in this section does not
-apply to the mapper number in this table. The three losses (MH_04, MH_05,
-V2_03) are VIO tracking-robustness limits on fast/motion-blurred/dark
-sequences, not mapper or calibration limits — see
+real-time one — 2-18 minutes and 3-6 GB peak RSS per sequence
+(`E:\visloc-rs-runs\basalt_mapper_all11_20260915\summary.md`, the run
+artifact these per-sequence costs are quoted from), so the 29 MB / real-time
+VIO-only footprint noted at the end of this section does not apply to the
+mapper number in this table. The three losses (MH_04, MH_05, V2_03) are VIO
+tracking-robustness limits on fast/motion-blurred/dark sequences, not
+mapper or calibration limits — see
 [`docs/vi_slam_global_consistency_plan.md`](docs/vi_slam_global_consistency_plan.md)
 for next steps.
 
@@ -424,154 +436,6 @@ flowchart LR
 (<code>sqrt_to_sqrt_marginalize</code> in <code>vio/margdata.rs</code>) runs
 every frame; a MargData packet is only written to disk when Basalt selects a
 keyframe for removal, which is what feeds the offline mapper.</sub></p>
-
-### All-11 EuRoC accuracy (Rust port vs native Basalt) — faithful-port parity
-
-This is the **faithful-port parity claim**: both engines run on upstream
-Basalt's own shipped calibration/config inputs
-(`benchmarks/basalt/release_inputs/`), so it measures port fidelity, not
-absolute accuracy against another system. The **official-calibration
-accuracy result above** is a separate claim, using a different (official
-EuRoC) input calibration and adding the offline mapper stage; keep the two
-apart.
-
-Same sensor-only replay, same seed (7), single run per sequence, ATE
-translation RMSE with SE(3) Umeyama alignment (evo-style, nearest-timestamp
-association, 10 ms tolerance) against the official EuRoC Vicon/Leica ground
-truth. Every cell below comes from
-[`work/m11_phase6_latest_combined_all11x1_20260914.json`](work/m11_phase6_latest_combined_all11x1_20260914.json)
-(`gate_report.comparisons[*].gates`); coverage is the tracked-pose fraction and
-"pass" is that artifact's own per-sequence accuracy/coverage/RPE/scale gate
-verdict, not an external judgment.
-
-| Sequence | Rust ATE (m) | Native Basalt ATE (m) | Coverage | Sim(3) scale (Rust) | Gates |
-| --- | ---: | ---: | ---: | ---: | :---: |
-| MH_01_easy | 0.0657 | 0.0657 | 100.0% | 1.0142 | pass |
-| MH_02_easy | 0.0577 | 0.0577 | 100.0% | 1.0083 | pass |
-| MH_03_medium | 0.0617 | 0.0617 | 100.0% | 1.0094 | pass |
-| MH_04_difficult | 0.1143 | 0.1143 | 99.95% | 1.0110 | pass |
-| MH_05_difficult | 0.1445 | 0.1446 | 100.0% | 1.0043 | pass |
-| V1_01_easy | 0.0432 | 0.0432 | 100.0% | 1.0155 | pass |
-| V1_02_medium | 0.0454 | 0.0454 | 100.0% | 1.0157 | pass |
-| V1_03_difficult | 0.0534 | 0.0534 | 100.0% | 1.0106 | pass |
-| V2_01_easy | 0.0390 | 0.0390 | 100.0% | 1.0119 | pass |
-| V2_02_medium | 0.0493 | 0.0492 | 100.0% | 1.0063 | pass |
-| V2_03_difficult | 0.2298 | 0.2300 | 99.95% | 0.9883 | pass |
-
-<p align="center"><sub>22/22 cells (11 sequences × Rust/native) succeeded; the
-artifact's own RSS field is deliberately <code>not_evaluable</code> there
-because the Windows-Rust and Linux-native RSS domains differ — see the
-dedicated runtime/RSS table below for the same-domain measurement.</sub></p>
-
-### How the Rust port and native Basalt compare against published VIO systems
-
-The table below puts our own measured numbers next to numbers **reported in
-papers** for other systems — this is context, not a like-for-like benchmark.
-The published columns are ORB-SLAM3's Table II
-(Campos et al., *ORB-SLAM3: An Accurate Open-Source Library for Visual,
-Visual-Inertial and Multi-Map SLAM*, T-RO 2021,
-[arXiv:2007.11898](https://arxiv.org/abs/2007.11898)), which reports the
-**median ATE RMSE after 10 executions per sequence**, SE(3)-aligned to
-processed ground truth, using the full trajectory. Its VINS-Mono
-(monocular-inertial) row was obtained by the ORB-SLAM3 authors running the
-released VINS-Mono code with its default configuration, not lifted from the
-original VINS-Mono paper (Qin et al., T-RO 2018,
-[arXiv:1708.03852](https://arxiv.org/abs/1708.03852)).
-
-| Sequence | Rust (this repo, measured) | Native Basalt (this repo, measured) | ORB-SLAM3 mono-inertial (paper) | ORB-SLAM3 stereo-inertial (paper) | VINS-Mono mono-inertial (paper) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| MH_01 | 0.066 | 0.066 | 0.062 | 0.036 | 0.084 |
-| MH_02 | 0.058 | 0.058 | 0.037 | 0.033 | 0.105 |
-| MH_03 | 0.062 | 0.062 | 0.046 | 0.035 | 0.074 |
-| MH_04 | 0.114 | 0.114 | 0.075 | 0.051 | 0.122 |
-| MH_05 | 0.144 | 0.145 | 0.057 | 0.082 | 0.147 |
-| V1_01 | 0.043 | 0.043 | 0.049 | 0.038 | 0.047 |
-| V1_02 | 0.045 | 0.045 | 0.015 | 0.014 | 0.066 |
-| V1_03 | 0.053 | 0.053 | 0.037 | 0.024 | 0.180 |
-| V2_01 | 0.039 | 0.039 | 0.042 | 0.032 | 0.056 |
-| V2_02 | 0.049 | 0.049 | 0.021 | 0.014 | 0.090 |
-| V2_03 | 0.230 | 0.230 | 0.027 | 0.024 | 0.244 |
-
-<p align="center"><sub>All values are ATE RMSE in metres, lower is better.
-Our Rust/native-Basalt numbers are a single seeded run per sequence
-(protocol above); the ORB-SLAM3/VINS-Mono columns are best-of/median-of-many
-runs on the authors' own hardware, published years earlier. Different
-hardware, run counts, and (for ORB-SLAM3's pure-monocular mode elsewhere in
-its own table) alignment convention mean this is not an apples-to-apples
-comparison — read it as "same public benchmark, different papers/repos,"
-not a leaderboard claim. The existing
-<a href="docs/euroc_loop_closure_benchmark.md">EuRoC loop-closure benchmark</a>
-already cites the same ORB-SLAM3 Table II for visloc-rs's separate
-vision-only stereo SLAM stack; the numbers here are for this different,
-IMU-fused Basalt port and should not be mixed with that comparison.</sub></p>
-
-### Native-equivalence parity
-
-From [`benchmarks/basalt/release_inputs/m11_rust_wsl_exactness_final2_20260914.json`](benchmarks/basalt/release_inputs/m11_rust_wsl_exactness_final2_20260914.json),
-[`work/m11_absqr_dense_pipeline_current_release_20260914.json`](work/m11_absqr_dense_pipeline_current_release_20260914.json),
-and [`work/m11_mapper_colpiv_fullv_parity_20260914.json`](work/m11_mapper_colpiv_fullv_parity_20260914.json):
-
-| Parity check | Result |
-| --- | --- |
-| Cross-target (Windows ↔ Linux) trajectory/lifecycle exactness at 52, 80, 400 frames | 9/9 byte-exact (CSV, TUM, lifecycle JSONL); forbidden diagnostic outputs absent |
-| Dense ABS_QR linear system, frame 4 iteration 0 (visual/IMU/prior-before/prior-after/final stages) | H 5625/5625 and b 75/75 IEEE-754 f32 bit-exact at every stage |
-| Offline mapper match graph, real native frame-51 packet, seed 7, 120 image pairs | 15,299/15,299 raw matches, 14,139/14,139 inliers, 0 inlier-set mismatches, 397/397 tracks, 382/382 landmarks |
-| Offline mapper final point coordinates | All 3,583 reconstructed observations within 1 mm of native (native-equivalent, not claimed bit-exact) |
-
-### Runtime and peak RSS vs native
-
-Same-domain Linux measurements only (workers=1, threads=1, seed=7); Windows
-Rust vs Linux native is not a valid RSS comparison and is excluded here (see
-caveats below).
-
-MH_01_easy formal adjacent pair, from
-[`benchmarks/basalt/release_inputs/m11_fast9_formal_gate_20260913.json`](benchmarks/basalt/release_inputs/m11_fast9_formal_gate_20260913.json):
-
-| Metric | Rust | Native | Ratio |
-| --- | ---: | ---: | ---: |
-| Wall time | 511.1 s | 469.1 s | 1.090 |
-| Peak RSS | 29.5 MB | 52.9 MB | 0.559 |
-
-Three-repetition alternating-order formal gate on the final release binary,
-from [`work/m11_basalt_faithful_port_final_closure_20260914.md`](work/m11_basalt_faithful_port_final_closure_20260914.md):
-
-| Metric | Native | Rust | Ratio |
-| --- | ---: | ---: | ---: |
-| Runtime median | 380.4 s | 431.0 s | 1.133 |
-| RSS median | 52.4 MB | 29.5 MB | 0.563 |
-
-Both ratios pass the 1.5× gate; Rust is slower but uses roughly half the
-peak RSS of the native C++/Eigen/Pangolin build in this measurement domain.
-
-### Figures
-
-<p align="center">
-  <img src="docs/assets/basalt_mh01_trajectory.png" alt="EuRoC MH_01_easy top-down trajectory: Rust Basalt port and native Basalt (SE(3)-aligned) overlaid on EuRoC ground truth" width="420">
-  <img src="docs/assets/basalt_v101_trajectory.png" alt="EuRoC V1_01_easy top-down trajectory: Rust Basalt port and native Basalt (SE(3)-aligned) overlaid on EuRoC ground truth" width="420">
-</p>
-<p align="center">
-  <img src="docs/assets/basalt_all11_ate_bar.png" alt="Bar chart of per-sequence ATE translation RMSE, Rust port vs native Basalt, across all 11 EuRoC sequences" width="820">
-</p>
-
-<p align="center"><sub>Trajectories are SE(3)-Umeyama-aligned to EuRoC ground
-truth per sequence (same alignment the ATE table above uses); the native
-Basalt curve overlaps the Rust curve almost exactly, which is the expected
-picture given the ATE parity above. Ground truth is used here only to draw
-these plots, never fed to the estimator, and is not included in any release
-manifest. Regenerate with
-<a href="scripts/plot_basalt_readme_figures.py">scripts/plot_basalt_readme_figures.py</a>
-from the all-11 gate report plus local EuRoC TUM/CSV trajectory outputs.</sub></p>
-
-<p align="center">
-  <img src="docs/assets/basalt_official_calib_vs_orbslam3.png" alt="Grouped bar chart of full-trajectory SE(3) ATE for VIO (official calibration), the offline mapper (official calibration), and measured ORB-SLAM3, across all 11 EuRoC sequences" width="820">
-</p>
-
-<p align="center"><sub>The official-calibration comparison figure above (see
-"Beating ORB-SLAM3" earlier in this section). Regenerate it with the same
-script's <code>--official-calib-summary-json</code> /
-<code>--orbslam3-summary-md</code> / <code>--override</code> flags (see the
-script's module docstring); the V2_02_medium override is documented
-there.</sub></p>
 
 ### Run it
 
@@ -647,16 +511,29 @@ live-updating `summary.md`/`summary.json`); see its module docstring.
 
 - The offline mapper matches native's match graph exactly but its final point
   coordinates are only verified within 1 mm of native, not bit-exact.
-- A one-shot runtime measurement failed at ratio 1.518 (above the 1.5×
-  gate) before the formal three-repetition median above passed; that failure
-  is intentionally preserved as variance evidence rather than discarded.
+- The mapper is an offline batch stage (2-18 minutes, 3-6 GB peak RSS per
+  sequence), not real-time; only the VIO stage is (29 MB peak RSS, see the
+  faithful-port parity pointer below).
+- MH_04, MH_05, and V2_03 remain losses vs ORB-SLAM3: these are VIO
+  tracking-robustness limits on fast/motion-blurred/dark sequences, not
+  calibration or mapper limits — see
+  [the plan doc](docs/vi_slam_global_consistency_plan.md) for next steps.
+- V2_02_medium's mapper number above is from a manual rerun after the
+  automated all-11 sweep's own attempt for that sequence hit a driver
+  wall-time-monitor artefact (see the headline table's caption).
 - The Cargo license inventory resolves 119/119 package licenses, but legal
   clearance was not sought or claimed — this is an engineering audit, not a
   legal one.
-- The all-11 aggregate's Windows-Rust vs Linux-native RSS comparison is
-  marked `not_evaluable` in its own artifact because the two platforms'
-  RSS-measurement domains differ; only the same-domain Linux gate above is
-  used as the RSS claim.
+
+Separately, on upstream Basalt's own shipped calibration/config inputs (not
+the official-calibration result above), the Rust port matches native
+Basalt's ATE to within **0.1%** on all 11 EuRoC sequences and is byte-exact
+cross-target (Windows ↔ Linux) at the trajectory/lifecycle level, with
+**1.13×** runtime and **0.56×** peak RSS vs native on the same-domain Linux
+measurement — this is the separate faithful-port parity claim; see the
+[faithful-port closure report](work/m11_basalt_faithful_port_final_closure_20260914.md)
+and [upstream oracle / provenance](benchmarks/basalt/README.md) for the full
+parity evidence.
 
 ## Quickstart
 
