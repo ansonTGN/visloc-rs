@@ -51,11 +51,32 @@ visloc-rs registers **9,996/10,008 cameras (99.88%)** across every ETH3D
 low-resolution many-view scene with no mapper run above 3.32 GiB, reconstructs
 the 1,200-image Electro set **3.46× faster than COLMAP** with **25.2% lower**
 camera-centre RMSE, and beats official COLMAP on the 38-image courtyard control
-(**0.5379 cm vs 1.6166 cm**). The connected 10k corridor stress run, the
-300-image reliability gate, the OpenLORIS comparison, and all reproduction
-commands are in the [SfM benchmark details](docs/sfm_benchmarks.md); unordered
-SfM, sequential SfM vs COLMAP, and EuRoC reconstruction evidence are in the
-[SfM benchmark docs](docs/unordered_sfm_benchmark.md).
+(**0.5379 cm vs 1.6166 cm**).
+
+<p align="center">
+  <img src="docs/assets/eth3d_10008_scale_validation.gif" alt="Ten measured ETH3D reconstructions generated from 10,008 real images: camera-centre trajectories, registration, score-only RMSE, and bounded mapper memory" width="900">
+</p>
+
+| Real scene (ETH3D low-res many-view) | Registered / supplied | Centre RMSE | RMSE / extent | Mapper peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| terrains | **660/660** | 0.58 cm | 0.12% | 1.56 GiB |
+| delivery area | **948/948** | 9.22 cm | 0.99% | 2.31 GiB |
+| forest | **1028/1028** | 1.33 cm | 0.19% | 2.65 GiB |
+| playground | **955/960** | 6.12 cm | 2.52% | 2.44 GiB |
+| electro | **1200/1200** | 3.50 cm | 0.55% | 1.39 GiB |
+| lakeside | **1063/1064** | 0.34 cm | 0.08% | 3.19 GiB |
+| sand box | **1112/1112** | 2.35 cm | 0.45% | **3.32 GiB** |
+| storage room | **795/796** | 0.61 cm | 0.42% | 1.71 GiB |
+| storage room 2 | **831/832** | 3.48 cm | 2.57% | 1.00 GiB |
+| tunnel | **1404/1408** | 14.92 cm | 1.61% | 3.25 GiB |
+
+<p align="center"><sub>tunnel includes one 5.32 m outlier (median 2.47 cm, p95 9.41 cm); playground excludes five hash-audited source outliers. The connected 10k corridor stress run, the 300-image reliability gate, the OpenLORIS comparison, and all reproduction commands are in the <a href="docs/sfm_benchmarks.md">SfM benchmark details</a>.</sub></p>
+
+<p align="center">
+  <img src="docs/assets/electro_1200_sfm_comparison.gif" alt="Measured ETH3D Electro 1,200-image reconstruction: visloc-rs and COLMAP camera centres, sparse structure, residuals, mapper time, and peak memory" width="820">
+</p>
+
+<p align="center"><sub>Same-input CPU8 Electro 1,200: visloc-rs <b>3.46× faster</b> and <b>25.2% lower</b> camera-centre RMSE than COLMAP. Unordered SfM, sequential SfM vs COLMAP, and EuRoC reconstruction evidence are in the <a href="docs/unordered_sfm_benchmark.md">SfM benchmark docs</a>.</sub></p>
 
 <p align="center">
   <img src="docs/assets/hero_euroc_mh01_slam.gif" alt="Online stereo SLAM on EuRoC MH_01: onboard camera footage beside the live map — estimated trajectory vs ground truth as stereo landmark replenishment grows the landmark map" width="820"><br>
@@ -75,16 +96,29 @@ its offline mapper it beats measured ORB-SLAM3 (full-trajectory SE(3) ATE) on
 V2_01_easy.
 
 <p align="center">
-  <img src="docs/assets/basalt_vs_orbslam3_trajectories.png" alt="EuRoC top-down trajectories: visloc-rs Basalt port vs ORB-SLAM3 vs ground truth, all SE(3)-aligned" width="820">
+  <img src="docs/assets/basalt_vs_orbslam3_trajectories.png" alt="EuRoC top-down trajectories: visloc-rs Basalt port vs ORB-SLAM3 vs ground truth, all SE(3)-aligned" width="820"><br>
+  <sub>Six of the eight winning EuRoC sequences: visloc-rs Basalt VIO + offline mapper (blue) vs measured ORB-SLAM3 (red), both SE(3)-aligned to ground truth (black).</sub>
 </p>
 
-Per-sequence tables, the pipeline diagram, run commands, the ~1.4% scale-bias
-root cause, and the honest caveats (an offline 2-18 min / 3-6 GB mapper vs the
-29 MB real-time VIO; three remaining difficult-sequence losses) are in the
-[VI-SLAM benchmark details](docs/vi_slam_benchmarks.md). Parity evidence:
-[faithful-port closure report](work/m11_basalt_faithful_port_final_closure_20260914.md)
-and [upstream oracle / provenance](benchmarks/basalt/README.md); next steps:
-[global-consistency plan](docs/vi_slam_global_consistency_plan.md).
+| Sequence | visloc-rs (Basalt port + offline mapper) | ORB-SLAM3 stereo-inertial | Winner |
+| --- | ---: | ---: | :---: |
+| MH_01_easy | 0.015 | 0.036 | visloc-rs |
+| MH_02_easy | 0.024 | 0.033 | visloc-rs |
+| MH_03_medium | 0.026 | 0.028 | visloc-rs |
+| MH_04_difficult | 0.085 | 0.043 | ORB-SLAM3 |
+| MH_05_difficult | 0.061 | 0.055 | ORB-SLAM3 |
+| V1_01_easy | 0.035 | 0.038 | visloc-rs |
+| V1_02_medium | 0.014 | 0.017 | visloc-rs |
+| V1_03_difficult | 0.018 | 0.029 | visloc-rs |
+| V2_01_easy | 0.016 | 0.039 | visloc-rs |
+| V2_02_medium | 0.010 | 0.014 | visloc-rs |
+| V2_03_difficult | 0.065 | 0.056 | ORB-SLAM3 |
+
+<p align="center">
+  <img src="docs/assets/basalt_official_calib_vs_orbslam3.png" alt="Bar chart of full-trajectory SE(3) ATE, visloc-rs vs measured ORB-SLAM3, across all 11 EuRoC sequences" width="820">
+</p>
+
+<p align="center"><sub>8/11 wins; full-trajectory ATE translation RMSE in metres, lower is better. Per-sequence captions, the pipeline diagram, run commands, the ~1.4% scale-bias root cause, and the honest caveats (an offline 2-18 min / 3-6 GB mapper vs the 29 MB real-time VIO; three remaining difficult-sequence losses) are in the <a href="docs/vi_slam_benchmarks.md">VI-SLAM benchmark details</a>. Parity evidence: <a href="work/m11_basalt_faithful_port_final_closure_20260914.md">faithful-port closure report</a> and <a href="benchmarks/basalt/README.md">upstream oracle / provenance</a>; next steps: <a href="docs/vi_slam_global_consistency_plan.md">global-consistency plan</a>.</sub></p>
 
 ## Quickstart
 
