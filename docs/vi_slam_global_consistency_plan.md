@@ -1,8 +1,11 @@
 # VI-SLAM global-consistency plan: Basalt-class local VIO + ORB-SLAM3-class global consistency
 
-Status: plan, 2026-09-15. Owner goal: beat existing OSS visual-inertial SLAM on EuRoC —
-ORB-SLAM3 stereo-inertial first, VINS-Mono second — while keeping the Basalt Rust
-port's runtime/memory edge.
+Status: 2026-09-15 — Stage 0/1c done, **8/11 wins vs measured ORB-SLAM3**
+(§1.4, PR #147); Stage 1 (custom persistent map) paused, did not beat the
+simpler calibration fix; next stages (§4) target VIO tracking robustness on
+the three remaining losses, then online/memory. Owner goal: beat existing
+OSS visual-inertial SLAM on EuRoC — ORB-SLAM3 stereo-inertial first,
+VINS-Mono second — while keeping the Basalt Rust port's runtime/memory edge.
 
 This document records (1) the same-protocol evidence gathered on 2026-09-14/15,
 (2) the diagnosis of where the accuracy gap actually is, (3) the architecture we
@@ -80,27 +83,122 @@ A pre-existing negative control with mean-pooled SIFT retrieval (no VIO-proximit
 gate) made things much worse (MH_01 0.184, MH_02 0.331) because self-consistent
 but wrong PnP loops on repetitive texture passed verification.
 
-### 1.3 Native Basalt offline mapper (in progress)
+### 1.3 Native Basalt offline mapper, all 11 sequences (complete, upstream calibration)
 
 The ported NFR mapper (`pipelines/basalt/src/mapper`, `examples/basalt_mapper_offline_demo.rs`;
 HashBoW loop candidates + 5-pt RANSAC + non-linear factor recovery + global
-optimisation) is being run on all 11 sequences from the fresh MargData under
-`E:\visloc-rs-runs\basalt_lc_ceiling_20260914\vio_marg\<SEQ>\`. Results will land in
-`E:\visloc-rs-runs\basalt_mapper_all11_20260915\summary.{json,md}` (branch
-`exp/basalt-mapper-all11`; driver `scripts/run_basalt_mapper_all11.py`, mapper
-invoked as `basalt_mapper_offline_demo --marg-dir <SEQ>/marg_data --calibration
+optimisation) was run on all 11 sequences from fresh MargData under
+`E:\visloc-rs-runs\basalt_lc_ceiling_20260914\vio_marg\<SEQ>\`, using upstream
+Basalt's own shipped calibration (branch `exp/basalt-mapper-all11`, commit
+`190308d`; driver `scripts/run_basalt_mapper_all11.py`, mapper invoked as
+`basalt_mapper_offline_demo --marg-dir <SEQ>/marg_data --calibration
 benchmarks/basalt/release_inputs/euroc_ds_calib.json --config
-configs/basalt/euroc_config.json`).
+configs/basalt/euroc_config.json`). Results:
+`E:\visloc-rs-runs\basalt_mapper_all11_20260915\summary.{json,md}`.
 
-MH_01 (complete): 454 packets → 461 keyframes, 12,935 accepted pairs from HashBoW
-temporal + loop queries, two optimisation rounds converged.
-**Keyframe ATE SE(3) 0.0658 m, full-trajectory ATE SE(3) 0.0647 m vs VIO 0.066 m —
-about 2 % gain**, i.e. no better than the raw VIO and behind both the custom pose
-graph (0.055 m) and ORB-SLAM3 (0.036 m). Sim(3) ATE is 0.012 m, so what remains
-is mostly a mild scale/gauge drift rather than local error. Cost: 18 min wall,
-6.3 GB peak RSS for one sequence. The remaining 10 sequences are running; on this
-evidence the native mapper's BoW + relative-pose stage is not the missing piece,
-which points Stage 1 at the L1/L2 design below rather than at the mapper as-is.
+| Sequence | VIO | Mapper full SE(3) | ORB-SLAM3 | Win |
+| --- | ---: | ---: | ---: | :---: |
+| MH_01_easy | 0.066 | 0.0647 | 0.036 | no |
+| MH_02_easy | 0.058 | 0.0500 | 0.033 | no |
+| MH_03_medium | 0.062 | 0.0389 | 0.028 | no |
+| MH_04_difficult | 0.114 | 0.0891 | 0.043 | no |
+| MH_05_difficult | 0.145 | 0.0803 | 0.055 | no |
+| V1_01_easy | 0.043 | 0.0420 | 0.038 | no |
+| V1_02_medium | 0.045 | 0.0257 | 0.017 | no |
+| V1_03_difficult | 0.053 | 0.0253 | 0.029 | YES |
+| V2_01_easy | 0.039 | 0.0281 | 0.039 | YES |
+| V2_02_medium | 0.049 | 0.0219 | 0.014 | no |
+| V2_03_difficult | 0.230 | 0.0499 | 0.056 | YES |
+
+3/11 wins vs ORB-SLAM3 on upstream calibration; 11/11 beat the raw VIO
+baseline; 10/11 beat the Stage-A pose-graph postprocess (§1.2). MH_01's own
+number closed from the earlier in-progress reading (0.0647 vs VIO 0.066, a
+real but small ~2 % gain) once all 11 sequences were in: the mapper reliably
+helps but on this calibration was not enough on its own to close the
+ORB-SLAM3 gap on most sequences. This motivated the scale-bias investigation
+in §1.4, which turned out to be the bigger lever than the mapper's own
+BoW/RANSAC/global-BA stage.
+
+### 1.4 Result 2026-09-15: official calibration removes the scale bias, mapper then wins 8/11
+
+Investigation on branch `exp/basalt-scale-bias` (commits `6552d6d`, `7a174a0`,
+`35c75c7`, `1d7a640`) found that the ~1.4 % ATE-scale gap in §1.1/§1.3 is not
+an IMU-noise or estimator problem: windowed (30 s) Sim(3) scale is constant
+over an entire sequence on MH_01/V1_02 (~1.012–1.018), i.e. a multiplicative,
+scene-independent bias, not depth-dependent stereo noise. Two a-priori
+IMU-noise variants (`h1_datasheet_noise`, `h1a_accel_noise_only`; ADIS16448
+datasheet values from EuRoC's own `mav0/imu0/sensor.yaml`) made the scale
+bias monotonically *worse* on MH_01 (1.0142 → 1.0153 → 1.0160) — an honest
+negative, not adopted, and dropped from this repository (superseded by the
+E1/E2 decomposition below; not referenced elsewhere in this document or the
+README).
+
+The decisive test (E1) scaled cam1's `T_imu_cam` translation offset so the
+cam0–cam1 stereo baseline moved by the measured 1.014 bias factor (a
+GT-informed probe, never proposed as a fix): SE(3) ATE dropped 2.7× (0.0657 →
+0.0247) while Sim(3) ATE was essentially unchanged (0.0257 → 0.0244) — the
+signature of a calibration-scale bug, not an IMU-weighting one. E2 (trusting
+the IMU 10× less) barely moved the scale bias (1.0142 → 1.0150), confirming
+the visual/stereo calibration side, not IMU noise, sets the scale. Basalt's
+own DS recalibration carries ~+0.45 % extra effective focal length and
+~+0.15 % extra stereo baseline relative to EuRoC's factory pinhole-radtan
+calibration — consistent in direction and rough order of magnitude with the
+observed bias, though not a precise reconciliation (different distortion
+parameterizations).
+
+`scripts/euroc_official_to_ds_calib.py` converts EuRoC's official
+pinhole-radtan calibration directly into Basalt's DS model (GT-free; inner
+90 %-bearing-radius fit — cam0 RMS 0.222 px / max 0.397 px, cam1 RMS 0.211 px
+/ max 0.377 px; residual below Basalt's own 0.5 px observation std; see
+`configs/basalt/variants/official_euroc_ds/README.txt` for the full
+rationale). Switching to it on MH_01/V1_02 moved scale sharply toward 1.0
+(MH_01 1.0142 → 1.0014, further than the ~1.007 ORB-SLAM3 reference point)
+and passed a pre-registered "Sim(3) must not degrade more than ~20 %" gate,
+so the full 11-sequence VIO + mapper sweep was launched (`exp/basalt-mapper-all11`
+commit `190308d`'s driver reused with the new calibration via
+`scripts/run_basalt_official_calib_all11.py`; results
+`E:\visloc-rs-runs\basalt_official_calib_20260915\summary.{md,json}`).
+
+| Sequence | VIO (official calib) | Mapper (official calib) | ORB-SLAM3 (measured) | Win |
+| --- | ---: | ---: | ---: | :---: |
+| MH_01_easy | 0.030 | 0.015 | 0.036 | mapper |
+| MH_02_easy | 0.035 | 0.024 | 0.033 | mapper |
+| MH_03_medium | 0.058 | 0.026 | 0.028 | mapper |
+| MH_04_difficult | 0.099 | 0.085 | 0.043 | ORB-SLAM3 |
+| MH_05_difficult | 0.123 | 0.061 | 0.055 | ORB-SLAM3 |
+| V1_01_easy | 0.040 | 0.035 | 0.038 | mapper |
+| V1_02_medium | 0.042 | 0.014 | 0.017 | mapper |
+| V1_03_difficult | 0.047 | 0.018 | 0.029 | mapper |
+| V2_01_easy | 0.027 | 0.016 | 0.039 | mapper |
+| V2_02_medium | 0.044 | 0.010 | 0.014 | mapper |
+| V2_03_difficult | 0.235 | 0.065 | 0.056 | ORB-SLAM3 |
+
+**8/11 wins.** V2_02_medium's mapper number is from a manual detached rerun
+of the same command (KF SE(3) 0.0090, full SE(3) 0.0103, Sim(3) 0.0100, scale
+0.9989, 226 s) after the driver's own attempt for that one sequence was
+killed by its wall-time safety monitor
+(`E:\visloc-rs-runs\basalt_official_calib_20260915\status\V2_02_medium.failed.json`)
+— a host/disk artefact of that specific run, not a tracking or optimizer
+failure. VIO-only with the official calibration already beats ORB-SLAM3 on
+MH_01_easy and V2_01_easy, before the mapper runs at all.
+
+**Stage 0/1 outcome, revised.** Stage 0 (§1.3, native mapper on upstream
+calibration) reached 3/11; adding the calibration fix on top of the same
+unchanged mapper reached **8/11** — the calibration fix was the larger lever,
+not a Stage 1 (L1/L2 persistent-map) rewrite. A parallel Stage 1 prototype
+(branch `exp/vi-slam-stage1-persistent-map`, commit `3bba681`:
+projection-based persistent-landmark tracking + Schur-complement global BA,
+offline post-process) reached V1_02_medium SE(3) ATE 0.027 m — within 2 mm of
+the native mapper's 0.0257 m on the same (upstream) calibration, i.e.
+**roughly matching, not beating, the simpler native-mapper path** — and MH_01
+Sim(3) 0.014 already beat ORB-SLAM3's measured 0.021, with the same ~1.3–1.4 %
+scale bias later diagnosed in this section present identically across VIO,
+Stage-A pose graph, and Stage 1. Given that this custom L1/L2 build does not
+yet clear the bar the calibration fix already clears with far less new code,
+Stage 1 (persistent-map/global-BA rewrite) is **paused**, not adopted or
+merged; the three remaining losses are VIO tracking-robustness limits (§4),
+where a persistent map is unlikely to help until the local estimator itself
+tracks through the difficult segments.
 
 ## 2. Diagnosis
 
@@ -167,24 +265,40 @@ flowchart LR
     eliminated by Schur complement, iSAM2-style incremental relinearisation once the
     batch version works. We borrow the design, not the library.
 
-## 4. Staged plan with kill criteria
+## 4. Staged plan with kill criteria (revised after §1.4)
 
-Rules for every stage: parameters fixed a priori and identical across the 11
-sequences; GT used only for evaluation; ORB-SLAM3 numbers are the same-protocol
-measurements in §1.1; every claim cites an artifact path.
+Stages 0 and 1 below are **closed**, per §1.4: the calibration fix + unchanged
+native mapper reached 8/11 (PR #147), which the L1/L2 persistent-map rewrite
+(Stage 1 prototype) did not clear and was not worth the added complexity for
+— it roughly matched the simpler native-mapper path on V1_02 and is paused,
+not deleted (`exp/vi-slam-stage1-persistent-map`, commit `3bba681`, kept as a
+reference implementation in case a later stage needs projection-based
+persistent tracking). Every remaining loss (MH_04, MH_05, V2_03) is a **VIO
+tracking-robustness** problem, not a mapper or global-consistency one — the
+mapper already reduces each of them relative to raw VIO (§1.4 table), it just
+starts from a worse VIO trajectory on these three. The plan going forward
+targets that, plus turning the now-working offline pipeline into an online
+one.
+
+Rules for every stage: parameters fixed a priori and identical across the
+target sequences; GT used only for evaluation; ORB-SLAM3 numbers are the
+same-protocol measurements in §1.1; every claim cites an artifact path.
 
 | Stage | Work | Pass | Kill / pivot |
 | --- | --- | --- | --- |
-| 0 (running; MH_01 done: +2 %) | Native Basalt mapper on all 11 (L0 + NFR + BoW loops, no L1) | Beats ORB-SLAM3 on any sequence → build L1/L2 on the mapper's factor graph | Fails to improve on VIO (MH_01 already does) → its BoW/RANSAC stage is the weak link; L1/L2 start from the Stage-A/B code and reuse only the NFR factor recovery |
-| 1 | Offline L1 + L2 on **V1_02** first, then MH_01: projection-based association → sequence-long tracks; NFR factors + reprojection factors; PCM + GNC loop acceptance; batch global BA | V1_02 ≤ 0.025 m, MH_01 ≤ 0.040 m | V1_02 does not improve → local VIO is the limit → Stage 1b |
-| 1b | Basalt front-end strengthening only if 1 fails: more features per frame, longer patch lifetime, SuperPoint descriptors for association | V1_02 improves | No improvement → the Basalt-as-L0 premise is wrong; reconsider OKVIS2-style VIO |
-| 2 | All 11 offline, resumable, per-sequence wall/RSS recorded | ≥ 6/11 wins vs ORB-SLAM3 measured; no sequence worse than VIO | < 4/11 → stop and write the honest negative |
-| 3 | Online: L1/L2 in a background thread behind the live VIO, incremental solve, memory budget ≤ 200 MB peak | Real-time on EuRoC, accuracy within 10 % of Stage 2 | Budget blown → keep offline mode as the shipped claim |
-| 4 | Same-protocol re-measurement (ORB-SLAM3 one run, ours one run), README VI-SLAM section update with figures/tables | — | — |
+| 0 (done, 3/11) | Native Basalt mapper on all 11, upstream calibration | — | superseded by the calibration fix, §1.3/§1.4 |
+| 1 (paused, ≈ Stage 0) | Custom L1 (persistent map) + L2 (global BA) offline post-process | — | roughly matched, did not beat, the simpler native-mapper path; paused pending evidence the gap is elsewhere |
+| 1c (done, 8/11) | Official-calibration VIO input (GT-free conversion) + unchanged native mapper, all 11 | Beats ORB-SLAM3 on ≥ 6/11 | — passed; this is the shipped PR #147 result |
+| 5 | **VIO tracking robustness on MH_04/MH_05 (fast motion / motion blur) and V2_03 (dark, fast)**: (a) raise FAST-9 corner count and lower the grid non-max-suppression radius specifically where flow confidence drops; (b) extend patch lifetime / reduce the window's forced-marginalization rate so fewer landmarks are lost mid-difficult-segment; (c) SuperPoint descriptors for frame-to-frame association in place of the Pattern51 patch tracker on these sequences, reusing the repository's existing SP-ONNX frontend; (d) relocalisation inside the mapper (or as a VIO-side fallback) when the tracker loses the window entirely, instead of only forward-marginalizing through a bad segment | Each of MH_04, MH_05, V2_03 VIO ATE improves without regressing the 8 already-winning sequences | A lever that does not move the failing three within its own sequence is dropped before trying the next; if all four (a–d) fail, the honest conclusion is that these three need a different frontend, not a differently-tuned Basalt one |
+| 6 | Re-run the official-calibration + mapper sweep on all 11 with whatever Stage 5 levers passed | ≥ 9/11 wins vs ORB-SLAM3 measured | < 8/11 (regression from PR #147) → revert the Stage 5 change that caused it |
+| 7 | Online: mapper (or a lighter L1/L2 subset) in a background thread behind the live VIO, incremental solve, memory budget ≤ 200 MB peak — this is the same online-mapping goal as the original plan's Stage 3, now sequenced after the accuracy work instead of before it | Real-time on EuRoC, accuracy within 10 % of Stage 6's offline result | Budget blown → keep offline mode as the shipped claim, as it already is in PR #147 |
+| 8 | Same-protocol re-measurement (ORB-SLAM3 one run, ours one run), README VI-SLAM section update with figures/tables | — | — |
 
-V1_02 is the first target on purpose: the room sequences have no drift to remove,
-so they isolate whether persistent-map re-observation (L1) is worth anything before
-any global-consistency work is done.
+MH_04/MH_05/V2_03 are the first target now for the same reason V1_02 was
+first under the old plan: they are where the remaining gap actually is (§1.4
+table), so work should isolate VIO tracking robustness there before any
+further global-consistency or online-systems effort, rather than repeating
+the L1/L2 rewrite that §1.4 showed was not the bottleneck.
 
 ## 5. Reading list for implementers
 
@@ -218,4 +332,13 @@ any global-consistency work is done.
   `E:\visloc-rs-runs\basalt_lc_ceiling_20260914\`
 - Native mapper all-11: branch `exp/basalt-mapper-all11`, results in
   `E:\visloc-rs-runs\basalt_mapper_all11_20260915\`
+- Scale-bias diagnosis + official calibration: branch `exp/basalt-scale-bias`
+  (`scripts/euroc_scale_diagnostic.py`, `scripts/euroc_official_to_ds_calib.py`,
+  `configs/basalt/variants/official_euroc_ds/`,
+  `scripts/run_basalt_official_calib_all11.py`), results in
+  `E:\visloc-rs-runs\basalt_scale_bias_20260915\` and
+  `E:\visloc-rs-runs\basalt_official_calib_20260915\`
+- Stage 1 persistent-map prototype (paused, §1.4/§4): branch
+  `exp/vi-slam-stage1-persistent-map`, commit `3bba681`, results in
+  `E:\visloc-rs-runs\vi_slam_stage1_20260915\`
 - README VI-SLAM section: PR #147; Basalt port: PR #145.
