@@ -33,7 +33,8 @@ use crate::{
     mapper::features::{
         extract_mapper_features, match_stereo_features, match_temporal_ransac,
         match_temporal_ransac_seeded, match_temporal_stage, mutual_descriptor_matches,
-        query_bow_candidates, FeaturePipelineError, MapperImageFeatures, MapperImageId,
+        query_bow_candidates, BowQueryCandidate, FeaturePipelineError, MapperImageFeatures,
+        MapperImageId,
     },
     pyramid::{ImageError, RawU16Image},
     vio::margdata::{MargData, OfImageData},
@@ -41,6 +42,8 @@ use crate::{
 // Only exercised by the `tests` module's fixtures below (via `use super::*;`).
 #[cfg(test)]
 use crate::vio::margdata::MARGDATA_SCHEMA_VERSION_V3;
+#[cfg(test)]
+use crate::mapper::features::BowEntry;
 
 use super::{
     extract_nonlinear_factors, global_ba_with_state, linearize_mapper_observation,
@@ -557,6 +560,19 @@ pub struct NfrMapper {
     /// carries the frame index separately; retaining that distinction keeps
     /// M7 packets with compact frame IDs usable by the later graph stages.
     pub feature_corners: BTreeMap<TimeCamId, MapperImageFeatures>,
+    /// Inverted HashBoW index: hash bucket -> images whose `bow_vector`
+    /// contains that hash.  `query_bow_candidates` (`features.rs`) only ever
+    /// scores a database entry that shares a hash bucket with the query (its
+    /// `shared` flag), so restricting `match_all`'s per-query scan to the
+    /// union of the query's own hash-bucket members is an *exact* reduction
+    /// of the candidate set, not an approximation -- ported from the online
+    /// mapper's `OnlineNfrMapper::hash_index`
+    /// (`pipelines/basalt/src/mapper/online.rs`, commit 8b55648) together
+    /// with its `bow_candidates_via_index` equivalence argument.  Populated
+    /// additively wherever `feature_corners` gains a non-empty `bow_vector`
+    /// (`detect_keypoints`); `match_stereo`'s empty-feature placeholders
+    /// contribute nothing since their `bow_vector` is empty.
+    pub hash_index: BTreeMap<u32, BTreeSet<TimeCamId>>,
     /// Persistent stereo/temporal match graph input.  `match_stereo` inserts
     /// only strict essential-inlier winners and `match_all` inserts only
     /// geometrically verified temporal winners, leaving prior accepted pairs
@@ -597,6 +613,7 @@ impl NfrMapper {
             },
             img_data: BTreeMap::new(),
             feature_corners: BTreeMap::new(),
+            hash_index: BTreeMap::new(),
             feature_matches: Matches::new(),
             feature_match_data: BTreeMap::new(),
             feature_tracks: FeatureTracks::new(),
@@ -828,7 +845,11 @@ impl NfrMapper {
                 )?;
                 feature_count += features.len();
                 processed_image_count += 1;
-                generated.insert(TimeCamId::new(image.frame_id, camera_id), features);
+                let key = TimeCamId::new(image.frame_id, camera_id);
+                for entry in &features.bow_vector {
+                    self.hash_index.entry(entry.hash).or_default().insert(key);
+                }
+                generated.insert(key, features);
             }
         }
 
@@ -1298,6 +1319,7 @@ impl NfrMapper {
         config: NfrMapperHeadlessConfig,
     ) -> Result<NfrMapperHeadlessReport, NfrMapperHeadlessError> {
         self.feature_corners.clear();
+        self.hash_index.clear();
         self.feature_matches.clear();
         self.feature_match_data.clear();
         let detection = self
@@ -1756,6 +1778,49 @@ impl NfrMapper {
         self.trajectory_tum()
     }
 
+    /// Build the candidate list for one `match_all` query using the
+    /// inverted `hash_index` instead of a full scan of every detected image.
+    ///
+    /// Exact reduction, not an approximation: `query_bow_candidates` only
+    /// ever scores a database entry when it shares a hash bucket with the
+    /// query (see `hash_index`'s field doc), so restricting the scanned set
+    /// to the union of this query's own hash-bucket members is guaranteed to
+    /// include every image that could possibly score, and excludes only
+    /// images that would have scored zero/unshared anyway.  Exposed as its
+    /// own method (rather than inlined in `match_all_impl`) so
+    /// `tests::inverted_index_candidates_equal_full_scan` can compare it
+    /// directly against a full-scan call with the same inputs -- mirrors
+    /// `OnlineNfrMapper::bow_candidates_via_index`
+    /// (`pipelines/basalt/src/mapper/online.rs`, commit 8b55648).
+    fn bow_candidates_via_index(
+        &self,
+        query_id: TimeCamId,
+        query_features: &MapperImageFeatures,
+        match_window: usize,
+    ) -> Vec<BowQueryCandidate> {
+        let candidate_ids = query_features
+            .bow_vector
+            .iter()
+            .filter_map(|entry| self.hash_index.get(&entry.hash))
+            .flatten()
+            .copied()
+            .collect::<BTreeSet<TimeCamId>>();
+        let database = candidate_ids
+            .iter()
+            .filter_map(|&id| {
+                self.feature_corners
+                    .get(&id)
+                    .map(|features| (MapperImageId::from(id), features))
+            })
+            .collect::<Vec<_>>();
+        query_bow_candidates(
+            MapperImageId::from(query_id),
+            query_features,
+            &database,
+            match_window,
+        )
+    }
+
     fn match_all_impl(&mut self, seed: Option<u32>) -> NfrMapperMatchAllReport {
         // The pinned source first materializes a key vector and an
         // id-to-index map from feature_corners.  BTreeMap gives this Rust
@@ -1781,25 +1846,32 @@ impl NfrMapper {
         // helper.  It excludes candidates at or after the query frame (the
         // source passes max_t_ns=&tcid.frame_id); retain the explicit same-
         // frame check below as the source's second gate.
+        //
+        // `query_bow_candidates` only ever scores a database entry that
+        // shares a hash bucket with the query (its `shared` flag) -- every
+        // other entry is skipped regardless of database size.  So instead of
+        // scanning every detected image for every query (`O(N^2)` in image
+        // count), restrict each query's scanned database to the union of
+        // `hash_index`'s members for that query's own `bow_vector` hashes.
+        // This is an *exact* reduction, not an approximation: the reduced
+        // set is guaranteed to contain every image that could possibly
+        // score, and excludes only images that would have scored
+        // zero/unshared anyway. Ported from the online mapper's
+        // `OnlineNfrMapper::bow_candidates_via_index`
+        // (`pipelines/basalt/src/mapper/online.rs`, commit 8b55648), whose
+        // `tests::inverted_index_candidates_equal_full_scan` proves the same
+        // equivalence for that call site.
         let candidate_pairs = {
-            let database = keys
-                .iter()
-                .filter_map(|&id| {
-                    self.feature_corners
-                        .get(&id)
-                        .map(|features| (MapperImageId::from(id), features))
-                })
-                .collect::<Vec<_>>();
             let mut candidates = Vec::new();
             for (query_index, &query_id) in keys.iter().enumerate() {
                 let query = self
                     .feature_corners
                     .get(&query_id)
-                    .expect("feature key was collected from feature_corners");
-                let results = query_bow_candidates(
-                    MapperImageId::from(query_id),
-                    query,
-                    &database,
+                    .expect("feature key was collected from feature_corners")
+                    .clone();
+                let results = self.bow_candidates_via_index(
+                    query_id,
+                    &query,
                     config.match_window as usize,
                 );
                 for result in results {
@@ -2181,5 +2253,121 @@ mod tests {
         );
         assert_eq!(mapper, mapper_before);
         assert_eq!(packet, packet_before);
+    }
+
+    /// The inverted `hash_index` lookup `match_all_impl` uses
+    /// (`bow_candidates_via_index`) must return exactly the same candidate
+    /// list a full-database scan of `query_bow_candidates` returns, for a
+    /// synthetic database engineered to exercise a score tie between two
+    /// candidates (the sort/tie-break path in `query_bow_candidates`), a
+    /// hash-disjoint image that must never be scored by either path, and a
+    /// numerically-newer frame that the source's `frame_id >= query`
+    /// gate must exclude regardless of hash overlap. Mirrors the online
+    /// mapper's `tests::inverted_index_candidates_equal_full_scan`
+    /// (`pipelines/basalt/src/mapper/online.rs`, commit 8b55648).
+    #[test]
+    fn inverted_index_candidates_equal_full_scan_with_ties() {
+        fn features(hashes: &[(u32, f64)]) -> MapperImageFeatures {
+            MapperImageFeatures {
+                corners: Vec::new(),
+                corner_angles: Vec::new(),
+                descriptors: Vec::new(),
+                rays: Vec::new(),
+                hashes: hashes.iter().map(|&(hash, _)| hash).collect(),
+                bow_vector: hashes
+                    .iter()
+                    .map(|&(hash, weight)| BowEntry { hash, weight })
+                    .collect(),
+            }
+        }
+
+        let query_id = TimeCamId::new(30, 0);
+        let query = features(&[(1, 0.5), (2, 0.5)]);
+
+        // Two older images with identical hash/weight overlap against the
+        // query: `query_bow_candidates` must score them identically, so the
+        // reduced (indexed) scan and the full scan must agree on ordering
+        // between them as well as membership.
+        let tie_a_id = TimeCamId::new(10, 0);
+        let tie_a = features(&[(1, 0.5), (2, 0.5)]);
+        let tie_b_id = TimeCamId::new(11, 0);
+        let tie_b = features(&[(1, 0.5), (2, 0.5)]);
+        // Shares no hash bucket with the query at all -- must never appear
+        // as a candidate via either path.
+        let disjoint_id = TimeCamId::new(12, 0);
+        let disjoint = features(&[(3, 1.0)]);
+        // Shares one hash bucket at a different weight -- included in the
+        // indexed scan's reduced database, but must score strictly worse
+        // than the tied pair (exercises the score computation itself, not
+        // just membership).
+        let partial_id = TimeCamId::new(13, 0);
+        let partial = features(&[(2, 0.2)]);
+        // Same hashes as the query but a *larger* frame_id: must be
+        // excluded by `query_bow_candidates`'s own
+        // `image.frame_id >= query_id.frame_id` gate even though it shares
+        // hash buckets and would otherwise land in the reduced database.
+        let future_id = TimeCamId::new(40, 0);
+        let future = features(&[(1, 0.5), (2, 0.5)]);
+
+        let mut mapper = NfrMapper::new(MapperConfig::default());
+        for (id, feats) in [
+            (tie_a_id, tie_a),
+            (tie_b_id, tie_b),
+            (disjoint_id, disjoint),
+            (partial_id, partial),
+            (future_id, future),
+            (query_id, query.clone()),
+        ] {
+            for entry in &feats.bow_vector {
+                mapper.hash_index.entry(entry.hash).or_default().insert(id);
+            }
+            mapper.feature_corners.insert(id, feats);
+        }
+
+        let match_window = 10;
+        let via_index = mapper.bow_candidates_via_index(query_id, &query, match_window);
+
+        let full_database = mapper
+            .feature_corners
+            .iter()
+            .map(|(&id, feats)| (MapperImageId::from(id), feats))
+            .collect::<Vec<_>>();
+        let via_full_scan = query_bow_candidates(
+            MapperImageId::from(query_id),
+            &query,
+            &full_database,
+            match_window,
+        );
+
+        assert_eq!(via_index, via_full_scan);
+        assert!(!via_index.is_empty());
+
+        let candidate_ids = via_index
+            .iter()
+            .map(|candidate| candidate.image)
+            .collect::<Vec<_>>();
+        assert!(candidate_ids.contains(&MapperImageId::from(tie_a_id)));
+        assert!(candidate_ids.contains(&MapperImageId::from(tie_b_id)));
+        assert!(candidate_ids.contains(&MapperImageId::from(partial_id)));
+        assert!(!candidate_ids.contains(&MapperImageId::from(disjoint_id)));
+        assert!(!candidate_ids.contains(&MapperImageId::from(future_id)));
+
+        let tie_a_score = via_index
+            .iter()
+            .find(|candidate| candidate.image == MapperImageId::from(tie_a_id))
+            .expect("tie_a present")
+            .score;
+        let tie_b_score = via_index
+            .iter()
+            .find(|candidate| candidate.image == MapperImageId::from(tie_b_id))
+            .expect("tie_b present")
+            .score;
+        let partial_score = via_index
+            .iter()
+            .find(|candidate| candidate.image == MapperImageId::from(partial_id))
+            .expect("partial present")
+            .score;
+        assert!((tie_a_score - tie_b_score).abs() < 1e-12);
+        assert!(tie_a_score > partial_score);
     }
 }
