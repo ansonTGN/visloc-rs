@@ -7,7 +7,7 @@
 //!   --manifest <rig manifest> --features-dir <dir> \
 //!   --pairs-export <VISLOC-COLMAP-1 .bin> --out-colmap <dir> \
 //!   [--random-seed 0] [--num-threads N] [--pose-solver gp3p|dlt6pt]
-//!   [--local-ba-point-policy colmap|window]
+//!   [--local-ba-point-policy colmap|window|nopull]
 //! ```
 //!
 //! Loads the same three inputs `DatabaseCache::from_generalized_rig_export`
@@ -122,7 +122,8 @@ fn main() {
     let local_ba_point_policy = match args.local_ba_point_policy.as_str() {
         "colmap" => visloc_slam::colmap_incremental::LocalBaPointPolicy::Colmap,
         "window" => visloc_slam::colmap_incremental::LocalBaPointPolicy::WindowOnly,
-        other => panic!("unknown --local-ba-point-policy {other} (colmap|window)"),
+        "nopull" => visloc_slam::colmap_incremental::LocalBaPointPolicy::VariableWithoutPullIn,
+        other => panic!("unknown --local-ba-point-policy {other} (colmap|window|nopull)"),
     };
     options.local_ba.local_ba_point_policy = local_ba_point_policy;
     options.global_ba.local_ba_point_policy = local_ba_point_policy;

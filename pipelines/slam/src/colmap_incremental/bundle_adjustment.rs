@@ -230,14 +230,28 @@ pub enum LocalBaPointPolicy {
     /// window (added with their pose held fixed).
     #[default]
     Colmap,
-    /// Pre-C2.6 behavior: a point is variable iff its *entire* track is
-    /// already inside `config.image_ids` (`track_fully_in_window`) or it is
-    /// explicitly variable *and* already fully in the window — i.e.
-    /// `add_variable_point` alone never expands a point's residual set
-    /// beyond the window. Matches this module's original (conservative)
-    /// "Deviation 3" simplification before this session's COLMAP-faithful
-    /// pull-in fix.
+    /// A point is variable iff its *entire* track is already inside
+    /// `config.image_ids` (`track_fully_in_window`) — an explicit
+    /// `add_variable_point` request is honored only when the track is
+    /// *already* fully in the window, otherwise the point falls back to
+    /// constant. **Not** the pre-C2.6 rule (confirmed by a 2.5k real-data
+    /// A/B: this policy underperforms the pre-C2.6 snapshot, 0.198m vs
+    /// 0.105m ATE with the DLT pose solver held fixed) — see
+    /// [`LocalBaPointPolicy::VariableWithoutPullIn`] for that. Kept as a
+    /// distinct, already-tested A/B point rather than removed.
     WindowOnly,
+    /// The actual pre-C2.6 rule, restored verbatim from
+    /// `git show 053f6e4:.../bundle_adjustment.rs`: a point is variable iff
+    /// `add_variable_point` was called for it *or* its track is fully in the
+    /// window — same variable/constant *decision* as [`LocalBaPointPolicy::Colmap`]
+    /// — but, unlike `Colmap`, an explicitly-variable point whose track
+    /// leaves the window is **never pulled in**: it is optimized as a free
+    /// point using only whichever of its observations happen to already be
+    /// residuals in this problem (i.e. only its in-window observations —
+    /// the rest are simply omitted, not added with a fixed pose). This is
+    /// what `add_variable_point` alone did before this session's
+    /// COLMAP-faithful `AddPointToProblem` pull-in fix.
+    VariableWithoutPullIn,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -461,21 +475,30 @@ pub fn solve(
             .track
             .iter()
             .all(|el| config.image_ids.contains(&el.image_id));
-        // `LocalBaPointPolicy::WindowOnly` (see its doc for why this switch
-        // exists) reverts to the pre-pull-in rule: an explicit
-        // `add_variable_point` request only takes effect if the track is
-        // *already* fully in the window: `Colmap` (COLMAP's literal rule)
-        // honors it unconditionally, later pulling in the rest of the track.
-        let pull_in_enabled = options.local_ba_point_policy == LocalBaPointPolicy::Colmap;
+        // Three-way `LocalBaPointPolicy` branch (see each variant's doc):
+        // `Colmap` and `VariableWithoutPullIn` both honor an explicit
+        // `add_variable_point` request unconditionally (the *variable vs.
+        // constant decision* is identical); `WindowOnly` only honors it when
+        // the track is already fully in the window. Only `Colmap` then
+        // pulls in the rest of the track as extra fixed-pose residuals;
+        // `VariableWithoutPullIn` (the actual pre-C2.6 rule, restored from
+        // `git show 053f6e4`) leaves the point free but optimizes it from
+        // only whichever observations already happen to be in this problem
+        // (its in-window observations) — the outside ones are simply never
+        // added, not pulled in with a fixed pose.
+        let explicit_variable = config.variable_point3d_ids.contains(&point3d_id);
+        let honor_explicit_variable = matches!(
+            options.local_ba_point_policy,
+            LocalBaPointPolicy::Colmap | LocalBaPointPolicy::VariableWithoutPullIn
+        );
         let variable = !config.constant_point3d_ids.contains(&point3d_id)
-            && (track_fully_in_window
-                || (pull_in_enabled && config.variable_point3d_ids.contains(&point3d_id)));
+            && (track_fully_in_window || (honor_explicit_variable && explicit_variable));
         if !variable {
             ba.fix_landmark(point3d_id);
             continue;
         }
-        if pull_in_enabled
-            && config.variable_point3d_ids.contains(&point3d_id)
+        if options.local_ba_point_policy == LocalBaPointPolicy::Colmap
+            && explicit_variable
             && !track_fully_in_window
         {
             // `AddPointToProblem` (`bundle_adjustment_ceres.cc:819-879`):
@@ -939,23 +962,25 @@ mod tests {
         cost
     }
 
-    /// C2.6 task (lead review after the 5k real-data A/B): a small
+    /// C2.6 task (lead review after the 5k and 2.5k real-data A/Bs): a small
     /// `AdjustLocalBundle`-shaped scenario — 12 frames, a 6-frame local
     /// window, points seen both inside and outside the window — exercising
-    /// [`LocalBaPointPolicy::Colmap`] vs [`LocalBaPointPolicy::WindowOnly`]
-    /// side by side from an identical starting state. Checks: (1) frames
-    /// outside the window stay bit-identical under *both* policies (never a
-    /// free parameter either way — `Colmap` adds them fixed for pull-in,
-    /// `WindowOnly` never touches them at all); (2) a point explicitly
-    /// requested variable with a track leaving the window converges close to
-    /// ground truth under `Colmap` (pull-in sees its whole track) but stays
-    /// *exactly* at its perturbed value under `WindowOnly` (falls back to
-    /// constant — the pre-C2.6 policy); (3) a point whose track is already
-    /// fully inside the window is unaffected by the policy switch either
-    /// way; (4) on this noiseless, fully-consistent synthetic scene (a
-    /// single shared ground truth, so both policies' problems share the same
-    /// zero-cost global optimum), `Colmap`'s final window-only reprojection
-    /// cost is not worse than `WindowOnly`'s.
+    /// all three [`LocalBaPointPolicy`] variants side by side from an
+    /// identical starting state. Checks: (1) frames outside the window stay
+    /// bit-identical under *every* policy (never a free parameter either way
+    /// — `Colmap` adds them fixed for pull-in, `WindowOnly`/
+    /// `VariableWithoutPullIn` never touch them at all); (2) a point
+    /// explicitly requested variable with a track leaving the window
+    /// converges close to ground truth under `Colmap` (pull-in sees its
+    /// whole track) and under `VariableWithoutPullIn` (free, but optimized
+    /// from only its in-window observations — sufficient here since the
+    /// window alone already over-determines the point), but stays *exactly*
+    /// at its perturbed value under `WindowOnly` (falls back to constant);
+    /// (3) a point whose track is already fully inside the window converges
+    /// under all three; (4) on this noiseless, fully-consistent synthetic
+    /// scene (a single shared ground truth, so every policy's problem shares
+    /// the same zero-cost global optimum for in-window residuals), `Colmap`'s
+    /// final window-only reprojection cost is not worse than `WindowOnly`'s.
     #[test]
     fn local_ba_point_policy_matches_colmap_local_bundle_scenario() {
         let scene = build_synthetic_rig_scene(12, 11);
@@ -1157,6 +1182,66 @@ mod tests {
              window-only residual (cost {window_only_cost}) — otherwise this test isn't \
              exercising the intended contrast"
         );
+
+        // --- VariableWithoutPullIn policy (the actual pre-C2.6 rule),
+        // from an identical starting state ---
+        let mut recon3 = build_recon();
+        for j in 0..3 {
+            recon3.add_point3d(scene.ground_truth_points[j], track_for(&[4, 5], j));
+        }
+        for j in 3..7 {
+            recon3.add_point3d(
+                scene.ground_truth_points[j] + noise,
+                track_for(&all_frames, j),
+            );
+        }
+        for j in 7..9 {
+            recon3.add_point3d(
+                scene.ground_truth_points[j] + noise,
+                track_for(&window_frames, j),
+            );
+        }
+        for j in 9..scene.ground_truth_points.len() {
+            recon3.add_point3d(scene.ground_truth_points[j], track_for(&all_frames, j));
+        }
+        options.local_ba_point_policy = LocalBaPointPolicy::VariableWithoutPullIn;
+        assert!(
+            solve(&options, &config, &mut recon3),
+            "VariableWithoutPullIn-policy solve failed"
+        );
+        for &f in &outside_frames {
+            assert_eq!(
+                recon3.frame(f).rig_from_world(),
+                recon.frame(f).rig_from_world(),
+                "outside frame {f} moved under VariableWithoutPullIn policy"
+            );
+        }
+        // Unlike `WindowOnly`, these points are free (not frozen at the
+        // perturbed value) — optimized from only their in-window
+        // observations, which on this noiseless scene are already
+        // sufficient (6 window frames x 2 cams) to pin the point back near
+        // ground truth without needing the pulled-in outside observations.
+        for (j, &pid) in p_pulled.iter().enumerate() {
+            let perturbed = p_pulled_gt[j] + noise;
+            let moved = (recon3.point3d(pid).xyz - perturbed).norm();
+            assert!(
+                moved > 1.0e-4,
+                "VariableWithoutPullIn policy: out-of-window point {j} did not move (was constant before)"
+            );
+            let err = (recon3.point3d(pid).xyz - p_pulled_gt[j]).norm();
+            assert!(
+                err < 0.01,
+                "VariableWithoutPullIn policy: out-of-window point {j} did not converge \
+                 using in-window observations only (error {err})"
+            );
+        }
+        for (j, &pid) in p_window_only.iter().enumerate() {
+            let err = (recon3.point3d(pid).xyz - p_window_only_gt[j]).norm();
+            assert!(
+                err < 0.01,
+                "VariableWithoutPullIn policy: window-only point {j} did not converge (error {err})"
+            );
+        }
 
         let _ = p_control; // kept alive: constrains the window frames above.
     }
