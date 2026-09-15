@@ -4172,6 +4172,108 @@ pub fn model_cost_decrease(
     decrease.is_finite().then_some(decrease)
 }
 
+/// One factor's independent model-cost-decrease contribution from the
+/// parallel pre-pass in [`model_cost_decrease_f32`], mirroring the four
+/// outcomes its per-factor loop body could reach for an *unpaired* factor
+/// (the Imu/Bias pairing decision is precomputed separately, since it needs
+/// the adjacent factor too). `DimensionMismatch` and `Failure` both make the
+/// overall function return `None`; kept distinct only for readability.
+enum FactorEvaluation {
+    DimensionMismatch,
+    DeferredPrior(f32),
+    Direct(f32),
+    Failure,
+}
+
+/// Pure per-factor evaluation extracted from `model_cost_decrease_f32`'s
+/// loop body, unchanged in arithmetic: every step below (the dimension
+/// check, `prior_model_inputs_f32`, the zero-landmark scalar contribution,
+/// and the full QR path) is copied verbatim, it just returns its outcome
+/// instead of mutating a shared `decrease`/`deferred_prior`.
+fn evaluate_model_decrease_factor(
+    factor: &WhitenedFactorRowStack,
+    step: &DVector<f32>,
+    state_step: &DVector<f64>,
+    threshold: f32,
+) -> FactorEvaluation {
+    if factor.state_jacobian.ncols() != step.len() {
+        return FactorEvaluation::DimensionMismatch;
+    }
+    if let Some((j, rhs, compact_step)) = prior_model_inputs_f32(factor, state_step) {
+        return FactorEvaluation::DeferredPrior(prior_model_f32(&j, &rhs, &compact_step));
+    }
+    let state = as_f32_matrix(&factor.state_jacobian);
+    let residual = as_f32_vector(&factor.residual);
+    let landmark_columns = factor.landmark_jacobian.ncols();
+    if landmark_columns == 0 {
+        let increment = state * step;
+        let contribution = -increment.dot(&(0.5_f32 * &increment + &residual));
+        return if factor.kind == FactorKind::Prior {
+            FactorEvaluation::DeferredPrior(contribution)
+        } else {
+            FactorEvaluation::Direct(contribution)
+        };
+    }
+    let landmark = as_f32_matrix(&factor.landmark_jacobian);
+    let Some(qr) = LandmarkHouseholderF32::factor(&state, &landmark, &residual) else {
+        return FactorEvaluation::Failure;
+    };
+    let rank = (0..landmark_columns)
+        .filter(|&index| qr.pivots[index].abs() > threshold)
+        .count();
+    if rank < landmark_columns {
+        let increment = state * step;
+        return FactorEvaluation::Direct(-increment.dot(&(0.5_f32 * &increment + &residual)));
+    }
+    let transformed_state = qr.transformed_state();
+    let transformed_residual =
+        DMatrix::from_column_slice(qr.rows, 1, qr.transformed_residual().as_slice());
+    let r = qr.upper_r();
+    let mut qj_inc = eigen_row_major_gemv_f32(&transformed_state, step);
+    let mut rhs = transformed_residual
+        .column(0)
+        .rows(0, landmark_columns)
+        .into_owned();
+    for row in 0..landmark_columns {
+        rhs[row] += qj_inc[row];
+    }
+    let mut landmark_inc = DVector::<f32>::zeros(landmark_columns);
+    if landmark_columns == 3 {
+        let d2 = r[(2, 2)];
+        let d1 = r[(1, 1)];
+        let d0 = r[(0, 0)];
+        if d2.abs() <= threshold || d1.abs() <= threshold || d0.abs() <= threshold {
+            return FactorEvaluation::Failure;
+        }
+        let x2 = rhs[2] / d2;
+        let x1 = (-r[(1, 2)]).mul_add(x2, rhs[1]) / d1;
+        let row0_dot = r[(0, 2)].mul_add(x2, r[(0, 1)] * x1);
+        let x0 = (rhs[0] - row0_dot) / d0;
+        landmark_inc[0] = -x0;
+        landmark_inc[1] = -x1;
+        landmark_inc[2] = -x2;
+    } else {
+        rhs = -rhs;
+        for row in (0..landmark_columns).rev() {
+            let mut value = rhs[row];
+            for column in (row + 1)..landmark_columns {
+                value -= r[(row, column)] * landmark_inc[column];
+            }
+            let diagonal = r[(row, row)];
+            if diagonal.abs() <= threshold {
+                return FactorEvaluation::Failure;
+            }
+            landmark_inc[row] = value / diagonal;
+        }
+    }
+    let q1_inc = r * landmark_inc;
+    for row in 0..landmark_columns {
+        qj_inc[row] += q1_inc[row];
+    }
+    let qres = transformed_residual.column(0).into_owned();
+    FactorEvaluation::Direct(-eigen_visual_model_dot_f32(&qj_inc, &qres))
+}
+
 fn model_cost_decrease_f32(
     factors: &[WhitenedFactorRowStack],
     state_step: &DVector<f64>,
@@ -4179,100 +4281,63 @@ fn model_cost_decrease_f32(
 ) -> Option<f64> {
     let step = as_f32_vector(state_step);
     let threshold = tolerance as f32;
+
+    // Every factor's Imu/Bias pairing check (needs only that factor and its
+    // immediate successor) and its ordinary evaluation (needs only that one
+    // factor) are pure and independent of every other factor's result and
+    // of the running `decrease`/`deferred_prior`/`paired_bias_index` state
+    // -- so both run in parallel below. `imu_bias_pair_model_dot_f32`
+    // re-checks the same state-column/`step.len()` match internally, so a
+    // factor whose own dimensions are wrong can never produce `Some` here
+    // (see the comment in the serial fold). The fold afterwards makes
+    // exactly the sequential decisions the original loop made -- pairing
+    // precedence, immediate `None` on dimension/QR failure, deferred-prior
+    // push order, `decrease +=` order -- just by reading each
+    // already-computed pure result instead of recomputing it, so the f32
+    // rounding tree is unchanged.
+    let imu_pair_dots: Vec<Option<f32>> = factors
+        .par_iter()
+        .enumerate()
+        .map(|(index, factor)| {
+            if factor.kind != FactorKind::Imu {
+                return None;
+            }
+            factors
+                .get(index + 1)
+                .and_then(|bias| imu_bias_pair_model_dot_f32(factor, bias, &step))
+        })
+        .collect();
+    let evaluations: Vec<FactorEvaluation> = factors
+        .par_iter()
+        .map(|factor| evaluate_model_decrease_factor(factor, &step, state_step, threshold))
+        .collect();
+
     let mut decrease = 0.0_f32;
     let mut deferred_prior = Vec::new();
     let mut paired_bias_index = None;
-    for (factor_index, factor) in factors.iter().enumerate() {
+    for factor_index in 0..factors.len() {
         if paired_bias_index == Some(factor_index) {
             paired_bias_index = None;
             continue;
         }
-        if factor.state_jacobian.ncols() != step.len() {
-            return None;
-        }
-        if factor.kind == FactorKind::Imu {
-            if let Some(bias) = factors.get(factor_index + 1) {
-                if let Some(dot) = imu_bias_pair_model_dot_f32(factor, bias, &step) {
-                    decrease -= dot;
-                    paired_bias_index = Some(factor_index + 1);
-                    continue;
-                }
-            }
-        }
-        if let Some((j, rhs, compact_step)) = prior_model_inputs_f32(factor, state_step) {
-            deferred_prior.push(prior_model_f32(&j, &rhs, &compact_step));
+        // A factor whose own `state_jacobian` width does not match `step`
+        // cannot also produce `Some` from the pairing check above (that
+        // check re-validates the same width on both the Imu and Bias
+        // factor), so consulting the pairing result first cannot skip past
+        // a dimension failure the original per-factor check would have
+        // caught -- either this branch is not taken and `evaluations`
+        // reports `DimensionMismatch` below, or the successor's own turn
+        // later in this same fold reports it.
+        if let Some(dot) = imu_pair_dots[factor_index] {
+            decrease -= dot;
+            paired_bias_index = Some(factor_index + 1);
             continue;
         }
-        let state = as_f32_matrix(&factor.state_jacobian);
-        let residual = as_f32_vector(&factor.residual);
-        let landmark_columns = factor.landmark_jacobian.ncols();
-        if landmark_columns == 0 {
-            let increment = state * &step;
-            let contribution = -increment.dot(&(0.5_f32 * &increment + &residual));
-            if factor.kind == FactorKind::Prior {
-                deferred_prior.push(contribution);
-            } else {
-                decrease += contribution;
-            }
-            continue;
+        match evaluations[factor_index] {
+            FactorEvaluation::DimensionMismatch | FactorEvaluation::Failure => return None,
+            FactorEvaluation::DeferredPrior(value) => deferred_prior.push(value),
+            FactorEvaluation::Direct(value) => decrease += value,
         }
-        let landmark = as_f32_matrix(&factor.landmark_jacobian);
-        let qr = LandmarkHouseholderF32::factor(&state, &landmark, &residual)?;
-        let rank = (0..landmark_columns)
-            .filter(|&index| qr.pivots[index].abs() > threshold)
-            .count();
-        if rank < landmark_columns {
-            let increment = state * &step;
-            decrease -= increment.dot(&(0.5_f32 * &increment + &residual));
-            continue;
-        }
-        let transformed_state = qr.transformed_state();
-        let transformed_residual =
-            DMatrix::from_column_slice(qr.rows, 1, qr.transformed_residual().as_slice());
-        let r = qr.upper_r();
-        let mut qj_inc = eigen_row_major_gemv_f32(&transformed_state, &step);
-        let mut rhs = transformed_residual
-            .column(0)
-            .rows(0, landmark_columns)
-            .into_owned();
-        for row in 0..landmark_columns {
-            rhs[row] += qj_inc[row];
-        }
-        let mut landmark_inc = DVector::<f32>::zeros(landmark_columns);
-        if landmark_columns == 3 {
-            let d2 = r[(2, 2)];
-            let d1 = r[(1, 1)];
-            let d0 = r[(0, 0)];
-            if d2.abs() <= threshold || d1.abs() <= threshold || d0.abs() <= threshold {
-                return None;
-            }
-            let x2 = rhs[2] / d2;
-            let x1 = (-r[(1, 2)]).mul_add(x2, rhs[1]) / d1;
-            let row0_dot = r[(0, 2)].mul_add(x2, r[(0, 1)] * x1);
-            let x0 = (rhs[0] - row0_dot) / d0;
-            landmark_inc[0] = -x0;
-            landmark_inc[1] = -x1;
-            landmark_inc[2] = -x2;
-        } else {
-            rhs = -rhs;
-            for row in (0..landmark_columns).rev() {
-                let mut value = rhs[row];
-                for column in (row + 1)..landmark_columns {
-                    value -= r[(row, column)] * landmark_inc[column];
-                }
-                let diagonal = r[(row, row)];
-                if diagonal.abs() <= threshold {
-                    return None;
-                }
-                landmark_inc[row] = value / diagonal;
-            }
-        }
-        let q1_inc = r * landmark_inc;
-        for row in 0..landmark_columns {
-            qj_inc[row] += q1_inc[row];
-        }
-        let qres = transformed_residual.column(0).into_owned();
-        decrease -= eigen_visual_model_dot_f32(&qj_inc, &qres);
     }
     // Upstream starts with the visual parallel-reduction result, applies all
     // ImuBlock terms, and only then adds the marginal-prior model change.
