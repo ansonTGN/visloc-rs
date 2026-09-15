@@ -78,6 +78,30 @@ camera-centre RMSE, and beats official COLMAP on the 38-image courtyard control
 
 <p align="center"><sub>Same-input CPU8 Electro 1,200: visloc-rs <b>3.46× faster</b> and <b>25.2% lower</b> camera-centre RMSE than COLMAP. Unordered SfM, sequential SfM vs COLMAP, and EuRoC reconstruction evidence are in the <a href="docs/unordered_sfm_benchmark.md">SfM benchmark docs</a>.</sub></p>
 
+### Run the SfM demo
+
+Reconstruct an unordered photo set in one command — SIFT features estimated
+in-process, COLMAP text model (`cameras.txt`, `images.txt`, `points3D.txt`)
+written to `--out-colmap`:
+
+```bash
+cargo run --release --example unordered_sfm_demo --features image-io -- \
+  --feature-extractor sift \
+  --images-dir /path/to/my_photos \
+  --width 1920 --height 1080 --fx 1400 --fy 1400 --cx 960 --cy 540 \
+  --sift-max-keypoints 4096 \
+  --retrieval-topk 12 --min-matches 30 --match-ratio 0.8 \
+  --verification-mode full --mapper incremental \
+  --next-image-policy auto --post-refinement-registration \
+  --final-iterative-refinement \
+  --out-colmap /path/to/runs/my-photos-sfm
+```
+
+Pass a validated per-image calibration with `--input-colmap-calibration` instead
+of the scalar intrinsics. The complete option set, the courtyard control
+commands, and the connected-component export mode are in the
+[SfM benchmark details](docs/sfm_benchmarks.md#run-the-sfm-demo).
+
 <p align="center">
   <img src="docs/assets/hero_euroc_mh01_slam.gif" alt="Online stereo SLAM on EuRoC MH_01: onboard camera footage beside the live map — estimated trajectory vs ground truth as stereo landmark replenishment grows the landmark map" width="820"><br>
   <sub>Online stereo SLAM on EuRoC MH_01 — onboard camera and the live map growing in real time: uninterrupted tracking throughout the shown 583-frame measured segment (100% coverage, 0.344 m rigid ATE RMSE), with the landmark map grown by stereo landmark replenishment. Still version: <a href="docs/assets/hero_euroc_mh01_light.png">light</a> · <a href="docs/assets/hero_euroc_mh01_dark.png">dark</a>.</sub>
@@ -119,6 +143,28 @@ V2_01_easy.
 </p>
 
 <p align="center"><sub>8/11 wins; full-trajectory ATE translation RMSE in metres, lower is better. Per-sequence captions, the pipeline diagram, run commands, the ~1.4% scale-bias root cause, and the honest caveats (an offline 2-18 min / 3-6 GB mapper vs the 29 MB real-time VIO; three remaining difficult-sequence losses) are in the <a href="docs/vi_slam_benchmarks.md">VI-SLAM benchmark details</a>. Parity evidence: <a href="work/m11_basalt_faithful_port_final_closure_20260914.md">faithful-port closure report</a> and <a href="benchmarks/basalt/README.md">upstream oracle / provenance</a>; next steps: <a href="docs/vi_slam_global_consistency_plan.md">global-consistency plan</a>.</sub></p>
+
+### Run the VI-SLAM demo
+
+Build with AVX2/FMA and replay a EuRoC sequence — the calibration and config
+are checked into the repo, `--euroc-dir` is an external dataset path:
+
+```bash
+RUSTFLAGS="-C target-feature=+avx2,+fma" \
+  cargo build --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse
+
+cargo run --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse -- \
+  --euroc-dir /path/to/MH_01_easy \
+  --calibration benchmarks/basalt/release_inputs/euroc_ds_calib.json \
+  --config configs/basalt/euroc_config.json \
+  --out-dir target/basalt_mh01 \
+  --max-frames 80
+```
+
+This writes `trajectory.tum`, `trajectory.csv`, `trace.jsonl`, and the
+`marg_data/` packets the offline mapper consumes. The official-calibration
+reproduction and offline mapper commands are in the
+[VI-SLAM benchmark details](docs/vi_slam_benchmarks.md#run-it).
 
 ## Quickstart
 
