@@ -1,0 +1,334 @@
+# SfM benchmark details
+
+This page preserves the detailed structure-from-motion and vision-only SLAM
+measurements relocated from the [README](../README.md) front page. Headline
+numbers stay in the README; full tables, caveats, provenance, and reproduction
+commands live here.
+
+## OpenLORIS 10k — calibrated-rig quality comparison
+
+visloc's experimental observation-backed atlas preserves the connected frame
+counts and meets the p95 target, but **RMSE parity is still open**.
+
+| Metric | Frozen COLMAP control | visloc-rs experimental atlas | Target |
+| --- | ---: | ---: | --- |
+| Registered images | 9,998 / 10,000 | 9,998 / 10,000 | Met |
+| Supported rig frames | 4,999 | 4,999 | Met |
+| ATE RMSE ↓ | **0.3843 m** | 0.3890 m | **Not met** |
+| ATE p95 ↓ | 0.6387 m | **0.6382 m** | Met |
+| Observation-weighted mean reprojection ↓ | 0.9030 px | **0.5817 px** | Met |
+
+The first continuous, generated-artifact native diagnostic also completed all
+17 stages inside a 2 GiB cgroup:
+
+| OpenLORIS 10k diagnostic | Frozen COLMAP control | visloc-rs | Outcome |
+| --- | ---: | ---: | ---: |
+| Mapper wall ↓ | 4:37:44 | **13:36** | **20.41× faster** |
+| Measured generated phases ↓ | 5:20:57 | **4:43:26** | **1.13× faster** |
+| Peak process / sampled RSS ↓ | 2.08 GiB | **1.72 GiB** | **17.0% lower** |
+| OOM kills | 0 | 0 | parity |
+
+Both models contain connected 4,494-frame and 505-frame components. Lower
+reprojection error is not proof of better trajectory accuracy. ATE uses one
+Sim(3) alignment per component; RMSE and p95 are computed from the pooled
+GT-scored image errors, not averages of component scores. This is a
+repeated development-sequence evaluation, not held-out validation, and no
+10k speed win at equivalent quality is claimed. The visloc timing is one
+uninterrupted run, but OS cache state was uncontrolled; the COLMAP total is a
+sum of measured phases rather than one continuous cold wall clock. Repeated
+cold-cache acceptance therefore remains open. See the
+[frozen COLMAP control](../benchmarks/electro/m8-openloris-colmap-10k-control.json)
+and [native E2E evidence](../benchmarks/electro/m8-native-e2e-v1.json), plus the
+[experimental refinement evidence](../benchmarks/electro/m8-openloris-atlas-connected-filtered-ba-v1.json).
+
+## 10,008-image real-world SfM scale validation
+
+<p align="center">
+  <img src="assets/eth3d_10008_scale_validation.gif" alt="Ten measured ETH3D reconstructions generated from 10,008 real images: camera-centre trajectories, registration, score-only RMSE, and bounded mapper memory" width="900">
+</p>
+
+**visloc-rs registers 9,996/10,008 cameras (99.88%) across every ETH3D
+low-resolution many-view scene, with no mapper run exceeding 3.32 GiB.** Each
+panel above is drawn from the completed model's real camera centres. The ten
+unrelated scenes remain ten independent reconstructions; supplied poses are
+opened only after a model has been selected and written.
+
+| Real scene | Registered / supplied | Centre RMSE | RMSE / extent | Mapper peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| terrains | **660/660** | 0.58 cm | 0.12% | 1.56 GiB |
+| delivery area | **948/948** | 9.22 cm | 0.99% | 2.31 GiB |
+| forest | **1028/1028** | 1.33 cm | 0.19% | 2.65 GiB |
+| playground | **955/960** | 6.12 cm | 2.52% | 2.44 GiB |
+| electro | **1200/1200** | 3.50 cm | 0.55% | 1.39 GiB |
+| lakeside | **1063/1064** | 0.34 cm | 0.08% | 3.19 GiB |
+| sand box | **1112/1112** | 2.35 cm | 0.45% | **3.32 GiB** |
+| storage room | **795/796** | 0.61 cm | 0.42% | 1.71 GiB |
+| storage room 2 | **831/832** | 3.48 cm | 2.57% | 1.00 GiB |
+| tunnel | **1404/1408** | 14.92 cm | 1.61% | 3.25 GiB |
+
+<p align="center"><sub>playground stages 955/960 supplied images after five
+hash-audited source outliers are excluded. storage_room_2 advances from seed 1
+(2/832) to seed 16 solely by internal registration count, before scoring.
+tunnel RMSE includes one 5.32 m outlier; its median is 2.47 cm and p95 is
+9.41 cm. Full precision, hashes, and selection notes:
+<a href="../benchmarks/electro/m5-eth3d-scale-validation.json">M5 evidence</a> ·
+<a href="electro_m5_scale_validation.md">scale report</a>.</sub></p>
+
+<p align="center">
+  <a href="assets/eth3d_10008_scale_validation.png"><img src="assets/eth3d_10008_scale_validation.png" alt="Full-resolution still of ten measured ETH3D camera-centre reconstructions" width="900"></a><br>
+  <sub>Full-resolution measured still · each trajectory is independently PCA-projected only for display.</sub>
+</p>
+
+## Same-input COLMAP speed comparison — Electro 1,200
+
+<p align="center">
+  <img src="assets/electro_1200_sfm_comparison.gif" alt="Measured ETH3D Electro 1,200-image reconstruction: visloc-rs and COLMAP camera centres, sparse structure, residuals, mapper time, and peak memory" width="820">
+</p>
+
+**visloc-rs completes the measured CPU8 pipeline 3.46× faster than COLMAP
+while registering all 1,200 cameras with 25.2% lower centre RMSE.** The new
+persistent matcher is itself 1.074× faster on the identical frozen 12,000-pair
+manifest, and the memory-bounded mapper is 14.63× faster. Every accepted run
+reproduces the same snapshot and model bytes.
+
+| Same-input CPU8 phase / result | visloc-rs | COLMAP 3.9.1 CPU | Winner |
+| --- | ---: | ---: | ---: |
+| Feature extraction | 721.42 s | **304.12 s** | COLMAP 2.37× |
+| Manifest validation + candidate generation/sharding | 148.58 s | frozen manifest supplied | — |
+| Exact-pair matching + merge | **442.58 s** | 471.37 s | **visloc 1.06×** |
+| Mapper / model writing | **336.90 s** | 4,929.56 s | **visloc 14.63×** |
+| Conservative end-to-end wall | **1,649.48 s** | 5,705.05 s | **visloc 3.46×** |
+| Matching peak RSS | 1.89 GiB | **0.26 GiB** | COLMAP |
+| Mapper peak RSS | 1.39 GiB | **1.20 GiB** | COLMAP |
+| Registered cameras | **1200/1200** | **1200/1200** | parity |
+| Camera-centre RMSE | **3.50 cm** | 4.68 cm | **visloc −25.2%** |
+| Reproducibility | exact snapshot ×3; exact model ×2 | frozen control | verified |
+
+<p align="center"><sub>The camera-centre plot uses all 1,200 stems and Sim(3)
+alignment to the supplied calibration proxy. Ground truth is score-only. The
+visloc measurements use the same explicit 96-correspondence mapper cap, one
+bounded post-refinement registration pass, four 8-iteration global solves, and
+no follow-up global-refinement rounds; these controls are not global defaults.
+The visloc total conservatively includes its candidate generation; COLMAP
+consumes the already frozen identical candidate manifest. The two systems
+extract and verify their own features/matches. The memory-bounded replay
+re-reads one feature file at a time to validate the descriptor-bound snapshot
+hash, then keeps keypoints only. Its 1,459,194 KiB median peak is 1.16× the
+COLMAP mapper peak. See the
+<a href="electro_performance_roadmap.md">performance and memory roadmap</a>
+and <a href="../benchmarks/electro/quality-attribution.json">quality-attribution ledger</a>.</sub></p>
+<p align="center"><sub>BA implementation and all nine A/B timings:
+<a href="electro_ba_block_system.md">direct-block Schur report</a>.</sub></p>
+<p align="center"><sub>Quality-gated BA schedule audit and two-run hashes:
+<a href="electro_ba_schedule_audit.md">four-solve speed report</a>.</sub></p>
+<p align="center"><sub>Descriptor-lifetime audit, two-run memory trace, and
+exact-model proof: <a href="electro_snapshot_memory_audit.md">1.39 GiB
+snapshot replay report</a>.</sub></p>
+<p align="center"><sub>Persistent worker, three-run matching median,
+bounded merge, byte-identical feature re-extraction, and end-to-end ledger:
+<a href="electro_persistent_matcher_audit.md">3.46× CPU8 report</a>.</sub></p>
+
+<p align="center">
+  <a href="assets/electro_1200_sfm_comparison.png"><img src="assets/electro_1200_sfm_comparison.png" alt="Full-resolution ETH3D Electro comparison with aligned camera centres, sparse structure, error distribution, mapper wall, and peak memory" width="820"></a><br>
+  <sub>Full-resolution measured still · camera centres are ordered by timestamp
+  and camera; sparse points are a deterministic final-model sample.</sub>
+</p>
+
+### Connected 10,000-image corridor stress
+
+The same restartable `7N` pipeline processes all 10,000 timestamp-ordered
+OpenLORIS corridor inputs in **1:03:45** with a **1.78 GiB** peak. This passes
+the resource gate, not the reconstruction-quality gate: registration is strong
+at 1k, plateaus near 1.2k, then falls to 199 at the full tier. We report that
+failure instead of presenting the run as a complete 10k map.
+
+The opt-in streamed global-descriptor path now builds the same 70,000-pair
+envelope in **8:51**, versus 49:49 for exact all-image ranking. At the frozen
+1k quality gate, its scale-aware LSH schedule registers **991/1000** images,
+versus 989/1000 for exact retrieval. The 10k mapping-quality failure below is
+still open; faster retrieval does not by itself claim to solve it.
+
+On the same frozen 10k verified snapshot, conflict-aware confidence ordering
+raises registration from 199 to **3,664 cameras** while reducing mean
+reprojection from 1.301 to **1.140 px**. It rejects only an edge whose merge
+would put two observations from one image into a track; the remaining
+1,192,223 observations stay available to mapping. This is an 18.4× recovery,
+not a completed 10k reconstruction: 63.36% of the supplied cameras remain
+unregistered. Frozen hashes and negative controls are in
+[`m6-conflict-aware-tracks.json`](../benchmarks/electro/m6-conflict-aware-tracks.json).
+
+| Frozen 10k mapper replay | Registered | Mean reprojection | Mapping wall |
+| --- | ---: | ---: | ---: |
+| Legacy UnionFind | 199/10,000 | 1.301 px | **1:59.8** |
+| Confidence-ordered tracks | **3,664/10,000** | **1.140 px** | 9:02.9 |
+| Component models (7 independent gauges) | **6,791/10,000** | 0.928–1.293 px | 10:44.5 |
+
+The component run explains the remaining gap: the frozen verified view graph
+contains 313 connected components, with seven major components covering 9,682
+images. Mapping those seven sequentially recovers 85.3% more cameras than the
+single-model replay, and preserves the M6 model byte-for-byte for the largest
+component. These are still seven coordinate systems, not one connected map;
+verified bridge discovery and Sim(3) alignment are required before making that
+claim. Evidence and model hashes are in
+[`m7-component-models.json`](../benchmarks/electro/m7-component-models.json).
+
+| Connected tier | Candidate / verified pairs | Registered | Total wall | Peak phase RSS |
+| --- | ---: | ---: | ---: | ---: |
+| 1,000 | 7,000 / 6,869 | **989 (98.9%)** | 2:25 | 274 MiB |
+| 2,500 | 17,500 / 16,321 | 1,223 (48.9%) | 7:10 | 392 MiB |
+| 5,000 | 35,000 / 31,521 | 1,212 (24.2%) | 20:33 | 676 MiB |
+| 10,000 | 70,000 / 58,879 | **199 (2.0%)** | 1:03:45 | **1.78 GiB** |
+
+<p align="center"><sub>The 10k peak is its 2,188-shard streaming merge;
+candidate generation peaks at 1.14 GiB, matching at 851 MiB, and compact
+mapping at 501 MiB. Exact VLAD ranking still scores every image pair, so ANN
+retrieval plus streamed global descriptors now removes that quadratic ranking
+bottleneck. These historical M5 results predate the calibrated-rig
+<a href="../benchmarks/electro/m8-openloris-colmap-10k-control.json">M8 COLMAP control</a>
+and are not a same-condition head-to-head comparison. Source/license, hashes, phase ledgers, and
+honest dense/global negatives:
+<a href="../benchmarks/electro/m5-openloris-connected-scale-validation.json">connected M5 evidence</a> ·
+<a href="electro_m5_scale_validation.md">full scale report</a>.</sub></p>
+
+### 300-image reliability gate
+
+Before another 1,200-image tuning run, the resumable pipeline was killed,
+restarted, corrupted, and repeated on a frozen 300-image probe. The bounded
+K=64 schedule retained **99.871%** of exhaustive verified pairs and lost only
+**0.667 percentage point** of registration; two complete runs reproduced the
+same candidate, feature, snapshot, and COLMAP-model hashes.
+
+| Measured probe result | Bounded K=64 | Exhaustive control |
+| --- | ---: | ---: |
+| Candidate / verified pairs | 10,634 / 3,878 | 44,850 / 3,883 |
+| Verified-pair recall | **99.871%** | 100% |
+| Registered cameras | 200/300 | 202/300 |
+| Matching / mapper wall | 90.65 s / 75.97 s | 160.58 s / 90.38 s |
+| Mapper peak RSS | **169.7 MiB** | 170.2 MiB |
+
+<p align="center"><sub>Feature extraction was 630.76 s with 193.4 MiB peak
+RSS; the full generated feature + run footprint was 318.8 MiB. Same-size
+corruption is rejected and SIGKILL resume reproduces uninterrupted hashes. See the
+<a href="../benchmarks/electro/electro-300-phase-ledger.json">phase ledger</a>
+and <a href="../benchmarks/electro/electro-300-failure-injection.log">failure-injection record</a>.</sub></p>
+
+## Measured courtyard SfM control
+
+<p align="center">
+  <img src="assets/courtyard_sfm_comparison.gif" alt="Measured 38-camera courtyard reconstruction: visloc-rs and official COLMAP camera centres and sparse points in one aligned frame" width="820">
+</p>
+
+**38/38 cameras registered at 0.5379 cm centre RMSE for visloc-rs, versus 1.6166 cm for official COLMAP CPU SIFT — 66.7% lower (3.01×).** Both results use the same 38 official high-resolution courtyard images, exhaustive 703-pair features/matches, and per-image PINHOLE calibration; only downstream verification/mapping differs.
+
+| Metric | visloc-rs | Official COLMAP CPU |
+| --- | ---: | ---: |
+| Registered cameras | **38/38** | **38/38** |
+| Sparse structure | 43,852 tracks / 152,432 observations | 38,422 points / 169,590 observations |
+| Reported mean reprojection / point error | 0.579 px | 0.744758 px |
+| Camera-centre RMSE after Sim(3) alignment | **0.5379 cm** | 1.6166 cm |
+
+<p align="center"><sub>Lower centre RMSE is better. The plot is aligned to the supplied calibration proxy; tracks versus points and reprojection reports are not identical accounting schemes. <a href="#courtyard-control-details">Details, provenance, and reproduction</a>.</sub></p>
+
+## Run the SfM demo
+
+Build the example with the `image-io` feature. The unordered demo accepts a
+directory of photos, estimates SIFT features in process, and writes a COLMAP
+text model (`cameras.txt`, `images.txt`, and `points3D.txt`) to the path given
+by `--out-colmap`. Supply either scalar intrinsics, as below, or a validated
+per-image model with `--input-colmap-calibration`; datasets and calibration
+files are external inputs and are not bundled with this repository.
+
+```bash
+cargo run --release --example unordered_sfm_demo --features image-io -- \
+  --feature-extractor sift \
+  --images-dir /path/to/my_photos \
+  --width 1920 --height 1080 --fx 1400 --fy 1400 --cx 960 --cy 540 \
+  --sift-max-keypoints 4096 \
+  --retrieval-topk 12 --min-matches 30 --match-ratio 0.8 \
+  --verification-mode full --mapper incremental \
+  --next-image-policy auto --post-refinement-registration \
+  --final-iterative-refinement \
+  --out-colmap /path/to/runs/my-photos-sfm
+```
+
+For the measured courtyard control, keep the artifact, image, and calibration
+paths explicit. `--verify-only` is fast and read-only; `--full` starts a fresh
+mapping run and writes its JSON summary/model under `--output-dir`.
+
+```bash
+ARTIFACT_ROOT=/path/to/colmap_highres_exhaustive_allpairs_20260830
+IMAGES_DIR=/path/to/dslr_images_undistorted
+CALIBRATION_MODEL=/path/to/dslr_calibration_undistorted
+
+scripts/benchmark_courtyard.sh --verify-only \
+  --artifact-root "$ARTIFACT_ROOT" \
+  --images-dir "$IMAGES_DIR" \
+  --calibration-model "$CALIBRATION_MODEL" \
+  --colmap-control validate --visuals check
+
+scripts/benchmark_courtyard.sh --full --no-build \
+  --artifact-root "$ARTIFACT_ROOT" \
+  --images-dir "$IMAGES_DIR" \
+  --calibration-model "$CALIBRATION_MODEL" \
+  --output-dir /path/to/runs/courtyard-sfm \
+  --colmap-control validate --visuals skip
+```
+
+The example header documents the complete unordered-SfM option set; the
+[courtyard benchmark guide](courtyard_benchmark.md) documents artifact
+validation, candidate schedules, and reproducible large-run details.
+
+For a disconnected verified snapshot, add
+`--component-model-min-images 100 --component-model-max-count 7` to write
+bounded, size-ranked independent models below `--out-colmap`, plus a
+`components.tsv` manifest. The mode is explicit because its outputs have
+independent gauges and must not be mistaken for one connected reconstruction.
+
+## Courtyard control details
+
+The central apples-to-apples control uses the same 38 official high-resolution
+courtyard images, official CPU-SIFT features, exhaustive 703-pair raw matches,
+and per-image PINHOLE calibration. The downstream verification/mapping
+implementation differs; no features are re-extracted. Camera centres in the
+plot are independently Sim(3)-aligned to the supplied calibration model, so
+both trajectories share one frame and scale.
+
+![Measured courtyard SfM camera centres, sparse points, and per-camera residuals](assets/courtyard_sfm_comparison.png)
+
+The centre RMSE is lower by **66.7% (3.01×)** for this measured control;
+lower is better. “Tracks” versus “points” and the two reprojection reports are
+not claimed to be identical accounting schemes. The centre reference is the
+supplied ETH3D calibration proxy, not an independent laser-camera ground-truth
+archive. Reproduction details, hashes, and the exact COLMAP 4.2 CPU commands
+are in [`colmap_highres_exhaustive_audit_20260830.md`](colmap_highres_exhaustive_audit_20260830.md)
+and [`reproducibility_ci_closure_20260830.md`](reproducibility_ci_closure_20260830.md).
+The committed visuals can be regenerated with
+[`generate_courtyard_readme_visuals.py`](../scripts/generate_courtyard_readme_visuals.py)
+(`numpy`, `matplotlib`, and `Pillow` are optional asset-generation dependencies):
+
+```bash
+python3 scripts/generate_courtyard_readme_visuals.py \
+  --visloc-model <visloc_model> \
+  --colmap-model <colmap_model> \
+  --reference-model <calibration_model> \
+  --output-dir docs/assets
+```
+
+For a hash-checked, one-command validation or fresh rerun of this control, see
+[`courtyard_benchmark.md`](courtyard_benchmark.md) and run
+[`benchmark_courtyard.sh`](../scripts/benchmark_courtyard.sh). Large
+dataset-derived artifacts remain external to the repository.
+
+Secondary frozen-cache measurements are kept separate from that central
+control:
+
+| Suite | Current measured result | Provenance / caveat |
+| --- | --- | --- |
+| South Building | **128/128**, 1.406 px, 0.73 cm | Demo no-flag `Auto`; frozen cache and calibration-proxy score |
+| ETH3D terrace | **23/23**, 1.574 px, 2.56 cm | Current frozen cache; historical 12.37 cm feature cache is unavailable |
+| ETH3D office | **18/26**, 1.512 px, 0.45 cm | Auto adds one camera and lowers reprojection; reference RMSE is 0.43→0.45 cm vs Count, so no accuracy gain is claimed; historical cache unavailable |
+| EuRoC MH_03 | **2,700/2,700** poses; ATE Sim(3) 2.1740 m (open), 0.4393 m (loop), 0.0843 m (full), 0.0537 m (full2vhi) | Same-cache baseline/current non-regression pass under one fixed `max(5%, 5 mm)` rule; this runner has no Auto policy |
+
+See the [current handover](codex_handover.md) and [full non-regression
+record](nonregression_20260830.md) for exact commands, artifacts, and
+classification of unavailable historical caches.
