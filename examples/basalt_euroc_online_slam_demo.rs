@@ -143,6 +143,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let lag_seconds_for_mapper = Arc::clone(&lag_seconds);
     let aggregate_for_mapper = Arc::clone(&aggregate);
     let mapper_handle = thread::spawn(move || {
+        let mapper_processed = std::sync::atomic::AtomicU64::new(0);
         run_mapper_thread(online_mapper, receiver, None, move |report| {
             if let Some(sent_at) = send_times_for_mapper.lock().expect("lock").pop_front() {
                 lag_seconds_for_mapper
@@ -151,6 +152,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .push(sent_at.elapsed().as_secs_f64());
             }
             aggregate_for_mapper.lock().expect("lock").add(report);
+            let processed = mapper_processed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            // Live progress: this is the only visibility into the mapper
+            // thread once the VIO thread's own frame-count log has finished
+            // (mapper packets can queue up behind a slow keyframe, and a
+            // periodic optimize's own cost only shows up here). Print every
+            // packet during the (typically short) tail so a queue drain or
+            // an unexpectedly slow optimize pass is visible live rather than
+            // only in the final aggregate JSON.
+            eprintln!(
+                "mapper packet={processed} new_keys={} detect={:.2}s stereo={:.2}s match={:.2}s \
+                 optimize_triggered={} optimize={:.2}s accepted_loops={}",
+                report.new_key_count,
+                report.detect_seconds,
+                report.stereo_seconds,
+                report.match_seconds,
+                report.optimize_triggered,
+                report.optimize_seconds,
+                report.accepted_loop_pair_count,
+            );
         })
     });
 

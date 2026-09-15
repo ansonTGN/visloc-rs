@@ -305,17 +305,42 @@ impl OnlineNfrMapper {
                 continue;
             }
 
+            let mut any_new_at_timestamp = false;
             for image in &images {
                 if !self.mapper.frame_poses.contains_key(&image.frame_id) {
                     continue;
                 }
+                // A MargData packet's `of_images` is the marginalization
+                // event's whole AOM window (Phase A: 16 images = 8 frames x
+                // 2 cams), and consecutive packets' windows overlap heavily
+                // -- only the oldest keyframe slides out between one packet
+                // and the next. Without this check every packet re-detects
+                // and (worse) re-queries `match_new_keyframe` for images
+                // already processed by an earlier packet: O(already-seen)
+                // wasted work per packet, reproducing batch `match_all`'s
+                // exact re-querying cost (Phase A's diagnosis) instead of
+                // eliminating it. Confirmed by an MH_01 smoke run before this
+                // fix: every packet reported `new_key_count=16` (the full
+                // window every time) and per-packet match cost grew
+                // monotonically packet-over-packet.
+                let key = TimeCamId::new(image.frame_id, image.camera_id);
+                if self.mapper.feature_corners.contains_key(&key) {
+                    continue;
+                }
                 let key = self.detect_one_image(image, &calibration)?;
                 new_keys.push(key);
+                any_new_at_timestamp = true;
             }
 
-            let stereo_start = Instant::now();
-            self.match_stereo_one_timestamp(timestamp_ns, &images, &calibration)?;
-            stereo_seconds_accum += stereo_start.elapsed().as_secs_f64();
+            // Same overlap reasoning for stereo: if both of this timestamp's
+            // camera images were already matched by an earlier packet,
+            // re-running stereo matching would just recompute an identical
+            // (deterministic) result for free-standing cost.
+            if any_new_at_timestamp {
+                let stereo_start = Instant::now();
+                self.match_stereo_one_timestamp(timestamp_ns, &images, &calibration)?;
+                stereo_seconds_accum += stereo_start.elapsed().as_secs_f64();
+            }
 
             // Rule 1: drop the raw pixels now that detection and stereo
             // matching (which only needs already-extracted features, not
@@ -1057,6 +1082,79 @@ mod tests {
         ];
 
         (packet_one, packet_two)
+    }
+
+    /// Like [`two_packets_with_images`], but `packet_two`'s window
+    /// *overlaps* `packet_one`'s -- it carries images for both `first` and
+    /// `second`, exactly like a real MargData stream's sliding AOM window
+    /// (Phase A: one packet's `of_images` is the whole marginalization-event
+    /// window, and consecutive packets' windows share all but the oldest
+    /// keyframe). Used to prove the overlap-skip fix below.
+    fn overlapping_packets_with_images() -> (MargData, MargData) {
+        let base = fixture_packet();
+        let first = base.frame_poses.first().expect("fixture pose").clone();
+        let second = base
+            .frame_poses
+            .get(1)
+            .expect("second fixture pose")
+            .clone();
+
+        let mut packet_one = base.clone();
+        packet_one.of_images = vec![
+            feature_image(first.frame_id, first.timestamp_ns, 0),
+            feature_image(first.frame_id, first.timestamp_ns, 1),
+        ];
+
+        let mut packet_two = base;
+        packet_two.of_images = vec![
+            feature_image(first.frame_id, first.timestamp_ns, 0),
+            feature_image(first.frame_id, first.timestamp_ns, 1),
+            feature_image(second.frame_id, second.timestamp_ns, 0),
+            feature_image(second.frame_id, second.timestamp_ns, 1),
+        ];
+
+        (packet_one, packet_two)
+    }
+
+    /// A packet whose window overlaps the previous one's must only detect
+    /// and match the genuinely new images, not re-process the whole window
+    /// every time -- the exact bug an MH_01 smoke run caught (every packet
+    /// reporting `new_key_count=16`, the full window, with per-packet match
+    /// cost growing monotonically as a result).
+    #[test]
+    fn overlapping_packet_window_only_processes_new_images() {
+        let (mut packet_one, mut packet_two) = overlapping_packets_with_images();
+        let mut online = OnlineNfrMapper::new(
+            MapperConfig::default(),
+            feature_calibration(),
+            OfflineMapperConfig::default(),
+            GlobalBaConfig::default(),
+            OnlineMapperConfig {
+                optimize_every_k: usize::MAX,
+                ..OnlineMapperConfig::default()
+            },
+        );
+        let report_one = online
+            .ingest_packet(&mut packet_one, Some(TEST_SEED))
+            .expect("online ingest 1");
+        assert_eq!(
+            report_one.new_key_count, 2,
+            "packet 1 detects its own 2 images"
+        );
+
+        let report_two = online
+            .ingest_packet(&mut packet_two, Some(TEST_SEED))
+            .expect("online ingest 2");
+        assert_eq!(
+            report_two.new_key_count, 2,
+            "packet 2 must only detect the 2 genuinely new images (second's stereo pair), \
+             not re-detect first's images already processed by packet 1"
+        );
+        assert_eq!(
+            online.mapper.feature_corners.len(),
+            4,
+            "feature_corners must contain exactly 4 keys total, not a duplicate 6"
+        );
     }
 
     /// Guardrail (1): the incremental matcher must accept exactly the same
