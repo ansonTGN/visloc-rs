@@ -2,6 +2,84 @@
 
 ## 現在の状態（以下の過去ログより優先）
 
+### 2026-09-15 引き継ぎチェックポイント: COLMAP rig mapperベタ移植（branch `feat/colmap-rig-mapper-port`）
+
+**状態**: branch `feat/colmap-rig-mapper-port`（mainから16 commit先行、push済み、worktree clean、PR未作成）。
+mainには`bench/colmap-graph-isolation`系の証跡と`docs/colmap_rig_mapper_port_plan.md`が入っていない
+（同branch上）。実行中のjobなし。
+
+**結論（10kでCOLMAPに負ける原因）**: frontendではなくmapper。COLMAP 10k controlの検証済みgraph
+（69621 pair、COLMAP keypoint）をそのまま旧`generalized_rig_sfm`へ入れるとcomponent構造は再現
+（4493 vs 4494 frame）するがSim(3) scale 0.136・ATE 11.9mに崩壊
+（`benchmarks/electro/m9-openloris-colmap-graph-isolation-10000-v1.json`）。候補pair集合は
+COLMAPと完全一致、visloc検証済み58879 pairはCOLMAP 69621の部分集合。
+
+**移植したもの**（`pipelines/slam/src/colmap_incremental/`、COLMAP commit 64805cb、各関数に
+file:line引用、参照sourceは`/tmp/.../scratchpad/colmap-port/colmap-src/`にあったが一時領域）:
+- C1 `types.rs`/`reconstruction.rs`/`database_cache.rs`（Rig/Frame/SetCamFromWorld、M2 CorrespondenceGraph流用）
+- C2 `observation_manager.rs`、`incremental_triangulator.rs`、`mapper.rs`/`mapper_impl.rs`、
+  `pipeline.rs`、`bundle_adjustment.rs`、example `examples/colmap_incremental_mapper.rs`
+  （`--manifest --features-dir --pairs-export --out-colmap [--pose-solver gp3p|dlt6pt]
+  [--local-ba-point-policy colmap|window|nopull]`）
+- C2.5 `rig_ba_solver.rs`: Ceres相当LM（trust region、gradient_tolerance 1e-4絶対、
+  function/parameter tolerance 0＝controlはCeresでも50反復回りきる）、点のSchur消去を
+  pair数累積で分割、疎ブロック縮約系、rayon決定論的。synthetic 440 frame/235k obsで114ms/反復。
+- C2.6 GP3P（`crates/vision/src/pnp/gp3p.rs`、PoseLib gp3p/re3q3移植、根はnalgebra固有値）、
+  COLMAP `ParameterizePoints`/`AddPointToProblem`のpull-in方針（`LocalBaPointPolicy::Colmap`）
+- ロバスト損失: Ceres `corrector.cc`移植、local BA初回のみSoftL1(1.0)以降trivial、global BA
+  trivial、RANSAC後の姿勢refinementはCauchy（`generalized_pose.cc:298`）
+- 未移植（記録済み逸脱）: structure-less登録（`RegisterNextStructureLessImage`）、
+  UniqueInlierSupportMeasurer、per-camera閾値の厳密平均、Sturm列（固有値で代替）、
+  gauge固定が姿勢単位（COLMAPは自由度単位）
+- 入力: `scripts/export_colmap_verified_for_visloc.py` + `examples/import_colmap_verified_snapshot`
+  でCOLMAP DBを再検証なしで変換。2.5k/5kはCOLMAP 10k DBのprefix切り出し
+  （`$R/colmap-prefix-parity-v1/tier-{2500,5000}/`、COLMAP参照modelとscore付き）。
+
+**同一入力でのCOLMAP比較（ATE RMSE / Sim(3) scale / RPE-10s、`score_openloris_model.py`＋
+`score_openloris_rpe.py`）**
+
+| 規模 | COLMAP | 旧generalized_rig_sfm | 移植版の最良 | 構成 |
+|---|---|---|---|---|
+| 1k | 0.028 / 1.136 / – | 0.027 | 0.033 / 1.152 | native BA (C2.5) |
+| 2.5k | 0.072 / 1.026 / 0.089 | 0.321 / 1.007 / 0.575 | **0.087 / 1.043 / 0.126** | GP3P+colmap方針+trivial損失（285dd15） |
+| 5k | 0.123 / 1.068 / 0.147 | 4.09 / 0.079 / 4.87 | **0.273 / 1.173 / 0.284** | native BA+DLT+旧点扱い（3740942 snapshot） |
+| 10k | 0.384 / 1.106,1.142 / 0.305（2 model） | 11.9 / 0.136（COLMAP graph） | 3.27 / 1.58 / 1.77（1 modelに統合） | GP3P+colmap方針 |
+
+2.5kはC2合格条件（ATE≤1.5x、scale±10%、RPE-10s≤1.5x）を全部PASS。5k以上は未達。
+A/B行列（決定論性はbyte一致で確認済み）:
+2.5k: GP3P+colmap 0.087、GP3P+nopull 0.162、DLT+window 0.198、GP3P+window 1.17、
+GP3P+colmap+ロバスト損失 0.154。
+5k: 旧点扱い+DLT 0.273、GP3P+colmap 0.436、GP3P+nopull 0.440、DLT+colmap 0.699、GP3P+window 2.39。
+→ 個々には忠実な変更で結果が2〜5倍揺れる。COLMAPは安定。残る構造的差（登録順/next-image選択、
+filter cadence、BA収束、structure-less登録欠如、gauge固定）が本命で、これ以上のA/Bより
+**COLMAPのmapper.logとの登録順・frame単位pose比較**（plan §4.2）を先にやること。
+
+**性度以外**: 2.5kのwallはCOLMAP 1:35に対し移植版0:47〜1:05（同時実行あり、非厳密）、
+5k 1:49〜2:02（COLMAP 2:11）、10k 4:27（COLMAP 4:38）、RSS最大4.8GB。初期pair探索は
+2.5kで約5分（COLMAPも約7分）。
+
+**証跡JSON**（`benchmarks/electro/`）: `m9-openloris-colmap-graph-isolation-{1000,10000}-v1`、
+`m9-openloris-colmap-prefix-parity-v1`、`m9-openloris-colmap-port-c2-parity-v1`、
+`m9-openloris-colmap-port-c2-5-native-ba-v1`、`m9-openloris-colmap-port-c2-6-gp3p-v1`、
+`m9-openloris-colmap-port-5000-native-ba-v1`、`m9-openloris-colmap-port-point-policy-ab-v1`、
+`m9-openloris-colmap-port-robust-loss-nopull-v1`。
+run root: `$R/colmap-port-c2-v1/tier-*`（各`mapper.bin`＝使用binary、`run.sh`＝正確なコマンド、
+`stderr.log`にINIT_PAIR/REGISTER/BA_SOLVE行、`model/model/<k>/`、`score.json`、`rpe.json`）。
+`$R=/home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1`。上書き・削除禁止、新実験はfresh root。
+
+**次の担当者へ**
+1. `main`へのPRはまだ。branchをそのままPRにしてよい（CI: `cargo test -p visloc-slam --lib`、
+   Python testsは`tests/`と`scripts/tests/`）。
+2. 診断: 2.5k（GP3P+colmap、0.087m）とCOLMAPの登録順LCS・frame単位pose差（Sim3 align後）を
+   出し、差が生まれる時点とイベント（global BA/retriangulate/filter）を特定する。
+3. structure-less登録の移植（COLMAPが5k/10kで使っている可能性）と、gauge固定の自由度単位化。
+4. 10kで1 modelに統合されている点（COLMAPは2 model）: `min_model_overlap`/`FilterImages`/
+   `max_model_overlap`の挙動確認。
+5. 実行のコツ: 長時間runは`setsid nohup run.sh`＋pidファイル、`ulimit -v`で上限。`pkill -f`に
+   自分のコマンド文字列を含めると自分が死ぬ。監視のsleepはメモリ警告で止められることがある。
+   BA log `BA_SOLVE ... iterations=50`は正常（controlのCeres設定と同じ）。
+
+
 ### 2026-09-14 区切りまとめ（次の担当者はまずここを読む）
 
 branch `feat/m9-learned-retrieval`、HEADはこの節を含むcommit（直前`e75aad4`）、push済み、
