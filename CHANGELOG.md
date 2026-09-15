@@ -4,6 +4,29 @@ All notable changes to `visloc-rs` will be documented here.
 
 ## Unreleased
 
+## 0.2.0 - 2026-09-15
+
+### Highlights
+
+- **Real-data SfM at scale.** All ten ETH3D low-resolution many-view scenes:
+  **9,996/10,008 cameras registered (99.88%)**, with no mapper run above
+  3.32 GiB. Same-input ETH3D Electro 1,200 runs **3.46× faster than COLMAP**
+  with **25.2% lower** camera-centre RMSE, and the 38-image courtyard control
+  reaches **0.5379 cm vs COLMAP's 1.6166 cm**.
+- **Visual-Inertial SLAM (faithful Basalt Rust port).** A tightly-coupled
+  stereo-inertial VIO estimator plus offline mapper that matches native
+  Basalt's ATE within **0.1%** on all 11 EuRoC sequences and, with EuRoC's
+  official calibration, beats measured ORB-SLAM3 on **8 of 11** sequences.
+- **COLMAP-compatible unordered SfM** with VLAD retrieval, essential-matrix
+  verification, incremental mapping, connected-component models, and COLMAP
+  text export for downstream 3DGS / MVS.
+- **Online stereo SLAM** with loop closure, SE(3)/Sim(3) pose-graph
+  optimization, GNC outlier rejection, and bundle adjustment, benchmarked on
+  KITTI, EuRoC, and TUM RGB-D.
+- **Opt-in deep frontend** (SuperPoint / LightGlue via in-Rust ONNX Runtime,
+  CUDA-accelerated), plus public-data map-reuse localization and GNSS-prior
+  tracking demos.
+
 ### Added
 
 - **Opt-in matrix-free pure-visual BA (2026-09-07).** Added a separate
