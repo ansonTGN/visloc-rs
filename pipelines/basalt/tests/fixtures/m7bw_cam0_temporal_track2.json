@@ -1,0 +1,11 @@
+{
+  "source_bits": ["0x42380000", "0x42ec0000"],
+  "first_level": 3,
+  "first_increment_bits": ["0xbeb28e40", "0xbe1adabe", "0xbb9ce858"],
+  "native_exp_rotation_bits": ["0x3f7fff40", "0x3b9ce831", "0xbb9ce831", "0x3f7fff40"],
+  "native_exp_translation_bits": ["0xbeb2bd73", "0xbe1a001a"],
+  "rust_exp_translation_bits": ["0xbeb2bd72", "0xbe1a001a"],
+  "native_order_translation_x_bits": "0xbeb2bd73",
+  "after_first_update_local_translation_bits": ["0x40acd429", "0x41699800"],
+  "frame1_cam0_track2_endpoint_bits": ["0x422e3d26", "0x42ea1cb7"]
+}

@@ -1,0 +1,73 @@
+M7br external/native trace
+===========================
+
+Source: pinned upstream libbasalt.so for commit 0f3b2b52c807f70ff4e2973ce253c73329eea7bc.
+Function: basalt::LinearizationAbsQR<float,6>::linearizeProblem(bool*)
+File-address block: 0x2e6208..0x2e62c4
+Runtime capture: GDB with ASLR disabled, filtered to the m7bo frame-0/frame-1
+host/target pair.  Values are f32 bit patterns in Eigen [x,y,z,w] lane order.
+
+A pre 6208 xmm0 (inverse target)
+  3d5cdea6,3f4d341f,3b2aa78b,3f186f67
+B post 6208 xmm4
+  bd582e43,bf4d686f,00000000,3f182ffd
+C post 620c xmm12
+  3f182ffd,3f182ffd,3f182ffd,bd582e43
+D post 6212 xmm8
+  00000000,bd582e43,bf4d686f,bf4d686f
+E post 6218 xmm9
+  bf4d686f,00000000,bd582e43,00000000
+F post 621e xmm1
+  3f4d341f,3b2aa78b,3d5cdea6,3f4d341f
+G post 6224 xmm2
+  3f186f67,3f186f67,3f186f67,3f186f67
+H post 622a xmm11
+  3b2aa78b,3d5cdea6,3f4d341f,3b2aa78b
+I post 6230 xmm6
+  3b2aa78b,3b2aa78b,3f186f67,3f186f67
+J post 6234 xmm3
+  3d5cdea6,3f4d341f,3b2aa78b,3f186f67
+K post 6240 xmm5
+  3f4d341f,3f4d341f,3f4d341f,3f4d341f
+L post 6245 xmm10
+  3f186f67,3f186f67,3f186f67,3f186f67
+M post 624a xmm0
+  3d5cdea6,3f4d341f,3b2aa78b,3d5cdea6
+N post 6250 xmm0
+  3d034d9a,3ef3fad4,3acae6f0,bb3a83c6
+O post 6255 xmm12
+  3f186f67,3f186f67,3f186f67,3f186f67
+P post 6259 xmm12
+  bd820392,bf744ccf,bacae6f0,3eb6b278
+Q post 625e xmm2
+  3a2503cc,baa3f5aa,3acae6f0,3eb3c869
+R post 6263 xmm0
+  3f4d341f,3b2aa78b,3d5cdea6,3f4d341f
+S post 6267 xmm2
+  3a2503cc,baa3f5aa,3acae6f0,3eb6b278
+T post 626d xmm0
+  3a2503cc,ba91f223,3d378f9d,3f7fffaf
+U post 6272 xmm2
+  3a2503cc,bab5f931,bd2ae12e,be929a6e
+V post 6277 xmm2
+  3a2503cc,bab5f931,bd2ae12e,3f7fffaf
+W post 627d xmm2 raw
+  3b322ebb,bab5f931,3a19f84f,3f7fffaf
+X post 6282 xmm0
+  36f80a09,36015a52,34b9357f,3f7fff5e
+Y post 6286 xmm2
+  3b322ebb,bab5f931,3a19f84f,3f7fffaf
+Z post 628e xmm1
+  34b9357f,3f7fff5e,34b9357f,3f7fff5e
+a post 6292 xmm0
+  3701ceb0,3f7fff7e,3539357f,3fffff5e
+b post 6296 xmm0
+  3701ceb0,3f7fff7e,3539357f,3fffff5e
+c post 629a xmm0
+  3f800000,3fffff7e,3fffff64,407fff5e
+d post 629e xmm0
+  3f800000,3fffff7e,3fffff64,407fff5e
+e post 62a8 xmm0 sqrt
+  3f800000,00000000,00000000,00000000
+f post 62ac xmm2 normalized
+  3b322ebb,bab5f931,3a19f84f,3f7fffaf

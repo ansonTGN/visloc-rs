@@ -1,0 +1,159 @@
+{
+  "schema": "visloc-rs.basalt-m1-paired-comparison.v1",
+  "created_utc": "2026-08-21T03:03:09Z",
+  "purpose": "M1 fixed-400-frame, sensor-only Basalt oracle paired with the existing Rust M7d/M7e evaluations",
+  "protocol": {
+    "id": "basalt-euroc-parity-v1",
+    "sequence": "MH_01_easy",
+    "frames_requested": 400,
+    "sensor_only": true,
+    "ground_truth_policy": "GT is unavailable to the engine and is read only by the post-run evaluator",
+    "association": "nearest_timestamp_one_to_one",
+    "max_association_delta_ns": 10000000,
+    "tum_time_unit": "ns for the Basalt harness evaluation; the legacy Rust evaluator used seconds",
+    "alignment": "SE(3) Umeyama; Sim(3) is diagnostic only",
+    "rpe": "consecutive associated poses"
+  },
+  "input_parity": {
+    "dataset": "EuRoC MAV official ASL release / machine_hall/MH_01_easy",
+    "upstream_commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+    "upstream_tree_sha1": "b7afb830d82b45b8209cf784ad9744025d838411",
+    "upstream_config": {
+      "path": "data/euroc_config.json",
+      "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+    },
+    "upstream_calibration": {
+      "path": "data/euroc_ds_calib.json",
+      "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c"
+    },
+    "checked_in_config_semantic_equal": true,
+    "basalt_input_manifest_sha256": "6538ccbe7d55751ebda35437166093bc64ea193c3f9bf410c0a94dd648a7b0be",
+    "basalt_input": {
+      "windows_root": "target\\basalt_upstream_input_mh01_400f_20260821T000005Z\\dataset\\MH_01_easy",
+      "wsl_root": "/mnt/c/Users/rsasa/Workspace/visloc-rs/target/basalt_upstream_input_mh01_400f_20260821T000005Z/dataset/MH_01_easy",
+      "frames_per_camera": 400,
+      "imu_csv": "full MH_01_easy imu0/data.csv",
+      "ground_truth_staged": false,
+      "file_count": 806
+    },
+    "parity_note": "Rust M7d/M7e processed the same first 400 camera timestamps and full IMU stream under sensor_only=true. Their legacy summaries report the source camera manifest length (3682) while limiting processed frames to 400; the Basalt harness stages only the deterministic 400-frame prefix and full IMU CSV."
+  },
+  "basalt_upstream_core_fallback": {
+    "oracle_kind": "official source at fixed commit, core-only fallback build",
+    "fallback_reason": "The optional RealSense2 2.51.1 manifest dependency fails under GCC 11.4 because a #if 0 diagnostic transcript contains U+2018/U+2019 tokens. No upstream source was patched.",
+    "binary": {
+      "wsl_path": "/root/visloc-basalt-oracle-0f3b2b52/build/core-relwithdebinfo/basalt_vio",
+      "sha256": "59cd32918dd170003df2e2e3ce6340e7726d70bd067a468861ce4c80048da6e6"
+    },
+    "run": {
+      "windows_root": "target\\basalt_upstream_mh01_400f_core_20260821T000010Z",
+      "wsl_root": "/mnt/c/Users/rsasa/Workspace/visloc-rs/target/basalt_upstream_mh01_400f_core_20260821T000010Z",
+      "run_manifest": "target\\basalt_upstream_mh01_400f_core_20260821T000010Z\\run_manifest.json",
+      "run_manifest_sha256": "6902df45f5e5eab678ef847a501659a01e9395c78f8fd6a369059042779db246",
+      "evaluation_result": "target\\basalt_upstream_mh01_400f_core_20260821T000010Z\\evaluation_result.json",
+      "evaluation_result_sha256": "49629a59ad9582ec33c729ff9328f33c4280ad872b2f3272c68d38cdcb770299",
+      "trajectory": "target\\basalt_upstream_mh01_400f_core_20260821T000010Z\\engine_workspace\\output\\slam_trajectory.csv",
+      "trajectory_sha256": "291f3009266bbba4d9b69d0de9e97923e02bb8109af52edbd0f5936b079ae169",
+      "raw_upstream_trajectory": "target\\basalt_upstream_mh01_400f_core_20260821T000010Z\\engine_workspace\\output\\trajectory.csv",
+      "raw_upstream_trajectory_sha256": "80e9339b3f28963ec6b1a1bfd95163474508ec22eba9247541a071bf58459912",
+      "wrapper": "benchmarks/basalt/upstream_engine_wrapper.py",
+      "wrapper_sha256": "219ea9b8726d1276f96415feed73a7d73d77d63db9c515005ccd613417693dae",
+      "stage_command": "python3 benchmarks/basalt/stage_euroc_prefix.py --sequence-root /mnt/e/datasets/euroc_mav/machine_hall/MH_01_easy --destination /mnt/c/Users/rsasa/Workspace/visloc-rs/target/basalt_upstream_input_mh01_400f_20260821T000005Z/dataset/MH_01_easy --max-frames 400",
+      "command": "python3 benchmarks/basalt/upstream_engine_wrapper.py --binary /root/visloc-basalt-oracle-0f3b2b52/build/core-relwithdebinfo/basalt_vio --config /root/visloc-basalt-oracle-0f3b2b52/data/euroc_config.json --calibration /root/visloc-basalt-oracle-0f3b2b52/data/euroc_ds_calib.json --input-root <run>/engine_workspace/input --output-root <run>/engine_workspace/output --max-frames 400 --num-threads 4",
+      "evaluate_command": "python3 -m benchmarks.basalt.harness evaluate --manifest target/basalt_upstream_mh01_400f_core_20260821T000010Z/run_manifest.json --ground-truth /mnt/e/datasets/euroc_mav/machine_hall/MH_01_easy/mav0/state_groundtruth_estimate0/data.csv --max-diff-ns 10000000 --tum-time-unit ns --out target/basalt_upstream_mh01_400f_core_20260821T000010Z/evaluation_result.json"
+    },
+    "coverage": {
+      "expected_input_frames": 400,
+      "trajectory_rows": 400,
+      "tracked_frames": 400,
+      "failed_frames": 0,
+      "tracked_fraction": 1.0,
+      "associated_poses": 378,
+      "association_ratio": 0.945,
+      "max_association_delta_ns": 256
+    },
+    "metrics": {
+      "ate_translation_se3_rmse_m": 0.006242631595225861,
+      "ate_translation_sim3_rmse_m": 0.006029650237629589,
+      "rpe_translation_consecutive_rmse_m": 0.0012669476219222937,
+      "rpe_translation_consecutive_sim3_rmse_m": 0.0012481848357928853,
+      "rpe_rotation_consecutive_rmse_deg": 0.031583161779643175,
+      "sim3_scale_diagnostic": 1.0086361215341875
+    },
+    "resources": {
+      "harness_wall_seconds": 31.742449571999998,
+      "harness_peak_process_tree_rss_bytes": 61689856,
+      "engine_stats_total_runtime_seconds": 31.918,
+      "engine_stats_resident_memory_peak_bytes": 398098432,
+      "resource_note": "The internal Basalt ExecutionStats resident_memory_peak is retained because the WSL psutil process-tree sample under-reports the child binary; both raw values are preserved in the run log/evidence."
+    },
+    "ground_truth_firewall": {
+      "ground_truth_available_to_engine": false,
+      "ground_truth_path_passed_to_engine": false,
+      "staged_input_excludes_ground_truth": true,
+      "workspace_gt_named_artifacts": []
+    }
+  },
+  "rust_m7d": {
+    "run": "target\\basalt_m7d_smoke400",
+    "summary": "target\\basalt_m7d_smoke400\\summary.txt",
+    "evaluation": "target\\basalt_m7d_smoke400\\evaluation.json",
+    "sensor_only": true,
+    "frames_requested": 400,
+    "frames_processed": 400,
+    "estimate_poses": 400,
+    "associated_poses": 378,
+    "association_ratio": 0.945,
+    "max_association_delta_ns": 256,
+    "metrics": {
+      "ate_translation_se3_rmse_m": 0.3471715354742742,
+      "ate_translation_sim3_rmse_m": 0.17712625263193812,
+      "rpe_translation_consecutive_rmse_m": 0.022586291776669196,
+      "rpe_translation_consecutive_sim3_rmse_m": 0.022241035809619697,
+      "rpe_rotation_consecutive_rmse_deg": 0.9612045757228942,
+      "sim3_scale_diagnostic": 0.18034107367591556
+    },
+    "coverage_tracked_fraction": null,
+    "resource_metrics": null,
+    "resource_note": "The legacy M7d artifact records no wall-clock or RSS measurement; do not infer parity from missing values."
+  },
+  "rust_m7e": {
+    "run": "target\\basalt_m7e_run400_reref",
+    "summary": "target\\basalt_m7e_run400_reref\\summary.txt",
+    "evaluation": "target\\basalt_m7e_run400_reref\\eval.json",
+    "sensor_only": true,
+    "frames_requested": 400,
+    "frames_processed": 400,
+    "estimate_poses": 400,
+    "associated_poses": 378,
+    "association_ratio": 0.945,
+    "max_association_delta_ns": 256,
+    "metrics": {
+      "ate_translation_se3_rmse_m": 0.6806942926830576,
+      "ate_translation_sim3_rmse_m": 0.17599837999222942,
+      "rpe_translation_consecutive_rmse_m": 0.02356150098007286,
+      "rpe_translation_consecutive_sim3_rmse_m": 0.02224385769167256,
+      "rpe_rotation_consecutive_rmse_deg": 0.23295036408915645,
+      "sim3_scale_diagnostic": 0.09454525456467197
+    },
+    "coverage_tracked_fraction": null,
+    "resource_metrics": null,
+    "resource_note": "The legacy M7e artifact records no wall-clock or RSS measurement; do not infer parity from missing values."
+  },
+  "comparison_scope": {
+    "paired_frame_and_association_match": true,
+    "basalt_vs_m7d": {
+      "ate_translation_se3_rmse_ratio": 0.0179814038806429,
+      "ate_translation_sim3_rmse_ratio": 0.0340415390041531,
+      "rpe_translation_rmse_ratio": 0.0560936533739019,
+      "rpe_rotation_rmse_ratio": 0.0328578978682976
+    },
+    "basalt_vs_m7e": {
+      "ate_translation_se3_rmse_ratio": 0.00917097684280502,
+      "ate_translation_sim3_rmse_ratio": 0.0342596916965702,
+      "rpe_translation_rmse_ratio": 0.0537719402084704,
+      "rpe_rotation_rmse_ratio": 0.135578932890422
+    },
+    "interpretation": "The fixed-source Basalt oracle is substantially lower-error on this 400-frame pair. This is an evidence anchor, not a full-manifest performance claim: the official dependency build remains blocked by RealSense2, and Rust runtime/RSS was not captured by the legacy M7d/M7e runs."
+  }
+}

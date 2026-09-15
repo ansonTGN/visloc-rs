@@ -1,0 +1,1682 @@
+{
+  "schema_version": 1,
+  "schema_id": "visloc-rs.basalt.provenance.v1",
+  "manifest_id": "basalt-provenance-v1",
+  "captured_at": "2026-08-30",
+  "scope": {
+    "rust_root": "pipelines/basalt",
+    "benchmark_root": "benchmarks/basalt",
+    "purpose": "License and source provenance for the Basalt literal-port implementation and its checked-in oracle/fixture generators.",
+    "algorithm_source_policy": "The audited tree contains no copied upstream source subtree. Based on the current source review, Rust modules are classified as clean-room translations or contract adapters and C++/scripts as newly written diagnostic/fixture code that compiles against pinned dependencies; this classification is not a legal determination or a line-by-line authorship proof.",
+    "hash_algorithm": "SHA-256",
+    "hash_basis": "Repository working-tree bytes as present on 2026-08-30; line endings are not normalized by the verifier.",
+    "production_source_hash_policy": "Every Rust source under pipelines/basalt/src is listed in port_files with a SHA-256 binding."
+  },
+  "upstreams": {
+    "basalt": {
+      "repository": "https://github.com/VladyslavUsenko/basalt.git",
+      "commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+      "tree_sha1": "b7afb830d82b45b8209cf784ad9744025d838411",
+      "license_spdx": "BSD-3-Clause",
+      "license_file": "LICENSE",
+      "redistribution_notice_required": true,
+      "source_paths": [
+        "data/euroc_config.json",
+        "data/euroc_ds_calib.json",
+        "include/basalt/linearization/linearization_abs_qr.hpp",
+        "include/basalt/io/dataset_io_euroc.h",
+        "include/basalt/io/marg_data_io.h",
+        "include/basalt/optical_flow/frame_to_frame_optical_flow.h",
+        "include/basalt/optical_flow/patch.h",
+        "include/basalt/optical_flow/patterns.h",
+        "include/basalt/utils/keypoints.h",
+        "include/basalt/utils/imu_types.h",
+        "include/basalt/utils/vio_config.h",
+        "include/basalt/hash_bow/hash_bow.h",
+        "include/basalt/vi_estimator/ba_base.h",
+        "include/basalt/vi_estimator/marg_helper.h",
+        "include/basalt/vi_estimator/nfr_mapper.h",
+        "src/linearization/linearization_abs_qr.cpp",
+        "src/utils/keypoints.cpp",
+        "src/vi_estimator/marg_helper.cpp",
+        "src/vi_estimator/nfr_mapper.cpp",
+        "src/vi_estimator/sqrt_keypoint_vio.cpp"
+      ],
+      "notice": "The BSD-3-Clause text and copyright attribution are reproduced in pipelines/basalt/NOTICE and benchmarks/basalt/NOTICE."
+    },
+    "basalt_headers": {
+      "repository": "https://gitlab.com/VladyslavUsenko/basalt-headers.git",
+      "commit": "aa441ba3e51050c47ba1902537792a2e4db7e43d",
+      "tree_sha1": "b2d9ed696183885a2248c4769780420bb2fe43c9",
+      "license_spdx": "BSD-3-Clause",
+      "license_file": "LICENSE",
+      "redistribution_notice_required": true,
+      "source_paths": [
+        "include/basalt/calibration/calib_bias.hpp",
+        "include/basalt/camera/double_sphere_camera.hpp",
+        "include/basalt/camera/generic_camera.hpp",
+        "include/basalt/camera/stereographic_param.hpp",
+        "include/basalt/image/image_pyr.h",
+        "include/basalt/imu/imu_types.h",
+        "include/basalt/imu/preintegration.h",
+        "include/basalt/serialization/headers_serialization.h"
+      ],
+      "notice": "The BSD-3-Clause text and copyright attribution are reproduced in pipelines/basalt/NOTICE and benchmarks/basalt/NOTICE."
+    },
+    "opengv": {
+      "repository": "https://github.com/laurentkneip/opengv.git",
+      "commit": "91f4b19c73450833a40e463ad3648aae80b3a7f3",
+      "tree_sha1": "b7be818181ac8fc08d0a043046e2dac4ccbecd47",
+      "license_spdx": "BSD-3-Clause",
+      "license_file": "License.txt",
+      "redistribution_notice_required": true,
+      "source_paths": [
+        "include/opengv/OptimizationFunctor.hpp",
+        "include/opengv/math/cayley.hpp",
+        "include/opengv/relative_pose/CentralRelativeAdapter.hpp",
+        "include/opengv/relative_pose/methods.hpp",
+        "include/opengv/sac/implementation/Ransac.hpp",
+        "include/opengv/sac_problems/relative_pose/CentralRelativePoseSacProblem.hpp",
+        "include/opengv/triangulation/methods.hpp",
+        "src/relative_pose/modules/main.cpp",
+        "src/relative_pose/methods.cpp",
+        "src/sac_problems/relative_pose/CentralRelativePoseSacProblem.cpp",
+        "src/triangulation/methods.cpp"
+      ],
+      "notice": "The OpenGV License.txt attribution is reproduced in pipelines/basalt/NOTICE and benchmarks/basalt/NOTICE."
+    },
+    "sophus": {
+      "repository": "https://github.com/strasdat/Sophus.git",
+      "commit": "d0b7315a0d90fc6143defa54596a3a95d9fa10ec",
+      "tree_sha1": "df1d3b480d7b9eaaa2b22a4c12653bcda62a7345",
+      "version": "1.24.6",
+      "license_spdx": "MIT",
+      "license_file": "LICENSE.txt",
+      "redistribution_notice_required": true,
+      "source_paths": [
+        "sophus/common.hpp",
+        "sophus/se3.hpp",
+        "sophus/so3.hpp"
+      ],
+      "notice": "The Sophus MIT attribution is reproduced in pipelines/basalt/NOTICE and benchmarks/basalt/NOTICE."
+    },
+    "eigen": {
+      "repository": "https://gitlab.com/libeigen/eigen.git",
+      "commit": "bc3b39870ecb690a623a3f49149a358b95c5781d",
+      "tree_sha1": "aa17dd206dcf99140aa5bfbcfc19068a1fa58f6b",
+      "version": "5.0.1",
+      "license_spdx": "MPL-2.0",
+      "license_file": "COPYING.MPL2",
+      "redistribution_notice_required": true,
+      "source_paths": [
+        "Eigen/src/Core/Dot.h",
+        "Eigen/src/Core/StableNorm.h",
+        "Eigen/src/QR/ColPivHouseholderQR.h",
+        "Eigen/src/QR/FullPivHouseholderQR.h",
+        "Eigen/src/SVD/JacobiSVD.h",
+        "unsupported/Eigen/src/NonLinearOptimization/LevenbergMarquardt.h"
+      ],
+      "additional_license_files": [
+        "COPYING.APACHE",
+        "COPYING.BSD",
+        "COPYING.MINPACK",
+        "COPYING.README"
+      ],
+      "notice": "Eigen is used by the checked-in C++ diagnostics and as a numerical behavior reference. No Eigen source is copied into this repository; the applicable MPL-2.0 and third-party notices are recorded in the local NOTICE files."
+    },
+    "opencv": {
+      "repository": "https://github.com/opencv/opencv.git",
+      "commit": "cbee6841638edb6fbc8110df7cd52bb8e3d66211",
+      "tree_sha1": "4251397346b33f43cd3be0211fe9c4daa2adc8a6",
+      "version": "4.12.0",
+      "vcpkg_port_version": 1,
+      "license_spdx": "Apache-2.0",
+      "license_file": "LICENSE",
+      "redistribution_notice_required": true,
+      "source_paths": [
+        "modules/features2d/src/fast.cpp",
+        "modules/features2d/src/fast_score.cpp",
+        "modules/imgproc/src/corner.cpp"
+      ],
+      "source_license_overrides": [
+        {
+          "paths": [
+            "modules/features2d/src/fast.cpp",
+            "modules/features2d/src/fast_score.cpp"
+          ],
+          "license_spdx": "BSD-3-Clause",
+          "copyright": "Edward Rosten, 2006, 2008"
+        },
+        {
+          "paths": [
+            "modules/imgproc/src/corner.cpp"
+          ],
+          "license_spdx": "BSD-3-Clause",
+          "copyright": "Intel Corporation, Willow Garage Inc., and Itseez Inc."
+        }
+      ],
+      "notice": "The OpenCV package is Apache-2.0; the referenced FAST and corner implementation files carry BSD-3-Clause notices. The Rust detector is a clean-room translation and does not link OpenCV."
+    }
+  },
+  "vcpkg_resolution": {
+    "repository": "https://github.com/microsoft/vcpkg.git",
+    "commit": "1e199d32ad53aab1defda61ce41c380302e3f95c",
+    "baseline": "05442024c3fda64320bd25d2251cc9807b84fb6f",
+    "overlay_ports": {
+      "basalt-headers": "aa441ba3e51050c47ba1902537792a2e4db7e43d",
+      "opengv": "91f4b19c73450833a40e463ad3648aae80b3a7f3"
+    },
+    "registry_ports": {
+      "eigen3": "5.0.1",
+      "opencv4": "4.12.0#1",
+      "sophus": "1.24.6"
+    },
+    "port_patches": {
+      "opencv4": [
+        "468de9b36740b3355f0d5cd8be2ce28b340df120.patch"
+      ],
+      "sophus": [
+        "0001-support-eigen3-5.patch"
+      ],
+      "opengv": [
+        "CMake C++17/configuration substitutions in the pinned overlay port",
+        "FindEigen CONFIG shim in the pinned overlay port"
+      ]
+    },
+    "source_ref_policy": "Registry versions are resolved to immutable upstream tag commits above; the vcpkg baseline and overlay port commit remain the reproducible package-resolution anchors."
+  },
+  "port_files": {
+    "pipelines/basalt/src/adapter.rs": {
+      "sha256": "0d7258c483781ce9d4148c06a571ee6c150429e7c82de80b53f4e292e8bd2d65",
+      "translation_status": "clean_room_adapter",
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers"
+      ]
+    },
+    "pipelines/basalt/src/calibration.rs": {
+      "sha256": "80aeddbda130764f8abe1624fa6f46e7f8c1834c166e5d61ccdffcafd75951e9",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers"
+      ]
+    },
+    "pipelines/basalt/src/camera.rs": {
+      "sha256": "e04af476c09f33fc499d2987a3505017c7b96f941bc2bc2c609bfd48fd754eba",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt_headers"
+      ]
+    },
+    "pipelines/basalt/src/config.rs": {
+      "sha256": "093f1cd61fcf269fb8a39b8da0ce4fb3ce3b7c6444226ea8cf3313e82fa53934",
+      "translation_status": "clean_room_contract",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/euroc.rs": {
+      "sha256": "02b36a7443d429b45c75bc1953045399577e8676decdb6a837c7fb3b7399cffd",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/fast.rs": {
+      "sha256": "99ca1a8ef5b55a2d1e70410e833ff6a9b52dace2973273480386e7397e729383",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "opencv"
+      ]
+    },
+    "pipelines/basalt/src/imu/factors.rs": {
+      "sha256": "495f29f1c45d88e8b68ca398a7e1f1a0dbd228ff19746a836f2d76efa922f2c3",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers",
+        "sophus",
+        "eigen"
+      ]
+    },
+    "pipelines/basalt/src/imu/mod.rs": {
+      "sha256": "fde2b3bfaefeaf76ad8180ac00ec6148bcd344dc0a99e4650502f6ce0e4c1601",
+      "translation_status": "clean_room_contract",
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers"
+      ]
+    },
+    "pipelines/basalt/src/imu/preintegration.rs": {
+      "sha256": "563099ea23a2f63d13ac66138bf6e5b07c0bab098aa14224023479d72bf6e9f7",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt_headers",
+        "sophus",
+        "eigen"
+      ]
+    },
+    "pipelines/basalt/src/imu/sampling.rs": {
+      "sha256": "87d89f0ee1e07518951e35e7edc19f5ffe1b069e5c5a46a61493819021597c87",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/initialization.rs": {
+      "sha256": "cb76498fe1ade7e8788b6870ebb2faeec02fdc7f817b6ec38352c0de6d4eb1c3",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/lib.rs": {
+      "sha256": "2ee7de94a3de7644ff840f0ab8c13fb9b633993688d7af829650115a7b83a42e",
+      "translation_status": "crate_boundary",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/mapper/features.rs": {
+      "sha256": "d6f0c19266c163c509ee6f87cbfb7257aa9b110d1249fa58aae847e60bc923a1",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "opengv",
+        "eigen",
+        "sophus",
+        "opencv"
+      ]
+    },
+    "pipelines/basalt/src/mapper/mod.rs": {
+      "sha256": "dd7b38c46bb829692c76c7abd17b1eceb66d102453fb820f7794bbe36901f181",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "opengv",
+        "eigen",
+        "sophus",
+        "opencv"
+      ]
+    },
+    "pipelines/basalt/src/mapper/session.rs": {
+      "sha256": "69d127357daf6d687f1f3489aed62055239170c66554b435cea868546eabfa74",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/mapper/triangulation.rs": {
+      "sha256": "536d64d4ca6552b558c714f90de2e07e24ba5f3d1634ea2dd57df5eb8cdf53e4",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "pipelines/basalt/src/patch.rs": {
+      "sha256": "881b7a78c6a215536b235c82c6bf7ef158e737250f7bc2597b467206e71e19b2",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt_headers"
+      ]
+    },
+    "pipelines/basalt/src/pattern.rs": {
+      "sha256": "e0bea281b6a62266441d1a6633b5b014c1d382dda81f5bd0e1b323b472fe812d",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt_headers"
+      ]
+    },
+    "pipelines/basalt/src/provenance.rs": {
+      "sha256": "f52ab64c1f398612862d03db2d557fa390108a2656814bce6acb664f1979e7bb",
+      "translation_status": "metadata_only",
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers"
+      ]
+    },
+    "pipelines/basalt/src/pyramid.rs": {
+      "sha256": "ef63434ceb0b3ef9ae4740efaa08af5e878ae0bd44a30eb0f4a5ac9c91d016b9",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt_headers"
+      ]
+    },
+    "pipelines/basalt/src/stream.rs": {
+      "sha256": "84aa71e4133d5aa758dd0de317c32fd5a3108657798e7f282651ccf27bea5b65",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers"
+      ]
+    },
+    "pipelines/basalt/src/streaming.rs": {
+      "sha256": "f059bd245b393847e83453e8a02742d91f27e00c4b8bb8a3834615184d0c0106",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/time.rs": {
+      "sha256": "3a11d726721a57eb7b16564cebe68dfb0ebe9b7286ed47ffec84cb7ee2ac035a",
+      "translation_status": "clean_room_contract",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/timing.rs": {
+      "sha256": "5bb75101d5d4ce5a127dbe1525235b54aef14a6928fbc4c09a9cdcf2f824e3e2",
+      "translation_status": "clean_room_contract",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/types.rs": {
+      "sha256": "674501a2997502dea838ce9aaf5dd141bfb98d5d7621b95fa387a94f92ada137",
+      "translation_status": "clean_room_contract",
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers"
+      ]
+    },
+    "pipelines/basalt/src/update.rs": {
+      "sha256": "acc595d7daa70a755c13d92ec7f1f1636ceef76a6a908d37f2231e1b9b7833fe",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers",
+        "sophus",
+        "eigen"
+      ]
+    },
+    "pipelines/basalt/src/vio/aom.rs": {
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ],
+      "sha256": "5a95f499f1849d0bdeaf7301faf6d1108ed014f62731733406ca79d96e129dee",
+      "upstream_source_paths": {
+        "basalt": [
+          "include/basalt/linearization/linearization_abs_qr.hpp",
+          "src/linearization/linearization_abs_qr.cpp"
+        ],
+        "eigen": [
+          "Eigen/src/QR/ColPivHouseholderQR.h",
+          "Eigen/src/QR/FullPivHouseholderQR.h"
+        ],
+        "sophus": [
+          "sophus/se3.hpp",
+          "sophus/so3.hpp"
+        ]
+      }
+    },
+    "pipelines/basalt/src/vio/estimator.rs": {
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers",
+        "sophus",
+        "eigen"
+      ],
+      "sha256": "8fd4b8d4b7262bf589da4c93463c47eaf36103794c0d11b5c1e12fd4fc7d5db7"
+    },
+    "pipelines/basalt/src/vio/landmarks.rs": {
+      "sha256": "cde9c23836b4513df8ae95c47b132360b5bc904247c53b2b52b13e0fbca2e40e",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers",
+        "sophus",
+        "eigen"
+      ]
+    },
+    "pipelines/basalt/src/vio/margdata.rs": {
+      "sha256": "bb5b989704b8f117f8d74f006287a1826ea72acd63988974a463b5bb9a99356b",
+      "translation_status": "clean_room_contract",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/vio/mod.rs": {
+      "sha256": "032f39f9977ce483a468bae63f4acd88c3ce4c485bdc12928e2917e8664c5742",
+      "translation_status": "crate_boundary",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/vio/scalar.rs": {
+      "sha256": "fd88e98c2e7b18e65c03dad2463aab423d44919f68754ee9a1d7f6ccea20a199",
+      "translation_status": "clean_room_contract",
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/src/vio/window.rs": {
+      "sha256": "dca65766e68afe8f8a85cfdad2aafa951a88a7ee118e2fda2a821a3ec0e074e7",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    }
+  },
+  "checked_in_generator_hashes": {
+    "benchmarks/basalt/__init__.py": {
+      "sha256": "46595a2d5c0a46cc989cbcc5a7f3f2b485cbe0bb034d4936e4ebb774242fed33",
+      "kind": "package_support",
+      "copied_upstream_source": false,
+      "upstream_refs": []
+    },
+    "benchmarks/basalt/__main__.py": {
+      "sha256": "739ca75b53ee8e1057e6ad56c1a73b69f4e8c89a12d3c1cd5d25b3665108d1c1",
+      "kind": "package_support",
+      "copied_upstream_source": false,
+      "upstream_refs": []
+    },
+    "benchmarks/basalt/batch.py": {
+      "sha256": "a67dfc4490f77de96ae7fbd8d476d6f918bff6ab9bb04e8e3f2ed51288096bf5",
+      "kind": "batch_orchestrator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/build_m8c_feature_fixture.py": {
+      "sha256": "fbd6e1c52fc8e118c592406f023a400a89a87f32f232fc6eedfd2139145997de",
+      "kind": "fixture_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "opengv",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/build_m8d_setup_fixture.py": {
+      "sha256": "ea808fd407811b07a6eac38e4f1e3693fc5eb7d7f8b673928c122404d22e588b",
+      "kind": "fixture_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/build_m8d_track_fixture.py": {
+      "sha256": "74219f834f840e7d7bf2b03c8689104ccefd1c6ab59166000dfb82e4ce8afae8",
+      "kind": "fixture_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/build_m8e_rust_fixture.py": {
+      "sha256": "ccc13abdf1f7626a93606c005d563fe881bf1c15abcdd9bb6b76ed86e62477c6",
+      "kind": "fixture_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/euroc_dataset_manifest.py": {
+      "sha256": "5722222e48e8dff2c8ac2b29d30aeca112802b2b000af74e03600833e670633a",
+      "kind": "dataset_manifest_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/harness.py": {
+      "sha256": "6fa5733311f99d68763721b935eaad30a68ce7ff37e4cb1ead1473edd878db38",
+      "kind": "post_run_harness",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/imu_trace_report.py": {
+      "sha256": "91c42e2a740aa4b478844c9520771f50f6ea88bd230e43c569ae57f500292b20",
+      "kind": "golden_report_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "basalt_headers"
+      ]
+    },
+    "benchmarks/basalt/m6_packet_oracle.py": {
+      "sha256": "d90091e9f5ae2283ac4512b7f14fc4b10f68c7e459e82efa7b421e425c3dc9e5",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7al_iteration_diff.py": {
+      "sha256": "2e943fdd1171aa665320fd9220438c4ed54935ec839790a1f16e0c2cb16cd98f",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7im_compare_cov_ldlt.py": {
+      "sha256": "ab63cb1a7a5528c1f7dc112ff2e4485a0f939c8021ba8a5cf1d915bc92aa6f61",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7im_cov_ldlt_oracle.cpp": {
+      "sha256": "dc027fe20e8a8a578e614d4c5cc74706c055098f039edf1fd2f9a1576e2f18c9",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt_headers",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7im_cov_ldlt_oracle.sh": {
+      "sha256": "12a60dbf671c72c7c1972122f39f688b5a66c8c2dac19470cc41cc5cb90b37c0",
+      "kind": "oracle_runner",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/m7aq_f32_intermediate.cpp": {
+      "sha256": "af943f42cb9334ba2b4dd35b5641402b2ec311a404b41f0053fe4394db8e8d09",
+      "kind": "golden_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt_headers",
+        "sophus",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7aq_upstream_imu_audit.cpp": {
+      "sha256": "9b9ff74d2a5e02b5a5d55682fd1b782eaa3e5b5e9a5fe8204706fbad0f167068",
+      "kind": "golden_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt_headers",
+        "sophus",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7aq_predict_boundary_probe.cpp": {
+      "sha256": "71fd950a08318762d5144fb5f1fb75419ca0b3ff9b28e2863b7c7f9305f7f39c",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt_headers",
+        "sophus",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7aq_predict_state_probe.cpp": {
+      "sha256": "090e19d94db8d8ced33b4554683e3fa3261e90451692815f14807db7be951de6",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt_headers",
+        "sophus",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7aq_predict_velocity_probe.cpp": {
+      "sha256": "45f45dd64a7198baf5aec932d1a60d819a4fba530a4bf65d55f3f79298cb0afc",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt_headers",
+        "sophus",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7aq_visual_factor_boundary_probe.cpp": {
+      "sha256": "89acd3e35366f828f669a2f2d6e95c944610693dcb277f4f3871fa39d5f9b402",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt_headers",
+        "sophus",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7ar_upstream_candidate_oracle.sh": {
+      "sha256": "ee3f9391de4bb1d457609784759056caa05d1ec674264136acb8da46ee275473",
+      "kind": "oracle_runner",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/parity.py": {
+      "sha256": "dd7869fd2a847da897009b31da46cf434e3f83087b0e181d51ec1d4021229d1b",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/run_oracle_wsl.sh": {
+      "sha256": "485be19f80c364201ac945423997a35401e11de2cefaa94779a9a6c2a6f74ee9",
+      "kind": "oracle_runner",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/run_clonefree_perf.py": {
+      "sha256": "b61c373c6b2c2f282df610f9c5d2eb07feb314998504471260d3355146cc324e",
+      "kind": "performance_runner",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/create_sensor_only_view.py": {
+      "sha256": "e26435d314683b68223937d14c833734c02faedfc5c66c1dfd5a5fcaed73d64e",
+      "kind": "sensor_hardlink_stager",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/native_wsl_runner.py": {
+      "sha256": "5aae73217c65ead1ac39643aa48cb739b48df1a492dc55110996cea4ffda59c3",
+      "kind": "performance_adapter",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/test_clonefree_perf.py": {
+      "sha256": "c0ef09289220691efbe3f6f268893de3fbeded7fca625e3b1543a804cd00c415",
+      "kind": "contract_test",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/test_create_sensor_only_view.py": {
+      "sha256": "89c5a76519b63bc331bbaca47c91389331e2d981e9de694461ed18f35b4d1940",
+      "kind": "contract_test",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/schema.py": {
+      "sha256": "67cd3511fa7320de215157cfea721f5b6921575fff68fce4a540f4be729e3a53",
+      "kind": "schema_validator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/setup_oracle_wsl.sh": {
+      "sha256": "6ecde35c7136d468957abed9cceab0ec76beb6ebe3e1cb36627d71f581c13d6a",
+      "kind": "oracle_setup",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/stage_euroc_prefix.py": {
+      "sha256": "f586c70d34b9d5375f58dfdde56e7824fe2767d07bdb12bcb98b3bedf099ffc0",
+      "kind": "fixture_stager",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/trace_report.py": {
+      "sha256": "0e88cbb8b193b77045bb9d341ed1d1c19a8955880655b1c2ebaab7d02639963a",
+      "kind": "golden_report_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/upstream_absqr_dump.cpp": {
+      "sha256": "6d0b6306619f1ca56aef851bdb0bf62ea1dcf6a31e43673fb5b1c28458cce11c",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/upstream_engine_wrapper.py": {
+      "sha256": "219ea9b8726d1276f96415feed73a7d73d77d63db9c515005ccd613417693dae",
+      "kind": "oracle_runner",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/upstream_m8c_feature_oracle.cpp": {
+      "sha256": "23eef5f1d9159db945b6a57e610d24877ff5e847015d582b9e279a9dfc183de3",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "opengv",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/upstream_m8d_setup_opt_oracle.cpp": {
+      "sha256": "d9d46a144c30faa1e4fd885ddd396a29cb4ff17b3ba6ea594a46859cad31e16a",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/upstream_m8e_global_ba_oracle.cpp": {
+      "sha256": "01dc005bae02b232f32a0ae02778938da95b14ae2c2545336a3a0dd5bcfbcf5b",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/upstream_marg_dump.cpp": {
+      "sha256": "ed50f011ca49b40101863510cd60ab4063c9a78652b2155b9a2b6d12bba7fe39",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/upstream_nfr_oracle.cpp": {
+      "sha256": "ca4f1b575eacf4ef4bc6f5c5c8d8a37aaf815cefcc9cabd3dd215fecbcdf4781",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/upstream_sqrt_marginalization_oracle.cpp": {
+      "sha256": "e40de024aebd95bf0baa387c9fc04ca8f734c24d4d7c746ec6c089bff430dfbf",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/verify_manifest.ps1": {
+      "sha256": "8734e083c7117d2860af0c449d07f99cf91075288406146e858b66b89d919ef2",
+      "kind": "source_verifier",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "pipelines/basalt/examples/m8c_cpp_lm_probe.cpp": {
+      "sha256": "e83d1593513e94c6f2dfd8020f7bb566f769908053de6ab80e350cfc63210eb6",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "opengv",
+        "eigen"
+      ]
+    },
+    "pipelines/basalt/examples/m8c_cpp_qr_probe.cpp": {
+      "sha256": "c26edc921f51e73a51d63a3cd7d1d0ec1fe2ac7766f3d9768911291c70fdbf12",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "opengv",
+        "eigen"
+      ]
+    },
+    "pipelines/basalt/examples/m8c_eigen_dot_asm.cpp": {
+      "sha256": "340a3a68cc9c971e67e2e51b8d0058f55db4fb4134ea2be02d3bfe25db7f3fe5",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "eigen"
+      ]
+    },
+    "pipelines/basalt/examples/m8c_exact_bits_probe.cpp": {
+      "sha256": "00bbe2e3535581eb1eda8c090d5faf3f74314feafcbdde9b3ca633f480d08627",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "opengv",
+        "eigen"
+      ]
+    },
+    "pipelines/basalt/examples/m8c_opengv_source_trace.cpp": {
+      "sha256": "b9099fd9dccca39009c62b08407d226e58720ae88b1a3eccab8a41d35cd8320c",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "opengv",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/check_m8_pose_provenance.py": {
+      "sha256": "57d039be936ac70adb3bff8724d0ddbb9e6abe4bd80bfa82f33048eaf33c5b13",
+      "kind": "provenance_checker",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/m7_j_block_oracle.cpp": {
+      "sha256": "69e0598774db98517131abbb07e51c5341749b39ea0b0e0df86332f5f2ac44d2",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7_position_residual_oracle.cpp": {
+      "sha256": "b10d850b25b646e1eb0cd253ce3bb0ad042916f2f19a647e582df4be1aa40ef5",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7_position_residual_probe.cpp": {
+      "sha256": "d0c86fac9add8b426843eb3dfa6cfd4b7dd3ccfccf791600288da918ed33d4ad",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7av_frame0_from_two_vectors_probe.cpp": {
+      "sha256": "64d0aca0afdbab860eff2fdd0d63822d883342e9933efd67d7d9666e5b259ab4",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7bf_sophus_oracle_tmp.cpp": {
+      "sha256": "f1da980a08b6a3497ff263dc96aa702998ac81fc4d0c045aa31d49aced193af8",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7bo_relative_oracle_probe.cpp": {
+      "sha256": "814b61a7dd9da1ea297b638c5caebae3aafcbfc6536e637ddef2355e1de07085",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7br_relative_packet4_trace.cpp": {
+      "sha256": "0e4f01a722d3524cdccfa6c336c18d071f1ba086979f90e23ed326752ae418d2",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7bw_se2_exp_probe.cpp": {
+      "sha256": "adcb17c657641cd5bcf453f447f0a57cf57cb122b861169ef1e841b0a1daaffc",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7bw_temporal_probe.cpp": {
+      "sha256": "51fda250fcb6900a3c4139e379843417f31424f8f0c5945355366e5e701c2cd5",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus",
+        "opencv"
+      ]
+    },
+    "benchmarks/basalt/m7bw_update_asm.cpp": {
+      "sha256": "be1d011e7e28159ab9994b15583b3e19947d81eed7caaa5192668f54549e3ca6",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7ca_composed_warp_probe.cpp": {
+      "sha256": "efe3580f16bbd5199fe6ff2d1701aae488d9663435c01eefc41ef756c6384752",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7ca_se2_exp_probe.cpp": {
+      "sha256": "22c121f30153e7e46e0080188f2164cada48775755dae6ad57577de01ab2bae9",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7cj_ldlt_probe.cpp": {
+      "sha256": "ac06f8013e675ebb5d8566450b715fd2e2ca0ad92030ba565dd66d24f0997e0f",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7de_state_residual.py": {
+      "sha256": "03c3ad9e1b4ed15d24e96644eeaade8fe849d89dc4bf0d75c5d9cc5078e22d82",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/m7di_predict_product_probe.cpp": {
+      "sha256": "97b23d699f32a03b4ffa85b68d4f4c0a9abc08cd5cab8cd37ccf41967381ded8",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7fh_native_position_probe.cpp": {
+      "sha256": "cf854b4e35a9175770b981c507a5c3430eb2df23271c5cb0b7e734e8540cb775",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7fh_predict_position_probe.cpp": {
+      "sha256": "65c5a03dcd0becd094647ad7ee007fb9ed6817e550454bf22adf6954db8a1174",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7fs_compare_visual.py": {
+      "sha256": "4b46802eda8e6f7e3379fde8667b100701c6047dc5875555b4f002fe9bdddfd0",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/m7fv_compare_visual_jxi.py": {
+      "sha256": "5357798fa51c8d78b49cc8b8de43d3d34e14e585cbf9d3b7013f2a1899cb4fb6",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7fw_compare_clean_rel_jacs_all.py": {
+      "sha256": "ef99002ed33930a945318fbb2c604c45bcc814bd6499a0173fe602b48d32c53f",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7fy_clean_native_remeasure.py": {
+      "sha256": "f169362ae1021ec0505698ecbbfa0fcecdd03c32c1a75bb545685686a0966fb4",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7gv_suffix_probe.cpp": {
+      "sha256": "a18f90a5ca989980c39b49431e4030b3957023b4ef7e8ece6aecb1a0af662fc4",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7hd_compare_assignment.py": {
+      "sha256": "c45ea1551525c63322037a20d28c0b9983efb4168084c699899fefbaa783a287",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/m7hd_compare_intermediates.py": {
+      "sha256": "ab124f3f9681e38dd126b2491883b2852ba672d02a6c5da3de5dcbc8f6c87d35",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/m7hd_compare_sqrt.py": {
+      "sha256": "4996b3ffff843f811cedc46072e3f43b193c664e463e15adfffc6a5c9413444d",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7hd_cov_gemm_probe.cpp": {
+      "sha256": "369568877e0ee83c58e6e4938c05ea9a71024f0e12a3dcb5d6d843422af37533",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7hd_matrix_product_probe.cpp": {
+      "sha256": "d81702727167468ed2d6bf66ba819bdba1abe2f20e7d8fa71d588ce16dfbf35f",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7hd_native_intermediate_probe.cpp": {
+      "sha256": "c78e4561200b3f6713cc4106a153a134130909320b0552d6824d5abc8430cfdb",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7hd_native_intermediate_probe.sh": {
+      "sha256": "3b6a849e3d98a483560d0e9923f2c9091beee1d5693345fad4fd6f26ba2880d7",
+      "kind": "oracle_runner",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7hd_quaternion_matrix_probe.cpp": {
+      "sha256": "a19c5e47428ea8d9b4537d90f043596518814087194b82a46f8b913e64e9604d",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7hd_tail_eigen.cpp": {
+      "sha256": "735b1fa1a83f8b69ad8143afd0a31dc4dc0858f2a3bf28e7df37ca9c59c296df",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7hd_tail_probe.cpp": {
+      "sha256": "410861534d1535263a6c7dc9841bbb48bc7b1fd67cf615f971241c7e47dfab92",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7hd_weighted_gram_probe.cpp": {
+      "sha256": "562ea183bfd50e1cbe0fa5ac185744025edd52f5a0675495e3b7fab1531ca2a9",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7he_lm_branch_compare.py": {
+      "sha256": "4216539d7a73d4ba7b9b29b407ec7eb8a05fbd4b7985a73f0a1c9b490afad997",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/m7he_lm_category_compare.py": {
+      "sha256": "ca53dd4615646385530c4c035931b7255e2269301083c13447b6e356eb83b9d0",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/m7he_margdata_boundary.py": {
+      "sha256": "f72969c93cbd23cf8415a14ea628428c2c8565d030098f225ce938f5f5a39bca",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/m7he_preqr_boundary_taxonomy.py": {
+      "sha256": "2d0c666b32f19645fa2b407c93c22deeb3f67eda2c8da6a15898bf2c64776a08",
+      "kind": "oracle_comparator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7im_whitening_schedule_fixture.py": {
+      "sha256": "2ec85e0c4c93449285e24cbd60a119d5a6635998ce32848ae03593fd682ad32a",
+      "kind": "fixture_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7im15_native_trig_probe.cpp": {
+      "sha256": "6dcb10c1fb481ac904bdecca3ebd51d6142f8b4bf08c4b34f04ea0f5785016af",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/m7im15_schedule_oracle.cpp": {
+      "sha256": "458c89a5af4d07d8d7390741c2486127ed751c52f9e8db210e033c439464794e",
+      "kind": "oracle_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7im15_sqrt_apply_probe.cpp": {
+      "sha256": "c018fbd99025c778939da3541ebdb0fa0d2e102e8d4625eddfc5cda4b7cad1f9",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/m7im15_state_quat_schedule_probe.cpp": {
+      "sha256": "fd55228a2cf97b2287810f89cb3503e02c613cac5ba79e9929216937211e49ea",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen",
+        "sophus"
+      ]
+    },
+    "benchmarks/basalt/phase6_coordinator.py": {
+      "sha256": "9768f6306fb8125aa59d5d8f5aa24a503b9f4bb87d4480c9217392c23e5ce3f2",
+      "kind": "batch_orchestrator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ]
+    },
+    "benchmarks/basalt/tmp_eigen_probe.cpp": {
+      "sha256": "b0ba7bb2344112bacb5cbec672dadb9332d031c12d6f13b1525a80955cc066fc",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ]
+    },
+    "benchmarks/basalt/build_phase6_rust.ps1": {
+      "kind": "build_helper",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "d9b1b72c85d5065d4339eef959070f3599efa22b2330189f2bc615fe01c3f6b2"
+    },
+    "benchmarks/basalt/bundle_selected_license_payload.py": {
+      "kind": "diagnostic_tool",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "5016f0b3ef7536d0a0ab474d4201b1bd60481305208dd61d21ba6f8c976f5087"
+    },
+    "benchmarks/basalt/generate_provenance_manifest_v2.py": {
+      "kind": "manifest_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "159197ac81160bc03c80533262fcf63aae1c19ec4ffa5362bb2db30ef2d91496"
+    },
+    "benchmarks/basalt/generate_rc_source_closure.py": {
+      "kind": "manifest_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "15fa44c56c778f98c2b5a2e178b3179e5932a9abdd2d8b5d766c9e0930174fd3"
+    },
+    "benchmarks/basalt/generate_selected_license_report.py": {
+      "kind": "manifest_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "61059239f88552f16f9d7a060df473ece2823aa17ace10d58ed958e53e278333"
+    },
+    "benchmarks/basalt/m11_max_output_compare.py": {
+      "kind": "parity_checker",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "58d7c10281b88921c5d0d5336892d8f6a4acff7456f250604dde191497e012c6"
+    },
+    "benchmarks/basalt/native_images_cereal_decoder.py": {
+      "kind": "diagnostic_tool",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "87c3e27ba459106241c4f7ddab5fe787e24ca966de564ef4e25122a9166da005"
+    },
+    "benchmarks/basalt/native_schema4_bridge.py": {
+      "kind": "diagnostic_tool",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "a3365e804bd008722ff604ac24719c9865220646c4550bc8d6d3ca758fba4930"
+    },
+    "benchmarks/basalt/refresh_release_provenance.py": {
+      "kind": "diagnostic_tool",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "386685f495feab5998272af38a45bb9ae59950fab679f36054c1da0f48f89082"
+    },
+    "benchmarks/basalt/rust_wsl_runner.py": {
+      "kind": "performance_adapter",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "b6008dfba5085c7157d064d81b2273c618d9a575c261530c18899de8b7ff234c"
+    },
+    "benchmarks/basalt/test_m11_max_output_compare.py": {
+      "kind": "contract_test",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "85ca4732a2b544d3343e0135aa5827016367943fb9b8e8d652697d0389ed68c0"
+    },
+    "benchmarks/basalt/test_phase6_formal_contract.py": {
+      "kind": "contract_test",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "10265af9a5d12dd80730536f77e3a18467359ad02993eefe81940f949ffe3a96"
+    },
+    "benchmarks/basalt/test_provenance_v2.py": {
+      "kind": "contract_test",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "4cdbc7efa1bf5416e4de3613c1410b6f5123788a24054c1e33abc5fd3813ec38"
+    },
+    "benchmarks/basalt/test_selected_license_payload.py": {
+      "kind": "contract_test",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "9d6565376891555811aa2fb60561037140b45e8673682d3f41070d97b6f9e29c"
+    },
+    "benchmarks/basalt/test_selected_license_report.py": {
+      "kind": "contract_test",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "4972eb29f184c7de678aeeb0dbc271c95db75c37d48057032fe95e11a7d92bb0"
+    },
+    "benchmarks/basalt/test_supplemental_source_dependencies.py": {
+      "kind": "contract_test",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "27b2a1ff60064492f7cfebbb2b6fdc837e25b0a6c56500afd9c11267cea17a41"
+    },
+    "benchmarks/basalt/verify_supplemental_source_dependencies.py": {
+      "kind": "provenance_checker",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "193933ac5b8ac9844dadf56b3e88fda21a2693feb8394df9517733e0d4c65fe9"
+    },
+    "pipelines/basalt/examples/export_rust_imu_golden.rs": {
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "1421f0dc99f36da246d56fcc08bf3b9721e3ae17e5c2821bf7513e07195e1154"
+    },
+    "pipelines/basalt/examples/m7aq_rust_imu_audit.rs": {
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "447e28b0ca137357a4ceffcbb429fa1a1f3c2e5bffb354d144042c1c36b659a8"
+    },
+    "pipelines/basalt/examples/m7bw_se2_exp_probe.rs": {
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "d3ce344c42fa63fea382f43c0f3f7a5a4c96811eee633034def82d2acd414ca9"
+    },
+    "pipelines/basalt/examples/m7bw_temporal_probe.rs": {
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "8bbf8e61efc36352be877db343a793ae6eb987deabbff55250f24ac09e1b1b7d"
+    },
+    "pipelines/basalt/examples/m7ca_se2_exp_probe.rs": {
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "9ea431314c6c7c6170bd3b438d5917438685bb3eaae1866f93a0cdd65b8f4909"
+    },
+    "pipelines/basalt/examples/m7im15_imu_whitening_rust.rs": {
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "f537886d3ae1831ef8ebead67e5b716de48df87ee6ef9f757d5e564f93223622"
+    },
+    "pipelines/basalt/examples/m7im15_rust_fej_rotation_trace.rs": {
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "c8f662751603f23a9d43004b903db412f0d390c16cc50eb994e5013a67b5a844"
+    },
+    "pipelines/basalt/examples/m7im_rust_ldlt_probe.rs": {
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "8e5c9447c25d0382a2ce8e549993269740dcf213bdfd24267743eb944f7abd72"
+    },
+    "pipelines/basalt/examples/m8e_rust_fixture.rs": {
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "48f53d5daf48a71cca849186300ce5c495c3b879caf9d3d7d31c8d2334e54124"
+    },
+    "pipelines/basalt/examples/stereo_diag.rs": {
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "c2e6cac2b62871cc37f30b9960c415eed0f6f909f21410a79aa2292d3959c8a6"
+    },
+    "benchmarks/basalt/generate_rust_wsl_exactness.py": {
+      "kind": "manifest_generator",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "3939f73c3f6766110d21d62a3ec1bc6b3e4c1f7cd3a4333f9098a8db033a2039"
+    },
+    "benchmarks/basalt/test_generate_rust_wsl_exactness.py": {
+      "kind": "contract_test",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "25404b4773a2fb8eb713bbd99ad19ecf34d5a5443ea4140def0ba6d159edb242"
+    },
+    "benchmarks/basalt/compare_absqr_dense_pipeline.py": {
+      "kind": "parity_checker",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "sha256": "6f67e8e41cbc5bd1d8a98620ae27b34344776a319de6efc799a2b99ade4e7c19"
+    }
+  },
+  "retained_audit_sources": {
+    "target/m7_householder_probe.cpp": {
+      "sha256": "e9fe363080c081f43cdeae03d3a1715055e1c4a7eaf6d71b6ce61c7be65ac533",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ],
+      "retention": "requested_audit_artifact"
+    },
+    "target/m7_q2_gemm_probe.cpp": {
+      "sha256": "8e75f8b381b80417c4cf7557055f95951bf874e86ccc9a4fd2df10e11c49befe",
+      "kind": "diagnostic_probe",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt",
+        "eigen"
+      ],
+      "retention": "requested_audit_artifact"
+    },
+    "benchmarks/basalt/schemas/clonefree_perf_result_v1.schema.json": {
+      "sha256": "449bb9259a3ecb3005c922c8eff558b36ccad1fd1c6d558643d1f50343848dd0",
+      "kind": "performance_result_schema",
+      "copied_upstream_source": false,
+      "upstream_refs": [
+        "basalt"
+      ],
+      "retention": "release_contract_schema"
+    }
+  },
+  "m7im_verification": {
+    "captured_at": "2026-08-24",
+    "report": "benchmarks/basalt/m7im_cov_ldlt_report.md",
+    "comparison_report": {
+      "path": "target/m7im_cov_ldlt_comparison_rust_run3.json",
+      "sha256": "a8bfb6951459f5f3634be2f1eb5279dfd1211f76c6127a7f7b5e53ee497bff4a",
+      "legacy_field_note": "The legacy comparator widens raw_residual; covariance and sqrt acceptance is taken from the run8/run3 captures below."
+    },
+    "acceptance": {
+      "run8_production_covariance_mismatches": "0/810",
+      "run8_observer_term1_mismatches": "6/810",
+      "run8_observer_term2_mismatches": "0/810",
+      "run8_observer_term3_mismatches": "0/810",
+      "run3_packet_whitener_mismatches": "0/810",
+      "run3_frame4_whitener_mismatches": "0/81",
+      "release_lib_tests": "193 passed, 0 failed, 1 ignored"
+    },
+    "schedule": {
+      "covariance": "Eigen aliased general GEMM chain with packet body, scalar ninth-row tail, and separate packet-compatible assignment += schedule",
+      "ldlt": "Pivoted lower LDLT with packet FMA A21 update and Eigen panel-order forward solve",
+      "sqrt": "Promoted double sqrt/division cast back to f32 at D^-1/2 boundary"
+    },
+    "artifacts": {
+      "target/m7hd_cov_current_run8.stdout": "08d4ef9b52a585a67abe4b971659be7d14b5bc98a8433b177db69e100ac24ca8",
+      "target/m7hd_cov_current_run8.stderr": "cc9d47787216ef018d8282760401015095c46d4804b67822d0e3865ba85d7286",
+      "target/m7im_rust_ldlt_run3.json": "e1f8862c993759de7ee4fcb948c21c6c9e542064bcebfc535a4eb1f393d8996e",
+      "target/m7im_rust_ldlt_run3.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "target/m7im_rust_ldlt_run3.stderr": "57bcb4b7ce902c1d65d8dedc49411abd777b1e008e0a635f88d3a04f309b49fb",
+      "target/m7im_rust_ldlt_probe_run2.stdout": "32325a40bc235750e7d4db37a06626ab221e57976fddf345530cc4c44089a2db",
+      "pipelines/basalt/src/imu/factors.rs": "448043412ea03c9ab3b283c100cf6828d61a71cec358ab9bd667fd1890785b13",
+      "pipelines/basalt/examples/m7im_rust_ldlt_probe.rs": "8e5c9447c25d0382a2ce8e549993269740dcf213bdfd24267743eb944f7abd72",
+      "target/release/examples/basalt_euroc_vio_demo": "7b22d2b26080c410e5182da4753bae31796a0919e6f289445a3ef56c51bd658c"
+    },
+    "semantic_v12_replay": {
+      "status": "semantic_15_row_pending_packet_schedule",
+      "source_snapshot": {
+        "pipelines/basalt/src/vio/aom.rs": "8f7eb952b5806d8e8177a3721662432f777ad9f66acd4278179a1823ae5f365e",
+        "pipelines/basalt/src/vio/window.rs": "4a82b118572ea6aee728c1c1d42924069b910e1469d14d772a9ce751457edb8e"
+      },
+      "elf": {
+        "path": "target/release/examples/basalt_euroc_vio_demo",
+        "sha256": "a516f867561746d28e52f2d197f5b5c6fd9aea639fb3b5fec82bb6bb86c506b7",
+        "size_bytes": 2516384
+      },
+      "factor_local_gate": {
+        "comparison_path": "target/m7im_cov_ldlt_comparison_rowprod_skylake20260824.json",
+        "comparison_sha256": "88e480a6256f6b57cffa106ab2f7cbc30435efe47f4a9cf524789df34e95cc59",
+        "rust_factor_path": "target/m7aq_rust_imu_audit_release_rowprod_skylake20260824.json",
+        "rust_factor_sha256": "90359855c991d0fdf11ddfa794ad97384657b485b860df7f624d539ae319627d",
+        "frame3_to_frame4": "covariance, sqrt-information, raw residual, Jacobian, W*r, W*J, J^T J, and J^T r all 0 mismatches"
+      },
+      "runs": {
+        "5": {
+          "trace_path": "target/m7he_imu15_semantic_v12_5/trace.jsonl",
+          "trace_sha256": "277dabca0881c9bfb853f0380987a547374615fc3298e17636cf346dbedc22d9",
+          "comparison_path": "target/m7he_lm_branch_compare_imu15_semantic_v12_5.json",
+          "comparison_sha256": "8c3725bca996eeb66b2bf6e1ecd764be8bfb8bce7a3f31468478a61462be9a96",
+          "runtime_seconds": 0.94,
+          "peak_rss_kb": 23152,
+          "branch_equal_frames": 1,
+          "branch_divergent_frames": 0,
+          "lambda_display_mismatch_trials": 0
+        },
+        "80": {
+          "trace_path": "target/m7he_imu15_semantic_v12_80/trace.jsonl",
+          "trace_sha256": "b20b2801c27441c23cc9759a94689b7f85bc08f9c46614017bcc71060857ca15",
+          "comparison_path": "target/m7he_lm_branch_compare_imu15_semantic_v12_80.json",
+          "comparison_sha256": "1d776fe89b6e58ee3fa42df362344ff5be1c63bc68806341cec1cc4338deda01",
+          "runtime_seconds": 43.64,
+          "peak_rss_kb": 90248,
+          "branch_equal_frames": 11,
+          "branch_divergent_frames": 65,
+          "lambda_display_mismatch_trials": 12,
+          "first_divergence": "frame 8 / iteration 4: native R, Rust A"
+        }
+      }
+    }
+  },
+  "current_metadata": {
+    "current_golden_registry": {
+      "path": "benchmarks/basalt/m11_current_golden_registry_20260830.json",
+      "bytes": 14632,
+      "sha256": "fca72289ae4df42c2ba03900498ed5dcd13fa16421c9b564febe79ca015503ec",
+      "status": "current_direct_pack_registry",
+      "historical_m1_m7_records_immutable": true
+    },
+    "cargo_license_inventory": {
+      "path": "benchmarks/basalt/cargo_license_inventory_v1.json",
+      "bytes": 32441,
+      "sha256": "e44bf59a68b1f70a847716a102eae3bbabb355f093e111e86dd272d6ba60e42a",
+      "status": "lockfile_and_local_registry_metadata_inventory",
+      "unresolved_packages_require_legal_review": true
+    }
+  },
+  "release": {
+    "manifest_path": "benchmarks/basalt/basalt_release_manifest_v1.json",
+    "notice_files": [
+      "pipelines/basalt/NOTICE",
+      "benchmarks/basalt/NOTICE"
+    ],
+    "ground_truth_artifacts": [],
+    "ground_truth_firewall": {
+      "estimator_input_contains_ground_truth": false,
+      "release_artifacts_contain_ground_truth": false,
+      "evaluation_is_post_run_only": true,
+      "forbidden_artifact_path_fragments": [
+        "state_groundtruth",
+        "groundtruth",
+        "ground_truth",
+        "/target/",
+        "\\target\\",
+        "marg_data"
+      ]
+    },
+    "legal_uncertainty": "This is a provenance record, not legal advice. The manifest records source licenses and notice handling for the audited paths; a release owner should obtain legal review for any binary bundling, transitive vcpkg package, or future source copy."
+  }
+}

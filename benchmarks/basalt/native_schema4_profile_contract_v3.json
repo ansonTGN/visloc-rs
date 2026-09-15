@@ -1,0 +1,72 @@
+{
+  "schema": "visloc.m11.native_schema4.profile_contract.v3",
+  "schema_version": 3,
+  "description": "Same-event native extension contract for constructing a checked Rust schema-4 MargData record, including explicitly proven deletion-only native KF transitions.",
+  "native_cereal": {
+    "exact_fields": [
+      "aom",
+      "abs_H",
+      "abs_b",
+      "frame_poses",
+      "frame_states",
+      "kfs_all",
+      "kfs_to_marg",
+      "use_imu"
+    ],
+    "raw_sidecars": [
+      "Q2_FINAL (tag 3)",
+      "PRIOR_INPUT (tag 15)",
+      "AOM_PRE (tag 1)",
+      "PARTITION (tag 5)",
+      "source-owner row/factor metadata"
+    ],
+    "native_absent": [
+      "Rust PriorData.fej_point",
+      "Rust four-way row_counts and source-to-Rust row permutation",
+      "Rust kf_to_marg destination/reanchor relation when native performs deletion-only host removal"
+    ]
+  },
+  "rust_extension_capture": {
+    "schema": "basalt.native.schema4.rust_extension_capture.v3",
+    "required_bindings": [
+      "same run_uuid/event ordinal/event state timestamp/packet filename+SHA",
+      "exact timestamp-to-frame-ID map SHA",
+      "same native executable and library SHA",
+      "Q2_FINAL section tag/shape/layout/scalar/payload SHA",
+      "prior section tag/shape/layout/scalar/payload SHA",
+      "prior order with event-bound native order SHA, frame IDs, and explicit pose/state/state_pose block kinds",
+      "PriorData.fej_point f32 values plus every raw f32 bit word, either from a same-event native internal capture or a deterministically recomputed native frame-state-map projection whose source-map SHA is bound",
+      "four canonical row segments [prior, visual, imu, bias] with source and target starts",
+      "one explicit destination timestamp/frame for every selected source KF, or an explicit native_absent deletion-only proof with no fabricated pair"
+    ],
+    "no_synthesis_rule": "Zero-fill, guessed row splits, or guessed reanchor destinations are invalid. A FEJ projection is accepted only when the exact same-event native frame-state maps, chart, order, and source-map SHA are present and independently recomputed by the validator. A deletion-only native transition is represented by status native_absent, empty pairs, source timestamps, operation remove_selected_hosts_and_observations, and a hash-bound full-event proof.",
+    "row_order": {
+      "native_companion": "visual, imu, damping, prior",
+      "rust_margdata": "prior, visual, imu, bias",
+      "required_operation": "apply the captured source-to-target permutation to Q2 rows while preserving column-major f32 values"
+    },
+    "prior_mapping": {
+      "chart": "Basalt left-local UpstreamF32 wire chart",
+      "pose": "translation xyz followed by quaternion xyz tangent lanes; quaternion w remains in frame sidecar",
+      "state_pose": "the first six pose lanes of a fifteen-DoF state block, resolved through frame_states and never coerced to a full state",
+      "state": "pose six lanes followed by velocity, gyro bias, accel bias",
+      "oracle": "prefer direct same-event PriorData.fej_point capture; when native cereal has no PriorData field, require the bound native frame-state-map projection and raw f32 bits to be recomputed exactly by the validator"
+    },
+    "schema4_representability": {
+      "rule": "A six-DoF prior block must resolve to either frame_poses (pose) or frame_states (state_pose); a fifteen-DoF block must resolve to frame_states (state). state_pose always consumes the first six lanes of the matching fifteen-DoF state block and does not synthesize a pose table.",
+      "event0_observation": "The pinned post-shift prior has a six-DoF block at the timestamp mapped to frame 49, while frame 49 exists only in frame_states as a fifteen-DoF state; it is therefore encoded explicitly as state_pose.",
+      "required_action": "Carry the explicit state_pose kind through the Rust wire and mapper/window prior mapping; reject missing, table-mismatched, or dimension-mismatched kinds."
+    }
+  },
+  "acceptance": {
+    "adapter": "native_schema4_bridge.py --strict-rust-schema4 --rust-schema4-output",
+    "rust_boundary": "MargData::from_json_checked before mapper mutation",
+    "mapper_boundary": "load_margdata_directory validation and write_mapper_packet_json only after checked deserialization",
+    "round_trip": "canonical JSON parse/serialize exact; Rust checked deserialize and mapper replay are separate required oracles",
+    "current_fixture": {
+      "status": "RUST_SCHEMA4_READY_WITH_NATIVE_ABSENT_TRANSITION",
+      "reason": "same-event extension binds Q2/prior matrices, FEJ frame-state projection, row permutation, explicit state_pose mapping for native frame 49, and a deletion-only native transition with no fabricated destination"
+    }
+  },
+  "numeric_scope": "Converter/validation only; no estimator arithmetic, FEJ update, AOM factor order, or mapper lifecycle change."
+}

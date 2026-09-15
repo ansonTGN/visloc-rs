@@ -1,0 +1,54 @@
+{
+  "schema": "visloc.m11.mapper_colpiv_fullv_parity.v1",
+  "status": "PASS_EXACT_MATCH_GRAPH",
+  "captured_at": "2026-09-14",
+  "upstream_commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+  "finding": "OpenGV draws eight SAC correspondences but passes only the first five to fivept_stewenius; the remaining three disambiguate the decomposed poses. Eigen's dynamic 5x9 JacobiSVD scales Q before its default ColPivHouseholderQR preconditioner. V.rightCols(4) are the trailing four columns of that full QR Q and are not touched by the subsequent 5x5 Jacobi sweeps.",
+  "implementation": {
+    "source": "pipelines/basalt/src/mapper/features.rs",
+    "source_sha256": "D6F0C19266C163C509EE6F87CBFB7257AA9B110D1249FA58AAE847E60BC923A1",
+    "changes": [
+      "replace Q^TQ symmetric-eigen nullspace approximation with scaled Eigen-order ColPivHouseholderQR full-Q trailing columns",
+      "emit composeA cubic constraints in upstream Eigen column-major coefficient order"
+    ]
+  },
+  "native_stage_oracle": {
+    "path": "E:\\visloc-rs-runs\\basalt_goal_mapper_identity_20260913\\native_mapper_seed7_oracle_20260914\\native_target_ransac_seed7.json",
+    "sha256": "C5EF39DE28D1F0586C23F5EF675B2E98D0C5EDBB45D00FA94A9B7C8F0AD89EDB",
+    "q_rows": 5,
+    "qr_matrix_max_abs_error": 1.7763568394002505e-15,
+    "householder_max_abs_error": 6.661338147750939e-16,
+    "full_q_max_abs_error": 2.7755575615628914e-15,
+    "full_v_last4_max_abs_error": 2.7755575615628914e-15
+  },
+  "real_packet_e2e": {
+    "input": "E:\\visloc-rs-runs\\basalt_goal_native_companion_frame51_20260913\\capture52_retry3\\native_projected_schema4_retry6.json",
+    "rust_output": "E:\\visloc-rs-runs\\basalt_goal_mapper_identity_20260913\\rust_first5_colpiv_fullv_candidate_20260914",
+    "rust_executable_sha256": "1458D7FE382514DC2F0834FDDE6CB15BC498EBF6EDDC9C817D9C90FB832B045A",
+    "native_matches_sha256": "DA1C7ABCC4AE54D9469D119A8E0E9FBB6E682A28BA63287C60CE4CE35F37D00F",
+    "rust_matches_sha256": "CEC6CF3E4C130D0D48D13CBA156B245BBC81E2496A830993FED319AD8B75D3C0",
+    "seed": 7,
+    "pairs": 120,
+    "raw_matches_native": 15299,
+    "raw_matches_rust": 15299,
+    "inliers_native": 14139,
+    "inliers_rust": 14139,
+    "pair_inlier_set_mismatches": 0,
+    "tracks_native": 397,
+    "tracks_rust": 397,
+    "landmarks_native": 382,
+    "landmarks_rust": 382,
+    "observations_native": 3583,
+    "observations_rust": 3583,
+    "trajectory_sha256_unchanged_from_prior_validated_rust": true,
+    "points_sha256_unchanged_from_prior_validated_rust": true,
+    "all_points_within_1mm_of_native": true
+  },
+  "validation": {
+    "native_oracle_test": "1 passed, 0 failed",
+    "mapper_feature_tests": "3 passed, 0 failed, 2 ignored",
+    "release_build": "PASS",
+    "real_packet_run": "PASS",
+    "full_lib_suite": "372 passed, 2 unrelated estimator failures, 59 ignored; mapper feature scope has zero failures"
+  }
+}

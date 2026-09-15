@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "schema_id": "visloc-rs.basalt.current-golden.v1",
+  "manifest_id": "basalt-current-golden-registry-20260830",
+  "generated_at": "2026-08-30",
+  "status": "current_direct_pack_registry",
+  "claim_policy": {
+    "source_basis": "Exact working-tree bytes, SHA-256, sorted POSIX relative paths; working tree was dirty at capture",
+    "historical_immutable": true,
+    "current_registry_does_not_relabel_m1_or_m7": true,
+    "dense_abs_h_b_numeric_claim": false
+  },
+  "source_binding": {
+    "root": "pipelines/basalt/src",
+    "file_count": 33,
+    "canonical_record": "relative POSIX path|lowercase SHA256, newline-joined and sorted",
+    "source_tree_sha256": "81d3b212056e6adb131aa328919c84b02a5f49721c6d50737b116178a9b0bfd5",
+    "files": [
+      {
+        "path": "pipelines/basalt/src/adapter.rs",
+        "bytes": 13188,
+        "sha256": "b3261499b12213db7f03d480ba69cba9d0faafcf5ef9080a34c729384d319e2c"
+      },
+      {
+        "path": "pipelines/basalt/src/calibration.rs",
+        "bytes": 10719,
+        "sha256": "80aeddbda130764f8abe1624fa6f46e7f8c1834c166e5d61ccdffcafd75951e9"
+      },
+      {
+        "path": "pipelines/basalt/src/camera.rs",
+        "bytes": 13288,
+        "sha256": "e04af476c09f33fc499d2987a3505017c7b96f941bc2bc2c609bfd48fd754eba"
+      },
+      {
+        "path": "pipelines/basalt/src/config.rs",
+        "bytes": 7564,
+        "sha256": "3fd39df6ce50bdc935d8e4744031bc67d2aa0ad57faf2c87e81b179c6dcee037"
+      },
+      {
+        "path": "pipelines/basalt/src/euroc.rs",
+        "bytes": 17749,
+        "sha256": "38e748e75a72ab34644c24f11306226dc2bd1e0bdc5cbe9c1109aaf9c1c91162"
+      },
+      {
+        "path": "pipelines/basalt/src/fast.rs",
+        "bytes": 19170,
+        "sha256": "2255c1fc81fdb025cdd289f7edc98157c97ec1cf4012ffa8a2594d211c25d085"
+      },
+      {
+        "path": "pipelines/basalt/src/imu/factors.rs",
+        "bytes": 129360,
+        "sha256": "b53604638fe0dcc68c5500cd7b7cdde306258ba787438e42c6898a14c857d95f"
+      },
+      {
+        "path": "pipelines/basalt/src/imu/mod.rs",
+        "bytes": 1081,
+        "sha256": "6de279bb0774e5e58b09c3283cdc7ee0bed7fe73158e701a26d7f41b2c5e8680"
+      },
+      {
+        "path": "pipelines/basalt/src/imu/preintegration.rs",
+        "bytes": 18789,
+        "sha256": "563099ea23a2f63d13ac66138bf6e5b07c0bab098aa14224023479d72bf6e9f7"
+      },
+      {
+        "path": "pipelines/basalt/src/imu/sampling.rs",
+        "bytes": 3020,
+        "sha256": "87d89f0ee1e07518951e35e7edc19f5ffe1b069e5c5a46a61493819021597c87"
+      },
+      {
+        "path": "pipelines/basalt/src/initialization.rs",
+        "bytes": 6169,
+        "sha256": "cb76498fe1ade7e8788b6870ebb2faeec02fdc7f817b6ec38352c0de6d4eb1c3"
+      },
+      {
+        "path": "pipelines/basalt/src/lib.rs",
+        "bytes": 2351,
+        "sha256": "2ee7de94a3de7644ff840f0ab8c13fb9b633993688d7af829650115a7b83a42e"
+      },
+      {
+        "path": "pipelines/basalt/src/mapper/features.rs",
+        "bytes": 95616,
+        "sha256": "e74dc6e395336aca9a975ffc0ba63b070af12d2c24b8d723e935ba97b830f60a"
+      },
+      {
+        "path": "pipelines/basalt/src/mapper/mod.rs",
+        "bytes": 136245,
+        "sha256": "dd7b38c46bb829692c76c7abd17b1eceb66d102453fb820f7794bbe36901f181"
+      },
+      {
+        "path": "pipelines/basalt/src/mapper/session.rs",
+        "bytes": 86477,
+        "sha256": "247401d17669c63459de727a9ea5c10578025681c3235f9e1823414cc655102d"
+      },
+      {
+        "path": "pipelines/basalt/src/mapper/triangulation.rs",
+        "bytes": 31624,
+        "sha256": "97f95b52ba4e1e8cd1b763b206d6da8179c3ddb7e5ef9d84c96e343f2f7c0aec"
+      },
+      {
+        "path": "pipelines/basalt/src/patch.rs",
+        "bytes": 31758,
+        "sha256": "881b7a78c6a215536b235c82c6bf7ef158e737250f7bc2597b467206e71e19b2"
+      },
+      {
+        "path": "pipelines/basalt/src/pattern.rs",
+        "bytes": 2029,
+        "sha256": "e0bea281b6a62266441d1a6633b5b014c1d382dda81f5bd0e1b323b472fe812d"
+      },
+      {
+        "path": "pipelines/basalt/src/provenance.rs",
+        "bytes": 1349,
+        "sha256": "f52ab64c1f398612862d03db2d557fa390108a2656814bce6acb664f1979e7bb"
+      },
+      {
+        "path": "pipelines/basalt/src/pyramid.rs",
+        "bytes": 9722,
+        "sha256": "eddbcb22d2a73a07495a9ff9a3c9f581b14683f816fce88d5917dda7e7a4b2e2"
+      },
+      {
+        "path": "pipelines/basalt/src/stream.rs",
+        "bytes": 26320,
+        "sha256": "af9cee372b397eff8e0d792a9a025c6273bbd1292e677214af823e388befde66"
+      },
+      {
+        "path": "pipelines/basalt/src/streaming.rs",
+        "bytes": 7086,
+        "sha256": "f059bd245b393847e83453e8a02742d91f27e00c4b8bb8a3834615184d0c0106"
+      },
+      {
+        "path": "pipelines/basalt/src/time.rs",
+        "bytes": 5774,
+        "sha256": "3a11d726721a57eb7b16564cebe68dfb0ebe9b7286ed47ffec84cb7ee2ac035a"
+      },
+      {
+        "path": "pipelines/basalt/src/timing.rs",
+        "bytes": 23744,
+        "sha256": "00136d2592f9b1c1a8b025a8da0938fbb92a25a5bda04b4d4aecaf15cc0b905d"
+      },
+      {
+        "path": "pipelines/basalt/src/types.rs",
+        "bytes": 3201,
+        "sha256": "674501a2997502dea838ce9aaf5dd141bfb98d5d7621b95fa387a94f92ada137"
+      },
+      {
+        "path": "pipelines/basalt/src/update.rs",
+        "bytes": 11853,
+        "sha256": "00a9d573fddf52cf159cbceccab15dcc1a25198b75bf41e09a3e942e2ba61378"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/aom.rs",
+        "bytes": 620086,
+        "sha256": "ed81107813a9661198e954be1ff1a6a70e72ab8d5e128778bda66539e7d0ab34"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/estimator.rs",
+        "bytes": 196215,
+        "sha256": "9d01169e5ff5a616c5a9787b375d688c1d3e729b2087c2557ac9955f7c6edca3"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/landmarks.rs",
+        "bytes": 83038,
+        "sha256": "5eab7c4749ab92bdec249cf5e9a354cfabd66cfafbc2b328b1cd4d1fa765c831"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/margdata.rs",
+        "bytes": 52986,
+        "sha256": "060f18dc1f81ac0a3603e41340647e41c25a4ec7a5a5e007e0e1c3701aaa1274"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/mod.rs",
+        "bytes": 387,
+        "sha256": "032f39f9977ce483a468bae63f4acd88c3ce4c485bdc12928e2917e8664c5742"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/scalar.rs",
+        "bytes": 839,
+        "sha256": "fd88e98c2e7b18e65c03dad2463aab423d44919f68754ee9a1d7f6ccea20a199"
+      },
+      {
+        "path": "pipelines/basalt/src/vio/window.rs",
+        "bytes": 423208,
+        "sha256": "7532712ade077732f15156904de3022a66cf85b96dc3baa9baeaf3316acb7123"
+      }
+    ],
+    "cargo_toml": {
+      "path": "Cargo.toml",
+      "sha256": "7ceebc6a607a6bcd949c91023fcb5c5d4fc2d1b47c963235942160453bc03966"
+    },
+    "cargo_lock": {
+      "path": "Cargo.lock",
+      "sha256": "bc06922e3b6cf36766c292514a7a7681af322dfaa50ac14d40e915d48760ea35"
+    }
+  },
+  "promoted_build": {
+    "target_dir": "target/m10_landmark_direct_pack_ms_20260829",
+    "executable": "target/m10_landmark_direct_pack_ms_20260829/release/examples/basalt_euroc_vio_demo.exe",
+    "bytes": 2987008,
+    "sha256": "f8d55647dce428a39139282da7af4ed0ddd24823a78d2c1fbb226969816fc151",
+    "build_evidence": {
+      "path": "work/m10_landmark_direct_pack_production_20260829.json",
+      "sha256": "64f9f335f7ee8b38f250081464272d00c3eeae183b52654867d6b63f1cd84463"
+    },
+    "command": "CARGO_TARGET_DIR=target/m10_landmark_direct_pack_ms_20260829 cargo build --locked --release --manifest-path Cargo.toml --example basalt_euroc_vio_demo",
+    "source_binding_status": "binary timestamp follows current aom/estimator/window/timing source snapshot; source_tree_sha256 is authoritative"
+  },
+  "inputs": {
+    "sequence": "MH_01_easy",
+    "performance_sensor_root": "E:/datasets/euroc_mav/machine_hall/MH_01_easy",
+    "lifecycle_sensor_root": "E:/datasets/euroc_mav/all11/MH_01_easy",
+    "calibration": {
+      "path": "target/euroc_ds_calib.json",
+      "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c"
+    },
+    "config": {
+      "path": "configs/basalt/euroc_config.json",
+      "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+    },
+    "protocol": {
+      "path": "benchmarks/basalt/protocols/basalt_euroc_parity_v1.json",
+      "sha256": "7957f102ffa47a67c3509cdf77942d599e7b0f5f5f2bf452987f87a55df246e5"
+    },
+    "dataset_manifest": {
+      "path": "benchmarks/basalt/euroc_dataset_manifest.json",
+      "sha256": "a803db9e01f7a39f587cb9f87fd8601c8800455135ae7a2dc67f9e108003dd26"
+    },
+    "sequence_manifest_sha256": "7edae0ebf886dac64fe15044eb5df72276565970a406cf9538655228bb292099",
+    "sequence_archive_sha256": "5f4ecbc563e7bf04950efab76fc3b14e126d4c91a1dd1134c33124fe18a4bfc6"
+  },
+  "evidence": {
+    "direct_pack": {
+      "artifact": "work/m10_landmark_direct_pack_production_20260829.json",
+      "artifact_sha256": "64f9f335f7ee8b38f250081464272d00c3eeae183b52654867d6b63f1cd84463",
+      "final_review": {
+        "path": "work/m10_landmark_direct_pack_final_review_20260829.json",
+        "sha256": "6725f1b8e74509643c9f95d2d82b1f63725bb961aba9d92dbe4d4461222a6143",
+        "verdict": "GO_WITH_P1_HARDENING"
+      },
+      "max52_lean": {
+        "status": "PASS",
+        "frames": 52,
+        "observations": 14661,
+        "imu_samples": 512,
+        "run_result": "work/m10_landmark_direct_pack_ms_20260829_run52_runner.json",
+        "run_result_sha256": "ab79026622c705f8503198768125040c5792cf748afffe9affc02e86f81a470f",
+        "run_manifest_sha256": "193b16126c905c3f2f865f7dbb8764217861d92f49bf523a0ae1b0436b40c821",
+        "trajectory_csv_sha256": "5f389d899682b34f296af4b59b8bcea2080fbd5e71d86265a8ce0ac849fdf4ea",
+        "trajectory_tum_sha256": "41a21ba235abac75875f403074efd31f1509e5d91453e04fa3257a796dc150ef",
+        "baseline_byte_exact": true
+      },
+      "max80_timing_on": {
+        "status": "PASS",
+        "frames": 80,
+        "observations": 24256,
+        "imu_samples": 792,
+        "run_result": "work/m10_landmark_direct_pack_ms_20260829_run80_timing.json",
+        "run_result_sha256": "2f46f0e02d36453edba31627a148bea6d81f5a852fd8b02f7829eec2dc3af1c6",
+        "run_manifest_sha256": "5dbc4aa0c6b02f92b3fefe6006488076d6b89059c377347c001562d12ddd06e0",
+        "timing_sidecar_sha256": "4a9d1cfea201fe1c17d86903c320f4279465ef9feaba5d77e65729c633c48625",
+        "trajectory_csv_sha256": "9b8838bb856404c2b0b54018c25bfbf2942c29e6d1ed2772e7d4f82a570adec3",
+        "trajectory_tum_sha256": "2dccbb00fc5a55f27c9e059492d047e8cca07bd7b5ba32c9cd8329c0678724e9",
+        "baseline_byte_exact": true
+      },
+      "max400_full_lifecycle": {
+        "status": "PASS",
+        "frames": 400,
+        "observations": 106981,
+        "imu_samples": 3992,
+        "marg_packets": 50,
+        "trace_sha256": "affc105cfbcb8adb367142d8cf088eb5aa74bcc101a9202b377a2fd5ffb21e9a",
+        "trajectory_csv_sha256": "0838eb33ca8947be6e7e9a66251002d8ec46e10e76bb22155cb7c1b1aa206ffc",
+        "trajectory_tum_sha256": "363ac4a76d6c73d1e48f96dcf22d632960463f3fcbf6cfbb64d31938c48d919",
+        "lifecycle": {
+          "path": "work/m10_landmark_direct_pack_ms_20260829_lifecycle.json",
+          "sha256": "b4eba02b750b361590161ae4aff5b3aa3ff21e70584bc8723ab219b0008ecfaf",
+          "native_packets": 50,
+          "rust_packets": 50,
+          "all_events_exact": true,
+          "exact_field_counts": {
+            "newest_state_timestamp_ns": 50,
+            "pose_timestamp_set": 50,
+            "state_timestamp_set": 50,
+            "pose_frame_ids": 50,
+            "state_frame_ids": 50,
+            "kfs_all": 50,
+            "kfs_to_marg": 50,
+            "aom_identity_order": 50,
+            "aom_timestamp_order": 50,
+            "aom_shape": 50,
+            "abs_h_shape": 50,
+            "abs_b_length": 50,
+            "use_imu": 50
+          },
+          "native_source_commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+          "dense_abs_h_b_numeric_values_available": false
+        },
+        "baseline_trajectory_byte_exact": true
+      }
+    },
+    "q2_reference": {
+      "artifact": "work/m10_q2_model_reuse_production_20260829.json",
+      "artifact_sha256": "9b44195b1161b01636c847a1d6e18636ca7439d9594d3618726cb443376f2e6c",
+      "status": "PASS_historical_reference",
+      "executable": "target/m10_q2_model_reuse_production_final_ms_20260829/release/examples/basalt_euroc_vio_demo.exe",
+      "executable_sha256": "39e78e97e1fb5a8b4967b74b37e1367a64b1fbf9d121dbdb9831f116658d8b6f",
+      "max80_trajectory_exact": true,
+      "timing_off_ab": true,
+      "source_binding_caveat": {
+        "artifact_aom_sha256": "c60bfd11bd93471ca3cc886041decdb8f9ed275906b94e581b11885f388bc1f6",
+        "current_aom_sha256": "ed81107813a9661198e954be1ff1a6a70e72ab8d5e128778bda66539e7d0ab34",
+        "interpretation": "Q2 result is retained comparator evidence; it is not a current-source binding for direct-pack."
+      },
+      "final_run52": {
+        "path": "work/m10_q2_model_reuse_production_final_run52.json",
+        "sha256": "bab893775e491006813766c31ac2437295e8444932c9bc558491a1f982811e72",
+        "trajectory_exact": true
+      },
+      "final_lifecycle": {
+        "path": "work/m10_q2_model_reuse_production_final_lifecycle_20260829.json",
+        "sha256": "4e7b45c3306f723e24c1483d7e104ea490b9cf2554d5594c89bf05989ab5dde3",
+        "packets": 50,
+        "all_events_exact": true
+      }
+    },
+    "interpretation": {
+      "source_currentity": "Direct-pack production artifact and promoted EXE are the current binding; Q2 artifacts are historical comparator evidence.",
+      "lifecycle_scope": "Current 400-frame evidence proves metadata/dimension/lifecycle exactness against the native bridge.",
+      "dense_abs_h_b": "No dense native abs_H/abs_b lane values were exported by the bridge; this registry makes no numeric H/b claim."
+    }
+  },
+  "historical_immutable": {
+    "upstream_manifest_records": [
+      "m1_400f",
+      "m1_trace_400f",
+      "m1_imu_trace",
+      "m1_imu_golden_frame1_2"
+    ],
+    "provenance_manifest_records": [
+      "m7im_verification"
+    ],
+    "policy": "Never rewrite historical source/binary/golden hashes to current working-tree values"
+  },
+  "registry_artifact_policy": {
+    "source_change_requires_new_registry": true,
+    "current_registry_file_is_release_artifact": true,
+    "referenced_target_and_work_outputs_are_evidence_not_distribution_payload": true,
+    "ground_truth_firewall": "No GT bytes or GT artifacts are included; protocol keeps GT post-run only"
+  }
+}

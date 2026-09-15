@@ -1,0 +1,11 @@
+{
+  "width": 96,
+  "height": 96,
+  "block": 8,
+  "frames": [
+    { "frame_id": 0, "timestamp_ns": 0, "cam0_dx": 0, "cam0_dy": 0, "cam1_dx": 0, "cam1_dy": 0 },
+    { "frame_id": 1, "timestamp_ns": 1000000, "cam0_dx": 1, "cam0_dy": 0, "cam1_dx": 1, "cam1_dy": 0 },
+    { "frame_id": 2, "timestamp_ns": 2000000, "cam0_dx": 2, "cam0_dy": 0, "cam1_dx": 2, "cam1_dy": 0 }
+  ],
+  "failure_frame": { "frame_id": 3, "timestamp_ns": 3000000 }
+}

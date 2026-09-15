@@ -1,0 +1,81 @@
+{
+  "schema": "visloc.m11.native_schema4.profile_contract.v2",
+  "schema_version": 2,
+  "description": "Separate the exact native-compatible MargData contract from Rust-only schema4 extensions.",
+  "native_compatible": {
+    "namespace": "native.schema4.compatible.v1",
+    "required_fields": [
+      "MargData.aom",
+      "MargData.abs_H",
+      "MargData.abs_b",
+      "MargData.frame_poses",
+      "MargData.frame_states",
+      "MargData.kfs_all",
+      "MargData.kfs_to_marg",
+      "MargData.use_imu",
+      "MargData.opt_flow_res",
+      "MargLinData.is_sqrt",
+      "MargLinData.order",
+      "MargLinData.H and MargLinData.b",
+      "prior current delta",
+      "prior FEJ point / anchor",
+      "Q2Jp/Q2r final",
+      "visual Q2 source",
+      "visual factor identity and observation rows",
+      "IMU Q2 source",
+      "pose damping Q2 rows",
+      "Q2 row topology",
+      "AOM pre/post and marginal partition",
+      "selection denominators/scores",
+      "lost_landmarks",
+      "internal new prior",
+      "optical-flow observations/images"
+    ],
+    "optional_native_absent_fields": [
+      "kf_to_marg equivalent"
+    ],
+    "acceptance_rule": "All required fields must be exact or exact_absent, all declared paths and source identity must be recomputed, and optional fields must carry native_absent evidence."
+  },
+  "rust_extension": {
+    "namespace": "rust.schema4.extension.v1",
+    "fields": {
+      "prior FEJ point / anchor": {
+        "status": "mapping_unavailable",
+        "native_representation": "native_raw_exact_unmapped",
+        "required_for_full_extension": true,
+        "frame_sidecars": {
+          "status": "deterministic_exact",
+          "schema": "basalt.rust.schema4.extension.mapping.v1",
+          "mapping": "timestamp key, quaternion_wxyz wire order, and Basalt left-local UpstreamF32 chart"
+        },
+        "prior_fej_point": {
+          "status": "candidate_unproven",
+          "requires": "event-bound reduced-prior order plus same-run Rust PriorData.fej_point bit oracle"
+        },
+        "reason": "Per-frame native FEJ sidecars have a deterministic adapter; the reduced PriorData.fej_point remains unproven until a same-run prior vector oracle is bound."
+      },
+      "kf_to_marg equivalent": {
+        "status": "native_absent",
+        "native_representation": "native_absent_optional",
+        "required_for_full_extension": true,
+        "reason": "Native removeKeyframes removes selected hosts/observations and does not expose a destination/reanchor pair."
+      }
+    },
+    "acceptance_rule": "A full Rust extension profile is accepted only after explicit rust_extension_exact mappings and same-event bit oracles are captured; a candidate or raw native evidence never upgrades one."
+  },
+  "statuses": {
+    "native_compatible_profile_status": [
+      "NATIVE_COMPATIBLE_ACCEPTED",
+      "NATIVE_COMPATIBLE_INCOMPLETE"
+    ],
+    "rust_extension_profile_status": [
+      "RUST_EXTENSION_ACCEPTED",
+      "RUST_EXTENSION_INCOMPLETE"
+    ],
+    "strict_profile_status": [
+      "FULL_ACCEPTED",
+      "FULL_INCOMPLETE"
+    ]
+  },
+  "numeric_path": "Bridge/schema classification only; Rust estimator arithmetic and lifecycle are unchanged."
+}

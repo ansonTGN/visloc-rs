@@ -158,6 +158,63 @@ const INTRA_MIN_WORK: usize = 12000;
 /// such chunks regardless.
 const INTRA_CONTRIB_CHUNK: usize = 8;
 
+type ScalarTriplet = (usize, usize, f64);
+
+/// A source of scalar COO entries.
+///
+/// The usual callers already own a triplet slice.  BA's reduced pose matrix is
+/// already dense, however, so building a second `Vec<(usize, usize, f64)>`
+/// just to feed this factorization is needlessly expensive.  Keeping the
+/// source as a callback lets the symbolic and numeric passes consume that
+/// matrix incrementally without changing the factorization arithmetic.
+pub(crate) trait TripletSource {
+    fn for_each(&self, f: &mut dyn FnMut(usize, usize, f64));
+}
+
+impl<T: ?Sized> TripletSource for T
+where
+    T: AsRef<[ScalarTriplet]>,
+{
+    fn for_each(&self, f: &mut dyn FnMut(usize, usize, f64)) {
+        for &(row, col, value) in self.as_ref() {
+            f(row, col, value);
+        }
+    }
+}
+
+/// Lazily exposes the block-lower entries of a dense matrix in the same order
+/// as the sparse BA path used to produce its materialized triplet vector:
+/// columns ascending, then rows ascending.  Entries in strict upper blocks
+/// are omitted because block Cholesky ignores them and reads the symmetric
+/// lower block instead.  All entries inside a diagonal block are retained.
+pub(crate) struct DenseBlockTriplets<'a> {
+    matrix: &'a DMatrix<f64>,
+    block_size: usize,
+}
+
+impl<'a> DenseBlockTriplets<'a> {
+    pub(crate) fn new(matrix: &'a DMatrix<f64>, block_size: usize) -> Self {
+        assert!(block_size > 0, "block size must be non-zero");
+        assert_eq!(matrix.nrows(), matrix.ncols(), "matrix must be square");
+        Self { matrix, block_size }
+    }
+}
+
+impl TripletSource for DenseBlockTriplets<'_> {
+    fn for_each(&self, f: &mut dyn FnMut(usize, usize, f64)) {
+        let dim = self.matrix.nrows();
+        for col in 0..dim {
+            let first_row = (col / self.block_size) * self.block_size;
+            for row in first_row..dim {
+                let value = self.matrix[(row, col)];
+                if value != 0.0 {
+                    f(row, col, value);
+                }
+            }
+        }
+    }
+}
+
 /// Solve the SPD system `(A + λI) X = RHS`, where `A` is given by `triplets`
 /// (scalar COO, summed on assembly, symmetric, in the caller's permuted order)
 /// at block size `block_size`, and `RHS` has one or more columns. Returns the
@@ -165,7 +222,7 @@ const INTRA_CONTRIB_CHUNK: usize = 8;
 /// not positive-definite. `block_size` must be 3, 6, or 7 — the sizes the
 /// pose-graph back-ends assemble.
 pub(crate) fn solve_spd_block(
-    triplets: &[(usize, usize, f64)],
+    triplets: &(impl TripletSource + ?Sized),
     dim: usize,
     block_size: usize,
     rhs: &DMatrix<f64>,
@@ -257,7 +314,7 @@ pub(crate) fn solve_spd_blocks6_cached(
 /// only feed systems of the same pattern/`block_size`/`dim` into it.
 pub(crate) fn solve_spd_block_cached(
     cache: &mut Option<BlockSymbolic>,
-    triplets: &[(usize, usize, f64)],
+    triplets: &(impl TripletSource + ?Sized),
     dim: usize,
     block_size: usize,
     rhs: &DMatrix<f64>,
@@ -319,7 +376,7 @@ pub(crate) fn solve_spd_block_cached(
 /// `block_size` must be 3, 6, or 7.
 #[allow(clippy::type_complexity)]
 pub(crate) fn factor_blocks(
-    triplets: &[(usize, usize, f64)],
+    triplets: &(impl TripletSource + ?Sized),
     dim: usize,
     block_size: usize,
 ) -> Result<(Vec<Vec<usize>>, Vec<Vec<DMatrix<f64>>>, Vec<DMatrix<f64>>), ()> {
@@ -333,7 +390,7 @@ pub(crate) fn factor_blocks(
 
 #[allow(clippy::type_complexity)]
 fn factor_blocks_inner<const B: usize>(
-    triplets: &[(usize, usize, f64)],
+    triplets: &(impl TripletSource + ?Sized),
     dim: usize,
 ) -> Result<(Vec<Vec<usize>>, Vec<Vec<DMatrix<f64>>>, Vec<DMatrix<f64>>), ()> {
     let sym = analyze(triplets, dim, B);
@@ -369,7 +426,7 @@ fn factor_blocks_inner<const B: usize>(
 /// (deterministic, to-rounding) one.
 #[allow(clippy::too_many_arguments)]
 fn solve_spd_block_inner(
-    triplets: &[(usize, usize, f64)],
+    triplets: &(impl TripletSource + ?Sized),
     dim: usize,
     block_size: usize,
     rhs: &DMatrix<f64>,
@@ -423,7 +480,7 @@ fn default_thread_count() -> usize {
 
 #[allow(clippy::too_many_arguments)]
 fn solve_dispatch<const B: usize>(
-    triplets: &[(usize, usize, f64)],
+    triplets: &(impl TripletSource + ?Sized),
     dim: usize,
     rhs: &DMatrix<f64>,
     lambda: f64,
@@ -605,7 +662,7 @@ impl BlockSymbolic {
 /// build the [`BlockSymbolic`] shared by every refactor of a fixed-pattern
 /// system. `dim` must be a multiple of `block_size` (3, 6, or 7).
 pub(crate) fn analyze(
-    triplets: &[(usize, usize, f64)],
+    triplets: &(impl TripletSource + ?Sized),
     dim: usize,
     block_size: usize,
 ) -> BlockSymbolic {
@@ -635,7 +692,7 @@ pub(crate) fn analyze(
 #[allow(clippy::too_many_arguments)]
 fn solve_with_symbolic<const B: usize>(
     sym: &BlockSymbolic,
-    triplets: &[(usize, usize, f64)],
+    triplets: &(impl TripletSource + ?Sized),
     rhs: &DMatrix<f64>,
     lambda: f64,
     threads: usize,
@@ -671,7 +728,7 @@ fn solve_with_symbolic<const B: usize>(
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn refactor_numeric<const B: usize>(
     sym: &BlockSymbolic,
-    triplets: &[(usize, usize, f64)],
+    triplets: &(impl TripletSource + ?Sized),
     lambda: f64,
     threads: usize,
     min_level_work: usize,
@@ -690,7 +747,7 @@ fn refactor_numeric<const B: usize>(
                 .collect()
         })
         .collect();
-    for &(r, c, v) in triplets {
+    triplets.for_each(&mut |r, c, v| {
         let (br, bc) = (r / B, c / B);
         if br >= bc {
             let slot = sym.a_pattern[bc]
@@ -698,7 +755,7 @@ fn refactor_numeric<const B: usize>(
                 .expect("triplet's block lies in the analyzed pattern");
             a_lower[bc][slot].1[(r % B, c % B)] += v;
         }
-    }
+    });
     if lambda != 0.0 {
         for (bc, rows) in sym.a_pattern.iter().enumerate() {
             let slot = rows
@@ -841,7 +898,7 @@ struct RefactorScratch {
 /// refactors thousands of times as the graph grows.
 fn refactor_incremental<const B: usize>(
     sym: &BlockSymbolic,
-    triplets: &[(usize, usize, f64)],
+    triplets: &(impl TripletSource + ?Sized),
     lambda: f64,
     affected: &[usize],
     col_vals: &mut [Vec<SMatrix<f64, B, B>>],
@@ -875,7 +932,7 @@ fn refactor_incremental<const B: usize>(
                 .collect()
         })
         .collect();
-    for &(r, c, v) in triplets {
+    triplets.for_each(&mut |r, c, v| {
         let (br, bc) = (r / B, c / B);
         if br >= bc && bc < n && scratch.mask[bc] {
             let local = scratch.local_of[bc];
@@ -884,7 +941,7 @@ fn refactor_incremental<const B: usize>(
                 .expect("triplet's block lies in the analyzed pattern");
             a_lower[local][slot].1[(r % B, c % B)] += v;
         }
-    }
+    });
     if lambda != 0.0 {
         for (local, &bc) in affected.iter().enumerate() {
             let slot = sym.a_pattern[bc]
@@ -1285,14 +1342,14 @@ fn build_levels(contributors: &[Vec<usize>], n: usize) -> (Vec<Vec<usize>>, Vec<
 /// so it lives in [`BlockSymbolic`] and the per-solve `BTreeMap` value assembly
 /// the old `assemble_blocks` did is gone.
 fn assemble_pattern(
-    triplets: &[(usize, usize, f64)],
+    triplets: &(impl TripletSource + ?Sized),
     n: usize,
     block_size: usize,
 ) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
     let mut lower: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); n];
     let mut col_pat: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); n];
 
-    for &(r, c, _) in triplets {
+    triplets.for_each(&mut |r, c, _| {
         let (br, bc) = (r / block_size, c / block_size);
         if br > bc {
             lower[br].insert(bc);
@@ -1301,7 +1358,7 @@ fn assemble_pattern(
             col_pat[bc].insert(br);
         }
         // br < bc (strict upper) is the transpose of a lower entry; dropped.
-    }
+    });
     for (bc, set) in col_pat.iter_mut().enumerate() {
         set.insert(bc);
     }
@@ -1514,6 +1571,33 @@ mod tests {
         let (m, t) = random_spd(n, 6, keep, 7);
         assert_solves(&m, &t, 6, 0.0);
         assert_solves(&m, &t, 6, 1e-3);
+    }
+
+    #[test]
+    fn dense_block_triplet_source_matches_materialized_path() {
+        // The old BA sparse path materialized every nonzero before entering
+        // block Cholesky. Compare that path with the lazy lower-block source on
+        // a modest pose-graph-shaped system, including multiple RHS columns.
+        let (m, _) = random_spd(18, 6, |bi, bj| bi.abs_diff(bj) <= 2, 23);
+        let streamed = DenseBlockTriplets::new(&m, 6);
+        let mut materialized = Vec::new();
+        for c in 0..m.ncols() {
+            for r in 0..m.nrows() {
+                let v = m[(r, c)];
+                if v != 0.0 {
+                    materialized.push((r, c, v));
+                }
+            }
+        }
+        let dim = m.nrows();
+        let rhs = DMatrix::<f64>::from_fn(dim, 2, |i, c| ((i + 3 * c) % 11) as f64 - 5.0);
+
+        let old = solve_spd_block(&materialized, dim, 6, &rhs, 0.125).expect("old path SPD");
+        let new = solve_spd_block(&streamed, dim, 6, &rhs, 0.125).expect("streamed path SPD");
+        assert_eq!(
+            old, new,
+            "streaming triplets must preserve the solve exactly"
+        );
     }
 
     #[test]

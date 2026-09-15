@@ -1,0 +1,744 @@
+{
+  "schema_version": 1,
+  "schema_id": "visloc-rs.basalt.release.v1",
+  "manifest_id": "basalt-release-v1",
+  "upstream_commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+  "provenance_manifest": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
+  "schema_path": "benchmarks/basalt/schemas/release_manifest_v1.schema.json",
+  "self_binding": {
+    "path": "benchmarks/basalt/basalt_release_manifest_v1.json",
+    "mode": "external_sha256",
+    "note": "This metadata manifest is excluded from artifacts to avoid a self-referential digest; packaging records its SHA-256 externally."
+  },
+  "contract_inputs": {
+    "port_manifest": "benchmarks/basalt/basalt_port_manifest_v1.json",
+    "upstream_manifest": "benchmarks/basalt/upstream_manifest.json",
+    "protocol": "benchmarks/basalt/protocols/basalt_euroc_parity_v1.json",
+    "config": "configs/basalt/euroc_config.json",
+    "provenance_manifest": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
+    "provenance_audit": "benchmarks/basalt/PROVENANCE_AUDIT.md",
+    "current_golden_registry": "benchmarks/basalt/m11_current_golden_registry_20260830.json",
+    "cargo_license_inventory": "benchmarks/basalt/cargo_license_inventory_v1.json"
+  },
+  "gitlink_bindings": {
+    "thirdparty/vcpkg": {
+      "mode": "160000",
+      "oid": "1e199d32ad53aab1defda61ce41c380302e3f95c",
+      "url": "https://github.com/microsoft/vcpkg.git",
+      "license_spdx": "MIT",
+      "license_notice_paths": [
+        "benchmarks/basalt/NOTICE",
+        "pipelines/basalt/NOTICE"
+      ],
+      "license_source": "thirdparty/vcpkg/LICENSE at the pinned gitlink OID; source is not materialized in this checkout",
+      "license_notice_scope": "listed NOTICE files retain Basalt/dependency attribution; vcpkg license text must be retained when the submodule is materialized",
+      "inventory": "excluded_from_content_artifacts",
+      "verification": "index_mode_and_oid_plus_head_tree_oid; materialized_submodule_head_and_toplevel_when_present",
+      "package_license_note": "The vcpkg repository license is recorded separately; transitive port/package licenses remain in cargo/vcpkg legal review."
+    }
+  },
+  "artifacts": [
+    {
+      "path": "benchmarks/basalt/basalt_port_manifest_v1.json",
+      "kind": "port_contract",
+      "bytes": 2346,
+      "sha256": "928005ec6e41697605fec0d98c7c2f312fa4a7238ff336d02f87947ad2b04dde"
+    },
+    {
+      "path": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
+      "kind": "provenance",
+      "bytes": 59028,
+      "sha256": "3fe589c4fba81d8b6127fb1101e04ef05707436cc2a593717af645e4e6f98db2"
+    },
+    {
+      "path": "benchmarks/basalt/NOTICE",
+      "kind": "license_notice",
+      "bytes": 5814,
+      "sha256": "303760eced8131574a1d757be6f656b02672161d45ad5b466a20066d1ecfc3f9"
+    },
+    {
+      "path": "benchmarks/basalt/protocols/basalt_euroc_parity_v1.json",
+      "kind": "parity_protocol",
+      "bytes": 4348,
+      "sha256": "7957f102ffa47a67c3509cdf77942d599e7b0f5f5f2bf452987f87a55df246e5"
+    },
+    {
+      "path": "benchmarks/basalt/schemas/provenance_manifest_v1.schema.json",
+      "kind": "provenance_schema",
+      "bytes": 3675,
+      "sha256": "fd42c85432e093797df7684c225993b42d1b7b1624bf49488349edce7b815b92"
+    },
+    {
+      "path": "benchmarks/basalt/schemas/release_manifest_v1.schema.json",
+      "kind": "release_schema",
+      "bytes": 3006,
+      "sha256": "a2cd19a366bc1dbf3468ed4f75b0eb3933d59ef7c2fd71131dc078993242b58b"
+    },
+    {
+      "path": "benchmarks/basalt/schemas/clonefree_perf_result_v1.schema.json",
+      "kind": "performance_result_schema",
+      "bytes": 12965,
+      "sha256": "449bb9259a3ecb3005c922c8eff558b36ccad1fd1c6d558643d1f50343848dd0"
+    },
+    {
+      "path": "benchmarks/basalt/upstream_manifest.json",
+      "kind": "upstream_pin",
+      "bytes": 20565,
+      "sha256": "2cf7552f2c25e8f987de428ce05b0637b08cc40cd7481d0c13aaf55325f8e00a"
+    },
+    {
+      "path": "benchmarks/basalt/verify_provenance.py",
+      "kind": "provenance_validator",
+      "bytes": 48927,
+      "sha256": "270b37396afb503d8d45486885debeec66f677a8bde15f49ef6758a803064563"
+    },
+    {
+      "path": "configs/basalt/euroc_config.json",
+      "kind": "configuration",
+      "bytes": 2401,
+      "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+    },
+    {
+      "path": "pipelines/basalt/examples/export_rust_imu_golden.rs",
+      "kind": "diagnostic_example",
+      "bytes": 8247,
+      "sha256": "1421f0dc99f36da246d56fcc08bf3b9721e3ae17e5c2821bf7513e07195e1154"
+    },
+    {
+      "path": "pipelines/basalt/examples/m7aq_rust_imu_audit.rs",
+      "kind": "diagnostic_example",
+      "bytes": 8642,
+      "sha256": "447e28b0ca137357a4ceffcbb429fa1a1f3c2e5bffb354d144042c1c36b659a8"
+    },
+    {
+      "path": "pipelines/basalt/examples/m7bw_se2_exp_probe.rs",
+      "kind": "diagnostic_example",
+      "bytes": 1621,
+      "sha256": "d3ce344c42fa63fea382f43c0f3f7a5a4c96811eee633034def82d2acd414ca9"
+    },
+    {
+      "path": "pipelines/basalt/examples/m7bw_temporal_probe.rs",
+      "kind": "diagnostic_example",
+      "bytes": 5338,
+      "sha256": "8bbf8e61efc36352be877db343a793ae6eb987deabbff55250f24ac09e1b1b7d"
+    },
+    {
+      "path": "pipelines/basalt/examples/m7ca_se2_exp_probe.rs",
+      "kind": "diagnostic_example",
+      "bytes": 2995,
+      "sha256": "9ea431314c6c7c6170bd3b438d5917438685bb3eaae1866f93a0cdd65b8f4909"
+    },
+    {
+      "path": "pipelines/basalt/examples/m7im_rust_ldlt_probe.rs",
+      "kind": "diagnostic_example",
+      "bytes": 3637,
+      "sha256": "8e5c9447c25d0382a2ce8e549993269740dcf213bdfd24267743eb944f7abd72"
+    },
+    {
+      "path": "pipelines/basalt/examples/m7im15_imu_whitening_rust.rs",
+      "kind": "diagnostic_example",
+      "bytes": 3726,
+      "sha256": "f537886d3ae1831ef8ebead67e5b716de48df87ee6ef9f757d5e564f93223622"
+    },
+    {
+      "path": "pipelines/basalt/examples/m7im15_rust_fej_rotation_trace.rs",
+      "kind": "diagnostic_example",
+      "bytes": 5611,
+      "sha256": "c8f662751603f23a9d43004b903db412f0d390c16cc50eb994e5013a67b5a844"
+    },
+    {
+      "path": "pipelines/basalt/examples/m8c_cpp_lm_probe.cpp",
+      "kind": "diagnostic_example",
+      "bytes": 14079,
+      "sha256": "e83d1593513e94c6f2dfd8020f7bb566f769908053de6ab80e350cfc63210eb6"
+    },
+    {
+      "path": "pipelines/basalt/examples/m8c_cpp_qr_probe.cpp",
+      "kind": "diagnostic_example",
+      "bytes": 9852,
+      "sha256": "c26edc921f51e73a51d63a3cd7d1d0ec1fe2ac7766f3d9768911291c70fdbf12"
+    },
+    {
+      "path": "pipelines/basalt/examples/m8c_eigen_dot_asm.cpp",
+      "kind": "diagnostic_example",
+      "bytes": 4903,
+      "sha256": "340a3a68cc9c971e67e2e51b8d0058f55db4fb4134ea2be02d3bfe25db7f3fe5"
+    },
+    {
+      "path": "pipelines/basalt/examples/m8c_exact_bits_probe.cpp",
+      "kind": "diagnostic_example",
+      "bytes": 16662,
+      "sha256": "00bbe2e3535581eb1eda8c090d5faf3f74314feafcbdde9b3ca633f480d08627"
+    },
+    {
+      "path": "pipelines/basalt/examples/m8c_opengv_source_trace.cpp",
+      "kind": "diagnostic_example",
+      "bytes": 2352,
+      "sha256": "b9099fd9dccca39009c62b08407d226e58720ae88b1a3eccab8a41d35cd8320c"
+    },
+    {
+      "path": "pipelines/basalt/examples/m8e_rust_fixture.rs",
+      "kind": "diagnostic_example",
+      "bytes": 8212,
+      "sha256": "48f53d5daf48a71cca849186300ce5c495c3b879caf9d3d7d31c8d2334e54124"
+    },
+    {
+      "path": "pipelines/basalt/examples/stereo_diag.rs",
+      "kind": "diagnostic_example",
+      "bytes": 3769,
+      "sha256": "c2e6cac2b62871cc37f30b9960c415eed0f6f909f21410a79aa2292d3959c8a6"
+    },
+    {
+      "path": "pipelines/basalt/NOTICE",
+      "kind": "license_notice",
+      "bytes": 10949,
+      "sha256": "8a5fc2f9884fb4b39eaed719da407b772993a8e6ecc5ce77463b2200ed0cdbef"
+    },
+    {
+      "path": "benchmarks/basalt/PROVENANCE_AUDIT.md",
+      "kind": "provenance_documentation",
+      "bytes": 8430,
+      "sha256": "1e0892f63e5d845715e95b23f57738c027d10f8e70c574d8f61db541153db53f"
+    },
+    {
+      "path": "benchmarks/basalt/m11_current_golden_registry_20260830.json",
+      "kind": "golden_registry",
+      "bytes": 14632,
+      "sha256": "fca72289ae4df42c2ba03900498ed5dcd13fa16421c9b564febe79ca015503ec"
+    },
+    {
+      "path": "benchmarks/basalt/cargo_license_inventory_v1.json",
+      "kind": "license_inventory",
+      "bytes": 32441,
+      "sha256": "e44bf59a68b1f70a847716a102eae3bbabb355f093e111e86dd272d6ba60e42a"
+    },
+    {
+      "path": "pipelines/basalt/src/adapter.rs",
+      "kind": "rust_source",
+      "bytes": 12760,
+      "sha256": "0d7258c483781ce9d4148c06a571ee6c150429e7c82de80b53f4e292e8bd2d65"
+    },
+    {
+      "path": "pipelines/basalt/src/calibration.rs",
+      "kind": "rust_source",
+      "bytes": 10719,
+      "sha256": "80aeddbda130764f8abe1624fa6f46e7f8c1834c166e5d61ccdffcafd75951e9"
+    },
+    {
+      "path": "pipelines/basalt/src/camera.rs",
+      "kind": "rust_source",
+      "bytes": 13288,
+      "sha256": "e04af476c09f33fc499d2987a3505017c7b96f941bc2bc2c609bfd48fd754eba"
+    },
+    {
+      "path": "pipelines/basalt/src/config.rs",
+      "kind": "rust_source",
+      "bytes": 9955,
+      "sha256": "093f1cd61fcf269fb8a39b8da0ce4fb3ce3b7c6444226ea8cf3313e82fa53934"
+    },
+    {
+      "path": "pipelines/basalt/src/euroc.rs",
+      "kind": "rust_source",
+      "bytes": 25834,
+      "sha256": "02b36a7443d429b45c75bc1953045399577e8676decdb6a837c7fb3b7399cffd"
+    },
+    {
+      "path": "pipelines/basalt/src/fast.rs",
+      "kind": "rust_source",
+      "bytes": 23070,
+      "sha256": "99ca1a8ef5b55a2d1e70410e833ff6a9b52dace2973273480386e7397e729383"
+    },
+    {
+      "path": "pipelines/basalt/src/imu/factors.rs",
+      "kind": "rust_source",
+      "bytes": 142604,
+      "sha256": "495f29f1c45d88e8b68ca398a7e1f1a0dbd228ff19746a836f2d76efa922f2c3"
+    },
+    {
+      "path": "pipelines/basalt/src/imu/mod.rs",
+      "kind": "rust_source",
+      "bytes": 1364,
+      "sha256": "fde2b3bfaefeaf76ad8180ac00ec6148bcd344dc0a99e4650502f6ce0e4c1601"
+    },
+    {
+      "path": "pipelines/basalt/src/imu/preintegration.rs",
+      "kind": "rust_source",
+      "bytes": 18789,
+      "sha256": "563099ea23a2f63d13ac66138bf6e5b07c0bab098aa14224023479d72bf6e9f7"
+    },
+    {
+      "path": "pipelines/basalt/src/imu/sampling.rs",
+      "kind": "rust_source",
+      "bytes": 3020,
+      "sha256": "87d89f0ee1e07518951e35e7edc19f5ffe1b069e5c5a46a61493819021597c87"
+    },
+    {
+      "path": "pipelines/basalt/src/initialization.rs",
+      "kind": "rust_source",
+      "bytes": 6169,
+      "sha256": "cb76498fe1ade7e8788b6870ebb2faeec02fdc7f817b6ec38352c0de6d4eb1c3"
+    },
+    {
+      "path": "pipelines/basalt/src/lib.rs",
+      "kind": "rust_source",
+      "bytes": 2351,
+      "sha256": "2ee7de94a3de7644ff840f0ab8c13fb9b633993688d7af829650115a7b83a42e"
+    },
+    {
+      "path": "pipelines/basalt/src/mapper/features.rs",
+      "kind": "rust_source",
+      "bytes": 101734,
+      "sha256": "d6f0c19266c163c509ee6f87cbfb7257aa9b110d1249fa58aae847e60bc923a1"
+    },
+    {
+      "path": "pipelines/basalt/src/mapper/mod.rs",
+      "kind": "rust_source",
+      "bytes": 136245,
+      "sha256": "dd7b38c46bb829692c76c7abd17b1eceb66d102453fb820f7794bbe36901f181"
+    },
+    {
+      "path": "pipelines/basalt/src/mapper/session.rs",
+      "kind": "rust_source",
+      "bytes": 89574,
+      "sha256": "69d127357daf6d687f1f3489aed62055239170c66554b435cea868546eabfa74"
+    },
+    {
+      "path": "pipelines/basalt/src/mapper/triangulation.rs",
+      "kind": "rust_source",
+      "bytes": 33333,
+      "sha256": "536d64d4ca6552b558c714f90de2e07e24ba5f3d1634ea2dd57df5eb8cdf53e4"
+    },
+    {
+      "path": "pipelines/basalt/src/patch.rs",
+      "kind": "rust_source",
+      "bytes": 31758,
+      "sha256": "881b7a78c6a215536b235c82c6bf7ef158e737250f7bc2597b467206e71e19b2"
+    },
+    {
+      "path": "pipelines/basalt/src/pattern.rs",
+      "kind": "rust_source",
+      "bytes": 2029,
+      "sha256": "e0bea281b6a62266441d1a6633b5b014c1d382dda81f5bd0e1b323b472fe812d"
+    },
+    {
+      "path": "pipelines/basalt/src/provenance.rs",
+      "kind": "rust_source",
+      "bytes": 1349,
+      "sha256": "f52ab64c1f398612862d03db2d557fa390108a2656814bce6acb664f1979e7bb"
+    },
+    {
+      "path": "pipelines/basalt/src/pyramid.rs",
+      "kind": "rust_source",
+      "bytes": 13124,
+      "sha256": "ef63434ceb0b3ef9ae4740efaa08af5e878ae0bd44a30eb0f4a5ac9c91d016b9"
+    },
+    {
+      "path": "pipelines/basalt/src/stream.rs",
+      "kind": "rust_source",
+      "bytes": 60126,
+      "sha256": "84aa71e4133d5aa758dd0de317c32fd5a3108657798e7f282651ccf27bea5b65"
+    },
+    {
+      "path": "pipelines/basalt/src/streaming.rs",
+      "kind": "rust_source",
+      "bytes": 7086,
+      "sha256": "f059bd245b393847e83453e8a02742d91f27e00c4b8bb8a3834615184d0c0106"
+    },
+    {
+      "path": "pipelines/basalt/src/time.rs",
+      "kind": "rust_source",
+      "bytes": 5774,
+      "sha256": "3a11d726721a57eb7b16564cebe68dfb0ebe9b7286ed47ffec84cb7ee2ac035a"
+    },
+    {
+      "path": "pipelines/basalt/src/timing.rs",
+      "kind": "rust_source",
+      "bytes": 37092,
+      "sha256": "5bb75101d5d4ce5a127dbe1525235b54aef14a6928fbc4c09a9cdcf2f824e3e2"
+    },
+    {
+      "path": "pipelines/basalt/src/types.rs",
+      "kind": "rust_source",
+      "bytes": 3201,
+      "sha256": "674501a2997502dea838ce9aaf5dd141bfb98d5d7621b95fa387a94f92ada137"
+    },
+    {
+      "path": "pipelines/basalt/src/update.rs",
+      "kind": "rust_source",
+      "bytes": 27005,
+      "sha256": "acc595d7daa70a755c13d92ec7f1f1636ceef76a6a908d37f2231e1b9b7833fe"
+    },
+    {
+      "path": "pipelines/basalt/src/vio/aom.rs",
+      "kind": "rust_source",
+      "bytes": 856564,
+      "sha256": "5a95f499f1849d0bdeaf7301faf6d1108ed014f62731733406ca79d96e129dee"
+    },
+    {
+      "path": "pipelines/basalt/src/vio/estimator.rs",
+      "kind": "rust_source",
+      "bytes": 301949,
+      "sha256": "8fd4b8d4b7262bf589da4c93463c47eaf36103794c0d11b5c1e12fd4fc7d5db7"
+    },
+    {
+      "path": "pipelines/basalt/src/vio/landmarks.rs",
+      "kind": "rust_source",
+      "bytes": 122380,
+      "sha256": "cde9c23836b4513df8ae95c47b132360b5bc904247c53b2b52b13e0fbca2e40e"
+    },
+    {
+      "path": "pipelines/basalt/src/vio/margdata.rs",
+      "kind": "rust_source",
+      "bytes": 89178,
+      "sha256": "bb5b989704b8f117f8d74f006287a1826ea72acd63988974a463b5bb9a99356b"
+    },
+    {
+      "path": "pipelines/basalt/src/vio/mod.rs",
+      "kind": "rust_source",
+      "bytes": 387,
+      "sha256": "032f39f9977ce483a468bae63f4acd88c3ce4c485bdc12928e2917e8664c5742"
+    },
+    {
+      "path": "pipelines/basalt/src/vio/scalar.rs",
+      "kind": "rust_source",
+      "bytes": 839,
+      "sha256": "fd88e98c2e7b18e65c03dad2463aab423d44919f68754ee9a1d7f6ccea20a199"
+    },
+    {
+      "path": "pipelines/basalt/src/vio/window.rs",
+      "kind": "rust_source",
+      "bytes": 590754,
+      "sha256": "dca65766e68afe8f8a85cfdad2aafa951a88a7ee118e2fda2a821a3ec0e074e7"
+    },
+    {
+      "path": "benchmarks/basalt/run_clonefree_perf.py",
+      "kind": "performance_runner",
+      "bytes": 40433,
+      "sha256": "b61c373c6b2c2f282df610f9c5d2eb07feb314998504471260d3355146cc324e"
+    },
+    {
+      "path": "benchmarks/basalt/native_wsl_runner.py",
+      "kind": "performance_adapter",
+      "bytes": 9386,
+      "sha256": "5aae73217c65ead1ac39643aa48cb739b48df1a492dc55110996cea4ffda59c3"
+    },
+    {
+      "path": "pipelines/basalt/tests/calibration_contract.rs",
+      "kind": "contract_test",
+      "bytes": 2951,
+      "sha256": "93d3e20acadf89e6ec8c1c9454b9fb53b58db0aca3b737ce727c749662ade3f6"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/euroc_ds_calib_minimal.json",
+      "kind": "contract_test",
+      "bytes": 1266,
+      "sha256": "ef0cf881086c84d7653e2be317a7bda0fd14c620a13831f6fddee65884684e22"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/klt_stream_synthetic.json",
+      "kind": "contract_test",
+      "bytes": 435,
+      "sha256": "33560fa37fa47f713775af55df6bd7d53be3fd76d3c30fa0436a1d148cffee99"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m11_imu_r_f64_scaled_axis_candidate_20260908.json",
+      "kind": "contract_test",
+      "bytes": 54675,
+      "sha256": "3109eda4cf9fe38be303ce58aa3633ab09179d194e11d044f30c263f3026a79e"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m11_prior39_model_frame24_native_20260909.json",
+      "kind": "contract_test",
+      "bytes": 39138,
+      "sha256": "e1e776b7a21178cc6a4a0e83772e9d28c3fd0f91ad510d2b94b2eb94894e510c"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m11_prior_reanchor_rhs_schedule_20260908.json",
+      "kind": "contract_test",
+      "bytes": 11252,
+      "sha256": "b6d9c2a265a32c5afe051de4258a72b403dd0365c0abe81d66b5d260e0182f0b"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m11_se2_exp_portable_cosf_witness.json",
+      "kind": "contract_test",
+      "bytes": 1189,
+      "sha256": "d1ca5f7f5e85cec9783602241a2620ba83fc7bd83c840d02bc86e29203178d0a"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7bw_cam0_temporal_track2.json",
+      "kind": "contract_test",
+      "bytes": 548,
+      "sha256": "2e2aaf3ed17dc25d93e634550623e75435dc025a049daa7fe660d05b300556f6"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7ca_se2_exp_native.json",
+      "kind": "contract_test",
+      "bytes": 5193,
+      "sha256": "f4d12085b73d964dc6dce906c645ce0a7e922f7a558b1c7dbd02fb0d8c449bd8"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7cb_existing_stereo_gemv.json",
+      "kind": "contract_test",
+      "bytes": 4028,
+      "sha256": "c31f44c6241e1c5860e00e55a5cf1fd2112c4c0f383a16cae39fe8db769ca8f6"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7ci_frame4_cam0_ldlt_boundary.json",
+      "kind": "contract_test",
+      "bytes": 889,
+      "sha256": "4e1f6387ac6069be2ed08b665d5b9d55439f82081fa25f18395421c5cb860073"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7cq_frame9_cam1_stereo_update_frontier.json",
+      "kind": "contract_test",
+      "bytes": 1003,
+      "sha256": "a80af5f80605367d0e322636cb87d70cc59eab69b9d146e9f766bfb00e0a771a"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7dx_clean_track1_relpose_jacobian.json",
+      "kind": "contract_test",
+      "bytes": 1713,
+      "sha256": "74bf73417d0fa8e49fc2a41f94821113f6b32383b1fe939effea0a8180c12462"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7ec_clean_track2_stereo_factor.json",
+      "kind": "contract_test",
+      "bytes": 728,
+      "sha256": "a31e13de0cfa90574d565fcdb21879fcac93a103bd0ff212a2fcfa58ea5f6023"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7et_ordinal0_jp_packet4.json",
+      "kind": "contract_test",
+      "bytes": 1026,
+      "sha256": "007532fe27d7899434c0195f14a6316f1949be6d589cf71ee2dccce43395a4e2"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7ez_ordinal38_projection.json",
+      "kind": "contract_test",
+      "bytes": 376,
+      "sha256": "42038ed5cec71b32d1c3ce6b627d255e5b7d1b09c3a8717c790e663442e9480e"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7ez_ordinal3_camera_jacobian.json",
+      "kind": "contract_test",
+      "bytes": 495,
+      "sha256": "fab4830ea2bc94b88bd581a7f522c0ee9946b2da4af5548de6d38f8af77e64ca"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7fa_ordinal43_jp.json",
+      "kind": "contract_test",
+      "bytes": 1654,
+      "sha256": "9f5fbea4826dc1a60fc4cbd3eb3181262e14ee7cbf693ba9b38c25f7f7e6a144"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7fb_ordinal110_projection.json",
+      "kind": "contract_test",
+      "bytes": 1026,
+      "sha256": "ecbf2eae8b8384153b9676445348b1ca67ff7f9e71906eea7eef81780cd8f2fc"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7fi_ordinal13_jp.json",
+      "kind": "contract_test",
+      "bytes": 1626,
+      "sha256": "a11ede6ea18de022338e9dad5f519e4abbb29992918ef6ffacf9927eccb2e56a"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7fi_ordinal311_projection.json",
+      "kind": "contract_test",
+      "bytes": 897,
+      "sha256": "5ec8fadeccbf9888ee5d47db628a7a27928cef2d5f14b46d3145855bd4f8b2f3"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7fq_live_ordinal105.json",
+      "kind": "contract_test",
+      "bytes": 1816,
+      "sha256": "1bb82040e22f49a9a1ea09b5a1a8b9550981fbe144e612cd8d710762a5f19e2c"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7fu_live_ordinal109_camera_jp.json",
+      "kind": "contract_test",
+      "bytes": 1035,
+      "sha256": "cedf192cccfa398d35f805d1cb00b6506e2c2bfa2bf6a3daf8b596f20e91f3e1"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7fx_same_timestamp_clean_relpose_jacobian.json",
+      "kind": "contract_test",
+      "bytes": 1791,
+      "sha256": "a8d212e6e9de168d816295a6e6b5f8ea68c7e8650d2c6c64ddd88a3ab990b9d8"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7gh_clean_all_relpose_jacobians.json",
+      "kind": "contract_test",
+      "bytes": 19180,
+      "sha256": "19ef4259efcbf00c9242000cc1785efc01d82ed2320d743db98c0c4de57f83f0"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7gu_clean_frame4_visual.json",
+      "kind": "contract_test",
+      "bytes": 7664,
+      "sha256": "dea00fdafd250080f7d1ec03b67e9714521e80cf663c9e97cc2bfc84a71f59be"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7he_native_huber_schedule.json",
+      "kind": "contract_test",
+      "bytes": 9811,
+      "sha256": "b617747985e6312db751956d251f2d084b85d74974e5eb3f70536356ede268d0"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7im15_native_iter1_track119_packet_inputs_20260827.json",
+      "kind": "contract_test",
+      "bytes": 2430,
+      "sha256": "41605ba75dc5e550a48da509d1788382a9eb580bdf1ee92a62d48778d82c826b"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/m7im15_step_relpose_inputs_gdb_20260827.json",
+      "kind": "contract_test",
+      "bytes": 25680,
+      "sha256": "fa8130ada7f003c2f612c74a983ca337a058a3cda199b3f938bc9a60fe77294c"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/patch51_golden.json",
+      "kind": "contract_test",
+      "bytes": 398,
+      "sha256": "dd68490a8155ecb6bf892141698fcb46463079f174c553110ee37b8550580109"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/raw_u16_pyramid_golden.json",
+      "kind": "contract_test",
+      "bytes": 945,
+      "sha256": "cbce90e5c16545e7393293eeffab38725c84094f942f5b45f734d00d53ede9c3"
+    },
+    {
+      "path": "pipelines/basalt/tests/fixtures/se2_update_golden.json",
+      "kind": "contract_test",
+      "bytes": 239,
+      "sha256": "b991eb608579c3a746cefa10ade1dbe17827f24e06958ce3427e0da85775d287"
+    },
+    {
+      "path": "pipelines/basalt/tests/imu_contract.rs",
+      "kind": "contract_test",
+      "bytes": 3979,
+      "sha256": "06d0887ebcd5f3e96a181b0571d933161de4ae5f77ab6a09bc3a5f0419c09423"
+    },
+    {
+      "path": "pipelines/basalt/tests/klt_stream_contract.rs",
+      "kind": "contract_test",
+      "bytes": 9331,
+      "sha256": "d80c45271c44b3958e4a2f077f75340dc999b8d1c0f4c128ca60a9194c9404fd"
+    },
+    {
+      "path": "pipelines/basalt/tests/m3a_numeric_contract.rs",
+      "kind": "contract_test",
+      "bytes": 3715,
+      "sha256": "0f5df670517d46e5c2d29c778d93b6f1daa96ddcef61324253802b3d1bd7c2fd"
+    },
+    {
+      "path": "pipelines/basalt/tests/m6_packet_contract.rs",
+      "kind": "contract_test",
+      "bytes": 3017,
+      "sha256": "d49cfb5f1ba5c7a0f266bfde5cbd49f61e4177682e13294a9acb26321e3e7a1b"
+    },
+    {
+      "path": "pipelines/basalt/tests/m7bd_obs_pixel_exact.rs",
+      "kind": "contract_test",
+      "bytes": 7456,
+      "sha256": "de941d722da856864c03be3ebb764788bfc1a3c9cbf2661701289ec5e65e5977"
+    },
+    {
+      "path": "pipelines/basalt/tests/m7bw_cam0_temporal_exact.rs",
+      "kind": "contract_test",
+      "bytes": 3313,
+      "sha256": "b5127799cfe2e4ae34a2de2629416f77bbe2554511b7663ca7c4bae046eebb23"
+    },
+    {
+      "path": "pipelines/basalt/tests/m7ca_se2_exp_exact.rs",
+      "kind": "contract_test",
+      "bytes": 2185,
+      "sha256": "d98a8beb33b873e9cc9cfaf8e6e1ffbc73292a345ffbf502a7fd8949f28b3d71"
+    },
+    {
+      "path": "pipelines/basalt/tests/m7f_camera_contract.rs",
+      "kind": "contract_test",
+      "bytes": 6967,
+      "sha256": "10e98fb33d97be1f87437d8dd6343013e133714d8481a40e7002ab6e1a987ef6"
+    },
+    {
+      "path": "pipelines/basalt/tests/m7im15_step_relpose_inputs_gdb_20260827.rs",
+      "kind": "contract_test",
+      "bytes": 6220,
+      "sha256": "3298f94e84c55b81e801c48015d416484d7d16225e34390b8285897884dfb022"
+    },
+    {
+      "path": "pipelines/basalt/tests/m8c_exact_bits_probe.rs",
+      "kind": "contract_test",
+      "bytes": 24205,
+      "sha256": "3d267f8a752cf9814e7a88854804d173bbe6e29bd355f0282536dd00898b34c7"
+    },
+    {
+      "path": "pipelines/basalt/tests/m8c_feature_parity.rs",
+      "kind": "contract_test",
+      "bytes": 39244,
+      "sha256": "e3c6fc005f867cde466202e3f1af78c7dced41011c486b574543a8dcd719d905"
+    },
+    {
+      "path": "pipelines/basalt/tests/m8c_feature_seed.rs",
+      "kind": "contract_test",
+      "bytes": 7788,
+      "sha256": "696ae730eeef3ba529064b1810dcb0ec67855911faaa73030d860e39c51f838a"
+    },
+    {
+      "path": "pipelines/basalt/tests/m8d_pose_opt_oracle.rs",
+      "kind": "contract_test",
+      "bytes": 10262,
+      "sha256": "23f4fe88d62e4b891cf13186d609b821b0c204e8aa913544fb1f6011cf917637"
+    },
+    {
+      "path": "pipelines/basalt/tests/m8d_track_oracle.rs",
+      "kind": "contract_test",
+      "bytes": 5821,
+      "sha256": "de497004456a6453677d88673fbce8ca6159bb153c96d2befa8b837a44a2c12b"
+    },
+    {
+      "path": "pipelines/basalt/tests/m8f_nfr_session.rs",
+      "kind": "contract_test",
+      "bytes": 41333,
+      "sha256": "3ed86a3292ef471790a5b487c23f9406abbd0e710f2d95736aa96bb37288cd3c"
+    },
+    {
+      "path": "pipelines/basalt/tests/mh01_stereo_golden.rs",
+      "kind": "contract_test",
+      "bytes": 13329,
+      "sha256": "f368b2c407d3e0f6522a683bc7da157b2a5178d8d07d03401d4814848681f24a"
+    },
+    {
+      "path": "benchmarks/basalt/test_clonefree_perf.py",
+      "kind": "contract_test",
+      "bytes": 3190,
+      "sha256": "c0ef09289220691efbe3f6f268893de3fbeded7fca625e3b1543a804cd00c415"
+    }
+  ],
+  "excluded_artifacts": [
+    "benchmarks/basalt/euroc_dataset_manifest.json",
+    "thirdparty/vcpkg",
+    "thirdparty/vcpkg/**",
+    "target/**",
+    "marg_data/**",
+    "**/state_groundtruth_estimate0/**",
+    "**/*ground_truth*"
+  ],
+  "ground_truth_artifacts": [],
+  "ground_truth_firewall": {
+    "release_artifacts_contain_ground_truth": false,
+    "ground_truth_is_post_run": true,
+    "forbidden_artifact_path_fragments": [
+      "state_groundtruth",
+      "groundtruth",
+      "ground_truth",
+      "/target/",
+      "\\target\\",
+      "marg_data"
+    ],
+    "metadata_terms_allowed": true
+  },
+  "legal_note": "This manifest is a technical source-distribution inventory, not legal advice. NOTICE files cover source attribution; recheck transitive package notices and binary redistribution obligations before shipping binaries."
+}

@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "audit_id": "m10-release-port-provenance-remediation-20260829",
+  "captured_at": "2026-08-29T06:15:39+09:00",
+  "scope": {
+    "workspace": "C:/Users/rsasa/Workspace/visloc-rs",
+    "heavy_build_or_timing_started": false,
+    "validator_command": "python -m benchmarks.basalt.verify_provenance",
+    "test_command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q benchmarks/basalt/test_provenance.py tests/test_basalt_parity_harness.py tests/test_basalt_batch.py tests/test_basalt_parity_evaluator.py tests/test_euroc_dataset_manifest.py",
+    "note": "This artifact records the initial metadata-only current-tree repair plus the scoped estimator.rs follow-up hash. Historical oracle hashes and the dirty pinned-checkout caveat remain unchanged."
+  },
+  "before": {
+    "manifest_sha256": "e7bbdca7905b98f1e5479a18bba7ef7351188ab406ba2125782065b17066cb40",
+    "manifest_bytes": 30061,
+    "validator_status": "FAIL",
+    "production_port_files": {
+      "actual": 32,
+      "listed": 31,
+      "missing": ["pipelines/basalt/src/mapper/session.rs"]
+    },
+    "generator_coverage": {
+      "actual": 97,
+      "listed": 48,
+      "missing_count": 50,
+      "extra": ["benchmarks/basalt/m7im_cov_ldlt_report.md"]
+    },
+    "hash_mismatch_count": 8,
+    "hash_mismatches": [
+      {"path": "pipelines/basalt/src/vio/aom.rs", "expected": "366545afcc6caa4877f713a7d827c8cf3e1cc4f507e1bf04edb665c401e26eb8", "actual": "66218ca8f776d02bbc8853c2c12544c8a761babbfc586c4385d069ea62266e82"},
+      {"path": "benchmarks/basalt/m7im_compare_cov_ldlt.py", "expected": "ffe1fdb8789594d3ad8e8797609369f1dc52a0ec225c7299cb43d705052a2c59", "actual": "ab63cb1a7a5528c1f7dc112ff2e4485a0f939c8021ba8a5cf1d915bc92aa6f61"},
+      {"path": "benchmarks/basalt/m7aq_predict_velocity_probe.cpp", "expected": "e089674c7b035ffe65be31aa5a28ccabd9c34fe3e4ec701d0c0cc90eb496fcbf", "actual": "45f45dd64a7198baf5aec932d1a60d819a4fba530a4bf65d55f3f79298cb0afc"},
+      {"path": "benchmarks/basalt/m7aq_visual_factor_boundary_probe.cpp", "expected": "f95837f8543562446447f55ae77f94b3c293c056a61cc554dbe5dd0817ba2149", "actual": "89acd3e35366f828f669a2f2d6e95c944610693dcb277f4f3871fa39d5f9b402"},
+      {"path": "benchmarks/basalt/upstream_marg_dump.cpp", "expected": "453143350fad2c02a3a7936de20e4bc28d9aa636a18b3d4d5ba875e320651be5", "actual": "ed50f011ca49b40101863510cd60ab4063c9a78652b2155b9a2b6d12bba7fe39"},
+      {"path": "benchmarks/basalt/upstream_sqrt_marginalization_oracle.cpp", "expected": "7b0893e9d310fcaf6da60d99190301d2d5aac1fb48c5b39115f40b22b6c3e622", "actual": "e40de024aebd95bf0baa387c9fc04ca8f734c24d4d7c746ec6c089bff430dfbf"},
+      {"path": "pipelines/basalt/examples/m7aq_rust_imu_audit.rs", "expected": "2290185d1f7b913ff575679bc51835ea900035bd6f0b68d9f2580be554d298d2", "actual": "447e28b0ca137357a4ceffcbb429fa1a1f3c2e5bffb354d144042c1c36b659a8"},
+      {"path": "pipelines/basalt/examples/m8e_rust_fixture.rs", "expected": "90b4f9209e5d79d3e752beacc8a47aa152149bcc91e8f0c6a2812df34c57d8bf", "actual": "a18ef712ce34447919329796ae76ab55dfe18de4cbec40d69370a72455bedd0a"}
+    ],
+    "missing_generator_paths": [
+      "benchmarks/basalt/check_m8_pose_provenance.py",
+      "benchmarks/basalt/m7_j_block_oracle.cpp",
+      "benchmarks/basalt/m7_position_residual_oracle.cpp",
+      "benchmarks/basalt/m7_position_residual_probe.cpp",
+      "benchmarks/basalt/m7av_frame0_from_two_vectors_probe.cpp",
+      "benchmarks/basalt/m7bf_sophus_oracle_tmp.cpp",
+      "benchmarks/basalt/m7bo_relative_oracle_probe.cpp",
+      "benchmarks/basalt/m7br_relative_packet4_trace.cpp",
+      "benchmarks/basalt/m7bw_se2_exp_probe.cpp",
+      "benchmarks/basalt/m7bw_temporal_probe.cpp",
+      "benchmarks/basalt/m7bw_update_asm.cpp",
+      "benchmarks/basalt/m7ca_composed_warp_probe.cpp",
+      "benchmarks/basalt/m7ca_se2_exp_probe.cpp",
+      "benchmarks/basalt/m7cj_ldlt_probe.cpp",
+      "benchmarks/basalt/m7de_state_residual.py",
+      "benchmarks/basalt/m7di_predict_product_probe.cpp",
+      "benchmarks/basalt/m7fh_native_position_probe.cpp",
+      "benchmarks/basalt/m7fh_predict_position_probe.cpp",
+      "benchmarks/basalt/m7fs_compare_visual.py",
+      "benchmarks/basalt/m7fv_compare_visual_jxi.py",
+      "benchmarks/basalt/m7fw_compare_clean_rel_jacs_all.py",
+      "benchmarks/basalt/m7fy_clean_native_remeasure.py",
+      "benchmarks/basalt/m7gv_suffix_probe.cpp",
+      "benchmarks/basalt/m7hd_compare_assignment.py",
+      "benchmarks/basalt/m7hd_compare_intermediates.py",
+      "benchmarks/basalt/m7hd_compare_sqrt.py",
+      "benchmarks/basalt/m7hd_cov_gemm_probe.cpp",
+      "benchmarks/basalt/m7hd_matrix_product_probe.cpp",
+      "benchmarks/basalt/m7hd_native_intermediate_probe.cpp",
+      "benchmarks/basalt/m7hd_native_intermediate_probe.sh",
+      "benchmarks/basalt/m7hd_quaternion_matrix_probe.cpp",
+      "benchmarks/basalt/m7hd_tail_eigen.cpp",
+      "benchmarks/basalt/m7hd_tail_probe.cpp",
+      "benchmarks/basalt/m7hd_weighted_gram_probe.cpp",
+      "benchmarks/basalt/m7he_lm_branch_compare.py",
+      "benchmarks/basalt/m7he_lm_category_compare.py",
+      "benchmarks/basalt/m7he_margdata_boundary.py",
+      "benchmarks/basalt/m7he_preqr_boundary_taxonomy.py",
+      "benchmarks/basalt/m7im_whitening_schedule_fixture.py",
+      "benchmarks/basalt/m7im15_native_trig_probe.cpp",
+      "benchmarks/basalt/m7im15_schedule_oracle.cpp",
+      "benchmarks/basalt/m7im15_sqrt_apply_probe.cpp",
+      "benchmarks/basalt/m7im15_state_quat_schedule_probe.cpp",
+      "benchmarks/basalt/phase6_coordinator.py",
+      "benchmarks/basalt/tmp_eigen_probe.cpp",
+      "pipelines/basalt/examples/m7bw_se2_exp_probe.rs",
+      "pipelines/basalt/examples/m7bw_temporal_probe.rs",
+      "pipelines/basalt/examples/m7ca_se2_exp_probe.rs",
+      "pipelines/basalt/examples/m7im15_imu_whitening_rust.rs",
+      "pipelines/basalt/examples/m7im15_rust_fej_rotation_trace.rs"
+    ]
+  },
+  "changes": {
+    "production_port_file_added": {
+      "path": "pipelines/basalt/src/mapper/session.rs",
+      "translation_status": "clean_room_translation",
+      "upstream_refs": ["basalt"]
+    },
+    "generator_entries_added": 50,
+    "generator_entry_removed": "benchmarks/basalt/m7im_cov_ldlt_report.md",
+    "sha256_records_refreshed": 8,
+    "source_hash_policy": "Each refreshed value is the SHA-256 of the current checked-in working-tree file; historical golden source/output hashes were not rebound.",
+    "followup_source_hash": {
+      "reason": "Root's frame-51 faithful stereo-observation counter edit changed estimator.rs after the initial repair.",
+      "before_followup_manifest": {"bytes": 41639, "sha256": "346ff481c235459f74901e22a3524da081cf34757eb3b47394d6f2afdec7bfdd"},
+      "path": "pipelines/basalt/src/vio/estimator.rs",
+      "previous_record": "No sha256 field was present in the initial port_files record.",
+      "current_sha256": "d898c63375a98b4ad58cab9d7206fe153baa86256ab60b9a7d9cda531a2294a7",
+      "recorded_as": "current production source hash; no estimator.rs source edit was made by this remediation"
+    },
+    "frame51_artifacts_outside_inventory": [
+      {
+        "path": "work/m7im15_frame51_kf_counter_comparison_20260829.json",
+        "bytes": 2530,
+        "sha256": "834cac4b80f0e7d730ad309fa32c0f9a60787dd41b468a881116f852de9fb65d",
+        "validator_inventory_included": false,
+        "reason": "The generator inventory scans benchmarks/basalt and pipelines/basalt/examples code/script suffixes, not work/*.json."
+      },
+      {
+        "path": "work/m7im15_frame51_kf_counter_comparison_20260829.md",
+        "bytes": 1723,
+        "sha256": "667c10a51684ef54175779d0f2c83f2612eb7f796a36b3a46489f1ab1d610d0f",
+        "validator_inventory_included": false,
+        "reason": "The generator inventory scans benchmarks/basalt and pipelines/basalt/examples code/script suffixes, not work/*.md."
+      },
+      {
+        "path": "work/m7im15_gdb_native_frame51_kf_counters_20260829.gdb",
+        "bytes": 683,
+        "sha256": "2e6c89cd8f142f4cbfedd6d342095fd2e1633bae0285581cac0c7bf844c10021",
+        "validator_inventory_included": false,
+        "reason": "The generator inventory does not scan work/ or the .gdb suffix."
+      }
+    ]
+  },
+  "after": {
+    "manifest_sha256": "5f872df75bf4a8a00fe5cfe7745593610ce4c296b24035e329c3ff30417ce77d",
+    "manifest_bytes": 41717,
+    "validator_status": "PASS",
+    "production_port_files": {"actual": 32, "listed": 32, "missing": [], "extra": [], "hashed_records": 2},
+    "generator_coverage": {"actual": 97, "listed": 97, "missing": [], "extra": []},
+    "hash_mismatch_count": 0,
+    "validator_output": "Basalt provenance validation passed.",
+    "lightweight_tests": {"passed": 27, "failed": 0, "warnings": 1, "warning": "PytestCacheWarning: cache path denied by the workspace permissions"}
+  },
+  "retained_caveats": [
+    "Pinned WSL checkout /root/visloc-basalt-oracle-0f3b2b52 remains dirty in five diagnostic files; binaries from it must remain labeled instrumented/dirty, not clean-pinned oracle evidence.",
+    "The historical target/basalt_upstream_imu_golden_frame1_2.cpp source hash differs from the current source; its historical hash was intentionally preserved.",
+    "No production numeric code, release artifact, oracle binary, or pinned-checkout file was changed by this remediation; the estimator.rs numeric edit predates this follow-up and was made by root."
+  ]
+}

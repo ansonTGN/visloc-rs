@@ -1,0 +1,34 @@
+{
+  "recorded": [
+    {"label":"L3.I0","tangent":["0xbeb28e40","0xbe1adabe","0xbb9ce858"],"rotation":["0x3f7fff40","0x3b9ce831","0xbb9ce831","0x3f7fff40"],"translation":["0xbeb2bd73","0xbe1a001a"]},
+    {"label":"L3.I1","tangent":["0x3ce12820","0x3c65ae81","0x3a9ce3d8"],"rotation":["0x3f7ffff4","0xba9ce3d6","0x3a9ce3d6","0x3f7ffff4"],"translation":["0x3ce1168c","0x3c65f361"]},
+    {"label":"L3.I2","tangent":["0x3bd231f5","0x3a8e8548","0x3ad33e98"],"rotation":["0x3f7fffea","0xbad33e92","0x3ad33e92","0x3f7fffea"],"translation":["0x3bd22a83","0x3a8f3464"]},
+    {"label":"L3.I3","tangent":["0x3b0d8a18","0x39772500","0x3a04bb70"],"rotation":["0x3f7ffffe","0xba04bb70","0x3a04bb70","0x3f7ffffe"],"translation":["0x3b0d892a","0x3977ad7e"]},
+    {"label":"L3.I4","tangent":["0x3a2c8748","0x38a7cb00","0x3924e040"],"rotation":["0x3f800000","0xb924e040","0x3924e040","0x3f800000"],"translation":["0x3a2c8748","0x38a7cb00"]},
+    {"label":"L2.I0","tangent":["0xbc6a7346","0x3c3caeea","0x3b9704a2"],"rotation":["0x3f7fff4e","0xbb97047f","0x3b97047f","0x3f7fff4e"],"translation":["0xbc6ae242","0x3c3c2494"]},
+    {"label":"L2.I1","tangent":["0x3b085770","0xbb2a77d4","0xb8b79bc0"],"rotation":["0x3f800000","0x38b79bc0","0xb8b79bc0","0x3f800000"],"translation":["0x3b085770","0xbb2a77d4"]},
+    {"label":"L2.I2","tangent":["0xba159230","0x3a155be0","0xb81a9e80"],"rotation":["0x3f800000","0x381a9e80","0xb81a9e80","0x3f800000"],"translation":["0xba159230","0x3a155be0"]},
+    {"label":"L2.I3","tangent":["0x393ca440","0xb917ac40","0x37592200"],"rotation":["0x3f800000","0xb7592200","0x37592200","0x3f800000"],"translation":["0x393ca440","0xb917ac40"]},
+    {"label":"L2.I4","tangent":["0xb86ddc00","0x38311a00","0xb682a000"],"rotation":["0x3f800000","0x3682a000","0xb682a000","0x3f800000"],"translation":["0xb86ddbe9","0x38311a1e"]},
+    {"label":"L1.I0","tangent":["0x3e5bb15e","0x3d8bad19","0xbc6e3b6a"],"rotation":["0x3f7ff912","0x3c6e3944","0xbc6e3944","0x3f7ff912"],"translation":["0x3e5c3166","0x3d8879de"]},
+    {"label":"L1.I1","tangent":["0xbdd326a0","0x3ad60820","0xb9fc3940"],"rotation":["0x3f7ffffe","0x39fc393f","0xb9fc393f","0x3f7ffffe"],"translation":["0xbdd32669","0x3ad9615f"]},
+    {"label":"L1.I2","tangent":["0x3d4e2d10","0xbbf5bb48","0x3b3a9694"],"rotation":["0x3f7fffbc","0xbb3a9683","0x3b3a9683","0x3f7fffbc"],"translation":["0x3d4e382f","0xbbf36216"]},
+    {"label":"L1.I3","tangent":["0xbccec6c0","0x3ba90ec0","0xbb17b3fc"],"rotation":["0x3f7fffd3","0x3b17b3f3","0xbb17b3f3","0x3f7fffd3"],"translation":["0xbcceba2a","0x3baa040f"]},
+    {"label":"L1.I4","tangent":["0x3c5276da","0xbb4111e0","0x3abf9c20"],"rotation":["0x3f7fffee","0xbabf9c1c","0x3abf9c1c","0x3f7fffee"],"translation":["0x3c527fe7","0xbb4073b1"]},
+    {"label":"L0.I0","tangent":["0xbe758c7b","0xbd1b2fc4","0x3b12b2a8"],"rotation":["0x3f7fffd6","0xbb12b2a0","0x3b12b2a0","0x3f7fffd6"],"translation":["0xbe758152","0xbd1c48f1"]},
+    {"label":"L0.I1","tangent":["0x3d91e281","0x3beecf2a","0xbc826c56"],"rotation":["0x3f7ff7b2","0x3c826aed","0xbc826aed","0x3f7ff7b2"],"translation":["0x3d91ff57","0x3bdc3882"]},
+    {"label":"L0.I2","tangent":["0xbce5ac64","0xb92ec0c0","0x3bea2a84"],"rotation":["0x3f7ffe54","0xbbea2a01","0x3bea2a01","0x3f7ffe54"],"translation":["0xbce5aaa4","0xb98bd96a"]},
+    {"label":"L0.I3","tangent":["0x3c2f6de9","0xb9e95350","0xbb3feb72"],"rotation":["0x3f7fffb8","0x3b3feb60","0xbb3feb60","0x3f7fffb8"],"translation":["0x3c2f6b1c","0xb9f18d42"]},
+    {"label":"L0.I4","tangent":["0xbb8701ec","0x39921b40","0x3a966db8"],"rotation":["0x3f7ffff5","0xba966db6","0x3a966db6","0x3f7ffff5"],"translation":["0xbb870340","0x3990df54"]}
+  ],
+  "small_angle": [
+    {"label":"theta=0","tangent":["0x3f4ccccd","0xbf19999a","0x00000000"],"rotation":["0x3f800000","0x80000000","0x00000000","0x3f800000"],"translation":["0x3f4ccccd","0xbf19999a"]},
+    {"label":"theta=0x33000000","tangent":["0x3f4ccccd","0xbf19999a","0x33000000"],"rotation":["0x3f800000","0xb3000000","0x33000000","0x3f800000"],"translation":["0x3f4ccccd","0xbf19999a"]},
+    {"label":"theta=0x33ffffff","tangent":["0x3f4ccccd","0xbf19999a","0x33ffffff"],"rotation":["0x3f800000","0xb3ffffff","0x33ffffff","0x3f800000"],"translation":["0x3f4cccce","0xbf199999"]},
+    {"label":"theta=0x34000000","tangent":["0x3f4ccccd","0xbf19999a","0x34000000"],"rotation":["0x3f800000","0xb4000000","0x34000000","0x3f800000"],"translation":["0x3f4cccce","0xbf199999"]},
+    {"label":"theta=0xb3000000","tangent":["0x3f4ccccd","0xbf19999a","0xb3000000"],"rotation":["0x3f800000","0x33000000","0xb3000000","0x3f800000"],"translation":["0x3f4ccccd","0xbf19999a"]},
+    {"label":"theta=0xb3ffffff","tangent":["0x3f4ccccd","0xbf19999a","0xb3ffffff"],"rotation":["0x3f800000","0x33ffffff","0xb3ffffff","0x3f800000"],"translation":["0x3f4ccccc","0xbf19999b"]},
+    {"label":"theta=0xb4000000","tangent":["0x3f4ccccd","0xbf19999a","0xb4000000"],"rotation":["0x3f800000","0x34000000","0xb4000000","0x3f800000"],"translation":["0x3f4ccccc","0xbf19999b"]},
+    {"label":"theta=0x35000000","tangent":["0x3f4ccccd","0xbf19999a","0x35000000"],"rotation":["0x3f800000","0xb5000000","0x35000000","0x3f800000"],"translation":["0x3f4ccccf","0xbf199997"]}
+  ]
+}

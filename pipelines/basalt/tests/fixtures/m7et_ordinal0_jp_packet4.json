@@ -1,0 +1,26 @@
+{
+  "schema": "visloc-rs.basalt.m7et.ordinal0-jp-packet4.v1",
+  "source": "target/m7ef_clean_visual_all.json",
+  "ordinal": 0,
+  "camera": "cam0",
+  "camera_params_f32_bits": [
+    "43aee0c5", "43ae5cbe", "43b6f27c", "43795478", "be76bd89", "3f1126b5"
+  ],
+  "observation_f32_bits": ["43c20000", "43410000"],
+  "direction_xy_f32_bits": ["3cc4c95a", "bd7b2508"],
+  "inverse_distance_f32_bits": "3e46b55a",
+  "target_point_xyz_f32_bits": ["3d43efd6", "bdfa0f6e", "3f7dca10"],
+  "projection_uv_f32_bits": ["43c2000b", "43411269"],
+  "camera_jacobian_row_major_f32_bits": [
+    "43e6b4aa", "3fe6b2f7", "c1b056e5", "00000000",
+    "3fe604cb", "43e4157f", "426062c3", "00000000"
+  ],
+  "homogeneous_point_jacobian_column_major_f32_bits": [
+    "3ffe9a0c", "3bbf6405", "bdc31742", "00000000",
+    "3bbf6405", "3ffcfc84", "3e78fb07", "00000000",
+    "00000000", "00000000", "00000000", "3f800000"
+  ],
+  "raw_landmark_jacobian_column_major_f32_bits": [
+    "4465f922", "3f652460", "3f65d1e0", "4464cfbf", "00000000", "00000000"
+  ]
+}

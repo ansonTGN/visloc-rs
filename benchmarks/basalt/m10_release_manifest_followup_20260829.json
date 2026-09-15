@@ -1,0 +1,102 @@
+{
+  "schema": "basalt.m10_release_manifest_followup.v1",
+  "captured_at": "2026-08-29T06:50:55+09:00",
+  "scope": {
+    "purpose": "canonicalize the reusable no-output performance runner and refresh release/provenance bindings",
+    "timing_started": false,
+    "heavy_build_started": false,
+    "packaged": false,
+    "commit": false,
+    "push": false,
+    "active_worker_exclusion": "PID 41260 remained active; no timing run was launched."
+  },
+  "canonical_bindings": {
+    "runner": {
+      "path": "benchmarks/basalt/run_clonefree_perf.py",
+      "bytes": 19830,
+      "sha256": "bc334b62590aa0aa7a69a1c3bbccaae5f5efea18648029182202db8935d56c18",
+      "provenance_location": "checked_in_generator_hashes",
+      "release_kind": "performance_runner"
+    },
+    "work_wrapper": {
+      "path": "work/m7im15_run_clonefree_perf_20260829.py",
+      "bytes": 373,
+      "sha256": "aea31ad59be4d7545f0619e9cb924010f14246797a30e0cb2df227b4e73340a2",
+      "release_inventory": "excluded_evidence_wrapper",
+      "note": "The work-tree wrapper delegates to the canonical benchmark runner and is not a release dependency."
+    },
+    "result_schema": {
+      "path": "benchmarks/basalt/schemas/clonefree_perf_result_v1.schema.json",
+      "bytes": 10104,
+      "sha256": "fa6f428ef052068d8d3531c8fa52b29192a3a2a0aef05feb71e7d763cd91c397",
+      "provenance_location": "retained_audit_sources",
+      "release_kind": "performance_result_schema"
+    }
+  },
+  "refreshed_manifests": {
+    "release": {
+      "path": "benchmarks/basalt/basalt_release_manifest_v1.json",
+      "bytes": 23765,
+      "sha256": "eaaac886d47cec9e9f77ba509226e4010639f4ea59d2f4613698c7163de52c88",
+      "artifact_records": 103,
+      "all_artifacts_bytes_and_sha256": true,
+      "contract_test_records": 44,
+      "self_binding": "external_sha256",
+      "canonical_runner_bound": true,
+      "result_schema_bound": true
+    },
+    "provenance": {
+      "path": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
+      "bytes": 42261,
+      "sha256": "6d9b24ff2a2fc056b1688412c3fdda1721693cb9b9d83bf4623a887fb4f62ac3",
+      "generator_records": 98,
+      "retained_audit_records": 3,
+      "canonical_runner_bound": true,
+      "result_schema_bound": true
+    }
+  },
+  "input_contract": {
+    "protocol": {
+      "path": "benchmarks/basalt/protocols/basalt_euroc_parity_v1.json",
+      "sha256": "7957f102ffa47a67c3509cdf77942d599e7b0f5f5f2bf452987f87a55df246e5"
+    },
+    "dataset_manifest": {
+      "path": "benchmarks/basalt/euroc_dataset_manifest.json",
+      "sha256": "a803db9e01f7a39f587cb9f87fd8601c8800455135ae7a2dc67f9e108003dd26"
+    },
+    "config": {
+      "path": "configs/basalt/euroc_config.json",
+      "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+    },
+    "calibration": {
+      "path": "target/euroc_ds_calib.json",
+      "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c"
+    },
+    "equivalence_52_frame": {
+      "path": "work/m7im15_nomarg_real52_equivalence_20260829.json",
+      "sha256": "716c99bc0e3655d1f43f84da8992236220761196db24b4365e47de936edc7975",
+      "trajectory_tum_sha256": "41a21ba235abac75875f403074efd31f1509e5d91453e04fa3257a796dc150ef",
+      "trajectory_csv_sha256": "5f389d899682b34f296af4b59b8bcea2080fbd5e71d86265a8ce0ac849fdf4ea",
+      "frames": 52,
+      "trajectory_byte_exact": true,
+      "timing_usable": false
+    }
+  },
+  "validation": {
+    "python_m_benchmarks_basalt_verify_provenance": "PASS",
+    "json_schema_clonefree_result": "PASS",
+    "focused_python_suite": {
+      "passed": 28,
+      "failed": 0,
+      "warning": "PytestCacheWarning: workspace cache path denied"
+    },
+    "canonical_runner_help": "PASS",
+    "canonical_runner_preflight": "PASS: MH_01_easy, 3682 cam0 frames, 7370 sensor/image files, 52-frame evidence verified"
+  },
+  "retained_caveats": [
+    "The direct-path performance mode is explicitly not a staged-copy parity cell and must not enter parity aggregates.",
+    "The executable SHA-256 is intentionally captured at each future fresh release build/run; no stale pre-clone-free executable is accepted.",
+    "The dataset root includes post-exit GT metadata, but the runner passes no GT path, bytes, or GT environment key to the engine.",
+    "NOTICE files cover source-distribution attribution; transitive vcpkg/package notices and binary redistribution remain a separate legal review."
+  ]
+}

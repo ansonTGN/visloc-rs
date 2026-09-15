@@ -1,0 +1,776 @@
+{
+  "aggregate_gate_report": "E:\\visloc-rs-runs\\basalt_linux_rss_pair_mh01_20260913\\phase6_gate_report.json",
+  "cell_order_policy": {
+    "canonical_method_order": [
+      "native_core",
+      "rust_current"
+    ],
+    "id": "sequence_major_repetition_major_method_parity_v1",
+    "parity": "reverse canonical method order when (sequence_index + repetition) % 2 == 1",
+    "repetition_order": "ascending",
+    "sequence_order": "selected_protocol_order",
+    "workers_1_execution": "deterministic sequential plan order",
+    "workers_gt_1_runtime_gate": "noncanonical_parallel_order"
+  },
+  "counts": {
+    "success": 2
+  },
+  "created_utc": "2026-09-13T10:28:54Z",
+  "diagnostic_gate_report": null,
+  "diagnostic_result": null,
+  "diagnostic_separate_from_formal": false,
+  "direct_dataset_no_sensor_copy": true,
+  "executable_bindings": {
+    "native_core": {
+      "available": true,
+      "bytes": null,
+      "kind": "native_wsl",
+      "path": "/root/visloc-basalt-clean-m7cr-20260823/build/core-relwithdebinfo/basalt_vio",
+      "sha256": "89e0324ccd04c3b615bf7e945aa32480a2f86524987aa00eaf152dcd6b1d242c",
+      "wrapper_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\native_wsl_runner.py",
+      "wrapper_sha256": "5aae73217c65ead1ac39643aa48cb739b48df1a492dc55110996cea4ffda59c3"
+    },
+    "rust_current": {
+      "bytes": 3868072,
+      "path": "/mnt/e/visloc-rs-runs/basalt_crossplatform_norm_fix_linux_20260913/release/examples/basalt_euroc_vio_demo",
+      "sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674"
+    }
+  },
+  "formal_cell_count": 2,
+  "formal_expected_cell_count": 2,
+  "fresh_output_root": true,
+  "no_marg_data": true,
+  "no_trace": true,
+  "output_policy": "trajectory_only_lean",
+  "representative": null,
+  "request": {
+    "calibration_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\euroc_ds_calib.json",
+    "calibration_sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
+    "cell_order_policy": {
+      "canonical_method_order": [
+        "native_core",
+        "rust_current"
+      ],
+      "id": "sequence_major_repetition_major_method_parity_v1",
+      "parity": "reverse canonical method order when (sequence_index + repetition) % 2 == 1",
+      "repetition_order": "ascending",
+      "sequence_order": "selected_protocol_order",
+      "workers_1_execution": "deterministic sequential plan order",
+      "workers_gt_1_runtime_gate": "noncanonical_parallel_order"
+    },
+    "config_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\configs\\basalt\\euroc_config.json",
+    "config_sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
+    "dataset_manifest_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\euroc_dataset_manifest.json",
+    "dataset_manifest_sha256": "a803db9e01f7a39f587cb9f87fd8601c8800455135ae7a2dc67f9e108003dd26",
+    "dataset_root": "E:\\datasets\\euroc_mav\\sensor_only_all11",
+    "direct_dataset_no_sensor_copy": true,
+    "executable_bindings": {
+      "native_core": {
+        "available": true,
+        "bytes": null,
+        "kind": "native_wsl",
+        "path": "/root/visloc-basalt-clean-m7cr-20260823/build/core-relwithdebinfo/basalt_vio",
+        "sha256": "89e0324ccd04c3b615bf7e945aa32480a2f86524987aa00eaf152dcd6b1d242c",
+        "wrapper_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\native_wsl_runner.py",
+        "wrapper_sha256": "5aae73217c65ead1ac39643aa48cb739b48df1a492dc55110996cea4ffda59c3"
+      },
+      "rust_current": {
+        "bytes": 3868072,
+        "path": "/mnt/e/visloc-rs-runs/basalt_crossplatform_norm_fix_linux_20260913/release/examples/basalt_euroc_vio_demo",
+        "sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674"
+      }
+    },
+    "formal_cell_count": 2,
+    "formal_expected_cell_count": 2,
+    "formal_matrix": {
+      "actual_cell_count": 2,
+      "diagnostic_cells_in_formal": 0,
+      "diagnostic_policy": "extra_cell_in_separate_output_root_and_aggregate",
+      "expected_cell_count": 2,
+      "formal_repetitions": 1,
+      "full_all11": false,
+      "required_full_count": 22
+    },
+    "formal_method_policies": {
+      "native_core": {
+        "no_marg_data": true,
+        "no_trace": true,
+        "output_policy": "trajectory_only_lean"
+      },
+      "rust_current": {
+        "no_marg_data": true,
+        "no_trace": true,
+        "output_policy": "trajectory_only_lean"
+      }
+    },
+    "fresh_output_root": true,
+    "gt_absence_fingerprint": "c1368ee075db1ba509a34c0d7af04815fba511422ab84ac86d1f5109553d5f11",
+    "input_namespace": {
+      "direct_dataset_no_sensor_copy": true,
+      "gt_absence_fingerprint": "c1368ee075db1ba509a34c0d7af04815fba511422ab84ac86d1f5109553d5f11",
+      "mode": "sensor_only",
+      "schema_id": "basalt.phase6.input_namespace.v1",
+      "sensor_input_view_mode": "junction",
+      "sensor_view_fingerprints": {
+        "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8"
+      },
+      "staged_sensor_only": false,
+      "strict_gt_absence_verified": true
+    },
+    "max_frames": null,
+    "methods": [
+      "native_core",
+      "rust_current"
+    ],
+    "native_provenance": {
+      "calibration": "/root/visloc-basalt-clean-m7cr-20260823/data/euroc_ds_calib.json",
+      "calibration_sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
+      "checkout_root": "/root/visloc-basalt-clean-m7cr-20260823",
+      "config": "/root/visloc-basalt-clean-m7cr-20260823/data/euroc_config.json",
+      "config_sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
+      "executable": "/root/visloc-basalt-clean-m7cr-20260823/build/core-relwithdebinfo/basalt_vio",
+      "executable_sha256": "89e0324ccd04c3b615bf7e945aa32480a2f86524987aa00eaf152dcd6b1d242c",
+      "git_head": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+      "git_status_clean": true,
+      "git_tree_sha1": "b7afb830d82b45b8209cf784ad9744025d838411",
+      "wrapper_bytes": 9386,
+      "wrapper_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\native_wsl_runner.py",
+      "wrapper_sha256": "5aae73217c65ead1ac39643aa48cb739b48df1a492dc55110996cea4ffda59c3"
+    },
+    "no_marg_data": true,
+    "no_trace": true,
+    "output_policy": "trajectory_only_lean",
+    "output_root": "E:\\visloc-rs-runs\\basalt_linux_rss_pair_mh01_20260913",
+    "poll_seconds": 0.25,
+    "protocol_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\protocols\\basalt_euroc_parity_v1.json",
+    "protocol_sha256": "7957f102ffa47a67c3509cdf77942d599e7b0f5f5f2bf452987f87a55df246e5",
+    "repetitions": 1,
+    "representative": null,
+    "representative_output_policy": null,
+    "resource_gate_canonical": true,
+    "retention": "trajectory_summary_evaluation_manifest_logs",
+    "rss_gate_candidate_eligible": true,
+    "run_session_id": "1cf8f3de912747a49304dd8f3dceebf0",
+    "runtime_context": {
+      "cache_context": {
+        "calibration_sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c",
+        "config_sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa",
+        "dataset_manifest_sha256": "a803db9e01f7a39f587cb9f87fd8601c8800455135ae7a2dc67f9e108003dd26",
+        "dataset_root": "E:\\datasets\\euroc_mav\\sensor_only_all11",
+        "formal_expected_cell_count": 2,
+        "fresh_output_root": true,
+        "full_formal_matrix": false,
+        "input_namespace": {
+          "direct_dataset_no_sensor_copy": true,
+          "gt_absence_fingerprint": "c1368ee075db1ba509a34c0d7af04815fba511422ab84ac86d1f5109553d5f11",
+          "mode": "sensor_only",
+          "schema_id": "basalt.phase6.input_namespace.v1",
+          "sensor_input_view_mode": "junction",
+          "sensor_view_fingerprints": {
+            "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8"
+          },
+          "staged_sensor_only": false,
+          "strict_gt_absence_verified": true
+        },
+        "max_frames": null,
+        "methods": [
+          "native_core",
+          "rust_current"
+        ],
+        "native_executable_binding": {
+          "available": true,
+          "bytes": null,
+          "kind": "native_wsl",
+          "path": "/root/visloc-basalt-clean-m7cr-20260823/build/core-relwithdebinfo/basalt_vio",
+          "sha256": "89e0324ccd04c3b615bf7e945aa32480a2f86524987aa00eaf152dcd6b1d242c",
+          "wrapper_path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\native_wsl_runner.py",
+          "wrapper_sha256": "5aae73217c65ead1ac39643aa48cb739b48df1a492dc55110996cea4ffda59c3"
+        },
+        "output_policy": "trajectory_only_lean",
+        "poll_seconds": 0.25,
+        "protocol_sha256": "7957f102ffa47a67c3509cdf77942d599e7b0f5f5f2bf452987f87a55df246e5",
+        "repetitions": 1,
+        "rss_gate_candidate_eligible": true,
+        "rust_executable_binding": {
+          "bytes": 3868072,
+          "path": "/mnt/e/visloc-rs-runs/basalt_crossplatform_norm_fix_linux_20260913/release/examples/basalt_euroc_vio_demo",
+          "sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674"
+        },
+        "rust_runtime_profile": "rust_wsl_linux",
+        "rust_wsl_binding": {
+          "binary": {
+            "bytes": 3868072,
+            "path": "/mnt/e/visloc-rs-runs/basalt_crossplatform_norm_fix_linux_20260913/release/examples/basalt_euroc_vio_demo",
+            "sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674"
+          },
+          "build": {
+            "features": [
+              "basalt-lm-workspace-reuse"
+            ],
+            "profile": "release",
+            "rustflags": "-C target-feature=+avx2,+fma"
+          },
+          "calibration": {
+            "bytes": 5967,
+            "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/benchmarks/basalt/release_inputs/euroc_ds_calib.json",
+            "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c"
+          },
+          "config": {
+            "bytes": 2401,
+            "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/configs/basalt/euroc_config.json",
+            "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+          },
+          "eligibility_reason": "exactness_certificate_and_remote_bindings_present",
+          "exactness_certificate": {
+            "available": true,
+            "bytes": 8565,
+            "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\m11_rust_wsl_exactness_20260913.json",
+            "sha256": "24e67c7adbe8430ec65394f9f974c3a10216440479089010c97fb423ba00fd69"
+          },
+          "exactness_certificate_status": "pass",
+          "exactness_required_frames": [
+            52,
+            80,
+            400
+          ],
+          "profile": "rust_wsl_linux",
+          "provenance_file": {
+            "available": true,
+            "bytes": 7978,
+            "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\m11_rust_wsl_provenance_20260913.json",
+            "sha256": "cbb485be8d5654cfe8177d92f9322e4b64945eed5709d1c36bfadf246e747b27"
+          },
+          "rss_candidate_eligible": true,
+          "runner": {
+            "available": true,
+            "bytes": 12727,
+            "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\rust_wsl_runner.py",
+            "sha256": "b6008dfba5085c7157d064d81b2273c618d9a575c261530c18899de8b7ff234c"
+          },
+          "rust_msvc_executable_sha256": "dd81ec7fcdc57aa33548b191aa4cdc00cafda037ecbdcd5f9e2a508396f2e515",
+          "source_sha256": "32cad9ac11a045868bc17fd55a3062c3eddd7dadaf9e8ea14ba05914582c29be",
+          "target_triple": "x86_64-unknown-linux-gnu",
+          "toolchain": {
+            "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02); LLVM 21.1.8"
+          },
+          "wsl": {
+            "rss_domain": "linux-proc-process-tree"
+          }
+        },
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "seed": 7,
+        "sensor_bytes_copied": 0,
+        "sensor_input_view_mode": "junction",
+        "sensor_only_input_view": true,
+        "sequences": [
+          "MH_01_easy"
+        ],
+        "session_id": "1cf8f3de912747a49304dd8f3dceebf0",
+        "threads": 1,
+        "timeout_seconds": 43200,
+        "timing_feature_binding": {
+          "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+          "environment_mode": "unset",
+          "environment_requested": false,
+          "feature": "basalt-timing-breakdown",
+          "rust_executable_sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674",
+          "state": "disabled"
+        },
+        "workers": 1
+      },
+      "cache_context_id": "807f65325d01eb970866065387b959c46f9f22b7401a8b58f59f0ab669c67bbb",
+      "pairing": "sequence/repetition pair with explicit method position",
+      "schema_id": "basalt.phase6.runtime_context.v1",
+      "session_id": "1cf8f3de912747a49304dd8f3dceebf0"
+    },
+    "runtime_gate_canonical": true,
+    "runtime_gate_requirements": {
+      "fresh_output_root": true,
+      "rss_authoritative_domain": "linux-proc-process-tree",
+      "rss_gate_candidate_eligible": true,
+      "rust_runtime_profile": "rust_wsl_linux",
+      "seed": 7,
+      "sensor_namespace_must_be_uniform": true,
+      "sensor_only_input_view": true,
+      "strict_gt_absence_verified": true,
+      "threads": 1,
+      "workers": 1
+    },
+    "rust_runtime_profile": "rust_wsl_linux",
+    "rust_wsl_binding": {
+      "binary": {
+        "bytes": 3868072,
+        "path": "/mnt/e/visloc-rs-runs/basalt_crossplatform_norm_fix_linux_20260913/release/examples/basalt_euroc_vio_demo",
+        "sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674"
+      },
+      "build": {
+        "features": [
+          "basalt-lm-workspace-reuse"
+        ],
+        "profile": "release",
+        "rustflags": "-C target-feature=+avx2,+fma"
+      },
+      "calibration": {
+        "bytes": 5967,
+        "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/benchmarks/basalt/release_inputs/euroc_ds_calib.json",
+        "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c"
+      },
+      "config": {
+        "bytes": 2401,
+        "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/configs/basalt/euroc_config.json",
+        "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+      },
+      "eligibility_reason": "exactness_certificate_and_remote_bindings_present",
+      "exactness_certificate": {
+        "available": true,
+        "bytes": 8565,
+        "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\m11_rust_wsl_exactness_20260913.json",
+        "sha256": "24e67c7adbe8430ec65394f9f974c3a10216440479089010c97fb423ba00fd69"
+      },
+      "exactness_certificate_status": "pass",
+      "exactness_required_frames": [
+        52,
+        80,
+        400
+      ],
+      "profile": "rust_wsl_linux",
+      "provenance_file": {
+        "available": true,
+        "bytes": 7978,
+        "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\m11_rust_wsl_provenance_20260913.json",
+        "sha256": "cbb485be8d5654cfe8177d92f9322e4b64945eed5709d1c36bfadf246e747b27"
+      },
+      "rss_candidate_eligible": true,
+      "runner": {
+        "available": true,
+        "bytes": 12727,
+        "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\rust_wsl_runner.py",
+        "sha256": "b6008dfba5085c7157d064d81b2273c618d9a575c261530c18899de8b7ff234c"
+      },
+      "rust_msvc_executable_sha256": "dd81ec7fcdc57aa33548b191aa4cdc00cafda037ecbdcd5f9e2a508396f2e515",
+      "source_sha256": "32cad9ac11a045868bc17fd55a3062c3eddd7dadaf9e8ea14ba05914582c29be",
+      "target_triple": "x86_64-unknown-linux-gnu",
+      "toolchain": {
+        "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02); LLVM 21.1.8"
+      },
+      "wsl": {
+        "rss_domain": "linux-proc-process-tree"
+      }
+    },
+    "schema_id": "basalt.phase6.coordinator.v1",
+    "seed": 7,
+    "sensor_bytes_copied": 0,
+    "sensor_input_view_mode": "junction",
+    "sensor_only_input_view": true,
+    "sensor_view_fingerprints": {
+      "MH_01_easy": "5edcfbc45125ecdc94d8d795881d88adfbdbcea18a15ec035fa43cda9dedaea8"
+    },
+    "sensor_view_gt_entry_absence": {
+      "MH_01_easy": {
+        "forbidden_gt_names": [],
+        "junction_count": 3,
+        "mav0_entries": [
+          "cam0",
+          "cam1",
+          "imu0"
+        ],
+        "regular_sensor_copies": 0,
+        "sequence_entries": [
+          "mav0"
+        ]
+      }
+    },
+    "sequences": [
+      "MH_01_easy"
+    ],
+    "staged_sensor_only": false,
+    "strict_gt_absence_verified": true,
+    "threads": 1,
+    "timeout_seconds": 43200,
+    "timing_feature_binding": {
+      "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+      "environment_mode": "unset",
+      "environment_requested": false,
+      "feature": "basalt-timing-breakdown",
+      "rust_executable_sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674",
+      "state": "disabled"
+    },
+    "workers": 1,
+    "workers_policy": "canonical_sequential"
+  },
+  "request_sha256": "a1bcf0a1dbb26b94e2196c2b1ed57f35e8a58300fa7e4c8b6b7d5d7b19d76eac",
+  "resource_gate_canonical": true,
+  "retention": {
+    "default": [
+      "trajectory",
+      "summary",
+      "evaluation",
+      "manifest",
+      "stdout.log",
+      "stderr.log"
+    ],
+    "representative": null
+  },
+  "rss_gate_candidate_eligible": true,
+  "run_count": 2,
+  "runs": [
+    {
+      "evaluation": "E:\\visloc-rs-runs\\basalt_linux_rss_pair_mh01_20260913\\rust_current\\MH_01_easy\\r1\\evaluation_result.json",
+      "failure_reason": null,
+      "method": "rust_current",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "peak_process_tree_rss_bytes": 29024256,
+      "repetition": 1,
+      "request_sha256": "ec4217095deb0f8761f09f2aaf0ac6994bdf22f20cc85f94b33083536d96ffaa",
+      "resume_context": {
+        "cell_reused": false,
+        "session_reused": false
+      },
+      "resume_identity": {
+        "cache_context_id": "807f65325d01eb970866065387b959c46f9f22b7401a8b58f59f0ab669c67bbb",
+        "method_order": [
+          "rust_current",
+          "native_core"
+        ],
+        "pair_id": "MH_01_easy:r1",
+        "pair_position": 1,
+        "pair_size": 2,
+        "rss_gate_candidate_eligible": true,
+        "rust_executable_sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674",
+        "rust_runtime_profile": "rust_wsl_linux",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "1cf8f3de912747a49304dd8f3dceebf0"
+      },
+      "rss_authoritative": true,
+      "rss_authoritative_domain": "linux-proc-process-tree",
+      "rss_gate_candidate_eligible": true,
+      "rss_measurement_domain": "linux-proc-process-tree",
+      "rss_measurement_source": "rust_wsl_runner:/proc",
+      "run_dir": "E:\\visloc-rs-runs\\basalt_linux_rss_pair_mh01_20260913\\rust_current\\MH_01_easy\\r1",
+      "runtime_common_measurement_domain": "windows-coordinator-process-tree-command",
+      "runtime_common_wall_seconds": 730.9278798997402,
+      "runtime_context": {
+        "cache_context_id": "807f65325d01eb970866065387b959c46f9f22b7401a8b58f59f0ab669c67bbb",
+        "method_order": [
+          "rust_current",
+          "native_core"
+        ],
+        "pair_id": "MH_01_easy:r1",
+        "pair_position": 1,
+        "pair_position_label": "first",
+        "pair_size": 2,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "1cf8f3de912747a49304dd8f3dceebf0"
+      },
+      "rust_runtime_profile": "rust_wsl_linux",
+      "rust_wsl_binding": {
+        "binary": {
+          "bytes": 3868072,
+          "path": "/mnt/e/visloc-rs-runs/basalt_crossplatform_norm_fix_linux_20260913/release/examples/basalt_euroc_vio_demo",
+          "sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674"
+        },
+        "build": {
+          "features": [
+            "basalt-lm-workspace-reuse"
+          ],
+          "profile": "release",
+          "rustflags": "-C target-feature=+avx2,+fma"
+        },
+        "calibration": {
+          "bytes": 5967,
+          "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/benchmarks/basalt/release_inputs/euroc_ds_calib.json",
+          "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c"
+        },
+        "config": {
+          "bytes": 2401,
+          "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/configs/basalt/euroc_config.json",
+          "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+        },
+        "eligibility_reason": "exactness_certificate_and_remote_bindings_present",
+        "exactness_certificate": {
+          "available": true,
+          "bytes": 8565,
+          "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\m11_rust_wsl_exactness_20260913.json",
+          "sha256": "24e67c7adbe8430ec65394f9f974c3a10216440479089010c97fb423ba00fd69"
+        },
+        "exactness_certificate_status": "pass",
+        "exactness_required_frames": [
+          52,
+          80,
+          400
+        ],
+        "profile": "rust_wsl_linux",
+        "provenance_file": {
+          "available": true,
+          "bytes": 7978,
+          "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\m11_rust_wsl_provenance_20260913.json",
+          "sha256": "cbb485be8d5654cfe8177d92f9322e4b64945eed5709d1c36bfadf246e747b27"
+        },
+        "rss_candidate_eligible": true,
+        "runner": {
+          "available": true,
+          "bytes": 12727,
+          "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\rust_wsl_runner.py",
+          "sha256": "b6008dfba5085c7157d064d81b2273c618d9a575c261530c18899de8b7ff234c"
+        },
+        "rust_msvc_executable_sha256": "dd81ec7fcdc57aa33548b191aa4cdc00cafda037ecbdcd5f9e2a508396f2e515",
+        "source_sha256": "32cad9ac11a045868bc17fd55a3062c3eddd7dadaf9e8ea14ba05914582c29be",
+        "target_triple": "x86_64-unknown-linux-gnu",
+        "toolchain": {
+          "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02); LLVM 21.1.8"
+        },
+        "wsl": {
+          "rss_domain": "linux-proc-process-tree"
+        }
+      },
+      "sensor_bytes_copied": 0,
+      "sensor_input_view_mode": "junction",
+      "sequence": "MH_01_easy",
+      "staged_sensor_only": false,
+      "status": "success",
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674",
+        "state": "disabled"
+      },
+      "wall_measurement_domain": "linux-inner-command",
+      "wall_seconds": 700.7519266039599
+    },
+    {
+      "evaluation": "E:\\visloc-rs-runs\\basalt_linux_rss_pair_mh01_20260913\\native_core\\MH_01_easy\\r1\\evaluation_result.json",
+      "failure_reason": null,
+      "method": "native_core",
+      "no_marg_data": true,
+      "no_trace": true,
+      "output_policy": "trajectory_only_lean",
+      "peak_process_tree_rss_bytes": 51011584,
+      "repetition": 1,
+      "request_sha256": "c1a3a18dc9fe15c869cc7533066faf644e6d47c3d2ed735bcc7909dd5c3317ab",
+      "resume_context": {
+        "cell_reused": false,
+        "session_reused": false
+      },
+      "resume_identity": {
+        "cache_context_id": "807f65325d01eb970866065387b959c46f9f22b7401a8b58f59f0ab669c67bbb",
+        "method_order": [
+          "rust_current",
+          "native_core"
+        ],
+        "pair_id": "MH_01_easy:r1",
+        "pair_position": 2,
+        "pair_size": 2,
+        "rss_gate_candidate_eligible": true,
+        "rust_executable_sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674",
+        "rust_runtime_profile": "rust_wsl_linux",
+        "schema_id": "basalt.phase6.resume_identity.v1",
+        "session_id": "1cf8f3de912747a49304dd8f3dceebf0"
+      },
+      "rss_authoritative": true,
+      "rss_authoritative_domain": "linux-proc-process-tree",
+      "rss_gate_candidate_eligible": true,
+      "rss_measurement_domain": "linux-proc-process-tree",
+      "rss_measurement_source": "native_wsl_runner:/proc",
+      "run_dir": "E:\\visloc-rs-runs\\basalt_linux_rss_pair_mh01_20260913\\native_core\\MH_01_easy\\r1",
+      "runtime_common_measurement_domain": "windows-coordinator-process-tree-command",
+      "runtime_common_wall_seconds": 456.53282589977607,
+      "runtime_context": {
+        "cache_context_id": "807f65325d01eb970866065387b959c46f9f22b7401a8b58f59f0ab669c67bbb",
+        "method_order": [
+          "rust_current",
+          "native_core"
+        ],
+        "pair_id": "MH_01_easy:r1",
+        "pair_position": 2,
+        "pair_position_label": "second",
+        "pair_size": 2,
+        "schema_id": "basalt.phase6.runtime_context.v1",
+        "session_id": "1cf8f3de912747a49304dd8f3dceebf0"
+      },
+      "rust_runtime_profile": "rust_wsl_linux",
+      "rust_wsl_binding": {
+        "binary": {
+          "bytes": 3868072,
+          "path": "/mnt/e/visloc-rs-runs/basalt_crossplatform_norm_fix_linux_20260913/release/examples/basalt_euroc_vio_demo",
+          "sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674"
+        },
+        "build": {
+          "features": [
+            "basalt-lm-workspace-reuse"
+          ],
+          "profile": "release",
+          "rustflags": "-C target-feature=+avx2,+fma"
+        },
+        "calibration": {
+          "bytes": 5967,
+          "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/benchmarks/basalt/release_inputs/euroc_ds_calib.json",
+          "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c"
+        },
+        "config": {
+          "bytes": 2401,
+          "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/configs/basalt/euroc_config.json",
+          "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+        },
+        "eligibility_reason": "exactness_certificate_and_remote_bindings_present",
+        "exactness_certificate": {
+          "available": true,
+          "bytes": 8565,
+          "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\m11_rust_wsl_exactness_20260913.json",
+          "sha256": "24e67c7adbe8430ec65394f9f974c3a10216440479089010c97fb423ba00fd69"
+        },
+        "exactness_certificate_status": "pass",
+        "exactness_required_frames": [
+          52,
+          80,
+          400
+        ],
+        "profile": "rust_wsl_linux",
+        "provenance_file": {
+          "available": true,
+          "bytes": 7978,
+          "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\m11_rust_wsl_provenance_20260913.json",
+          "sha256": "cbb485be8d5654cfe8177d92f9322e4b64945eed5709d1c36bfadf246e747b27"
+        },
+        "rss_candidate_eligible": true,
+        "runner": {
+          "available": true,
+          "bytes": 12727,
+          "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\rust_wsl_runner.py",
+          "sha256": "b6008dfba5085c7157d064d81b2273c618d9a575c261530c18899de8b7ff234c"
+        },
+        "rust_msvc_executable_sha256": "dd81ec7fcdc57aa33548b191aa4cdc00cafda037ecbdcd5f9e2a508396f2e515",
+        "source_sha256": "32cad9ac11a045868bc17fd55a3062c3eddd7dadaf9e8ea14ba05914582c29be",
+        "target_triple": "x86_64-unknown-linux-gnu",
+        "toolchain": {
+          "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02); LLVM 21.1.8"
+        },
+        "wsl": {
+          "rss_domain": "linux-proc-process-tree"
+        }
+      },
+      "sensor_bytes_copied": 0,
+      "sensor_input_view_mode": "junction",
+      "sequence": "MH_01_easy",
+      "staged_sensor_only": false,
+      "status": "success",
+      "timing_feature_binding": {
+        "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+        "environment_mode": "unset",
+        "environment_requested": false,
+        "feature": "basalt-timing-breakdown",
+        "rust_executable_sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674",
+        "state": "disabled"
+      },
+      "wall_measurement_domain": "linux-inner-command",
+      "wall_seconds": 438.71282819705084
+    }
+  ],
+  "runtime_gate_canonical": true,
+  "runtime_gate_canonical_override": null,
+  "runtime_gate_canonical_override_reason": null,
+  "runtime_gate_canonical_request": true,
+  "runtime_gate_requirements": {
+    "fresh_output_root": true,
+    "rss_authoritative_domain": "linux-proc-process-tree",
+    "rss_gate_candidate_eligible": true,
+    "rust_runtime_profile": "rust_wsl_linux",
+    "seed": 7,
+    "sensor_namespace_must_be_uniform": true,
+    "sensor_only_input_view": true,
+    "strict_gt_absence_verified": true,
+    "threads": 1,
+    "workers": 1
+  },
+  "runtime_session": {
+    "cache_context_id": "807f65325d01eb970866065387b959c46f9f22b7401a8b58f59f0ab669c67bbb",
+    "resumed_existing_session": false,
+    "session_file": "E:\\visloc-rs-runs\\basalt_linux_rss_pair_mh01_20260913\\phase6_session.json",
+    "session_id": "1cf8f3de912747a49304dd8f3dceebf0"
+  },
+  "rust_runtime_profile": "rust_wsl_linux",
+  "rust_wsl_binding": {
+    "binary": {
+      "bytes": 3868072,
+      "path": "/mnt/e/visloc-rs-runs/basalt_crossplatform_norm_fix_linux_20260913/release/examples/basalt_euroc_vio_demo",
+      "sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674"
+    },
+    "build": {
+      "features": [
+        "basalt-lm-workspace-reuse"
+      ],
+      "profile": "release",
+      "rustflags": "-C target-feature=+avx2,+fma"
+    },
+    "calibration": {
+      "bytes": 5967,
+      "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/benchmarks/basalt/release_inputs/euroc_ds_calib.json",
+      "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c"
+    },
+    "config": {
+      "bytes": 2401,
+      "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/configs/basalt/euroc_config.json",
+      "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+    },
+    "eligibility_reason": "exactness_certificate_and_remote_bindings_present",
+    "exactness_certificate": {
+      "available": true,
+      "bytes": 8565,
+      "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\m11_rust_wsl_exactness_20260913.json",
+      "sha256": "24e67c7adbe8430ec65394f9f974c3a10216440479089010c97fb423ba00fd69"
+    },
+    "exactness_certificate_status": "pass",
+    "exactness_required_frames": [
+      52,
+      80,
+      400
+    ],
+    "profile": "rust_wsl_linux",
+    "provenance_file": {
+      "available": true,
+      "bytes": 7978,
+      "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\release_inputs\\m11_rust_wsl_provenance_20260913.json",
+      "sha256": "cbb485be8d5654cfe8177d92f9322e4b64945eed5709d1c36bfadf246e747b27"
+    },
+    "rss_candidate_eligible": true,
+    "runner": {
+      "available": true,
+      "bytes": 12727,
+      "path": "E:\\visloc_archive\\ssfm_runset_core_pr_20260819\\benchmarks\\basalt\\rust_wsl_runner.py",
+      "sha256": "b6008dfba5085c7157d064d81b2273c618d9a575c261530c18899de8b7ff234c"
+    },
+    "rust_msvc_executable_sha256": "dd81ec7fcdc57aa33548b191aa4cdc00cafda037ecbdcd5f9e2a508396f2e515",
+    "source_sha256": "32cad9ac11a045868bc17fd55a3062c3eddd7dadaf9e8ea14ba05914582c29be",
+    "target_triple": "x86_64-unknown-linux-gnu",
+    "toolchain": {
+      "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02); LLVM 21.1.8"
+    },
+    "wsl": {
+      "rss_domain": "linux-proc-process-tree"
+    }
+  },
+  "schema_id": "basalt.phase6.coordinator.v1",
+  "schema_version": 1,
+  "sensor_bytes_copied": 0,
+  "sensor_input_view_mode": "junction",
+  "sensor_only_input_view": true,
+  "staged_sensor_only": false,
+  "storage_estimate": {
+    "additional_sensor_staging_bytes": 0,
+    "note": "Existing shared EuRoC source/junction storage is reused; engine working-output size is workload-dependent and non-representative cells are pruned after evaluation.",
+    "per_cell_sensor_copy_bytes": 0
+  },
+  "timing_feature_binding": {
+    "environment": "VISLOC_BASALT_TIMING_BREAKDOWN",
+    "environment_mode": "unset",
+    "environment_requested": false,
+    "feature": "basalt-timing-breakdown",
+    "rust_executable_sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674",
+    "state": "disabled"
+  },
+  "workers": 1,
+  "workers_policy": "canonical_sequential"
+}

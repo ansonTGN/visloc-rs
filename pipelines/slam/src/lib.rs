@@ -21,15 +21,16 @@ pub mod colmap_incremental;
 mod landmark_qr;
 mod process_memory;
 pub use bundle::{
-    BaConfig, BaError, BaGeneralStereoObservation, BaGncResult, BaIterationStats, BaObservation,
-    BaResult, BaRigObservation, BaStereoObservation, BiasRandomWalkFactor, BundleAdjustment,
-    BundleAdjustmentRefiner, GravityPrior, MatrixFreeBaAdaptiveDampingIterationStats,
-    MatrixFreeBaAdaptiveDampingResult, MatrixFreeBaColumnScalingIterationStats,
-    MatrixFreeBaColumnScalingOptions, MatrixFreeBaColumnScalingResult, MatrixFreeBaError,
-    MatrixFreeBaIterationStats, MatrixFreeBaOptions, MatrixFreeBaRestartIterationStats,
-    MatrixFreeBaRestartOptions, MatrixFreeBaRestartResult, MatrixFreeBaResult,
-    NavigationStatePrior, PairwisePoseFactor, PerPoseGravityObservation, PerPoseGravityPrior,
-    PositionPrior, PositionPriorObservation,
+    build_sqrt_factor_rows, BaConfig, BaError, BaGeneralStereoObservation, BaGncResult,
+    BaIterationStats, BaObservation, BaResult, BaRigObservation, BaStereoObservation,
+    BiasRandomWalkFactor, BundleAdjustment, BundleAdjustmentRefiner, GravityPrior,
+    MatrixFreeBaAdaptiveDampingIterationStats, MatrixFreeBaAdaptiveDampingResult,
+    MatrixFreeBaColumnScalingIterationStats, MatrixFreeBaColumnScalingOptions,
+    MatrixFreeBaColumnScalingResult, MatrixFreeBaError, MatrixFreeBaIterationStats,
+    MatrixFreeBaOptions, MatrixFreeBaRestartIterationStats, MatrixFreeBaRestartOptions,
+    MatrixFreeBaRestartResult, MatrixFreeBaResult, NavigationStatePrior, PairwisePoseFactor,
+    PerPoseGravityObservation, PerPoseGravityPrior, PositionPrior, PositionPriorObservation,
+    SqrtStack,
 };
 
 pub mod camera_rig;
@@ -205,6 +206,17 @@ pub mod gnc;
 pub mod incremental_pose_graph;
 pub mod map_atlas;
 pub mod marginalization;
+pub mod marginalization_sqrt;
+pub use marginalization_sqrt::{marginalize_sqrt, marginalize_sqrt_from_information, SqrtMarginal};
+pub mod vi_sqrt_window;
+pub use vi_sqrt_window::{step_window_marginal, NavBlock, SqrtNavMarginal};
+pub mod nonlinear_factor_recovery;
+pub use nonlinear_factor_recovery::{
+    permute_sqrt_stack_to_vi_blocks, recover_relative_pose_factors,
+    recover_relative_pose_factors_from_ba_stack, recover_relative_pose_factors_pose_only,
+    vi_marginal_to_pose_only, RecoveredRelativePoseFactor, VI_POSE_DOF, VI_STATE_DOF,
+    VI_VEL_BIAS_DOF,
+};
 pub mod pcm;
 mod reordering;
 pub mod sparse_factor_graph;

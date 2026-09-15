@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://visloc-rs.local/schemas/basalt/provenance-manifest-v1.schema.json",
+  "title": "visloc-rs Basalt provenance manifest v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "schema_id",
+    "manifest_id",
+    "upstreams",
+    "port_files",
+    "checked_in_generator_hashes",
+    "retained_audit_sources",
+    "release"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "schema_id": {"const": "visloc-rs.basalt.provenance.v1"},
+    "manifest_id": {"const": "basalt-provenance-v1"},
+    "upstreams": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/upstream"}
+    },
+    "port_files": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/port_file"}
+    },
+    "checked_in_generator_hashes": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/generator"}
+    },
+    "retained_audit_sources": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/audit_source"}
+    },
+    "release": {"type": "object", "required": ["manifest_path", "notice_files"]}
+  },
+  "$defs": {
+    "upstream": {
+      "type": "object",
+      "required": [
+        "repository",
+        "commit",
+        "tree_sha1",
+        "license_spdx",
+        "license_file",
+        "redistribution_notice_required",
+        "source_paths"
+      ],
+      "properties": {
+        "repository": {"type": "string", "format": "uri"},
+        "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "tree_sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "license_spdx": {"type": "string", "minLength": 1},
+        "license_file": {"type": "string", "minLength": 1},
+        "redistribution_notice_required": {"const": true},
+        "source_paths": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "port_file": {
+      "type": "object",
+      "required": ["translation_status", "upstream_refs"],
+      "properties": {
+        "translation_status": {"type": "string", "minLength": 1},
+        "upstream_refs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "upstream_source_paths": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"}
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "generator": {
+      "type": "object",
+      "required": ["sha256", "kind", "copied_upstream_source", "upstream_refs"],
+      "properties": {
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "kind": {"type": "string", "minLength": 1},
+        "copied_upstream_source": {"const": false},
+        "upstream_refs": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "audit_source": {
+      "type": "object",
+      "required": ["sha256", "kind", "copied_upstream_source", "upstream_refs", "retention"],
+      "properties": {
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "kind": {"type": "string", "minLength": 1},
+        "copied_upstream_source": {"const": false},
+        "upstream_refs": {"type": "array", "items": {"type": "string"}},
+        "retention": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

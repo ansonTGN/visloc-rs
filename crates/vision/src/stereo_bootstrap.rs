@@ -188,6 +188,145 @@ pub fn bootstrap_stereo_landmarks(
     survivors
 }
 
+/// Triangulate known left→right correspondences (e.g. Basalt stereo optical
+/// flow) without descriptor matching. `correspondences` are
+/// `(left_keypoint_index, right_pixel)` pairs into `left_keypoints`.
+pub fn bootstrap_stereo_landmarks_from_correspondences(
+    left_camera: &Camera,
+    right_camera: &Camera,
+    left_to_right: &SE3,
+    left_keypoints: &[Point2<f64>],
+    correspondences: &[(usize, Point2<f64>)],
+    config: &StereoBootstrapConfig,
+) -> Vec<StereoBootstrapLandmark> {
+    let mut survivors = Vec::with_capacity(correspondences.len());
+    for &(left_keypoint_index, right_keypoint) in correspondences {
+        let Some(left_keypoint) = left_keypoints.get(left_keypoint_index).copied() else {
+            continue;
+        };
+        let Some(point_left) = triangulate_two_view_left_frame(
+            left_camera,
+            right_camera,
+            left_to_right,
+            &left_keypoint,
+            &right_keypoint,
+        ) else {
+            continue;
+        };
+        if !point_left.z.is_finite()
+            || point_left.z < config.min_depth_meters
+            || point_left.z > config.max_depth_meters
+        {
+            continue;
+        }
+        let point_right = left_to_right.transform_point(&point_left);
+        if !point_right.z.is_finite() || point_right.z < config.min_depth_meters {
+            continue;
+        }
+        let Some(left_projected) = left_camera.project(&point_left) else {
+            continue;
+        };
+        let Some(right_projected) = right_camera.project(&point_right) else {
+            continue;
+        };
+        let left_error = (left_projected - left_keypoint).norm();
+        let right_error = (right_projected - right_keypoint).norm();
+        if left_error > config.max_reprojection_error_pixels
+            || right_error > config.max_reprojection_error_pixels
+        {
+            continue;
+        }
+        let Some(point_covariance_left_camera_frame) = propagate_stereo_pixel_covariance(
+            left_camera,
+            right_camera,
+            left_to_right,
+            &left_keypoint,
+            &right_keypoint,
+            config.pixel_stddev_pixels,
+        ) else {
+            continue;
+        };
+        survivors.push(StereoBootstrapLandmark {
+            left_keypoint_index,
+            // Not indexed into a right FeatureSet; callers should keep the
+            // right pixel alongside this list (see optical-flow stereo path).
+            right_keypoint_index: 0,
+            point_left_camera_frame: point_left,
+            left_reprojection_error_pixels: left_error,
+            right_reprojection_error_pixels: right_error,
+            point_covariance_left_camera_frame,
+        });
+    }
+    survivors.sort_by_key(|landmark| landmark.left_keypoint_index);
+    survivors
+}
+
+/// Basalt `filterPoints` epipolar gate for already-undistorted stereo pairs.
+///
+/// Builds `E = [t]_× R` from `left_to_right` and drops correspondences whose
+/// unit-bearing Sampson-style score `|b_rightᵀ E b_left|` exceeds
+/// `max_epipolar_error` (Basalt default `0.005`).
+pub fn filter_correspondences_by_epipolar(
+    left_camera: &Camera,
+    right_camera: &Camera,
+    left_to_right: &SE3,
+    left_keypoints: &[Point2<f64>],
+    correspondences: &[(usize, Point2<f64>)],
+    max_epipolar_error: f64,
+) -> Vec<(usize, Point2<f64>)> {
+    let Some(essential) = essential_from_left_to_right(left_to_right) else {
+        return correspondences.to_vec();
+    };
+    correspondences
+        .iter()
+        .copied()
+        .filter(|&(left_idx, right_px)| {
+            let Some(left_px) = left_keypoints.get(left_idx).copied() else {
+                return false;
+            };
+            let Some(b0) = bearing_from_undistorted_pixel(left_camera, left_px) else {
+                return false;
+            };
+            let Some(b1) = bearing_from_undistorted_pixel(right_camera, right_px) else {
+                return false;
+            };
+            let err = (b1.transpose() * essential * b0).x.abs();
+            err <= max_epipolar_error
+        })
+        .collect()
+}
+
+fn essential_from_left_to_right(left_to_right: &SE3) -> Option<Matrix3<f64>> {
+    let rotation = left_to_right.rotation.to_rotation_matrix().into_inner();
+    let t = left_to_right.translation;
+    if t.norm() < 1e-12 {
+        return None;
+    }
+    Some(skew_symmetric(t) * rotation)
+}
+
+fn skew_symmetric(v: nalgebra::Vector3<f64>) -> Matrix3<f64> {
+    Matrix3::new(0.0, -v.z, v.y, v.z, 0.0, -v.x, -v.y, v.x, 0.0)
+}
+
+/// Ideal-pinhole bearing for an **already undistorted** pixel (no second
+/// radial inversion — OF / SuperPoint bootstrap paths undistort upstream).
+fn bearing_from_undistorted_pixel(
+    camera: &Camera,
+    pixel: Point2<f64>,
+) -> Option<nalgebra::Vector3<f64>> {
+    let (fx, fy, cx, cy) = camera.intrinsics()?;
+    if fx.abs() < 1e-12 || fy.abs() < 1e-12 {
+        return None;
+    }
+    let v = nalgebra::Vector3::new((pixel.x - cx) / fx, (pixel.y - cy) / fy, 1.0);
+    let n = v.norm();
+    if n < 1e-12 {
+        return None;
+    }
+    Some(v / n)
+}
+
 /// Propagate independent isotropic left/right keypoint noise through the
 /// general two-view DLT triangulator.
 ///

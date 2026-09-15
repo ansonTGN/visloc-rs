@@ -1,0 +1,20 @@
+{
+  "schema": "visloc.basalt.m11.se2_exp_portable_cosf_witness.v1",
+  "source": "Frame-12 cam1 KLT iteration index 11; first cross-platform cosine witness after exact prior/patch/increment agreement.",
+  "upstream_native": "Linux glibc 2.35 libm sincosf/cosf runtime bound by native_cosf_probe_linux_r3.json",
+  "tangent_bits": ["0xbc8e9c4f", "0x3b8490f6", "0xbbe72bd4"],
+  "expected_rotation_bits_column_major": ["0x3f7ffe5f", "0xbbe72b56", "0x3be72b56", "0x3f7ffe5f"],
+  "expected_translation_bits": ["0xbc8e7e1d", "0x3b86932e"],
+  "cosine_witness": {
+    "theta_bits": "0xbbe72bd4",
+    "linux_native_cosf_bits": "0x3f7ffe5f",
+    "previous_msvc_std_cosf_bits": "0x3f7ffe5e"
+  },
+  "provenance": {
+    "trace_path": "E:/visloc-rs-runs/m11_frame12_klt_repro_20260907/linux_r1/klt_real_path_trace.json",
+    "trace_sha256": "09CAF6237BDACE757B132424B8DC41E392DB7FCF58AA037740E35FC8F26A8A17",
+    "native_probe_path": "E:/visloc-rs-runs/m11_frame12_klt_repro_20260907/native_cosf_probe_linux_r3.json",
+    "native_probe_sha256": "CA46442B519C053106902D1372A8D25606B45537BDC4C25D70F7042881FF8D33",
+    "libm_sha256": "df621c68dbfed7e843434ef2faedb9f4d4b0543ad161e9a55eaf4d4ce2443176"
+  }
+}

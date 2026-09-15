@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "audit_id": "m10-release-manifest-remediation-20260829",
+  "captured_at": "2026-08-29T06:32:23+09:00",
+  "scope": {
+    "workspace": "C:/Users/rsasa/Workspace/visloc-rs",
+    "read_only_for_engine_and_pinned_checkout": true,
+    "heavy_build_or_timing_started": false,
+    "release_packaged": false,
+    "note": "This remediation changes release/provenance metadata and validator tests only; historical dirty/golden/legal caveats remain disclosed."
+  },
+  "before": {
+    "release_manifest": {
+      "path": "benchmarks/basalt/basalt_release_manifest_v1.json",
+      "bytes": 1671,
+      "sha256": "995056435ddabadcdd478c7e7e3a56df6c0a5141f0c14abf88c5d158d2b298bd",
+      "artifact_records": 9,
+      "artifact_sha256_fields": 0,
+      "directory_entries": 3,
+      "self_listed": true,
+      "contract_inputs_listed": 0,
+      "test_files_individually_bound": 0
+    },
+    "release_schema": {"present": false},
+    "validator": "The prior M10 blocker audit recorded path-only release metadata, no dedicated release schema, four omitted contract inputs, and 44 tests bound only by a directory entry."
+  },
+  "changes": {
+    "dedicated_schema": {
+      "path": "benchmarks/basalt/schemas/release_manifest_v1.schema.json",
+      "bytes": 3006,
+      "sha256": "a2cd19a366bc1dbf3468ed4f75b0eb3933d59ef7c2fd71131dc078993242b58b",
+      "contract": "Artifact records require path, kind, bytes, and lowercase SHA-256; schema requires self-binding, five contract inputs, exclusions, and GT-firewall fields."
+    },
+    "release_inventory": {
+      "artifact_records": 101,
+      "rust_source_files": 32,
+      "diagnostic_example_files": 15,
+      "contract_test_files": 44,
+      "license_notice_files": 2,
+      "contract_input_records": 5,
+      "directory_entries": 0,
+      "self_listed": false,
+      "self_binding": "external_sha256"
+    },
+    "contract_inputs": {
+      "port_manifest": "benchmarks/basalt/basalt_port_manifest_v1.json",
+      "upstream_manifest": "benchmarks/basalt/upstream_manifest.json",
+      "protocol": "benchmarks/basalt/protocols/basalt_euroc_parity_v1.json",
+      "config": "configs/basalt/euroc_config.json",
+      "provenance_manifest": "benchmarks/basalt/basalt_provenance_manifest_v1.json"
+    },
+    "validator": {
+      "path": "benchmarks/basalt/verify_provenance.py",
+      "bytes": 25128,
+      "sha256": "9f56c826ecc05c784f72229bb03958b2270090ba62c7de34b7ce6ad04ecdd764",
+      "checks": ["dedicated release schema contract", "all artifact file bytes", "all artifact SHA-256 values", "unique paths", "required contract-input inclusion", "external self-binding", "GT firewall"]
+    },
+    "focused_test_added": "benchmarks/basalt/test_provenance.py::test_release_manifest_binds_every_file_and_contract_input"
+  },
+  "after": {
+    "release_manifest": {
+      "path": "benchmarks/basalt/basalt_release_manifest_v1.json",
+      "bytes": 23313,
+      "sha256": "4c0310b2f3ef26302e636bec3930d5aed97f4038da25175cd6c4138400dd2007",
+      "artifact_records": 101,
+      "artifact_sha256_fields": 101,
+      "artifact_byte_fields": 101,
+      "artifact_hash_mismatches": 0,
+      "artifact_byte_mismatches": 0,
+      "duplicate_paths": 0,
+      "self_listed": false,
+      "contract_inputs_bound": 5,
+      "test_files_individually_bound": 44
+    },
+    "release_schema": {
+      "path": "benchmarks/basalt/schemas/release_manifest_v1.schema.json",
+      "present": true,
+      "artifact_bound": true,
+      "sha256": "a2cd19a366bc1dbf3468ed4f75b0eb3933d59ef7c2fd71131dc078993242b58b"
+    },
+    "validator": {"status": "PASS", "output": "Basalt provenance validation passed."},
+    "lightweight_suite": {"passed": 28, "failed": 0, "warnings": 1, "warning": "PytestCacheWarning: cache path denied by workspace permissions"},
+    "provenance_manifest": {
+      "path": "benchmarks/basalt/basalt_provenance_manifest_v1.json",
+      "bytes": 41717,
+      "sha256": "5f872df75bf4a8a00fe5cfe7745593610ce4c296b24035e329c3ff30417ce77d"
+    }
+  },
+  "self_hash_policy": {
+    "path": "benchmarks/basalt/basalt_release_manifest_v1.json",
+    "mode": "external_sha256",
+    "reason": "Including a file's ordinary SHA-256 inside that same file is self-referential. The release manifest explicitly excludes itself from artifacts; packaging or the release evidence records its final SHA-256 externally."
+  },
+  "retained_caveats": [
+    "Pinned WSL checkout /root/visloc-basalt-oracle-0f3b2b52 remains dirty in five diagnostic files; binaries from it are instrumented/dirty evidence, not clean-pinned oracle evidence.",
+    "The historical target/basalt_upstream_imu_golden_frame1_2.cpp source hash differs from current source; its historical binding was not regenerated.",
+    "NOTICE files provide source-distribution attribution; legal review remains required for transitive vcpkg packages and binary redistribution."
+  ]
+}

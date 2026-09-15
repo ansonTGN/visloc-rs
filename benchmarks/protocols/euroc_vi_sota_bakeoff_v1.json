@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "name": "EuRoC stereo-inertial SOTA bakeoff v1",
+  "status": "draft_pending_basalt_parity",
+  "goal": "README figures/tables claiming visloc-rs beats Basalt, ORB-SLAM3 (stereo-inertial), and VINS-Mono / VINS-Fusion on the same protocol.",
+  "dataset": "EuRoC MAV official ASL release",
+  "sensor_mode": "stereo camera + IMU (VINS-Mono reported on a separate mono-inertial row)",
+  "sequences": [
+    "MH_01_easy",
+    "MH_02_easy",
+    "MH_03_medium",
+    "MH_04_difficult",
+    "MH_05_difficult",
+    "V1_01_easy",
+    "V1_02_medium",
+    "V1_03_difficult",
+    "V2_01_easy",
+    "V2_02_medium",
+    "V2_03_difficult"
+  ],
+  "methods": [
+    {
+      "id": "visloc_stereo_vi",
+      "role": "ours",
+      "entry": "examples/euroc_online_slam_vi_image_demo.rs",
+      "notes": "Single frozen motion-VI config after Basalt-parity gate passes."
+    },
+    {
+      "id": "basalt_stereo_vi",
+      "role": "baseline",
+      "source": "https://gitlab.com/VladyslavUsenko/basalt",
+      "notes": "Re-run locally; paper/table numbers only as external_published fallback."
+    },
+    {
+      "id": "orb_slam3_stereo_inertial",
+      "role": "baseline",
+      "source": "https://github.com/UZ-SLAMLab/ORB_SLAM3",
+      "notes": "Stereo-Inertial mode; same EuRoC yaml calib."
+    },
+    {
+      "id": "vins_fusion_stereo_inertial",
+      "role": "baseline",
+      "source": "https://github.com/HKUST-Aerial-Robotics/VINS-Fusion",
+      "notes": "Preferred stereo-inertial peer for apples-to-apples."
+    },
+    {
+      "id": "vins_mono",
+      "role": "baseline_separate_row",
+      "source": "https://github.com/HKUST-Aerial-Robotics/VINS-Mono",
+      "notes": "Mono-inertial; never merge into stereo-inertial win claims."
+    }
+  ],
+  "scoring": {
+    "tool": "scripts/evaluate_euroc_trajectory.py (evo-compatible SE3 ATE RMSE)",
+    "alignment": "SE3 (rigid) primary; Sim3 scale reported as diagnostic only",
+    "coverage": "tracked_fraction over full sequence length; deaths count as failures in the denominator",
+    "repetitions": 3,
+    "aggregation": "Per-sequence mean over reps, then mean/median/worst across 11 sequences"
+  },
+  "gates_before_readme_claim": {
+    "basalt_parity_mh01": {
+      "min_tracked_fraction": 0.90,
+      "max_ate_rigid_rmse_m": 0.10,
+      "min_ate_similarity_scale": 0.85,
+      "max_ate_similarity_scale": 1.15,
+      "notes": "Must pass on full MH_01 (not 800f truncated) before bakeoff README rows."
+    },
+    "bakeoff_claim": {
+      "min_sequences_best_or_tied": 6,
+      "forbid_mixed_published_vs_rerun_in_same_cell": true,
+      "readme_artifacts": [
+        "docs/assets/euroc_vi_sota_table.svg",
+        "docs/assets/euroc_vi_mh01_overlay.png",
+        "docs/assets/euroc_vi_ate_bars.png",
+        "benchmarks/registry/readme_claims_v1.json entry"
+      ]
+    }
+  },
+  "published_reference_ballpark_m": {
+    "notes": "Literature ballpark only; bakeoff cells must prefer local re-runs.",
+    "MH_01_easy": {
+      "basalt": 0.09,
+      "orb_slam3_stereo_inertial": 0.04,
+      "vins_fusion_stereo": 0.24
+    }
+  },
+  "blocker": "visloc tracking cliff (~0.56 coverage / 800f) must close before any README win claim."
+}

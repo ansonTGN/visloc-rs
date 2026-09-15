@@ -1,0 +1,93 @@
+{
+  "schema": "visloc.basalt.linux_same_domain_runtime_rss.v1",
+  "created_local_date": "2026-09-13",
+  "status": "RSS_PASS_RUNTIME_FAIL_OPTIMIZATION_CONTINUES",
+  "source_commit": "2119e22",
+  "formal_pair": {
+    "sequence": "MH_01_easy",
+    "repetitions": 1,
+    "workers": 1,
+    "threads": 1,
+    "seed": 7,
+    "sensor_only": true,
+    "sensor_bytes_copied": 0,
+    "output_root": "E:\\visloc-rs-runs\\basalt_linux_rss_pair_mh01_20260913",
+    "aggregate": "work/m11_linux_rss_pair_mh01_20260913.json",
+    "aggregate_sha256": "f6aa0758835de85106142e841ce0d24282cb75996943ed7f6383b11dfef70eee",
+    "gate_report": "E:\\visloc-rs-runs\\basalt_linux_rss_pair_mh01_20260913\\phase6_gate_report.json",
+    "gate_report_sha256": "8864a268185213982ea064c1d0b0d7b1165e2ed7028a273dbcf1bd3663e4ae02",
+    "result_counts": {
+      "success": 2,
+      "failure": 0
+    },
+    "gates": {
+      "accuracy": "pass",
+      "coverage": "pass",
+      "scale": "pass",
+      "rss": "pass",
+      "runtime": "fail"
+    },
+    "metrics": {
+      "native_runtime_common_wall_seconds": 456.53282589977607,
+      "rust_runtime_common_wall_seconds": 730.9278798997402,
+      "runtime_ratio": 1.6010412361020516,
+      "runtime_ratio_limit": 1.5,
+      "native_peak_linux_proc_rss_bytes": 51011584,
+      "rust_peak_linux_proc_rss_bytes": 29024256,
+      "rss_ratio": 0.5689738236711097,
+      "rss_ratio_limit": 1.5,
+      "native_ate_translation_se3_rmse_m": 0.0657318229112738,
+      "rust_ate_translation_se3_rmse_m": 0.06572474774789937,
+      "native_coverage": 1.0,
+      "rust_coverage": 1.0
+    }
+  },
+  "cross_target_exactness": {
+    "certificate": "benchmarks/basalt/release_inputs/m11_rust_wsl_exactness_20260913.json",
+    "certificate_sha256": "24e67c7adbe8430ec65394f9f974c3a10216440479089010c97fb423ba00fd69",
+    "required_frames": [52, 80, 400],
+    "trajectory_exact_all": true,
+    "lifecycle_exact_all": true,
+    "forbidden_outputs_absent_all": true
+  },
+  "timing_profile_400": {
+    "baseline_root": "E:\\visloc-rs-runs\\basalt_linux_timing_mh01_400_20260913",
+    "adapter_total_seconds": 40.881053646,
+    "adapter_frontend_seconds": 23.616673541,
+    "adapter_estimator_seconds": 17.263834052,
+    "estimator_lm_solve_seconds": 16.428986746,
+    "lm_landmark_reduction_seconds": 8.854687041,
+    "lm_model_decrease_seconds": 3.785645756,
+    "dataset_frame_acquisition_seconds": 13.561052943
+  },
+  "experiments": [
+    {
+      "id": "q2_virtual_gemv",
+      "production_change_retained": false,
+      "trajectory_exact": true,
+      "result": "rejected_no_measured_gain",
+      "model_decrease_seconds_runs": [3.8829, 3.94],
+      "baseline_model_decrease_seconds": 3.7856
+    },
+    {
+      "id": "fat_lto_codegen_units_1",
+      "production_change_retained": false,
+      "trajectory_exact": true,
+      "adapter_total_seconds": 40.53,
+      "result": "not_promoted_insufficient_gain"
+    },
+    {
+      "id": "x86_64_v3_fat_lto_codegen_units_1",
+      "production_change_retained": false,
+      "trajectory_exact": true,
+      "adapter_total_seconds": 51.47,
+      "result": "rejected_regression"
+    }
+  ],
+  "next_boundary": {
+    "required_runtime_saving_seconds_on_mh01": 46.12864105007699,
+    "priority": "profile and optimize the faithful frontend path before another full gate",
+    "completion_claimed": false,
+    "push_performed": false
+  }
+}

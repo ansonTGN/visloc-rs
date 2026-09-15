@@ -1,0 +1,38 @@
+{
+  "schema": "visloc-rs.basalt.m7fa.ordinal43-jp.v1",
+  "source": "target/m7fa_ordinal43_jp.json",
+  "ordinal": 43,
+  "relation": "same-timestamp stereo frame 0 cam0 -> frame 0 cam1",
+  "camera_params_f32_bits": [
+    "43b4d5f0", "43b44af7", "43bdb43f", "437ffa30", "be5a1edd", "3f13a2ab"
+  ],
+  "direction_xy_f32_bits": ["3eb9ae8e", "be15bd5c"],
+  "inverse_distance_f32_bits": "3d8325d2",
+  "observation_f32_bits": ["442d8e69", "43048eb8"],
+  "q_xyzw_f32_bits": ["bbefaaa9", "b9eadbb0", "ba8bff3a", "3f7ffe35"],
+  "t_xyz_f32_bits": ["bde1c0f0", "3997d300", "b9e136c8"],
+  "transform_t_t_h_f32_bits_column_major": [
+    "3f7fffd3", "bb0b904f", "3a6ef290", "00000000",
+    "3b0c6c2f", "3f7ff8d7", "bc6fa4f8", "00000000",
+    "ba66c186", "3c6facff", "3f7ff8f6", "00000000",
+    "bde1c0f0", "3997d300", "b9e136c8", "3f800000"
+  ],
+  "target_point4_f32_bits": ["3f1ef180", "be7a142b", "3f3d2a31", "3d8325d2"],
+  "projection_uv_f32_bits": ["442d8e20", "430484d3"],
+  "raw_residual_uv_f32_bits": ["bb920000", "bd1e5000"],
+  "camera_jacobian_column_major_f32_bits": [
+    "43b7771b", "425bcc35", "425c75a2", "43f1f4ca",
+    "c3910beb", "42e38757", "00000000", "00000000"
+  ],
+  "homogeneous_point_jacobian_column_major_f32_bits": [
+    "3fab8d55", "3e1022a4", "bf8bd2ad", "00000000",
+    "3e26b079", "3fd6916d", "3ed4d9b2", "00000000",
+    "bde1c0f0", "3997d300", "b9e136c8", "3f800000"
+  ],
+  "raw_landmark_jacobian_column_major_f32_bits": [
+    "444c1b2f", "418be6e8", "41fc2b64", "4458db64", "c2213a01", "c0bee881"
+  ],
+  "weighted_landmark_jacobian_column_major_f32_bits": [
+    "44cc1b2f", "420be6e8", "427c2b64", "44d8db64", "c2a13a01", "c13ee881"
+  ]
+}

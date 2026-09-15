@@ -216,6 +216,10 @@ impl NativeCudaCorrelation {
         )
     }
 
+    // This private dispatcher mirrors the versioned native C ABI's flat
+    // argument list. Keep the ABI-facing call site explicit rather than
+    // changing the public Rust API or native symbol contract merely to satisfy
+    // a style threshold.
     #[allow(clippy::too_many_arguments)]
     fn run_impl(
         &mut self,

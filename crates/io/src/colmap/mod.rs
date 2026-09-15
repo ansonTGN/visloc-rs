@@ -1008,9 +1008,13 @@ pub fn parse_images_txt(contents: &str) -> Result<Vec<Keyframe>, ColmapError> {
 }
 
 pub fn parse_cameras_bin(contents: &[u8]) -> Result<Vec<Camera>, ColmapError> {
+    // A camera record contains the fixed fields plus at least the three
+    // parameters required by every model accepted by `camera_model_from_colmap_id`.
+    const MIN_CAMERA_RECORD_BYTES: usize = 4 + 4 + 8 + 8 + (3 * 8);
     let mut reader = BinaryReader::new("cameras.bin", contents);
-    let camera_count = reader.read_u64()? as usize;
-    let mut cameras = Vec::with_capacity(camera_count);
+    let camera_count = reader.read_count_with_min_bytes("camera_count", MIN_CAMERA_RECORD_BYTES)?;
+    let mut cameras = Vec::new();
+    reader.try_reserve(&mut cameras, camera_count, "camera_count")?;
 
     for _ in 0..camera_count {
         let id = reader.read_u32()? as u64;
@@ -1042,9 +1046,14 @@ pub fn parse_cameras_bin(contents: &[u8]) -> Result<Vec<Camera>, ColmapError> {
 }
 
 pub fn parse_images_bin(contents: &[u8]) -> Result<Vec<Keyframe>, ColmapError> {
+    // An image with an empty NAME and no POINTS2D still occupies these fixed
+    // fields. Each POINTS2D entry is two f64 coordinates plus one i64 id.
+    const MIN_IMAGE_RECORD_BYTES: usize = 4 + (7 * 8) + 4 + 1 + 8;
+    const IMAGE_POINT2D_BYTES: usize = 3 * 8;
     let mut reader = BinaryReader::new("images.bin", contents);
-    let image_count = reader.read_u64()? as usize;
-    let mut keyframes = Vec::with_capacity(image_count);
+    let image_count = reader.read_count_with_min_bytes("image_count", MIN_IMAGE_RECORD_BYTES)?;
+    let mut keyframes = Vec::new();
+    reader.try_reserve(&mut keyframes, image_count, "image_count")?;
 
     for _ in 0..image_count {
         let frame_id = reader.read_u32()? as u64;
@@ -1064,8 +1073,10 @@ pub fn parse_images_bin(contents: &[u8]) -> Result<Vec<Keyframe>, ColmapError> {
             Vector3::new(tx, ty, tz),
         ));
 
-        let point_count = reader.read_u64()? as usize;
+        let point_count = reader.read_count_with_min_bytes("point_count", IMAGE_POINT2D_BYTES)?;
+        reader.try_reserve(&mut frame.keypoints, point_count, "point_count keypoints")?;
         let mut observations = Vec::new();
+        reader.try_reserve(&mut observations, point_count, "point_count observations")?;
         for keypoint_index in 0..point_count {
             let xy = Point2::new(reader.read_f64()?, reader.read_f64()?);
             frame.keypoints.push(xy);
@@ -1092,16 +1103,24 @@ pub fn parse_images_bin(contents: &[u8]) -> Result<Vec<Keyframe>, ColmapError> {
 }
 
 pub fn parse_points3d_bin(contents: &[u8]) -> Result<Vec<Landmark>, ColmapError> {
+    // A POINT3D record contains id, xyz, RGB, error, and track_length before
+    // its variable-length track entries. Each track entry is (image_id,
+    // point2D_idx), two u32 values.
+    const MIN_POINT3D_RECORD_BYTES: usize = 8 + (3 * 8) + 3 + 8 + 8;
+    const POINT3D_TRACK_ENTRY_BYTES: usize = 2 * 4;
     let mut reader = BinaryReader::new("points3D.bin", contents);
-    let point_count = reader.read_u64()? as usize;
-    let mut landmarks = Vec::with_capacity(point_count);
+    let point_count =
+        reader.read_count_with_min_bytes("point3D_count", MIN_POINT3D_RECORD_BYTES)?;
+    let mut landmarks = Vec::new();
+    reader.try_reserve(&mut landmarks, point_count, "point3D_count")?;
 
     for _ in 0..point_count {
         let id = reader.read_u64()?;
         let position = Point3::new(reader.read_f64()?, reader.read_f64()?, reader.read_f64()?);
         reader.skip(3)?;
         let _error = reader.read_f64()?;
-        let track_length = reader.read_u64()? as usize;
+        let track_length =
+            reader.read_count_with_min_bytes("track_length", POINT3D_TRACK_ENTRY_BYTES)?;
         for _ in 0..track_length {
             let _image_id = reader.read_u32()?;
             let _point2d_index = reader.read_u32()?;
@@ -1297,6 +1316,51 @@ impl<'a> BinaryReader<'a> {
 
     fn read_f64(&mut self) -> Result<f64, ColmapError> {
         Ok(f64::from_le_bytes(self.read_array()?))
+    }
+
+    /// Read a count and reject it before any allocation or long iteration when
+    /// the remaining input cannot contain even the minimum-sized records.
+    /// The bound is derived from this input's remaining bytes rather than a
+    /// fixed model-size limit, so valid large models remain supported.
+    fn read_count_with_min_bytes(
+        &mut self,
+        field: &'static str,
+        min_record_bytes: usize,
+    ) -> Result<usize, ColmapError> {
+        let raw = self.read_u64()?;
+        let count = usize::try_from(raw).map_err(|_| ColmapError::InvalidBinary {
+            file: self.file,
+            message: format!("{field}={raw} does not fit in usize"),
+        })?;
+        let required_bytes =
+            count
+                .checked_mul(min_record_bytes)
+                .ok_or_else(|| ColmapError::InvalidBinary {
+                    file: self.file,
+                    message: format!("{field}={count} overflows minimum record-byte calculation"),
+                })?;
+        let remaining_bytes = self.contents.len().saturating_sub(self.offset);
+        if required_bytes > remaining_bytes {
+            return Err(ColmapError::InvalidBinary {
+                file: self.file,
+                message: format!("{field}={count} requires at least {required_bytes} remaining byte(s), but only {remaining_bytes} remain"),
+            });
+        }
+        Ok(count)
+    }
+
+    fn try_reserve<T>(
+        &self,
+        values: &mut Vec<T>,
+        additional: usize,
+        field: &'static str,
+    ) -> Result<(), ColmapError> {
+        values
+            .try_reserve(additional)
+            .map_err(|error| ColmapError::InvalidBinary {
+                file: self.file,
+                message: format!("{field}={additional} allocation failed: {error:?}"),
+            })
     }
 
     fn read_null_terminated_string(&mut self) -> Result<String, ColmapError> {

@@ -46,6 +46,11 @@ pub struct AdaptiveSubmapPartitionConfig {
     /// size (and thus reconstruction cost) for pathological all-static
     /// input, which still fails fast once the cap is spent.
     pub max_widen_merges: usize,
+    /// Maximum number of neighbouring windows absorbed in one rebuild step
+    /// after consecutive `NoSeedPair` failures. The step starts at one and
+    /// doubles after each consecutive failure (1, 2, 4, ...), while every
+    /// absorbed window still consumes one unit of `max_widen_merges`.
+    pub max_widen_windows_per_step: usize,
     /// Minimum number of images, in the overlap a build-stage-widened window
     /// shares with a still-independent predecessor, that must lie *outside*
     /// the original (pre-widen) failing window's own span.
@@ -119,6 +124,7 @@ impl Default for AdaptiveSubmapPartitionConfig {
             boundary_search_radius: 16,
             widen_unseedable_windows: true,
             max_widen_merges: 16,
+            max_widen_windows_per_step: 8,
             // See the field doc: kept small (not tied to `overlap_images`)
             // because each additional absorption's full incremental-SfM
             // rebuild was measured to cost far more than linearly in image
@@ -294,9 +300,11 @@ pub enum WidenMergeReason {
 /// window covering both original ranges — and rebuilt; if it is the final
 /// window in the sequence (no successor to absorb), it is instead merged with
 /// its predecessor, discarding that predecessor's already-accepted build,
-/// since the predecessor's frames now belong to the wider tail window. This
-/// repeats, so a run of several consecutive unseedable windows collapses into
-/// one window wide enough to reach past the whole run, up to `max_merges`
+/// since the predecessor's frames now belong to the wider tail window.
+/// Consecutive failures identified by `is_no_seed_pair` exponentially increase
+/// the number of neighbours absorbed before the next rebuild (1, 2, 4, ...),
+/// capped by `max_windows_per_step`. Other widenable failures absorb one window.
+/// Every absorbed neighbour still consumes one unit, up to `max_merges`
 /// absorptions *per contiguous failing span* (the counter resets once a
 /// window succeeds and processing moves on). If a span is still failing once
 /// its merge budget is spent, the triggering error is returned unchanged —
@@ -319,27 +327,31 @@ pub enum WidenMergeReason {
 /// [`AdaptiveSubmapPartitionConfig::min_post_widen_overlap_images`] for why
 /// this is a real, diagnosed failure mode and not a hypothetical one.
 ///
-/// `on_widen(merge_number, absorbed_range, resulting_range, reason)` is
-/// invoked once per merge, in order, purely for observability (e.g.
-/// logging); pass `|_, _, _, _| {}` to ignore it.
+/// `on_widen(merges_used, absorbed_windows, previous_range, resulting_range,
+/// reason)` is invoked once per widening step for observability. Pass
+/// `|_, _, _, _, _| {}` to ignore it.
 ///
 /// Deterministic: windows are always visited left to right, a failing window
 /// always merges forward first, and the post-widen safety absorption is a
 /// pure function of the (deterministic) merged window and its unmerged
 /// predecessor, so the same windows and the same sequence of build outcomes
 /// always produce the same merges and the same output order.
+#[allow(clippy::too_many_arguments)]
 pub fn widen_and_build<T, E>(
     mut windows: Vec<SubmapWindow>,
     max_merges: usize,
+    max_windows_per_step: usize,
     min_post_widen_overlap_images: usize,
     mut build: impl FnMut(&SubmapWindow) -> Result<T, E>,
     is_widenable: impl Fn(&E) -> bool,
-    mut on_widen: impl FnMut(usize, &Range<usize>, &Range<usize>, WidenMergeReason),
+    is_no_seed_pair: impl Fn(&E) -> bool,
+    mut on_widen: impl FnMut(usize, usize, &Range<usize>, &Range<usize>, WidenMergeReason),
 ) -> Result<Vec<(SubmapWindow, T)>, E> {
     let mut outputs: Vec<(SubmapWindow, T)> = Vec::with_capacity(windows.len());
     let mut index = 0usize;
     while index < windows.len() {
         let mut merges = 0usize;
+        let mut no_seed_pair_step = 1usize;
         // The start of the window this cycle began with, before any merge
         // (forward or backward) touched it. Forward merges never change a
         // window's start, so as long as it still equals this value the
@@ -349,6 +361,7 @@ pub fn widen_and_build<T, E>(
         loop {
             match build(&windows[index]) {
                 Ok(value) => {
+                    no_seed_pair_step = 1;
                     let margin = original_start.saturating_sub(windows[index].image_range.start);
                     if merges > 0
                         && merges < max_merges
@@ -375,6 +388,7 @@ pub fn widen_and_build<T, E>(
                         };
                         on_widen(
                             merges,
+                            1,
                             &before,
                             &windows[index].image_range,
                             WidenMergeReason::PostWidenOverlapSafety,
@@ -385,49 +399,58 @@ pub fn widen_and_build<T, E>(
                     break;
                 }
                 Err(error) if merges < max_merges && is_widenable(&error) => {
-                    merges += 1;
-                    if index + 1 < windows.len() {
-                        // Absorb the successor: it has not been built yet
-                        // (windows are only ever visited left to right), so
-                        // nothing already accepted needs to be undone.
-                        let next = windows.remove(index + 1);
-                        let before = windows[index].image_range.clone();
-                        windows[index] = SubmapWindow {
-                            image_range: windows[index].image_range.start..next.image_range.end,
-                            outgoing_seam_support: next.outgoing_seam_support,
-                        };
-                        on_widen(
-                            merges,
-                            &before,
-                            &windows[index].image_range,
-                            WidenMergeReason::UnbuildableWindow,
-                        );
-                    } else if index > 0 {
-                        // Tail window with no successor: absorb the
-                        // predecessor instead. Its build already succeeded
-                        // and was pushed to `outputs`; undo that, since its
-                        // frames now belong to the wider tail window.
-                        let prev = windows.remove(index - 1);
-                        outputs
-                            .pop()
-                            .expect("predecessor window was built before the tail window");
-                        index -= 1;
-                        let before = windows[index].image_range.clone();
-                        windows[index] = SubmapWindow {
-                            image_range: prev.image_range.start..windows[index].image_range.end,
-                            outgoing_seam_support: windows[index].outgoing_seam_support,
-                        };
-                        on_widen(
-                            merges,
-                            &before,
-                            &windows[index].image_range,
-                            WidenMergeReason::UnbuildableWindow,
-                        );
+                    let no_seed_pair = is_no_seed_pair(&error);
+                    let requested = if no_seed_pair {
+                        no_seed_pair_step.min(max_windows_per_step.max(1))
                     } else {
-                        // Only one window left and it still fails: no
-                        // neighbour left to absorb.
+                        1
+                    }
+                    .min(max_merges - merges);
+                    let before = windows[index].image_range.clone();
+                    let mut absorbed = 0usize;
+                    while absorbed < requested {
+                        if index + 1 < windows.len() {
+                            // Prefer successors: they have not been built yet.
+                            let next = windows.remove(index + 1);
+                            windows[index] = SubmapWindow {
+                                image_range: windows[index].image_range.start..next.image_range.end,
+                                outgoing_seam_support: next.outgoing_seam_support,
+                            };
+                        } else if index > 0 {
+                            // At the tail, consume already-built predecessors
+                            // and discard their now-covered outputs.
+                            let prev = windows.remove(index - 1);
+                            outputs
+                                .pop()
+                                .expect("predecessor window was built before the tail window");
+                            index -= 1;
+                            windows[index] = SubmapWindow {
+                                image_range: prev.image_range.start..windows[index].image_range.end,
+                                outgoing_seam_support: windows[index].outgoing_seam_support,
+                            };
+                        } else {
+                            break;
+                        }
+                        absorbed += 1;
+                    }
+                    if absorbed == 0 {
                         return Err(error);
                     }
+                    merges += absorbed;
+                    on_widen(
+                        merges,
+                        absorbed,
+                        &before,
+                        &windows[index].image_range,
+                        WidenMergeReason::UnbuildableWindow,
+                    );
+                    no_seed_pair_step = if no_seed_pair {
+                        no_seed_pair_step
+                            .saturating_mul(2)
+                            .min(max_windows_per_step.max(1))
+                    } else {
+                        1
+                    };
                 }
                 Err(error) => return Err(error),
             }
@@ -614,10 +637,12 @@ mod tests {
             let outputs = widen_and_build(
                 base_windows(),
                 8,
+                1,
                 0, // post-widen safety absorption disabled: not under test here
                 build_failing_within(10..40, &calls),
                 |_error| true,
-                |n, before, after, reason| {
+                |_error| true,
+                |n, _absorbed, before, after, reason| {
                     assert_eq!(reason, WidenMergeReason::UnbuildableWindow);
                     merges.borrow_mut().push((n, before.clone(), after.clone()))
                 },
@@ -648,10 +673,12 @@ mod tests {
             let error = widen_and_build(
                 base_windows(),
                 2, // one merge short of the three the bad span needs
+                1,
                 0, // post-widen safety absorption disabled: not under test here
                 build_failing_within(10..40, &calls),
                 |_error| true,
-                |n, before, after, _reason| {
+                |_error| true,
+                |n, _absorbed, before, after, _reason| {
                     merges.borrow_mut().push((n, before.clone(), after.clone()))
                 },
             )
@@ -677,10 +704,12 @@ mod tests {
             let outputs = widen_and_build(
                 vec![w(0..10), w(10..20), w(20..30)],
                 8,
+                1,
                 0, // post-widen safety absorption disabled: not under test here
                 build,
                 |_error| true,
-                |_, _, _, _| {},
+                |_error| true,
+                |_, _, _, _, _| {},
             )
             .expect("merging with the predecessor escapes the failing tail window");
 
@@ -698,10 +727,12 @@ mod tests {
             let error = widen_and_build(
                 vec![w(0..5)],
                 8,
+                1,
                 0,
                 |_window: &SubmapWindow| Err::<usize, _>(FakeSeedError),
                 |_error| true,
-                |_, _, _, _| {},
+                |_error| true,
+                |_, _, _, _, _| {},
             )
             .unwrap_err();
             assert_eq!(error, FakeSeedError);
@@ -713,10 +744,12 @@ mod tests {
             let error = widen_and_build(
                 base_windows(),
                 8,
+                1,
                 0,
                 build_failing_within(10..40, &calls),
                 |_error| false, // this failure is never worth widening for
-                |_, _, _, _| panic!("must not widen a non-widenable error"),
+                |_error| true,
+                |_, _, _, _, _| panic!("must not widen a non-widenable error"),
             )
             .unwrap_err();
             assert_eq!(error, FakeSeedError);
@@ -729,10 +762,12 @@ mod tests {
             let outputs = widen_and_build(
                 vec![w(0..5), w(5..10)],
                 8,
+                1,
                 0,
                 |window: &SubmapWindow| Ok::<_, FakeSeedError>(window.image_range.len()),
                 |_error| true,
-                |_, _, _, _| panic!("no failure means no widening"),
+                |_error| true,
+                |_, _, _, _, _| panic!("no failure means no widening"),
             )
             .unwrap();
             assert_eq!(
@@ -751,10 +786,12 @@ mod tests {
                 let outputs = widen_and_build(
                     base_windows(),
                     8,
+                    1,
                     0,
                     build_failing_within(10..40, &calls),
                     |_error| true,
-                    |_, _, _, _| {},
+                    |_error| true,
+                    |_, _, _, _, _| {},
                 )
                 .unwrap();
                 (
@@ -766,6 +803,74 @@ mod tests {
                 )
             };
             assert_eq!(run(), run());
+        }
+
+        #[test]
+        fn long_unseedable_span_uses_exponential_steps_within_merge_budget() {
+            let windows = (0..18).map(|i| w(i * 10..(i + 1) * 10)).collect();
+            let calls = RefCell::new(Vec::new());
+            let steps = RefCell::new(Vec::new());
+            let outputs = widen_and_build(
+                windows,
+                16,
+                8,
+                0,
+                build_failing_within(0..161, &calls),
+                |_error| true,
+                |_error| true,
+                |units, absorbed, _before, _after, reason| {
+                    assert_eq!(reason, WidenMergeReason::UnbuildableWindow);
+                    steps.borrow_mut().push((units, absorbed));
+                },
+            )
+            .expect("sixteen absorption units reach beyond the long static span");
+
+            assert_eq!(
+                &*steps.borrow(),
+                &[(1, 1), (3, 2), (7, 4), (15, 8), (16, 1)]
+            );
+            assert_eq!(
+                calls.borrow().len(),
+                7,
+                "two output windows plus five failed-span attempts"
+            );
+            assert_eq!(outputs[0].0.image_range, 0..170);
+        }
+
+        #[test]
+        fn no_seed_pair_escalation_resets_after_success() {
+            let windows = (0..7).map(|i| w(i * 10..(i + 1) * 10)).collect();
+            let steps = RefCell::new(Vec::new());
+            let outputs = widen_and_build(
+                windows,
+                4,
+                4,
+                0,
+                |window| {
+                    let range = &window.image_range;
+                    if (range.start == 0 && range.end < 40) || (range.start == 40 && range.end < 60)
+                    {
+                        Err(FakeSeedError)
+                    } else {
+                        Ok(range.len())
+                    }
+                },
+                |_error| true,
+                |_error| true,
+                |units, absorbed, _before, _after, _reason| {
+                    steps.borrow_mut().push((units, absorbed));
+                },
+            )
+            .unwrap();
+
+            assert_eq!(&*steps.borrow(), &[(1, 1), (3, 2), (1, 1)]);
+            assert_eq!(
+                outputs
+                    .iter()
+                    .map(|(window, _)| window.image_range.clone())
+                    .collect::<Vec<_>>(),
+                vec![0..40, 40..60, 60..70]
+            );
         }
 
         /// The exact structural shape of the diagnosed MH_03 2700-frame
@@ -798,10 +903,12 @@ mod tests {
             let outputs = widen_and_build(
                 thin_quality_windows(),
                 8,
+                1,
                 5, // require >= 5 clean images outside `bad` in the shared overlap
                 build,
                 |_error| true,
-                |n, before, after, reason| {
+                |_error| true,
+                |n, _absorbed, before, after, reason| {
                     merges
                         .borrow_mut()
                         .push((n, before.clone(), after.clone(), reason))
@@ -845,10 +952,12 @@ mod tests {
             let outputs = widen_and_build(
                 thin_quality_windows(),
                 1, // exactly enough for the one forward merge, none left for safety
+                1,
                 5,
                 build,
                 |_error| true,
-                |n, before, after, reason| {
+                |_error| true,
+                |n, _absorbed, before, after, reason| {
                     merges
                         .borrow_mut()
                         .push((n, before.clone(), after.clone(), reason))
@@ -878,10 +987,12 @@ mod tests {
             let outputs = widen_and_build(
                 thin_quality_windows(),
                 8,
+                1,
                 1000,
                 |window: &SubmapWindow| Ok::<_, FakeSeedError>(window.image_range.len()),
                 |_error| true,
-                |n, before, after, reason| {
+                |_error| true,
+                |n, _absorbed, before, after, reason| {
                     merges
                         .borrow_mut()
                         .push((n, before.clone(), after.clone(), reason))
@@ -915,10 +1026,12 @@ mod tests {
             let outputs = widen_and_build(
                 thin_quality_windows(),
                 8,
+                1,
                 0, // disabled
                 build,
                 |_error| true,
-                |n, before, after, reason| {
+                |_error| true,
+                |n, _absorbed, before, after, reason| {
                     merges
                         .borrow_mut()
                         .push((n, before.clone(), after.clone(), reason))
@@ -952,10 +1065,12 @@ mod tests {
                 let outputs = widen_and_build(
                     thin_quality_windows(),
                     8,
+                    1,
                     5,
                     build,
                     |_error| true,
-                    |n, before, after, reason| {
+                    |_error| true,
+                    |n, _absorbed, before, after, reason| {
                         merges
                             .borrow_mut()
                             .push((n, before.clone(), after.clone(), reason))

@@ -4,13 +4,13 @@
 
 ## Before Tagging
 
-- Run `scripts/check.sh`, including the Rust 1.82 MSRV `image-io` check, Tier 1 feature matrix, Python registry/CI drift tests, benchmark-registry validation, package metadata, crate-content checks, documentation link checks, GNSS demo output smoke checks, timestamped image GNSS sync-output checks, and KITTI image sequence demo output checks.
+- Run `scripts/check.sh`, including the Rust 1.83 MSRV `image-io` check, Tier 1 feature matrix, Python registry/CI drift tests, benchmark-registry validation, package metadata, crate-content checks, documentation link checks, GNSS demo output smoke checks, timestamped image GNSS sync-output checks, and KITTI image sequence demo output checks.
 - Use `docs/release_change_sets.md` to review the branch by change-set scope instead of treating the full diff as one release change.
 - Confirm `scripts/check_feature_matrix.sh` passes for Tier 1 features (`--no-default-features`, default, and `image-io`) and that CI runs those checks on Linux and Windows.
 - Confirm `python -m unittest tests.test_ci_release_gate tests.test_feature_matrix tests.test_docs_assets` passes after changing CI, feature support, release gates, generated benchmark evidence paths, or docs showcase assets.
 - Confirm CI uploads the public demo artifacts: `gnss-demo-outputs`, `timestamped-gnss-image-demo-outputs`, and `kitti-image-sequence-demo-outputs`.
 - Confirm trajectory evaluation thresholds still pass through `scripts/check_trajectory_evaluation.sh`.
-- Confirm the CI MSRV job passes with Rust 1.82.0 through `scripts/check_msrv.sh`.
+- Confirm the CI MSRV job passes with Rust 1.83.0 through `scripts/check_msrv.sh`.
 - Run every example that is expected to stay user-facing with `scripts/run_examples.sh` (also covered by `scripts/check.sh`).
 - Confirm `README.md` describes the current public API and does not imply full SLAM support.
 - Confirm README benchmark rows are generated from `benchmarks/registry/readme_claims_v1.json` via `scripts/benchmark_registry.py render-readme`, and that any headline metric change has a registered run manifest or an explicit `documented_historical` / `external_published` evidence label.

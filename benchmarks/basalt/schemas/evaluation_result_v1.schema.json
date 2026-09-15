@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://visloc-rs.local/schemas/basalt/evaluation-result-v1.schema.json",
+  "title": "Basalt parity post-exit evaluation result v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "schema_id",
+    "protocol_id",
+    "ground_truth_used_after_engine_exit",
+    "runs",
+    "aggregate"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "schema_id": {"const": "basalt.evaluation_result.v1"},
+    "protocol_id": {"type": "string", "const": "basalt-euroc-parity-v1"},
+    "ground_truth_used_after_engine_exit": {"const": true},
+    "ground_truth": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"}
+      },
+      "additionalProperties": true
+    },
+    "runs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/run"}},
+    "aggregate": {"type": "object"},
+    "created_utc": {"type": "string"}
+  },
+  "$defs": {
+    "run": {
+      "type": "object",
+      "required": ["manifest", "status", "sequence", "method", "runtime", "coverage"],
+      "properties": {
+        "manifest": {"type": "string", "minLength": 1},
+        "manifest_sha256": {"type": "string", "pattern": "^[0-9a-fA-F]{64}$"},
+        "status": {"enum": ["success", "dnf", "failure"]},
+        "sequence": {"type": "string"},
+        "method": {"type": "string"},
+        "runtime": {
+          "type": "object",
+          "required": ["wall_seconds", "peak_process_tree_rss_bytes"],
+          "properties": {
+            "wall_seconds": {"type": "number", "minimum": 0},
+            "peak_process_tree_rss_bytes": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": true
+        },
+        "coverage": {
+          "type": "object",
+          "required": ["expected_input_frames", "tracked_frames", "tracked_fraction"],
+          "properties": {
+            "expected_input_frames": {"type": "integer", "minimum": 0},
+            "trajectory_rows": {"type": "integer", "minimum": 0},
+            "tracked_frames": {"type": "integer", "minimum": 0},
+            "failed_frames": {"type": "integer", "minimum": 0},
+            "tracked_fraction": {"type": ["number", "null"], "minimum": 0}
+          },
+          "additionalProperties": true
+        },
+        "metrics": {"type": "object"},
+        "failure_reason": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,71 @@
+{
+  "schema": "basalt-m8e-global-ba-oracle-summary-v2",
+  "upstream_commit": "0f3b2b52c807f70ff4e2973ce253c73329eea7bc",
+  "input": {
+    "setup_stream": "target/m8d_setup_m7v80.bin",
+    "marg_data": "marg_data/1403636579763555584.cereal",
+    "pose_blocks": 83,
+    "pose_dof": 6,
+    "landmarks": 549
+  },
+  "oracle_trace_artifact": "target/m8e_factor_oracle_v2.json",
+  "initial_cost": 2711067.758715515,
+  "final_cost": 93074.762625592528,
+  "final_lambda": 1e-32,
+  "final_state_hash": 12460248985570421363,
+  "trace_hash": 7693564316440188179,
+  "rust_comparison": {
+    "status": "run",
+    "fixture_trace": "target/m8e_rust_fixture_fixed.json",
+    "rust_runner": "pipelines/basalt/examples/m8e_rust_fixture.rs",
+    "rust_counts": {"poses": 83, "landmarks": 549, "observations": 5687},
+    "rust_initial_cost": 2711067.758715517,
+    "rust_final_cost": 93074.76262564836,
+    "rust_initial_relative": 1208110.9092111855,
+    "rust_initial_relative_factor_costs": [7193.165402396683, 6260.74437974839, 445558.40241736, 742644.0766684159, 2126.632837005219, 2095.720187892268, 2232.1673183671983],
+    "rust_initial_h_diagonal_0": 24980552.89154232,
+    "upstream_initial_h_diagonal_0": 24980552.891542263,
+    "final_cost_abs_delta": 5.58357e-8,
+    "rust_final_lambda": 1e-32,
+    "rust_trace_iterations": 10,
+    "stable_gates": {"all_trials_accepted": true, "final_cost_abs_tolerance": 0.01, "initial_vision_abs_tolerance": 1e-6},
+    "remaining_boundary": "The initial vision and relative-factor terms now match; Hdiag0 differs by 5.6e-8 and final cost by 5.6e-8. Later iterations retain small dense-versus-Eigen sparse accumulation/solve drift; raw state/trace hashes remain compiler/toolchain sensitive."
+  },
+  "production_fix": {
+    "file": "pipelines/basalt/src/mapper/mod.rs",
+    "source_sha256": "E439594D34E099E0FAB96F5EB057745ACA0BCBA157D67DBC193DDE40DA740898",
+    "upstream_contract": "Sophus::rightJacobianInvSE3Decoupled sets J.topLeftCorner<3,3>() to SO3::exp(omega).matrix(); Rust now mirrors that translational exp(omega) block.",
+    "focused_tests": "cargo test -p visloc-basalt mapper (26 passed, 1 ignored); cargo check -p visloc-basalt --all-targets"
+  },
+  "diagnostic": {
+    "upstream_source_sha256_after_cleanup": "01DC005BAE02B232F32A0AE02778938DA95B14AE2C2545336A3A0DD5BCFBCF5B",
+    "upstream_command": "M8E_DIAG=1 target/m8e_hdiag_oracle_diag3 target/euroc_ds_calib.json target/euroc_config.json marg_data/1403636579763555584.cereal target/m8d_setup_m7v80.bin target/m8e_hdiag_oracle_diag4.json > target/m8e_hdiag_oracle_diag4.stdout 2> target/m8e_hdiag_oracle_diag4.log",
+    "upstream_trace_artifact": "target/m8e_hdiag_oracle_diag4.json",
+    "upstream_trace_sha256": "E6B62DF297AA204B00AF63DFBC144AFC25C2936A07F5411AAD0C5EA407B3895F",
+    "upstream_log_sha256": "45703F12ECDE0530400020B6BDD7A36FAE8B94861E85363E17877E88ECBF633D",
+    "rust_command": "cargo run --release -p visloc-basalt --example m8e_rust_fixture > target/m8e_rust_fixture_fixed.json",
+    "rust_trace_artifact": "target/m8e_rust_fixture_fixed.json",
+    "rust_trace_sha256": "6AE616990AB9670B11B7194DC179A87E5B47773211D65E89C8B4A91B489A4F43",
+    "rust_diagnostic_command": "M8E_DIAG=1 target/release/examples/m8e_rust_fixture.exe > target/m8e_rust_hdiag_fixed.json 2> target/m8e_rust_hdiag_fixed.log",
+    "rust_diagnostic_log_sha256": "ACAA77793AE16E0E6C6CA995BA36B43808C54A636A1BB6DC59F61981B51D147C",
+    "initial_hdiag0_by_category": {
+      "upstream": {"vision": 16521399.458724074, "relative": 8459153.4328181893, "roll_pitch": 2.2250738585072014e-308, "combined": 24980552.891542263},
+      "rust": {"vision": 16521399.458724126, "relative": 8459153.432818191, "roll_pitch": 0.0, "combined": 24980552.89154232}
+    },
+    "relative_factor_hdiag0_upstream": [3211067.7123373561, 1921693.6373665195, 853975.35784472816, 844554.81009619776, 560491.93127962435, 559021.66755007161, 508348.31634369167],
+    "relative_factor_hdiag0_rust": [3211067.7123373579, 1921693.6373665193, 853975.35784472781, 844554.81009619776, 560491.93127962446, 559021.66755007161, 508348.31634369172],
+    "conclusion": "Before the fix, the entire 6408.202218465 Hdiag0 delta was in relative-factor Jacobians. The pinned Sophus translational exp(omega) block removes that delta; vision accumulation and sparse hash order were not the earliest boundary."
+  },
+  "iterations": [
+    {"iteration":0,"total_cost":2711067.75871552,"vision_cost":1502955.25618555,"relative_cost":1208110.90921119,"roll_pitch_cost":1.59331877994036,"h_diagonal_0":24980552.8915423,"max_pose_increment":0.735745018148147,"landmark_3_increment":[4.22396641782979e-05,9.50621631577944e-05,0.00726813830698184],"f_diff":2335486.35990158,"accepted":true},
+    {"iteration":1,"total_cost":375581.398813934,"vision_cost":375127.535612659,"relative_cost":453.55910384202,"roll_pitch_cost":0.304097433696046,"h_diagonal_0":51983888.2037173,"max_pose_increment":0.073120888148248,"landmark_3_increment":[0.000178636281281917,0.000196533951648748,0.00377951257963045],"f_diff":262469.0434517,"accepted":true},
+    {"iteration":2,"total_cost":113112.355362235,"vision_cost":113025.547310585,"relative_cost":86.3256311212303,"roll_pitch_cost":0.482420528579013,"h_diagonal_0":65419411.4643692,"max_pose_increment":0.00491087854490484,"landmark_3_increment":[-2.64746228986599e-06,1.74766086874658e-06,2.36703454072172e-05],"f_diff":18161.8932068281,"accepted":true},
+    {"iteration":3,"total_cost":94950.4621554067,"vision_cost":94868.1660237801,"relative_cost":81.8247986132145,"roll_pitch_cost":0.471333013373147,"h_diagonal_0":67931552.144386,"max_pose_increment":0.00472629508499249,"landmark_3_increment":[-3.55478550042906e-07,-4.29106707405647e-07,6.51668399816692e-05],"f_diff":1391.73646398442,"accepted":true},
+    {"iteration":4,"total_cost":93558.7256914223,"vision_cost":93473.0250421506,"relative_cost":85.6093352850247,"roll_pitch_cost":0.0913139866632539,"h_diagonal_0":67841035.7399516,"max_pose_increment":0.00186320656953056,"landmark_3_increment":[1.66727180838809e-06,8.54882013043361e-07,2.66570805188513e-05],"f_diff":298.232830266061,"accepted":true},
+    {"iteration":5,"total_cost":93260.4928611562,"vision_cost":93174.0372075461,"relative_cost":86.4556536101478,"roll_pitch_cost":5.59594784026324e-13,"h_diagonal_0":67897232.7850399,"max_pose_increment":8.86384794472151e-05,"landmark_3_increment":[8.61594075413783e-07,3.22184998925931e-07,1.2989986835184e-05],"f_diff":83.5446108999313,"accepted":true},
+    {"iteration":6,"total_cost":93176.9482502563,"vision_cost":93089.1097988874,"relative_cost":87.8384513329759,"roll_pitch_cost":3.59288389111804e-08,"h_diagonal_0":67862776.1054154,"max_pose_increment":3.80425085502629e-05,"landmark_3_increment":[5.20793814405703e-07,-9.82242607093562e-09,9.518506317195e-06],"f_diff":37.4266319608723,"accepted":true},
+    {"iteration":7,"total_cost":93139.5216182954,"vision_cost":93050.9083412298,"relative_cost":88.6132769840296,"roll_pitch_cost":8.15947091077779e-08,"h_diagonal_0":67848211.0029208,"max_pose_increment":2.2918936154591e-05,"landmark_3_increment":[3.51005869870719e-07,-4.3611476581504e-08,7.18838442798331e-06],"f_diff":25.3575792905613,"accepted":true},
+    {"iteration":8,"total_cost":93114.1640390048,"vision_cost":93025.0795936031,"relative_cost":89.0844452721874,"roll_pitch_cost":1.29528849073043e-07,"h_diagonal_0":67840007.690063,"max_pose_increment":1.61032147109945e-05,"landmark_3_increment":[2.49063358495585e-07,-2.70651549880527e-08,5.59949209318789e-06],"f_diff":20.8151283738553,"accepted":true},
+    {"iteration":9,"total_cost":93093.348910631,"vision_cost":93003.9515980986,"relative_cost":89.39731236911,"roll_pitch_cost":1.63333953828436e-07,"h_diagonal_0":67835031.8536847,"max_pose_increment":1.54526807568248e-05,"landmark_3_increment":[2.109617709897e-07,-9.43520878903104e-10,5.11461615329946e-06],"f_diff":18.5862850384583,"accepted":true}
+  ]
+}

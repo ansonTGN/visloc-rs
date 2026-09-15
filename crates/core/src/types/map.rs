@@ -512,6 +512,19 @@ impl LandmarkDescriptorStore {
         self.descriptors.contains_key(&landmark_id)
     }
 
+    /// Build a store containing only the requested landmark ids that exist
+    /// in `self`. Order of `landmark_ids` is preserved for determinism of
+    /// the first-insert-wins path, but lookups remain by id.
+    pub fn filtered(&self, landmark_ids: &[LandmarkId]) -> Self {
+        let mut descriptors = HashMap::new();
+        for &landmark_id in landmark_ids {
+            if let Some(descriptor) = self.descriptors.get(&landmark_id) {
+                descriptors.insert(landmark_id, descriptor.clone());
+            }
+        }
+        Self { descriptors }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (LandmarkId, &[f32])> + '_ {
         let mut descriptors = self
             .descriptors

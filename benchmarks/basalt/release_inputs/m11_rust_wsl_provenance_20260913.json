@@ -1,0 +1,226 @@
+{
+  "binary": {
+    "bytes": 3868072,
+    "path": "/mnt/e/visloc-rs-runs/basalt_crossplatform_norm_fix_linux_20260913/release/examples/basalt_euroc_vio_demo",
+    "sha256": "bccd41516f69e961d96b9e35e378ee508e9886be6e4b8205df8cbc6f9ce98674"
+  },
+  "build": {
+    "features": [
+      "basalt-lm-workspace-reuse"
+    ],
+    "profile": "release",
+    "rustflags": "-C target-feature=+avx2,+fma"
+  },
+  "calibration": {
+    "bytes": 5967,
+    "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/benchmarks/basalt/release_inputs/euroc_ds_calib.json",
+    "sha256": "ad8c5a18c48c55dacf61d18ebbc18cd7d4f3acccd5840bd5a5cd8646adb6271c"
+  },
+  "config": {
+    "bytes": 2401,
+    "path": "/mnt/e/visloc_archive/ssfm_runset_core_pr_20260819/configs/basalt/euroc_config.json",
+    "sha256": "82937bd6493e592ef89572d31260c10f7437b4fb3ff1fda179375713966e34fa"
+  },
+  "created_utc": "2026-09-13T10:01:22+00:00",
+  "git": {
+    "head": "83c85350a2e4842794d5ad36da68f461039a4ad7",
+    "unexpected_tracked_changes": []
+  },
+  "runtime_profile": "rust_wsl_linux",
+  "schema_id": "basalt.phase6.rust_wsl_provenance.v1",
+  "source": {
+    "algorithm": "sha256-of-sorted-sha256-size-path-lines-v1",
+    "file_count": 36,
+    "files": [
+      {
+        "bytes": 27662,
+        "path": "Cargo.lock",
+        "sha256": "901cfb7ee48c13b030eb9c33288813a12a0773e608a070ee1a4dbd0e028b75d0"
+      },
+      {
+        "bytes": 6138,
+        "path": "Cargo.toml",
+        "sha256": "5c049cc8597f7e05bf14cc50c098c09e71c0995adbbf4bee34e7c062ca868984"
+      },
+      {
+        "bytes": 1071,
+        "path": "pipelines/basalt/Cargo.toml",
+        "sha256": "3d7db0a7e58d2ef86894f548e896e0c354059ca8fcf6d9d2e94ec5200b30f1e2"
+      },
+      {
+        "bytes": 12704,
+        "path": "pipelines/basalt/src/adapter.rs",
+        "sha256": "ffc50a777964ae4c55bc1afb6fc905fc7067a32a48d7dbbcb4648f61582d9088"
+      },
+      {
+        "bytes": 10719,
+        "path": "pipelines/basalt/src/calibration.rs",
+        "sha256": "80aeddbda130764f8abe1624fa6f46e7f8c1834c166e5d61ccdffcafd75951e9"
+      },
+      {
+        "bytes": 13288,
+        "path": "pipelines/basalt/src/camera.rs",
+        "sha256": "e04af476c09f33fc499d2987a3505017c7b96f941bc2bc2c609bfd48fd754eba"
+      },
+      {
+        "bytes": 7564,
+        "path": "pipelines/basalt/src/config.rs",
+        "sha256": "3fd39df6ce50bdc935d8e4744031bc67d2aa0ad57faf2c87e81b179c6dcee037"
+      },
+      {
+        "bytes": 25834,
+        "path": "pipelines/basalt/src/euroc.rs",
+        "sha256": "02b36a7443d429b45c75bc1953045399577e8676decdb6a837c7fb3b7399cffd"
+      },
+      {
+        "bytes": 19170,
+        "path": "pipelines/basalt/src/fast.rs",
+        "sha256": "2255c1fc81fdb025cdd289f7edc98157c97ec1cf4012ffa8a2594d211c25d085"
+      },
+      {
+        "bytes": 142604,
+        "path": "pipelines/basalt/src/imu/factors.rs",
+        "sha256": "495f29f1c45d88e8b68ca398a7e1f1a0dbd228ff19746a836f2d76efa922f2c3"
+      },
+      {
+        "bytes": 1364,
+        "path": "pipelines/basalt/src/imu/mod.rs",
+        "sha256": "fde2b3bfaefeaf76ad8180ac00ec6148bcd344dc0a99e4650502f6ce0e4c1601"
+      },
+      {
+        "bytes": 18789,
+        "path": "pipelines/basalt/src/imu/preintegration.rs",
+        "sha256": "563099ea23a2f63d13ac66138bf6e5b07c0bab098aa14224023479d72bf6e9f7"
+      },
+      {
+        "bytes": 3020,
+        "path": "pipelines/basalt/src/imu/sampling.rs",
+        "sha256": "87d89f0ee1e07518951e35e7edc19f5ffe1b069e5c5a46a61493819021597c87"
+      },
+      {
+        "bytes": 6169,
+        "path": "pipelines/basalt/src/initialization.rs",
+        "sha256": "cb76498fe1ade7e8788b6870ebb2faeec02fdc7f817b6ec38352c0de6d4eb1c3"
+      },
+      {
+        "bytes": 2351,
+        "path": "pipelines/basalt/src/lib.rs",
+        "sha256": "2ee7de94a3de7644ff840f0ab8c13fb9b633993688d7af829650115a7b83a42e"
+      },
+      {
+        "bytes": 95616,
+        "path": "pipelines/basalt/src/mapper/features.rs",
+        "sha256": "e74dc6e395336aca9a975ffc0ba63b070af12d2c24b8d723e935ba97b830f60a"
+      },
+      {
+        "bytes": 136245,
+        "path": "pipelines/basalt/src/mapper/mod.rs",
+        "sha256": "dd7b38c46bb829692c76c7abd17b1eceb66d102453fb820f7794bbe36901f181"
+      },
+      {
+        "bytes": 89004,
+        "path": "pipelines/basalt/src/mapper/session.rs",
+        "sha256": "6da86500fbf4addb270f60b43851a18927daffab5998da09d9a6172413275653"
+      },
+      {
+        "bytes": 33333,
+        "path": "pipelines/basalt/src/mapper/triangulation.rs",
+        "sha256": "536d64d4ca6552b558c714f90de2e07e24ba5f3d1634ea2dd57df5eb8cdf53e4"
+      },
+      {
+        "bytes": 31758,
+        "path": "pipelines/basalt/src/patch.rs",
+        "sha256": "881b7a78c6a215536b235c82c6bf7ef158e737250f7bc2597b467206e71e19b2"
+      },
+      {
+        "bytes": 2029,
+        "path": "pipelines/basalt/src/pattern.rs",
+        "sha256": "e0bea281b6a62266441d1a6633b5b014c1d382dda81f5bd0e1b323b472fe812d"
+      },
+      {
+        "bytes": 1349,
+        "path": "pipelines/basalt/src/provenance.rs",
+        "sha256": "f52ab64c1f398612862d03db2d557fa390108a2656814bce6acb664f1979e7bb"
+      },
+      {
+        "bytes": 13124,
+        "path": "pipelines/basalt/src/pyramid.rs",
+        "sha256": "ef63434ceb0b3ef9ae4740efaa08af5e878ae0bd44a30eb0f4a5ac9c91d016b9"
+      },
+      {
+        "bytes": 58932,
+        "path": "pipelines/basalt/src/stream.rs",
+        "sha256": "f46e4fe6bdcea22088984993b9d7fe82405c02e16a79bd30e705ea2eba8af856"
+      },
+      {
+        "bytes": 7086,
+        "path": "pipelines/basalt/src/streaming.rs",
+        "sha256": "f059bd245b393847e83453e8a02742d91f27e00c4b8bb8a3834615184d0c0106"
+      },
+      {
+        "bytes": 5774,
+        "path": "pipelines/basalt/src/time.rs",
+        "sha256": "3a11d726721a57eb7b16564cebe68dfb0ebe9b7286ed47ffec84cb7ee2ac035a"
+      },
+      {
+        "bytes": 34793,
+        "path": "pipelines/basalt/src/timing.rs",
+        "sha256": "320294ad25ca3b036e42148f8c53e819ac8fac8c21151bde96e69c6d4a57c5be"
+      },
+      {
+        "bytes": 3201,
+        "path": "pipelines/basalt/src/types.rs",
+        "sha256": "674501a2997502dea838ce9aaf5dd141bfb98d5d7621b95fa387a94f92ada137"
+      },
+      {
+        "bytes": 27005,
+        "path": "pipelines/basalt/src/update.rs",
+        "sha256": "acc595d7daa70a755c13d92ec7f1f1636ceef76a6a908d37f2231e1b9b7833fe"
+      },
+      {
+        "bytes": 856564,
+        "path": "pipelines/basalt/src/vio/aom.rs",
+        "sha256": "5a95f499f1849d0bdeaf7301faf6d1108ed014f62731733406ca79d96e129dee"
+      },
+      {
+        "bytes": 301286,
+        "path": "pipelines/basalt/src/vio/estimator.rs",
+        "sha256": "7bfcb580d9366a8735d5b67243d7134eb1c11ea879256c41d76b50f06ebe8b00"
+      },
+      {
+        "bytes": 122380,
+        "path": "pipelines/basalt/src/vio/landmarks.rs",
+        "sha256": "cde9c23836b4513df8ae95c47b132360b5bc904247c53b2b52b13e0fbca2e40e"
+      },
+      {
+        "bytes": 80788,
+        "path": "pipelines/basalt/src/vio/margdata.rs",
+        "sha256": "a58ff6f6b3bb36d054e10c04ec0a3b24372b5a5affc561e29254bbdf8dd262c0"
+      },
+      {
+        "bytes": 387,
+        "path": "pipelines/basalt/src/vio/mod.rs",
+        "sha256": "032f39f9977ce483a468bae63f4acd88c3ce4c485bdc12928e2917e8664c5742"
+      },
+      {
+        "bytes": 839,
+        "path": "pipelines/basalt/src/vio/scalar.rs",
+        "sha256": "fd88e98c2e7b18e65c03dad2463aab423d44919f68754ee9a1d7f6ccea20a199"
+      },
+      {
+        "bytes": 590754,
+        "path": "pipelines/basalt/src/vio/window.rs",
+        "sha256": "dca65766e68afe8f8a85cfdad2aafa951a88a7ee118e2fda2a821a3ec0e074e7"
+      }
+    ],
+    "sha256": "32cad9ac11a045868bc17fd55a3062c3eddd7dadaf9e8ea14ba05914582c29be"
+  },
+  "source_sha256": "32cad9ac11a045868bc17fd55a3062c3eddd7dadaf9e8ea14ba05914582c29be",
+  "target_triple": "x86_64-unknown-linux-gnu",
+  "toolchain": {
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02); LLVM 21.1.8"
+  },
+  "wsl": {
+    "rss_domain": "linux-proc-process-tree"
+  }
+}

@@ -1,0 +1,229 @@
+{
+  "schema": "visloc.basalt.release_candidate_correctness.v1",
+  "artifact": "m11_release_candidate_final2_correctness_20260831",
+  "created_utc": "2026-08-31",
+  "status": "PASS_CORRECTNESS_ONLY",
+  "scope": {
+    "workspace_root": "C:/Users/rsasa/Workspace/visloc-rs",
+    "fresh_target_dir": "target/m11_release_candidate_final2_ms_20260831",
+    "features": [],
+    "timing_breakdown": "compile-time feature disabled",
+    "lm_workspace_reuse": "feature disabled",
+    "performance_evaluation": false,
+    "commit": false,
+    "push": false
+  },
+  "build": {
+    "status": "success",
+    "exit_code": 0,
+    "command": [
+      "C:/Users/rsasa/.cargo/bin/cargo.exe",
+      "build",
+      "--locked",
+      "--release",
+      "--no-default-features",
+      "--manifest-path",
+      "C:/Users/rsasa/Workspace/visloc-rs/Cargo.toml",
+      "--example",
+      "basalt_euroc_vio_demo"
+    ],
+    "cargo_target_dir": "C:/Users/rsasa/Workspace/visloc-rs/target/m11_release_candidate_final2_ms_20260831",
+    "executable": {
+      "path": "target/m11_release_candidate_final2_ms_20260831/release/examples/basalt_euroc_vio_demo.exe",
+      "bytes": 3006976,
+      "sha256": "7307FC7C469B01AF77530739773E9EF229A1213BEC1CFEE83E961EA93EA31FAC",
+      "last_write": "2026-08-31T08:53:17.1557435+09:00"
+    },
+    "logs": [
+      {
+        "path": "work/m11_release_candidate_final2_build_20260831.log",
+        "bytes": 0,
+        "sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+      },
+      {
+        "path": "work/m11_release_candidate_final2_build_20260831.err",
+        "bytes": 8322,
+        "sha256": "F5FF87A4369910B176F41EBD12ADECABF95306E9A08AB5715D06F36BDBD41016"
+      }
+    ]
+  },
+  "source_binding": {
+    "hash_algorithm": "SHA256",
+    "files": [
+      {"path": "Cargo.toml", "bytes": 6107, "sha256": "A54BE7CFAD7700B24A6AE3AF5DC7EFA5A2C04BCC2F3B28E68E304DB0EC3F3E54"},
+      {"path": "Cargo.lock", "bytes": 26592, "sha256": "BC06922E3B6CF36766C292514A7A7681AF322DFAA50AC14D40E915D48760EA35"},
+      {"path": "pipelines/basalt/Cargo.toml", "bytes": 1072, "sha256": "7C1533A4A3C50EFEAA6E1428467690F2E7B82B58A0DF1AE770A60DBBE2F30AD6"},
+      {"path": "pipelines/basalt/src/timing.rs", "bytes": 34793, "sha256": "320294AD25CA3B036E42148F8C53E819AC8FAC8C21151BDE96E69C6D4A57C5BE"},
+      {"path": "pipelines/basalt/src/vio/aom.rs", "bytes": 692013, "sha256": "246979610F9C6537311AC1D3E94F611CE6F7EFDF265D357BA3CBC6588A1C9667"},
+      {"path": "pipelines/basalt/src/vio/window.rs", "bytes": 436210, "sha256": "9FACFCBFE0B76B29F764265EA90104699A0AF82B293906C9D9BAAC43BFAE36C0"},
+      {"path": "pipelines/basalt/src/vio/estimator.rs", "bytes": 196458, "sha256": "A43EAA12E79EEFBB3A87F2A05354032E981296D8F124CF5A52F60A77AD71B45D"},
+      {"path": "pipelines/basalt/src/pyramid.rs", "bytes": 13124, "sha256": "EF63434CEB0B3EF9AE4740EFAA08AF5E878AE0BD44A30EB0F4A5AC9C91D016B9"},
+      {"path": "pipelines/basalt/src/stream.rs", "bytes": 26589, "sha256": "D0A48E28FBC5B6CD76211ABDD75BA348D8DBF5CD663A8001B93EF141F770E6B7"},
+      {"path": "pipelines/basalt/src/euroc.rs", "bytes": 22661, "sha256": "D4773ADA60BAEFAB6190C0BD45AF8610F78AD0E0E640D402CCF59BE6F4AC270B"},
+      {"path": "examples/basalt_euroc_vio_demo.rs", "bytes": 27184, "sha256": "A9CD93BBFBDF4CE297767D35839F58B0A0832141CE3C50AA642027F4C47E1DFC"}
+    ]
+  },
+  "protocol_binding": {
+    "protocol": "basalt_euroc_parity_v1",
+    "path": "benchmarks/basalt/protocols/basalt_euroc_parity_v1.json",
+    "bytes": 4348,
+    "sha256": "7957F102FFA47A67C3509CDF77942D599E7B0F5F5F2BF452987F87A55DF246E5",
+    "correctness_profile": "lean_no_marg_no_trace"
+  },
+  "input_binding": {
+    "dataset_root": "E:/datasets/euroc_mav/sensor_hardlink_all11/MH_01_easy",
+    "sensor_only": true,
+    "gt_argument_passed_to_engine": false,
+    "dataset_manifest": {
+      "path": "benchmarks/basalt/euroc_dataset_manifest.json",
+      "bytes": 920070,
+      "sha256": "A803DB9E01F7A39F587CB9F87FD8601C8800455135AE7A2DC67F9E108003DD26"
+    },
+    "calibration": {
+      "path": "target/euroc_ds_calib.json",
+      "bytes": 5967,
+      "sha256": "AD8C5A18C48C55DACF61D18EBBC18CD7D4F3ACCCD5840BD0A5CD8646ADB6271C"
+    },
+    "config": {
+      "path": "configs/basalt/euroc_config.json",
+      "bytes": 2401,
+      "sha256": "82937BD6493E592EF89572D31260C10F7437B4FB3FF1FDA179375713966E34FA"
+    },
+    "engine_flags": ["--no-marg-data", "--no-trace"],
+    "environment": {
+      "VISLOC_BASALT_TIMING_BREAKDOWN": "unset"
+    }
+  },
+  "replays": [
+    {
+      "name": "max52_lean",
+      "max_frames": 52,
+      "exit_code": 0,
+      "pid": 32208,
+      "output_dir": "target/m11_release_candidate_final2_ms_20260831/run52_lean",
+      "argv": [
+        "target/m11_release_candidate_final2_ms_20260831/release/examples/basalt_euroc_vio_demo.exe",
+        "--euroc-dir", "E:/datasets/euroc_mav/sensor_hardlink_all11/MH_01_easy",
+        "--calibration", "C:/Users/rsasa/Workspace/visloc-rs/target/euroc_ds_calib.json",
+        "--config", "C:/Users/rsasa/Workspace/visloc-rs/configs/basalt/euroc_config.json",
+        "--out-dir", "target/m11_release_candidate_final2_ms_20260831/run52_lean",
+        "--max-frames", "52", "--no-marg-data", "--no-trace"
+      ],
+      "summary": {
+        "frames_requested": 52,
+        "frames_processed": 52,
+        "cam0_manifest_frames": 3682,
+        "cam1_manifest_timestamps": 3682,
+        "imu_samples_loaded": 36820,
+        "imu_samples_delivered": 512,
+        "observations_emitted": 14661,
+        "summary_sha256": "C79F130A01BC3D1A2ADDB7A4135B0C384DC51531662259F2B9D8B3B34D764E3F"
+      },
+      "artifacts": {
+        "trajectory_csv": {"bytes": 7082, "sha256": "5F389D899682B34F296AF4B59B8BCEA2080FBD5E71D86265A8CE0AC849FDF4EA"},
+        "trajectory_tum": {"bytes": 6356, "sha256": "41A21BA235ABAC75875F403074EFD31F1509E5D91453E04FA3257A796DC150EF9"},
+        "files": ["summary.txt", "trajectory.csv", "trajectory.tum"],
+        "forbidden_absent": ["trace.jsonl", "marg_data", "timing_breakdown.json"]
+      },
+      "authoritative": {
+        "certificate": "work/m11_final_hardened_correctness_20260830.json",
+        "trajectory_csv_byte_exact": true,
+        "trajectory_tum_byte_exact": true,
+        "obs_exact": true,
+        "imu_exact": true
+      }
+    },
+    {
+      "name": "max80_lean",
+      "max_frames": 80,
+      "exit_code": 0,
+      "pid": 42352,
+      "output_dir": "target/m11_release_candidate_final2_ms_20260831/run80_lean",
+      "argv": [
+        "target/m11_release_candidate_final2_ms_20260831/release/examples/basalt_euroc_vio_demo.exe",
+        "--euroc-dir", "E:/datasets/euroc_mav/sensor_hardlink_all11/MH_01_easy",
+        "--calibration", "C:/Users/rsasa/Workspace/visloc-rs/target/euroc_ds_calib.json",
+        "--config", "C:/Users/rsasa/Workspace/visloc-rs/configs/basalt/euroc_config.json",
+        "--out-dir", "target/m11_release_candidate_final2_ms_20260831/run80_lean",
+        "--max-frames", "80", "--no-marg-data", "--no-trace"
+      ],
+      "summary": {
+        "frames_requested": 80,
+        "frames_processed": 80,
+        "cam0_manifest_frames": 3682,
+        "cam1_manifest_timestamps": 3682,
+        "imu_samples_loaded": 36820,
+        "imu_samples_delivered": 792,
+        "observations_emitted": 24256,
+        "summary_sha256": "9087A99250F6CD55C3BD2AA7E8DB29B8D4B4C24B11CA756787B39E05B00EFAEF"
+      },
+      "artifacts": {
+        "trajectory_csv": {"bytes": 10851, "sha256": "9B8838BB856404C2B0B54018C25BFBF2942C29E6D1ED2772E7D4F82A570ADEC3"},
+        "trajectory_tum": {"bytes": 9768, "sha256": "2DCCBB00FC5A55F27C9E059492D047E8CCA07BD7B5BA32C9CD8329C0678724E9"},
+        "files": ["summary.txt", "trajectory.csv", "trajectory.tum"],
+        "forbidden_absent": ["trace.jsonl", "marg_data", "timing_breakdown.json"]
+      },
+      "authoritative": {
+        "certificate": "work/m11_final_hardened_correctness_20260830.json",
+        "trajectory_csv_byte_exact": true,
+        "trajectory_tum_byte_exact": true,
+        "obs_exact": true,
+        "imu_exact": true
+      }
+    },
+    {
+      "name": "max400_lean",
+      "max_frames": 400,
+      "exit_code": 0,
+      "pid": 43128,
+      "output_dir": "target/m11_release_candidate_final2_ms_20260831/run400_lean",
+      "argv": [
+        "target/m11_release_candidate_final2_ms_20260831/release/examples/basalt_euroc_vio_demo.exe",
+        "--euroc-dir", "E:/datasets/euroc_mav/sensor_hardlink_all11/MH_01_easy",
+        "--calibration", "C:/Users/rsasa/Workspace/visloc-rs/target/euroc_ds_calib.json",
+        "--config", "C:/Users/rsasa/Workspace/visloc-rs/configs/basalt/euroc_config.json",
+        "--out-dir", "target/m11_release_candidate_final2_ms_20260831/run400_lean",
+        "--max-frames", "400", "--no-marg-data", "--no-trace"
+      ],
+      "summary": {
+        "frames_requested": 400,
+        "frames_processed": 400,
+        "cam0_manifest_frames": 3682,
+        "cam1_manifest_timestamps": 3682,
+        "imu_samples_loaded": 36820,
+        "imu_samples_delivered": 3992,
+        "observations_emitted": 106981,
+        "summary_sha256": "7D559E507B57887441344CC2211255A7342687BCC9037BECE10DFB581C70EF3F"
+      },
+      "artifacts": {
+        "trajectory_csv": {"bytes": 53776, "sha256": "0838EB33CA8947BE6E7E9A66251002D8EC46E10E76BB22155CB7C1B1AA206FFC"},
+        "trajectory_tum": {"bytes": 48520, "sha256": "363AC4A76D6C73D1E48F96DCF22D632960463F3FCBCF6CFBB64D31938C48D919"},
+        "files": ["summary.txt", "trajectory.csv", "trajectory.tum"],
+        "forbidden_absent": ["trace.jsonl", "marg_data", "timing_breakdown.json"]
+      },
+      "authoritative": {
+        "certificate": "work/m10_landmark_direct_pack_ms_20260829_lifecycle.json",
+        "trajectory_csv_byte_exact": true,
+        "trajectory_tum_byte_exact": true,
+        "obs_exact": true,
+        "imu_exact": true,
+        "lifecycle_fields": "not_evaluable_current_lean_no_marg_data_no_trace",
+        "lifecycle_count_crosscheck": true,
+        "lifecycle_count_crosscheck_note": "400-frame full-output certificates report the same 400/106981/3992 counts; current lean run intentionally emits no event/lifecycle sidecars."
+      }
+    }
+  ],
+  "aggregate": {
+    "replays_successful": "3/3",
+    "trajectory_csv_exact": "3/3",
+    "trajectory_tum_exact": "3/3",
+    "frame_counts_exact": "3/3",
+    "observation_counts_exact": "3/3",
+    "imu_counts_exact": "3/3",
+    "forbidden_outputs_absent": "3/3",
+    "state_and_lifecycle_event_hashes": "not_evaluable_for_lean_runs",
+    "performance_gate": "not_evaluated",
+    "gt_metrics": "not_evaluated_gt_not_passed_to_engine"
+  },
+  "post_run_process_note": "No candidate basalt_euroc_vio_demo process remained. Unrelated cargo/rustc processes were observed after completion and were not touched; no global-clean performance claim is made."
+}
