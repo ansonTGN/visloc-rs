@@ -33,8 +33,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 ONLINE_BIN = Path(
-    "E:/visloc-rs-runs/basalt_goal_mapper_identity_20260913/target-msvc/"
-    "release/examples/basalt_euroc_online_slam_demo.exe"
+    "E:/visloc-rs-runs/online_target/release/examples/basalt_euroc_online_slam_demo.exe"
 )
 CALIB = REPO / "configs/basalt/variants/official_euroc_ds/euroc_ds_calib.json"
 CONFIG = REPO / "configs/basalt/variants/official_euroc_ds/euroc_config.json"
@@ -176,7 +175,7 @@ def run_one_sequence(seq):
             f"[{seq}] DONE online_se3={record['online_se3_rmse_m']:.4f}m "
             f"rtf={record['real_time_factor']:.3f} "
             f"loops={record['mapper']['accepted_loop_pair_count']} "
-            f"optimizes={record['mapper']['optimize_pass_count']} "
+            f"optimizes={record['mapper']['optimize_trigger_count']} "
             f"peak_rss={record['peak_working_set_bytes'] / 1e6:.0f}MB "
             f"wall={record['total_wall_seconds'] / 60:.1f}min"
         )
@@ -276,7 +275,7 @@ def write_summary():
         rtf = f"{row['real_time_factor']:.3f}"
         rss = f"{row['peak_working_set_bytes'] / 1e6:.0f} MB"
         loops = row["mapper"]["accepted_loop_pair_count"]
-        optimizes = row["mapper"]["optimize_pass_count"]
+        optimizes = row["mapper"]["optimize_trigger_count"]
         lines.append(
             f"| {seq} | {row['online_se3_rmse_m']:.4f} | {fmt(row.get('offline_se3_rmse_m'))} | "
             f"{fmt(row.get('orbslam3_se3_rmse_m'))} | {win} | {rtf} | {rss} | {loops} | {optimizes} |"
