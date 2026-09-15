@@ -38,6 +38,22 @@ rerun, see README). Omit `--official-calib-summary-json`/`--orbslam3-summary-md`
 to skip the bar chart, or `--hero-mapper-out-dir`/`--hero-orbslam3-dir`/
 `--hero-gt-root` to skip the hero trajectory grid.
 
+Online-mapper mode (Stage 3 of docs/vi_slam_global_consistency_plan.md,
+scripts/run_basalt_online_all11.py's output): pass
+`--online-summary-json <online_run>/summary.json` (its own schema --
+`rows[].online_se3_rmse_m`, `status`/`error` for not-run/failed rows,
+distinct from `--official-calib-summary-json`'s offline schema) together
+with `--orbslam3-summary-md` to draw a 2-series online-vs-ORB-SLAM3 bar
+chart (`basalt_online_vs_orbslam3.png`), matching the offline chart's shape
+but reading the online driver's numbers. Pass `--hero-online-run-dir
+<online_run>/runs` (each `<run_dir>/<SEQ>/trajectory_online.tum` is already
+the full-frame propagated trajectory -- no mapper_out/rerun-directory
+naming to thread through, unlike the offline hero grid) together with
+`--hero-orbslam3-dir`/`--hero-gt-root` for the online hero trajectory grid
+(`basalt_online_vs_orbslam3_trajectories.png`). These are independent of,
+and do not change, the offline `--official-calib-summary-json` /
+`--hero-mapper-out-dir` outputs above.
+
 Optional dependencies: numpy, matplotlib. Asset-generation helper, not part
 of the core build, test, or CI path.
 """
@@ -103,6 +119,19 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="EuRoC dataset root containing <SEQ>/mav0/state_groundtruth_estimate0/data.csv",
+    )
+    parser.add_argument(
+        "--online-summary-json",
+        type=Path,
+        default=None,
+        help="run_basalt_online_all11.py summary.json (online mapper, its own schema)",
+    )
+    parser.add_argument(
+        "--hero-online-run-dir",
+        type=Path,
+        default=None,
+        help="run_basalt_online_all11.py's runs/ directory "
+        "(<dir>/<SEQ>/trajectory_online.tum is already the full-frame propagated trajectory)",
     )
     return parser.parse_args()
 
@@ -312,6 +341,129 @@ def load_official_calib_rows(summary_json: Path, overrides: dict[str, dict[str, 
     return rows
 
 
+def load_online_rows(summary_json: Path):
+    """Load `run_basalt_online_all11.py`'s summary.json rows.
+
+    Its schema differs from the offline driver's (`online_se3_rmse_m`, and a
+    "not_run"/`error` row shape for sequences the sweep has not reached or
+    that failed) -- see that script's `write_summary`.
+    """
+    import json
+
+    with summary_json.open() as handle:
+        data = json.load(handle)
+    rows = []
+    for row in data["rows"]:
+        se3 = row.get("online_se3_rmse_m")
+        if se3 is None:
+            # not yet run, or failed -- see row.get("status")/row.get("error")
+            continue
+        rows.append((row["sequence"], float(se3)))
+    rows.sort(key=lambda row: row[0])
+    return rows
+
+
+def plot_online_vs_orbslam3(
+    online_summary_json: Path,
+    orbslam3_summary_md: Path,
+    output: Path,
+) -> None:
+    """Same 2-series bar-chart shape as `plot_ours_vs_orbslam3`, reading the
+    online mapper driver's summary.json instead of the offline one."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    rows = load_online_rows(online_summary_json)
+    orbslam3 = load_orbslam3_measured(orbslam3_summary_md)
+
+    labels = [seq.replace("_easy", "").replace("_medium", "").replace("_difficult", "") for seq, _ in rows]
+    online_vals = [se3 for _, se3 in rows]
+    orb_vals = [orbslam3[seq] for seq, _ in rows]
+
+    x = np.arange(len(labels))
+    width = 0.36
+    fig, ax = plt.subplots(figsize=(10.5, 4.6))
+    ax.bar(x - width / 2, online_vals, width, label="visloc-rs (online VIO + mapper)", color="#2f6fed")
+    ax.bar(x + width / 2, orb_vals, width, label="ORB-SLAM3 (measured)", color="#c0392b")
+    ax.set_ylabel("Full-trajectory ATE translation RMSE, SE(3) [m]")
+    ax.set_title("EuRoC: visloc-rs online VI-SLAM vs ORB-SLAM3 (lower is better)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=30, ha="right")
+    ax.grid(True, axis="y", color="#d8dee9", linewidth=0.6)
+    ax.legend(loc="upper left", frameon=True, framealpha=0.9)
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+    fig.tight_layout()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=150, facecolor="white")
+    plt.close(fig)
+    print(f"wrote {output}")
+
+
+def plot_hero_trajectory_grid_online(
+    run_dir: Path,
+    orbslam3_dir: Path,
+    gt_root: Path,
+    output: Path,
+) -> None:
+    """Same hero-grid shape as `plot_hero_trajectory_grid`, reading the
+    online driver's own `<run_dir>/<SEQ>/trajectory_online.tum` directly (it
+    is already the full-frame propagated trajectory -- no mapper_out/rerun
+    directory naming to thread through)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    gt_color, orb_color, ours_color = "#1b1f27", "#c06b6b", "#2f6fed"
+
+    fig, axes = plt.subplots(2, 3, figsize=(16.0, 9.0))
+    for ax, (sequence, label, _mapper_subdir, _traj_name) in zip(axes.flat, HERO_SEQUENCES):
+        gt = load_euroc_csv(gt_root / sequence / "mav0" / "state_groundtruth_estimate0" / "data.csv")
+        ours = load_tum(run_dir / sequence / "trajectory_online.tum")
+        orb = load_tum_ns(orbslam3_dir / sequence / "r1" / f"f_orbslam3_{sequence}_r1.txt")
+
+        ours_aligned, ours_rmse = align_and_ate(gt, ours)
+        orb_aligned, orb_rmse = align_and_ate(gt, orb)
+        gt_xyz = np.asarray([[p[1], p[2], p[3]] for p in gt])
+
+        ax.plot(gt_xyz[:, 0], gt_xyz[:, 1], color=gt_color, linewidth=2.0, zorder=2, label="EuRoC ground truth")
+        ax.plot(orb_aligned[:, 0], orb_aligned[:, 1], color=orb_color, linewidth=1.4, zorder=3, label="ORB-SLAM3")
+        ax.plot(
+            ours_aligned[:, 0],
+            ours_aligned[:, 1],
+            color=ours_color,
+            linewidth=1.5,
+            zorder=4,
+            label="visloc-rs (online)",
+        )
+
+        ax.set_title(f"{label} — ours {ours_rmse * 100:.1f} cm / ORB-SLAM3 {orb_rmse * 100:.1f} cm", fontsize=11)
+        ax.set_aspect("equal", adjustable="datalim")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_color("#c7ccd4")
+        ax.set_facecolor("white")
+
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, frameon=False, bbox_to_anchor=(0.5, -0.02))
+    fig.suptitle(
+        "EuRoC top-down trajectories, SE(3)-aligned to ground truth: visloc-rs (online) vs ORB-SLAM3",
+        fontsize=13,
+    )
+    fig.patch.set_facecolor("white")
+    fig.tight_layout(rect=(0, 0.04, 1, 0.96))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=100, facecolor="white", bbox_inches="tight", pil_kwargs={"optimize": True})
+    plt.close(fig)
+    print(f"wrote {output}")
+
+
 def plot_ours_vs_orbslam3(
     official_calib_summary_json: Path,
     orbslam3_summary_md: Path,
@@ -374,6 +526,21 @@ def main() -> int:
             args.hero_orbslam3_dir,
             args.hero_gt_root,
             args.output_dir / "basalt_vs_orbslam3_trajectories.png",
+        )
+
+    if args.online_summary_json and args.orbslam3_summary_md:
+        plot_online_vs_orbslam3(
+            args.online_summary_json,
+            args.orbslam3_summary_md,
+            args.output_dir / "basalt_online_vs_orbslam3.png",
+        )
+
+    if args.hero_online_run_dir and args.hero_orbslam3_dir and args.hero_gt_root:
+        plot_hero_trajectory_grid_online(
+            args.hero_online_run_dir,
+            args.hero_orbslam3_dir,
+            args.hero_gt_root,
+            args.output_dir / "basalt_online_vs_orbslam3_trajectories.png",
         )
 
     return 0
