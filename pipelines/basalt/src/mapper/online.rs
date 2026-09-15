@@ -41,6 +41,7 @@
 
 use std::collections::BTreeSet;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
@@ -63,7 +64,8 @@ use crate::mapper::{
         NfrMapper, NfrMapperError, NfrMapperFilterReport, NfrMapperHeadlessConfig,
         NfrMapperMatchData, NfrMapperOptimizeReport, NfrMapperResult,
     },
-    GlobalBaConfig, MapperConfig, MatchData, OfflineMapperConfig, TimeCamId,
+    GlobalBaConfig, GlobalBaOptimizerState, MapperConfig, MatchData, OfflineMapperConfig,
+    TimeCamId,
 };
 
 /// Errors raised by the online mapper's incremental entry points.
@@ -123,10 +125,32 @@ pub struct OnlineMapperConfig {
     /// `headless.num_opt_iter` instead.
     pub periodic_iterations: usize,
     /// An accepted temporal match pair whose two frame IDs differ by more
-    /// than this many keyframes is treated as a loop closure for the
-    /// trigger policy (immediate optimize on the same packet), separate
-    /// from the periodic `optimize_every_k` cadence.
+    /// than this many keyframes is classified as a loop closure (reported
+    /// via `OnlineIngestReport::accepted_loop_pair_count`) and, like every
+    /// accepted pair, is immediately in `feature_matches`. It does *not*
+    /// force its own optimize trigger: the rate limit in `ingest_packet`
+    /// (see `last_optimize_started_at`'s field doc) picks it up whenever
+    /// the next `optimize_every_k`-or-cooldown trigger fires, so a
+    /// loop-rich revisited segment cannot make every single packet start
+    /// its own background job.
     pub loop_gap_keyframes: u64,
+    /// Candidates considered per new keyframe query in
+    /// `match_new_keyframe`, i.e. the `num_results` truncation passed to
+    /// `query_bow_candidates` -- independent of (and by default smaller
+    /// than) `OfflineMapperConfig::match_window` (30), which batch
+    /// `NfrMapper::match_all` still uses unchanged. This is a genuine
+    /// semantic difference from the offline/batch path, not merely a
+    /// performance tweak: RANSAC (bounded by this many attempts per query)
+    /// dominated match_new_keyframe's cost on a real MH_01 run (up to
+    /// ~2.7s/packet at match_window=30, well above the real-time budget a
+    /// live VIO stream needs from the mapper), and a query's true loop/
+    /// temporal-continuation candidates are almost always within its
+    /// highest-scoring few. `tests::inverted_index_candidates_equal_full_scan`
+    /// and `tests::incremental_matches_equal_batch` compare against a batch
+    /// call truncated to this same value, not the offline default, so
+    /// exactness is still proven at whatever `k` is configured -- just not
+    /// against the *offline mapper's own* candidate count.
+    pub match_top_k: usize,
     /// Knobs `NfrMapper::run_headless` uses for `finalize`'s pass
     /// (`num_opt_iter`, `outlier_threshold`, `min_num_obs`,
     /// `temporal_seed`); `num_opt_iter` is unused by the periodic trigger,
@@ -142,6 +166,7 @@ impl Default for OnlineMapperConfig {
             optimize_every_k: 100,
             periodic_iterations: 4,
             loop_gap_keyframes: 30,
+            match_top_k: 5,
             headless: NfrMapperHeadlessConfig::default(),
         }
     }
@@ -159,8 +184,15 @@ pub struct OnlineIngestReport {
     pub match_seconds: f64,
     pub accepted_temporal_pair_count: usize,
     pub accepted_loop_pair_count: usize,
+    /// A new background optimize job was *started* this packet (see
+    /// [`BackgroundOptimizeBreakdown`] -- ingestion is not blocked by it;
+    /// its result is merged, and reported via `optimize_merge`, on a later
+    /// packet once the background thread finishes).
     pub optimize_triggered: bool,
-    pub optimize_seconds: f64,
+    /// A previously started background optimize job *finished and was
+    /// merged* into the live mapper state during this packet's call. `None`
+    /// on every packet where no job happened to complete.
+    pub optimize_merge: Option<BackgroundOptimizeBreakdown>,
     /// Bytes retained in `NfrMapper::img_data` immediately after this call
     /// returns. Phase A identified this field as the dominant term in the
     /// offline mapper's RSS; the online demo asserts this stays ~0 (only
@@ -168,6 +200,23 @@ pub struct OnlineIngestReport {
     /// not expected on a live VIO stream since a packet's own frame poses
     /// are installed by `add_marg_data` before this method runs).
     pub retained_image_bytes: usize,
+}
+
+/// Per-stage timing for one completed background optimize job (see rule 3
+/// in [`OnlineNfrMapper`]'s trigger policy): where a periodic pass's wall
+/// time actually goes. `build_tracks`/`setup_opt` are full rebuilds over the
+/// whole accumulated match/track graph on every call (Sec2 of the design
+/// doc -- there is no incremental union-find/triangulation port), so their
+/// cost grows with total sequence length regardless of the LM iteration
+/// cap; `optimize1`/`optimize2` are bounded by `periodic_iterations`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct BackgroundOptimizeBreakdown {
+    pub build_tracks_seconds: f64,
+    pub setup_opt_seconds: f64,
+    pub optimize1_seconds: f64,
+    pub filter_seconds: f64,
+    pub optimize2_seconds: f64,
+    pub total_seconds: f64,
 }
 
 /// Result of the final `optimize_pass` run when the ingest channel closes.
@@ -209,6 +258,37 @@ pub struct OnlineNfrMapper {
     /// `query_bow_candidates` scans, not an approximation: see
     /// `tests::inverted_index_candidates_equal_full_scan` below.
     hash_index: std::collections::BTreeMap<u32, BTreeSet<TimeCamId>>,
+    /// At most one background optimize job in flight at a time (rule 3):
+    /// `ingest_packet` never blocks on it, but also never starts a second
+    /// one while the first is still running, so the mapper thread's own
+    /// ingestion work (detect/stereo/match, all cheap) is what determines
+    /// whether the mapper keeps up with the VIO, not a growing backlog of
+    /// stacked optimize jobs.
+    pending_optimizer: Option<JoinHandle<BackgroundOptimizeResult>>,
+    /// When the currently-pending (or most recently completed) job started,
+    /// and how long the most recently *completed* one took. Used by the
+    /// trigger's rate limit: don't start another job until at least
+    /// `last_optimize_duration * 2` has elapsed since the last one started,
+    /// even if loop pairs keep arriving in the meantime (they still get
+    /// recorded as accepted match-graph factors immediately; they just
+    /// don't each force their own optimize job the way the first cut of
+    /// this trigger policy did -- confirmed by an MH_01 run where a
+    /// loop-rich revisited corridor made `optimize_triggered` fire on
+    /// nearly every packet, each costing 80-130s, because every single
+    /// accepted loop pair triggered its own full rebuild).
+    last_optimize_started_at: Option<Instant>,
+    last_optimize_duration: Duration,
+    total_optimize_triggers: usize,
+}
+
+/// Owned inputs/outputs of one background optimize job (rule 3). Computed
+/// entirely on a clone of the mapper state taken at trigger time -- the
+/// live `NfrMapper` (and therefore `ingest_packet`) is never touched while
+/// this runs.
+struct BackgroundOptimizeResult {
+    poses: std::collections::BTreeMap<u64, SE3>,
+    optimizer_state: GlobalBaOptimizerState,
+    breakdown: BackgroundOptimizeBreakdown,
 }
 
 impl OnlineNfrMapper {
@@ -231,7 +311,15 @@ impl OnlineNfrMapper {
             keyframe_rank: std::collections::BTreeMap::new(),
             next_keyframe_rank: 0,
             hash_index: std::collections::BTreeMap::new(),
+            pending_optimizer: None,
+            last_optimize_started_at: None,
+            last_optimize_duration: Duration::ZERO,
+            total_optimize_triggers: 0,
         }
+    }
+
+    pub fn total_optimize_triggers(&self) -> usize {
+        self.total_optimize_triggers
     }
 
     pub fn total_accepted_loops(&self) -> usize {
@@ -272,6 +360,11 @@ impl OnlineNfrMapper {
         data: &mut MargData,
         seed: Option<u32>,
     ) -> Result<OnlineIngestReport, OnlineMapperError> {
+        // Non-blocking: pick up a background optimize job's result if one
+        // finished since the last packet (rule 3). Ingestion below proceeds
+        // immediately either way.
+        let optimize_merge = self.poll_pending_optimizer();
+
         self.mapper
             .add_marg_data(data)
             .map_err(OnlineMapperError::Ingest)?;
@@ -372,16 +465,26 @@ impl OnlineNfrMapper {
             .len();
         self.keyframes_since_optimize += new_keyframe_count;
 
-        let should_optimize = !new_keys.is_empty()
-            && (self.keyframes_since_optimize >= self.config.optimize_every_k
-                || accepted_loop_pair_count > 0);
-        let mut optimize_seconds = 0.0;
-        if should_optimize {
-            let start = Instant::now();
-            let _ = self.optimize_pass(self.config.periodic_iterations);
-            optimize_seconds = start.elapsed().as_secs_f64();
+        // Rate limit (rule 1): a keyframe-count threshold alone re-triggers
+        // on literally every packet through a loop-rich revisited segment,
+        // since each packet's own newly accepted loop pair satisfies
+        // `accepted_loop_pair_count > 0` independently -- confirmed by an
+        // MH_01 run where that fired ~120 times in a row at 80-130s each.
+        // Loops accepted while a job is running or cooling down still land
+        // in `feature_matches`/`feature_match_data` immediately (rule 2 is
+        // unaffected); they are simply picked up by whichever optimize job
+        // runs next instead of each forcing their own.
+        let cooldown_elapsed = self.last_optimize_started_at.is_none_or(|started| {
+            started.elapsed() >= self.last_optimize_duration.saturating_mul(2)
+        });
+        let should_trigger = self.pending_optimizer.is_none()
+            && !new_keys.is_empty()
+            && self.keyframes_since_optimize >= self.config.optimize_every_k
+            && cooldown_elapsed;
+        if should_trigger {
+            self.spawn_background_optimize();
             self.keyframes_since_optimize = 0;
-            self.total_optimize_passes += 1;
+            self.total_optimize_triggers += 1;
         }
 
         Ok(OnlineIngestReport {
@@ -393,8 +496,8 @@ impl OnlineNfrMapper {
             match_seconds,
             accepted_temporal_pair_count,
             accepted_loop_pair_count,
-            optimize_triggered: should_optimize,
-            optimize_seconds,
+            optimize_triggered: should_trigger,
+            optimize_merge,
             retained_image_bytes: self.retained_image_bytes(),
         })
     }
@@ -589,8 +692,11 @@ impl OnlineNfrMapper {
         let Some(query_features) = self.mapper.feature_corners.get(&query_id).cloned() else {
             return (0, 0);
         };
+        // Deliberately `self.config.match_top_k`, not
+        // `config.match_window` (which batch `match_all` still uses
+        // unchanged) -- see `OnlineMapperConfig::match_top_k`'s field doc.
         let candidates =
-            self.bow_candidates_via_index(query_id, &query_features, config.match_window as usize);
+            self.bow_candidates_via_index(query_id, &query_features, self.config.match_top_k);
 
         let mut accepted_count = 0;
         let mut loop_count = 0;
@@ -731,7 +837,17 @@ impl OnlineNfrMapper {
     /// Run a final, full-budget `optimize_pass` (unconditionally, regardless
     /// of the periodic trigger's cadence) and return the propagated
     /// trajectory. Call this once the packet channel/source is exhausted.
+    ///
+    /// Joins any in-flight background optimize job first (rule 3) so the
+    /// final pass warm-starts from the freshest `GlobalBaOptimizerState`
+    /// and does not race a background merge landing mid-solve; this is the
+    /// one place `OnlineNfrMapper` blocks on the background thread, and it
+    /// only does so once, at the natural end of the run.
     pub fn finalize(&mut self) -> Result<OnlineFinalReport, OnlineMapperError> {
+        if let Some(handle) = self.pending_optimizer.take() {
+            let result = handle.join().expect("background optimize thread panicked");
+            self.merge_background_result(result);
+        }
         let (first_optimize, filter, second_optimize) =
             self.optimize_pass(self.config.headless.num_opt_iter)?;
         self.total_optimize_passes += 1;
@@ -742,6 +858,95 @@ impl OnlineNfrMapper {
             result: self.mapper.result(),
             trajectory_tum: self.mapper.trajectory_tum(),
         })
+    }
+
+    /// Non-blocking: if the in-flight background optimize job (if any) has
+    /// finished, join and merge it, returning its breakdown. Called at the
+    /// top of every [`Self::ingest_packet`] so a completed job is merged
+    /// promptly without ever making ingestion wait for it.
+    fn poll_pending_optimizer(&mut self) -> Option<BackgroundOptimizeBreakdown> {
+        let finished = self
+            .pending_optimizer
+            .as_ref()
+            .is_some_and(JoinHandle::is_finished);
+        if !finished {
+            return None;
+        }
+        let handle = self.pending_optimizer.take().expect("checked Some above");
+        let result = handle.join().expect("background optimize thread panicked");
+        let breakdown = result.breakdown;
+        self.merge_background_result(result);
+        Some(breakdown)
+    }
+
+    /// Apply a finished background job's result to the live mapper state.
+    /// Only poses present in the snapshot are overwritten -- a keyframe
+    /// detected *after* the snapshot was taken keeps its live incremental
+    /// pose estimate rather than being touched by a solve that never saw
+    /// it. `optimizer_state` (lambda/lambda_vee) is always taken from the
+    /// background result so the next job's warm start continues from it.
+    fn merge_background_result(&mut self, result: BackgroundOptimizeResult) {
+        for (frame_id, pose) in result.poses {
+            self.mapper.frame_poses.insert(frame_id, pose);
+        }
+        self.mapper.optimizer_state = result.optimizer_state;
+        self.last_optimize_duration = Duration::from_secs_f64(result.breakdown.total_seconds);
+        self.total_optimize_passes += 1;
+    }
+
+    /// Rule 3: clone the current mapper state and run one periodic
+    /// `optimize_pass`-equivalent sequence on the clone, on a dedicated
+    /// thread, so ingestion (`detect`/`stereo`/`match_new_keyframe`, the
+    /// cheap per-packet work) is never blocked by it. The clone is a
+    /// snapshot: it does not observe any packet ingested after this call
+    /// returns, and the live mapper is not touched until
+    /// [`Self::poll_pending_optimizer`] or [`Self::finalize`] merges the
+    /// result back.
+    fn spawn_background_optimize(&mut self) {
+        let mut snapshot = self.mapper.clone();
+        let periodic_iterations = self.config.periodic_iterations;
+        let outlier_threshold = self.config.headless.outlier_threshold;
+        let min_num_obs = self.config.headless.min_num_obs;
+        self.last_optimize_started_at = Some(Instant::now());
+        self.pending_optimizer = Some(std::thread::spawn(move || {
+            let total_start = Instant::now();
+            let start = Instant::now();
+            let _ = snapshot.build_tracks();
+            let build_tracks_seconds = start.elapsed().as_secs_f64();
+
+            let start = Instant::now();
+            // Calibration is always present on an online mapper (checked in
+            // `OnlineNfrMapper::new`'s callers); a missing-calibration error
+            // here would mean the snapshot itself is malformed, which
+            // `ingest_packet` already could not have produced.
+            let _ = snapshot.setup_opt();
+            let setup_opt_seconds = start.elapsed().as_secs_f64();
+
+            let start = Instant::now();
+            let _ = snapshot.optimize(periodic_iterations);
+            let optimize1_seconds = start.elapsed().as_secs_f64();
+
+            let start = Instant::now();
+            let _ = snapshot.filter_outliers(outlier_threshold, min_num_obs);
+            let filter_seconds = start.elapsed().as_secs_f64();
+
+            let start = Instant::now();
+            let _ = snapshot.optimize(periodic_iterations);
+            let optimize2_seconds = start.elapsed().as_secs_f64();
+
+            BackgroundOptimizeResult {
+                poses: snapshot.frame_poses,
+                optimizer_state: snapshot.optimizer_state,
+                breakdown: BackgroundOptimizeBreakdown {
+                    build_tracks_seconds,
+                    setup_opt_seconds,
+                    optimize1_seconds,
+                    filter_seconds,
+                    optimize2_seconds,
+                    total_seconds: total_start.elapsed().as_secs_f64(),
+                },
+            }
+        }));
     }
 }
 

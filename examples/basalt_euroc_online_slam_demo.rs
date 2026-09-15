@@ -74,11 +74,23 @@ struct MapperAggregate {
     new_key_count: usize,
     accepted_temporal_pair_count: usize,
     accepted_loop_pair_count: usize,
-    optimize_pass_count: usize,
+    /// A background optimize job was *started* (rule 1's rate-limited
+    /// trigger; see `mapper_online`'s module doc).
+    optimize_trigger_count: usize,
+    /// A background optimize job *finished and was merged* -- may lag
+    /// `optimize_trigger_count` by up to one in-flight job at any time.
+    optimize_merge_count: usize,
     detect_seconds: f64,
     stereo_seconds: f64,
     match_seconds: f64,
-    optimize_seconds: f64,
+    /// Sum/max of merged background jobs' wall time and per-stage
+    /// breakdown, for the "where does the time go" report.
+    optimize_total_seconds: f64,
+    optimize_max_seconds: f64,
+    optimize_build_tracks_seconds: f64,
+    optimize_setup_opt_seconds: f64,
+    optimize_lm_seconds: f64,
+    optimize_filter_seconds: f64,
 }
 
 impl MapperAggregate {
@@ -90,9 +102,17 @@ impl MapperAggregate {
         self.detect_seconds += report.detect_seconds;
         self.stereo_seconds += report.stereo_seconds;
         self.match_seconds += report.match_seconds;
-        self.optimize_seconds += report.optimize_seconds;
         if report.optimize_triggered {
-            self.optimize_pass_count += 1;
+            self.optimize_trigger_count += 1;
+        }
+        if let Some(breakdown) = report.optimize_merge {
+            self.optimize_merge_count += 1;
+            self.optimize_total_seconds += breakdown.total_seconds;
+            self.optimize_max_seconds = self.optimize_max_seconds.max(breakdown.total_seconds);
+            self.optimize_build_tracks_seconds += breakdown.build_tracks_seconds;
+            self.optimize_setup_opt_seconds += breakdown.setup_opt_seconds;
+            self.optimize_lm_seconds += breakdown.optimize1_seconds + breakdown.optimize2_seconds;
+            self.optimize_filter_seconds += breakdown.filter_seconds;
         }
     }
 }
@@ -160,15 +180,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             // packet during the (typically short) tail so a queue drain or
             // an unexpectedly slow optimize pass is visible live rather than
             // only in the final aggregate JSON.
+            let merge_note = match report.optimize_merge {
+                Some(breakdown) => format!(
+                    " MERGED(total={:.2}s build_tracks={:.2}s setup_opt={:.2}s lm={:.2}s filter={:.2}s)",
+                    breakdown.total_seconds,
+                    breakdown.build_tracks_seconds,
+                    breakdown.setup_opt_seconds,
+                    breakdown.optimize1_seconds + breakdown.optimize2_seconds,
+                    breakdown.filter_seconds,
+                ),
+                None => String::new(),
+            };
             eprintln!(
                 "mapper packet={processed} new_keys={} detect={:.2}s stereo={:.2}s match={:.2}s \
-                 optimize_triggered={} optimize={:.2}s accepted_loops={}",
+                 optimize_triggered={} accepted_loops={}{merge_note}",
                 report.new_key_count,
                 report.detect_seconds,
                 report.stereo_seconds,
                 report.match_seconds,
                 report.optimize_triggered,
-                report.optimize_seconds,
                 report.accepted_loop_pair_count,
             );
         })
@@ -276,11 +306,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "new_key_count": aggregate.new_key_count,
             "accepted_temporal_pair_count": aggregate.accepted_temporal_pair_count,
             "accepted_loop_pair_count": aggregate.accepted_loop_pair_count,
-            "optimize_pass_count": aggregate.optimize_pass_count,
+            "optimize_trigger_count": aggregate.optimize_trigger_count,
+            "optimize_merge_count": aggregate.optimize_merge_count,
             "detect_seconds": aggregate.detect_seconds,
             "stereo_seconds": aggregate.stereo_seconds,
             "match_seconds": aggregate.match_seconds,
-            "optimize_seconds": aggregate.optimize_seconds,
+            "optimize_total_seconds": aggregate.optimize_total_seconds,
+            "optimize_max_seconds": aggregate.optimize_max_seconds,
+            "optimize_build_tracks_seconds": aggregate.optimize_build_tracks_seconds,
+            "optimize_setup_opt_seconds": aggregate.optimize_setup_opt_seconds,
+            "optimize_lm_seconds": aggregate.optimize_lm_seconds,
+            "optimize_filter_seconds": aggregate.optimize_filter_seconds,
         },
         "final_optimize": {
             "first_optimize_final_cost": final_report.first_optimize.final_cost,
@@ -302,7 +338,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}", serde_json::to_string_pretty(&summary)?);
     eprintln!(
         "pacing={} rtf={:.3} vio_wall={:.1}s total_wall={:.1}s max_queue_depth={} \
-         lag_max={:.3}s lag_mean={:.3}s loops={} optimizes={} peak_rss={:.0}MB out={}",
+         lag_max={:.3}s lag_mean={:.3}s loops={} triggers={} merges={} \
+         optimize_max={:.1}s optimize_total={:.1}s peak_rss={:.0}MB out={}",
         if args.realtime {
             "dataset_rate"
         } else {
@@ -315,7 +352,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         lag_max,
         lag_mean,
         aggregate.accepted_loop_pair_count,
-        aggregate.optimize_pass_count,
+        aggregate.optimize_trigger_count,
+        aggregate.optimize_merge_count,
+        aggregate.optimize_max_seconds,
+        aggregate.optimize_total_seconds,
         peak_rss_bytes as f64 / 1e6,
         args.out_dir.display(),
     );
