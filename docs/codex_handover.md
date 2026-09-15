@@ -5,10 +5,12 @@
 ### 2026-09-15 追記: 2.5k/5k 登録順LCSとframe単位pose差（plan §4.2 items 1-3）
 
 **新tool** `scripts/compare_colmap_mapper_registration.py`（+ `scripts/tests/
-test_compare_colmap_mapper_registration.py`、13 test全PASS）。COLMAP `mapper.log`と
+test_compare_colmap_mapper_registration.py`、15 test全PASS）。COLMAP `mapper.log`と
 移植版logから初期ペア・登録順・global BAイベントを取り、対応するmodel `images.txt`の
 カメラ中心をimage名で突き合わせ、片方を他方へ1回のSim(3)（`score_openloris_model.
-umeyama`をimport）で合わせた残差をframe/登録rank別に出す。GTは読まない。証跡:
+umeyama`をimport）で合わせた残差をframe/登録rank別に出す。加えてframe窓ごとの局所
+Sim(3) scale（`local_scale`、`--local-scale-window/--local-scale-step`）を出す。GTは
+読まない。証跡:
 `benchmarks/electro/m9-openloris-colmap-port-registration-diag-{2500,5000}-v1.json`。
 
 | tier | 初期ペア frame (COLMAP / 移植) | LCS full / post-init | 登録集合 | global BA (C/P) | model間Sim3残差 mean / p95 / max (m) |
@@ -23,14 +25,30 @@ umeyama`をimport）で合わせた残差をframe/登録rank別に出す。GTは
   id昇順tie-breakで代替）。2.5kでは登録順の一致率が低い（equal positions 477/1248、
   最長一致run 98）が最終登録集合・component構造・geometryは一致に近い。
 - 5kは逆: 登録順はむしろ近い（LCS 0.796）のにgeometry差が約10倍（rank 0-99ですでに
-  mean 0.31 m、rank 2400+で0.60 m）。→ **5kのquality差（ATE 0.436 vs COLMAP 0.123）は
-  登録順ではなくBA/scaleの差**。2.5kの順序差はgeometryに効いていない。
-- 次の本命は (i) 初期ペア選択の忠実化（attempt列をログに出して候補順を比較、または
-  `--init-pair` overrideで感度を見る）、(ii) 5kのBA/scale診断（登録stepごとのpose差を
-  local/global BAイベントに重ねる）。pose差は単一component・登録集合一致のときのみ
-  意味を持つ点に注意。再現は上記toolの `--colmap-log/--colmap-images/--ported-log/
-  --ported-images/--rig-manifest/--image-aliases`（aliasは
-  `corridor1-1-m8-colmap/tier-10000-rig-v3/image_aliases.tsv`）。
+  mean 0.31 m、rank 2400+で0.60 m）。
+- **局所Sim(3) scale（200 frame窓、移植→COLMAP）で原因を特定**: 2.5kは全域
+  0.982–1.025（±2.5%以内）だが、5kは frame ~1250 まで約1.007、frame ~1275から上昇し
+  frame 1350–1400 で1.038→1.073、frame ~1900 で最大1.163、その後~1.12。→ **5kの
+  quality差（ATE 0.436 vs COLMAP 0.123）は登録順ではなく、後半（frame 1250以降）の
+  局所scaleドリフト（相対+16〜19%）**。2.5kはドリフト領域の手前で終わるため合格する。
+- **初期ペア強制の試みは推定器逸脱でブロック**: exampleに`--init-image1/--init-image2`
+  （internal image id、強制のみ・autoへフォールバックせず緩和stageを進める）と
+  `PipelineOptions::forced_init_pair`、env `VISLOC_DEBUG_INIT` の拒否理由診断を追加。
+  COLMAPの5k成功ペア（image 893/925 = frames 446/462、`cam2_000893`/`cam2_000925`）を
+  強制すると、relax0は direct matches 59 < 100、relax1/2（50）は通常two-viewの
+  **median三角測量角 1.16° ≤ 16°/8°** で拒否（generalized推定に到達しない）。三角測量角
+  ゲートをenvで外すとgeneralized(GR6P)は通るが、初期三角測量（`min_angle=8–16°`）で点が
+  立たず`BadInitialPair`を繰り返す。→ `mapper_impl.rs` module doc記載の逸脱
+  （visloc `RelativePoseEstimator` vs COLMAP `EstimateTwoViewGeometry`）が初期ペア不一致の
+  直接原因。5k geometryへの寄与は未検証（強制run root
+  `colmap-port-c2-v1/tier-5000-forced-init-v1/` は0 model）。
+- 次の本命は **5k後半の局所scaleドリフト診断**。frame 1250–2200 の登録stepごとの局所
+  scale/poseをlocal/global BAイベント（`BA local image=`/`TIMING iterative_global`）に
+  重ね、どのBAで膨らむかを特定する。初期ペアの完全一致は別途
+  `EstimateTwoViewGeometry` の移植が必要（forced_init_pair toolは残す）。pose/scale差は
+  単一component・登録集合一致のときのみ意味を持つ点に注意。再現は上記toolの
+  `--colmap-log/--colmap-images/--ported-log/--ported-images/--rig-manifest/
+  --image-aliases`（aliasは`corridor1-1-m8-colmap/tier-10000-rig-v3/image_aliases.tsv`）。
 
 ### 2026-09-15 引き継ぎチェックポイント: COLMAP rig mapperベタ移植（branch `feat/colmap-rig-mapper-port`）
 

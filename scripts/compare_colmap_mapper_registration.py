@@ -314,6 +314,55 @@ def pose_difference(
     }
 
 
+def local_scale_by_window(
+    ported_centres: dict[str, np.ndarray],
+    colmap_centres: dict[str, np.ndarray],
+    flat_to_colmap: dict[str, str],
+    flat_to_frame: dict[str, int],
+    window: int,
+    step: int,
+    min_frames: int = 20,
+) -> list[dict[str, Any]]:
+    """Local scale of the ported model relative to COLMAP over frame windows.
+
+    For every sliding window of ``window`` frames (stride ``step``), fit one
+    Sim(3) from the ported frames' camera centres onto COLMAP's and report the
+    scale. A locally constant trace near the global scale means the two models
+    agree up to gauge; a trace that drifts with frame index isolates a
+    differential scale accumulation to that frame range.
+    """
+    per_frame: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    for flat_name, centre in ported_centres.items():
+        colmap_name = flat_to_colmap.get(flat_name)
+        if colmap_name is None or colmap_name not in colmap_centres:
+            continue
+        frame = flat_to_frame.get(flat_name)
+        if frame is None:
+            continue
+        per_frame[frame] = (centre, colmap_centres[colmap_name])
+    frames = sorted(per_frame)
+    results: list[dict[str, Any]] = []
+    for start in range(0, max(1, len(frames) - window + 1), step):
+        selected = frames[start:start + window]
+        if len(selected) < min_frames:
+            continue
+        source = np.asarray([per_frame[frame][0] for frame in selected])
+        destination = np.asarray([per_frame[frame][1] for frame in selected])
+        try:
+            scale, _, _ = om.umeyama(source, destination)
+        except om.ScoreError:
+            continue
+        results.append(
+            {
+                "frame_start": selected[0],
+                "frame_end": selected[-1],
+                "frames": len(selected),
+                "scale_ported_to_colmap": scale,
+            }
+        )
+    return results
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--colmap-log", type=Path, required=True)
@@ -324,6 +373,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--image-aliases", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--worst", type=int, default=20)
+    parser.add_argument("--local-scale-window", type=int, default=200)
+    parser.add_argument("--local-scale-step", type=int, default=50)
     args = parser.parse_args(argv)
 
     flat_to_frame, _ = parse_rig_manifest(args.rig_manifest)
@@ -421,6 +472,18 @@ def main(argv: list[str] | None = None) -> int:
             colmap_rank,
             worst=args.worst,
         ),
+        "local_scale": {
+            "window_frames": args.local_scale_window,
+            "step_frames": args.local_scale_step,
+            "windows": local_scale_by_window(
+                ported_centres,
+                colmap_centres,
+                flat_to_colmap,
+                flat_to_frame,
+                args.local_scale_window,
+                args.local_scale_step,
+            ),
+        },
     }
     payload["rank_displacement"]["max_abs"] = payload["rank_displacement"]["max_abs"][0]
 

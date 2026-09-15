@@ -8,6 +8,7 @@
 //!   --pairs-export <VISLOC-COLMAP-1 .bin> --out-colmap <dir> \
 //!   [--random-seed 0] [--num-threads N] [--pose-solver gp3p|dlt6pt]
 //!   [--local-ba-point-policy colmap|window|nopull]
+//!   [--init-image1 ID --init-image2 ID]
 //! ```
 //!
 //! Loads the same three inputs `DatabaseCache::from_generalized_rig_export`
@@ -40,6 +41,7 @@ struct Args {
     random_seed: u64,
     pose_solver: String,
     local_ba_point_policy: String,
+    forced_init_pair: Option<(u64, u64)>,
 }
 
 fn parse_args() -> Args {
@@ -61,6 +63,19 @@ fn parse_args() -> Args {
         )
     };
 
+    let forced_init_pair = match (flags.get("init-image1"), flags.get("init-image2")) {
+        (None, None) => None,
+        (Some(first), Some(second)) => Some((
+            first
+                .parse::<u64>()
+                .expect("--init-image1 must be an integer"),
+            second
+                .parse::<u64>()
+                .expect("--init-image2 must be an integer"),
+        )),
+        _ => panic!("--init-image1 and --init-image2 must be given together"),
+    };
+
     Args {
         manifest: get("manifest"),
         features_dir: get("features-dir"),
@@ -78,6 +93,7 @@ fn parse_args() -> Args {
             .get("local-ba-point-policy")
             .cloned()
             .unwrap_or_else(|| "colmap".to_string()),
+        forced_init_pair,
     }
 }
 
@@ -127,6 +143,9 @@ fn main() {
     };
     options.local_ba.local_ba_point_policy = local_ba_point_policy;
     options.global_ba.local_ba_point_policy = local_ba_point_policy;
+    // Diagnostic (`plan` 4.2 item 1): force the initial pair to a chosen
+    // pair of internal image ids; `None` keeps COLMAP's auto search.
+    options.forced_init_pair = args.forced_init_pair;
 
     fs::create_dir_all(&args.out_colmap).expect("failed to create --out-colmap directory");
 

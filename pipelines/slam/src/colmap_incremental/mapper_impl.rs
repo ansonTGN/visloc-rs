@@ -66,6 +66,15 @@ use super::observation_manager::calculate_triangulation_angle;
 use super::reconstruction::{Image, Reconstruction};
 use super::types::{Frame, ImageT, Rig, SensorT};
 
+/// Debug-only diagnosis of why an initial pair was rejected, enabled with
+/// `VISLOC_DEBUG_INIT=1`. Used to attribute a `forced_init_pair` rejection to
+/// the direct two-view match gate vs the generalized GR6P gate.
+fn debug_init(message: &str) {
+    if std::env::var_os("VISLOC_DEBUG_INIT").is_some() {
+        eprintln!("{message}");
+    }
+}
+
 /// The control-relevant subset of `IncrementalMapper::Options` needed by
 /// this module's free functions (the rest lives on `mapper::Options`; kept
 /// separate to avoid a circular `use`).
@@ -197,6 +206,12 @@ fn estimate_initial_generalized_two_view_geometry(
     }
 
     if gr_corrs.len() < 6 {
+        debug_init(&format!(
+            "generalized init rejected: gr_corrs={} < 6 (images {}/{})",
+            gr_corrs.len(),
+            image1.image_id,
+            image2.image_id
+        ));
         return None;
     }
 
@@ -211,10 +226,27 @@ fn estimate_initial_generalized_two_view_geometry(
         min_inliers: 6,
         ..GeneralizedRelativePoseRansacConfig::default()
     };
-    let report = estimate_gr6p_ransac_with_config(&gr_corrs, &cfg)
+    let Some(report) = estimate_gr6p_ransac_with_config(&gr_corrs, &cfg)
         .ok()
-        .flatten()?;
+        .flatten()
+    else {
+        debug_init(&format!(
+            "generalized init rejected: GR6P failed (images {}/{}, gr_corrs={})",
+            image1.image_id,
+            image2.image_id,
+            gr_corrs.len()
+        ));
+        return None;
+    };
     if report.inliers.len() < options.init_min_num_inliers {
+        debug_init(&format!(
+            "generalized init rejected: GR6P inliers={} < init_min_num_inliers={} (images {}/{}, gr_corrs={})",
+            report.inliers.len(),
+            options.init_min_num_inliers,
+            image1.image_id,
+            image2.image_id,
+            gr_corrs.len()
+        ));
         return None;
     }
 
@@ -245,6 +277,13 @@ pub fn estimate_initial_two_view_geometry(
 
     let matches = matches_between_images(graph, recon, image_id1, image_id2);
     if matches.len() < options.init_min_num_inliers {
+        debug_init(&format!(
+            "init rejected: direct_matches={} < init_min_num_inliers={} (images {}/{})",
+            matches.len(),
+            options.init_min_num_inliers,
+            image_id1,
+            image_id2
+        ));
         return None;
     }
     let correspondences: Vec<TwoViewCorrespondence> = matches
@@ -260,11 +299,27 @@ pub fn estimate_initial_two_view_geometry(
         .unwrap_or(500.0);
     estimator.ransac.config.sampson_threshold = options.init_max_error / avg_focal;
 
-    let recovered = estimator.estimate_with_cameras(&correspondences, &camera1, &camera2)?;
+    let Some(recovered) = estimator.estimate_with_cameras(&correspondences, &camera1, &camera2)
+    else {
+        debug_init(&format!(
+            "init rejected: ordinary two-view estimate failed (images {image_id1}/{image_id2})"
+        ));
+        return None;
+    };
     if recovered.inliers.len() < options.init_min_num_inliers {
+        debug_init(&format!(
+            "init rejected: ordinary inliers={} < init_min_num_inliers={} (images {image_id1}/{image_id2})",
+            recovered.inliers.len(),
+            options.init_min_num_inliers
+        ));
         return None;
     }
     if recovered.previous_to_current.translation.z.abs() >= options.init_max_forward_motion {
+        debug_init(&format!(
+            "init rejected: forward motion |tz|={} >= init_max_forward_motion={} (images {image_id1}/{image_id2})",
+            recovered.previous_to_current.translation.z.abs(),
+            options.init_max_forward_motion
+        ));
         return None;
     }
 
@@ -291,11 +346,19 @@ pub fn estimate_initial_two_view_geometry(
         angles.push(calculate_triangulation_angle(cam1_center, cam2_center, xyz));
     }
     if angles.is_empty() {
+        debug_init(&format!(
+            "init rejected: no triangulable inliers for angle (images {image_id1}/{image_id2})"
+        ));
         return None;
     }
     angles.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median_angle = angles[angles.len() / 2];
     if median_angle <= options.init_min_tri_angle_deg.to_radians() {
+        debug_init(&format!(
+            "init rejected: median tri angle {:.2}deg <= {:.2}deg (images {image_id1}/{image_id2})",
+            median_angle.to_degrees(),
+            options.init_min_tri_angle_deg
+        ));
         return None;
     }
 

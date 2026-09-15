@@ -149,6 +149,40 @@ class PoseDifferenceTest(unittest.TestCase):
             )
 
 
+class LocalScaleTest(unittest.TestCase):
+    def test_constant_scale_is_recovered_per_window(self):
+        frames = list(range(60))
+        # Non-degenerate 3D path.
+        points = {
+            f: np.array([f * 0.1, (f % 7) * 0.2, (f % 5) * 0.3]) for f in frames
+        }
+        ported = {f"cam1_{f:06d}.png": points[f] for f in frames}
+        colmap = {
+            f"rig/camera1/{f}.png": 2.0 * points[f] for f in frames
+        }
+        flat_to_colmap = {
+            f"cam1_{f:06d}.png": f"rig/camera1/{f}.png" for f in frames
+        }
+        flat_to_frame = {f"cam1_{f:06d}.png": f for f in frames}
+        windows = diag.local_scale_by_window(
+            ported, colmap, flat_to_colmap, flat_to_frame, window=30, step=10
+        )
+        self.assertGreater(len(windows), 1)
+        for entry in windows:
+            self.assertAlmostEqual(entry["scale_ported_to_colmap"], 2.0, places=6)
+
+    def test_empty_when_no_common_frames(self):
+        windows = diag.local_scale_by_window(
+            {"a.png": np.zeros(3)},
+            {"b.png": np.zeros(3)},
+            {"a.png": "missing.png"},
+            {"a.png": 0},
+            window=10,
+            step=5,
+        )
+        self.assertEqual(windows, [])
+
+
 class MainEndToEndTest(unittest.TestCase):
     def _fixtures(self, tmp: Path):
         manifest = _write(

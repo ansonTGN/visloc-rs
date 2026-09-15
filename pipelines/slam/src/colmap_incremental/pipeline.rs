@@ -68,6 +68,19 @@ pub struct PipelineOptions {
     pub triangulation: TriangulatorOptions,
     pub local_ba: BundleAdjustmentOptions,
     pub global_ba: BundleAdjustmentOptions,
+    /// Diagnostic override: if set, `initialize_reconstruction` uses this
+    /// exact `(image_id1, image_id2)` pair and **disables** the auto search
+    /// for every initialization stage. A rejected pair returns
+    /// `Status::NoInitialPair` for the current stage instead of falling back,
+    /// so `run`'s existing relaxation loop (`Run`, `.cc:418-445`) retries the
+    /// same pair with the relaxed `init_min_num_inliers`/`init_min_tri_angle`
+    /// — e.g. COLMAP's own successful 5k pair has only 59 direct two-view
+    /// inliers and is accepted only after the first relaxation halves
+    /// `init_min_num_inliers` to 50. `None` (the default) leaves COLMAP's
+    /// auto search untouched; this exists to A/B whether a downstream
+    /// geometry difference is caused by the initial-pair choice (see
+    /// `docs/colmap_rig_mapper_port_plan.md` §4.2 item 1).
+    pub forced_init_pair: Option<(ImageT, ImageT)>,
 }
 
 impl Default for PipelineOptions {
@@ -90,6 +103,7 @@ impl Default for PipelineOptions {
             triangulation: TriangulatorOptions::default(),
             local_ba: BundleAdjustmentOptions::local(),
             global_ba: BundleAdjustmentOptions::global(),
+            forced_init_pair: None,
         }
     }
 }
@@ -126,9 +140,19 @@ fn initialize_reconstruction(
     db: &DatabaseCache,
     recon: &mut Reconstruction,
 ) -> Status {
-    let Some((image_id1, image_id2, cam2_from_cam1)) =
-        mapper.find_initial_image_pair(mapper_options, recon, db.correspondence_graph())
-    else {
+    let found = match options.forced_init_pair {
+        Some((image_id1, image_id2)) => mapper
+            .estimate_initial_two_view_geometry(
+                mapper_options,
+                recon,
+                db.correspondence_graph(),
+                image_id1,
+                image_id2,
+            )
+            .map(|cam2_from_cam1| (image_id1, image_id2, cam2_from_cam1)),
+        None => mapper.find_initial_image_pair(mapper_options, recon, db.correspondence_graph()),
+    };
+    let Some((image_id1, image_id2, cam2_from_cam1)) = found else {
         return Status::NoInitialPair;
     };
 
@@ -357,6 +381,12 @@ pub fn run(options: &PipelineOptions, db: &DatabaseCache) -> RunResult {
     let variants = [relax0, relax1, relax2];
 
     'relax: for mapper_options in &variants {
+        if std::env::var_os("VISLOC_DEBUG_INIT").is_some() {
+            eprintln!(
+                "run stage: init_min_num_inliers={} init_min_tri_angle_deg={}",
+                mapper_options.init_min_num_inliers, mapper_options.init_min_tri_angle_deg
+            );
+        }
         if mapper.num_total_reg_images() >= num_images {
             break 'relax;
         }
@@ -485,6 +515,78 @@ mod tests {
         assert!(
             max_err < 0.02,
             "max Umeyama-aligned frame-center error {max_err} too large"
+        );
+    }
+
+    /// `forced_init_pair` (plan §4.2 item 1 diagnostic) must seed the
+    /// reconstruction with exactly the requested image pair, and fall back to
+    /// the auto search only when the forced pair is rejected.
+    #[test]
+    fn forced_init_pair_overrides_the_auto_search() {
+        let scene = build_synthetic_rig_scene(12, 4);
+        let mut options = PipelineOptions::default();
+        options.mapper.init_min_num_inliers = 20;
+        options.mapper.init_min_tri_angle_deg = 1.0;
+
+        // Auto search first, to learn which pair it would pick.
+        let auto = run(&options, &scene.db);
+        let auto_init = auto
+            .log
+            .iter()
+            .find(|line| line.starts_with("INIT_PAIR"))
+            .expect("auto run logs an INIT_PAIR")
+            .clone();
+
+        // Force a cross-frame cam1/cam1 pair (frames 3 and 6, within the
+        // scene's 4-frame correspondence window) that the auto search is free
+        // to pick or not.
+        let (forced1, _) = scene.images_per_frame[3];
+        let (forced2, _) = scene.images_per_frame[6];
+        options.forced_init_pair = Some((forced1, forced2));
+        let result = run(&options, &scene.db);
+        assert!(!result.models.is_empty(), "forced run kept no model");
+        let forced_init = result
+            .log
+            .iter()
+            .find(|line| line.starts_with("INIT_PAIR"))
+            .expect("forced run logs an INIT_PAIR");
+        assert!(
+            forced_init.contains(&format!("image1={forced1} image2={forced2}")),
+            "forced pair {forced1}/{forced2} not honored; got {forced_init:?} (auto was {auto_init:?})"
+        );
+    }
+
+    /// A forced pair that the initialization gates reject in every relaxation
+    /// stage must produce no model rather than silently falling back to the
+    /// auto search (`forced_init_pair` is "force only", see its doc).
+    #[test]
+    fn forced_init_pair_does_not_fall_back_to_auto() {
+        let scene = build_synthetic_rig_scene(12, 4);
+        let mut options = PipelineOptions::default();
+        options.mapper.init_min_num_inliers = 20;
+        options.mapper.init_min_tri_angle_deg = 1.0;
+        let last = scene.images_per_frame.len() - 1;
+        // Frames 0 and 11 are farther apart than the scene's 4-frame
+        // correspondence window, so this pair has no matches at all.
+        options.forced_init_pair =
+            Some((scene.images_per_frame[0].0, scene.images_per_frame[last].0));
+
+        let mut sanity_options = options.clone();
+        sanity_options.forced_init_pair = None;
+        let auto = run(&sanity_options, &scene.db);
+        assert!(
+            !auto.models.is_empty(),
+            "sanity: the auto search finds a model"
+        );
+
+        let result = run(&options, &scene.db);
+        assert!(
+            result.models.is_empty(),
+            "invalid forced pair must not fall back to the auto search"
+        );
+        assert!(
+            !result.log.iter().any(|line| line.starts_with("INIT_PAIR")),
+            "no pair should have been registered"
         );
     }
 }
