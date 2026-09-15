@@ -41,6 +41,7 @@ struct Args {
     native_companion_binding: Option<PathBuf>,
     pipeline: bool,
     pipeline_capacity: usize,
+    decode_threads: usize,
     threads: Option<usize>,
 }
 
@@ -229,6 +230,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             retain_marg_data,
             retain_trace,
             args.pipeline_capacity,
+            args.decode_threads,
             handle_output,
         )?;
         timing.merge_from(&producer_timing);
@@ -760,6 +762,7 @@ impl Args {
         let mut native_companion_binding = None;
         let mut pipeline = false;
         let mut pipeline_capacity = 4usize;
+        let mut decode_threads = 3usize;
         let mut threads = None;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
@@ -808,6 +811,18 @@ impl Args {
                     }
                     pipeline_capacity = value;
                 }
+                "--decode-threads" => {
+                    let value = arguments
+                        .next()
+                        .ok_or_else(|| format!("{option} requires a value"))?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --decode-threads: {error}"))?;
+                    if value == 0 {
+                        return Err("--decode-threads must be positive".into());
+                    }
+                    decode_threads = value;
+                }
                 "--threads" => {
                     let value = arguments
                         .next()
@@ -838,12 +853,13 @@ impl Args {
             native_companion_binding,
             pipeline,
             pipeline_capacity,
+            decode_threads,
             threads,
         })
     }
 
     fn usage() -> String {
-        "usage: basalt_euroc_vio_demo --euroc-dir DIR --calibration FILE [--config FILE] [--out-dir DIR] [--max-frames N] [--no-trace] [--no-marg-data] [--native-companion-binding FILE] [--pipeline] [--pipeline-capacity N] [--threads N]".into()
+        "usage: basalt_euroc_vio_demo --euroc-dir DIR --calibration FILE [--config FILE] [--out-dir DIR] [--max-frames N] [--no-trace] [--no-marg-data] [--native-companion-binding FILE] [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N]".into()
     }
 }
 
@@ -973,10 +989,27 @@ mod tests {
     }
 
     #[test]
+    fn decode_threads_defaults_to_three_and_is_parsed() {
+        let args = parse(&["--euroc-dir", "dataset", "--calibration", "calib.json"]);
+        assert_eq!(args.decode_threads, 3);
+
+        let args = parse(&[
+            "--euroc-dir",
+            "dataset",
+            "--calibration",
+            "calib.json",
+            "--decode-threads",
+            "2",
+        ]);
+        assert_eq!(args.decode_threads, 2);
+    }
+
+    #[test]
     fn usage_documents_pipeline_flags() {
         let usage = Args::usage();
         assert!(usage.contains("--pipeline"));
         assert!(usage.contains("--pipeline-capacity"));
+        assert!(usage.contains("--decode-threads"));
         assert!(usage.contains("--threads"));
     }
 

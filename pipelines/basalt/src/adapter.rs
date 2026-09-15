@@ -249,10 +249,20 @@ impl BasaltVioEstimatorAdapter {
     /// receives a thread-local [`TimingBreakdown`] to record its own timed
     /// regions (e.g. `DemoOutput`) into.
     ///
-    /// Returns the producer-side (dataset + frontend) and consumer-side
+    /// Returns the producer-side (decode-ahead + frontend) and consumer-side
     /// (estimator + `on_output`) cumulative timing breakdowns; the caller
     /// merges these into its own collector the same way
     /// [`Self::timing_breakdown_with_estimator`] merges the serial path's.
+    ///
+    /// `decode_threads` sizes a small pool that decodes PNG frames ahead of
+    /// the frontend thread (see [`run_pipeline_decode_worker`]) so dataset
+    /// acquisition -- disk I/O plus PNG/DEFLATE decode -- comes off the
+    /// frontend thread's own critical path and multiple reads can be in
+    /// flight with the OS/disk concurrently, making wall time more robust
+    /// to disk contention from other processes. It changes no numerics:
+    /// the frontend thread still consumes decoded frames strictly in index
+    /// order (buffering any that arrive early), so frame order and every
+    /// per-frame computation are unchanged from a single decode thread.
     pub fn process_euroc_stream_pipelined<F>(
         &mut self,
         dataset: &EurocSensorDataset,
@@ -260,21 +270,54 @@ impl BasaltVioEstimatorAdapter {
         retain_marg_data: bool,
         retain_trace: bool,
         channel_capacity: usize,
+        decode_threads: usize,
         mut on_output: F,
     ) -> Result<(TimingBreakdown, TimingBreakdown), BasaltAdapterError>
     where
         F: FnMut(BasaltAdapterOutput, &mut TimingBreakdown) -> Result<(), BasaltAdapterError>,
     {
         let capacity = channel_capacity.max(1);
+        let decode_worker_count = decode_threads.max(1);
         let (sender, receiver) =
             mpsc::sync_channel::<Result<PipelineFrontendPacket, BasaltAdapterError>>(capacity);
+        let (decode_sender, decode_receiver) = mpsc::sync_channel::<(
+            usize,
+            Result<EurocSensorFrame, BasaltAdapterError>,
+        )>(capacity.max(decode_worker_count));
+        let next_decode_index = std::sync::atomic::AtomicUsize::new(0);
         let frontend = &mut self.frontend;
         let estimator = &mut self.estimator;
 
-        let (producer_timing, producer_result, mut consumer_timing, consumer_error) =
+        let (decode_timings, producer_timing, producer_result, mut consumer_timing, consumer_error) =
             std::thread::scope(|scope| {
+                let next_decode_index = &next_decode_index;
+                let decode_handles: Vec<_> = (0..decode_worker_count)
+                    .map(|_| {
+                        let decode_sender = decode_sender.clone();
+                        scope.spawn(move || {
+                            run_pipeline_decode_worker(
+                                dataset,
+                                frame_count,
+                                next_decode_index,
+                                &decode_sender,
+                            )
+                        })
+                    })
+                    .collect();
+                // Only the clones each worker holds should keep the channel
+                // open; dropping this original lets the channel close (and
+                // the frontend's reorder loop below notice EOF) once every
+                // worker has finished.
+                drop(decode_sender);
+
                 let producer_handle = scope.spawn(move || {
-                    run_pipeline_frontend(frontend, dataset, frame_count, retain_marg_data, &sender)
+                    run_pipeline_frontend(
+                        frontend,
+                        frame_count,
+                        &decode_receiver,
+                        retain_marg_data,
+                        &sender,
+                    )
                 });
 
                 let (consumer_timing, consumer_error) = run_pipeline_estimator(
@@ -295,7 +338,21 @@ impl BasaltVioEstimatorAdapter {
                 let (producer_timing, producer_result) = producer_handle
                     .join()
                     .expect("basalt pipeline frontend thread panicked");
+                // The frontend thread has now dropped its `decode_receiver`
+                // (its stack frame returned), so any decode worker still
+                // blocked in `send` observes a disconnected channel and
+                // returns immediately rather than blocking forever; join
+                // them unconditionally.
+                let decode_timings: Vec<TimingBreakdown> = decode_handles
+                    .into_iter()
+                    .map(|handle| {
+                        handle
+                            .join()
+                            .expect("basalt pipeline decode thread panicked")
+                    })
+                    .collect();
                 (
+                    decode_timings,
                     producer_timing,
                     producer_result,
                     consumer_timing,
@@ -306,6 +363,10 @@ impl BasaltVioEstimatorAdapter {
         producer_result?;
         if let Some(error) = consumer_error {
             return Err(error);
+        }
+        let mut producer_timing = producer_timing;
+        for decode_timing in &decode_timings {
+            producer_timing.merge_from(decode_timing);
         }
         consumer_timing.merge_from(self.estimator.timing_breakdown());
         Ok((producer_timing, consumer_timing))
@@ -322,21 +383,27 @@ struct PipelineFrontendPacket {
     imu_count: usize,
 }
 
-/// Producer-thread body: dataset acquisition plus frontend tracking, in
-/// frame order, sent downstream as they complete. Returns its own timing
-/// collector plus an error if dataset acquisition itself failed outside the
-/// per-frame `Result` already carried over the channel (currently always
-/// `Ok(())`; the `Result` return is kept so a future fatal-before-loop error
-/// has somewhere to go without changing this function's signature).
-fn run_pipeline_frontend(
-    frontend: &mut DirectKltStream,
+/// Decode-ahead worker body: repeatedly claims the next undecoded frame
+/// index from the shared counter (so `decode_threads` workers partition the
+/// sequence without any two decoding the same frame) and sends `(index,
+/// result)` to the unordered decode channel. Frames therefore complete out
+/// of order when their decode times differ; [`run_pipeline_frontend`]'s
+/// reorder buffer is what restores strict order before anything touches
+/// `DirectKltStream`. Stops as soon as a `send` fails, which happens once
+/// the frontend thread has taken everything it needs and dropped its
+/// receiver (either normal completion or an earlier fatal error).
+fn run_pipeline_decode_worker(
     dataset: &EurocSensorDataset,
     frame_count: usize,
-    retain_marg_data: bool,
-    sender: &mpsc::SyncSender<Result<PipelineFrontendPacket, BasaltAdapterError>>,
-) -> (TimingBreakdown, Result<(), BasaltAdapterError>) {
+    next_index: &std::sync::atomic::AtomicUsize,
+    sender: &mpsc::SyncSender<(usize, Result<EurocSensorFrame, BasaltAdapterError>)>,
+) -> TimingBreakdown {
     let mut timing = TimingBreakdown::from_env();
-    for index in 0..frame_count {
+    loop {
+        let index = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if index >= frame_count {
+            break;
+        }
         let frame_result = if timing.enabled() {
             timing
                 .measure_with(TimingBucket::DatasetFrameAcquisition, |timing| {
@@ -345,6 +412,62 @@ fn run_pipeline_frontend(
                 .map_err(BasaltAdapterError::from)
         } else {
             dataset.frame(index).map_err(BasaltAdapterError::from)
+        };
+        if sender.send((index, frame_result)).is_err() {
+            break;
+        }
+    }
+    timing
+}
+
+/// Producer-thread body: reorders the decode-ahead pool's out-of-order
+/// output back into strict frame order, then runs frontend tracking on each
+/// frame in that order, sent downstream as they complete. Returns its own
+/// timing collector plus an error if the frontend loop itself failed
+/// outside the per-frame `Result` already carried over the channel
+/// (currently always `Ok(())`; the `Result` return is kept so a future
+/// fatal-before-loop error has somewhere to go without changing this
+/// function's signature).
+fn run_pipeline_frontend(
+    frontend: &mut DirectKltStream,
+    frame_count: usize,
+    decode_receiver: &mpsc::Receiver<(usize, Result<EurocSensorFrame, BasaltAdapterError>)>,
+    retain_marg_data: bool,
+    sender: &mpsc::SyncSender<Result<PipelineFrontendPacket, BasaltAdapterError>>,
+) -> (TimingBreakdown, Result<(), BasaltAdapterError>) {
+    let mut timing = TimingBreakdown::from_env();
+    let mut pending: std::collections::HashMap<
+        usize,
+        Result<EurocSensorFrame, BasaltAdapterError>,
+    > = std::collections::HashMap::new();
+    for index in 0..frame_count {
+        // The decode-ahead pool delivers frames out of order; wait here
+        // only when `index` (the next frame the frontend must process, in
+        // order) has not arrived yet. Every earlier-arriving later frame is
+        // buffered in `pending` and drained via the `remove` below once its
+        // own turn comes -- this is the only place frame order is decided,
+        // so it is exactly the same order a single decode thread would have
+        // delivered frames in.
+        let frame_result = match pending.remove(&index) {
+            Some(result) => result,
+            None => loop {
+                match decode_receiver.recv() {
+                    Ok((arrived_index, result)) if arrived_index == index => break result,
+                    Ok((arrived_index, result)) => {
+                        pending.insert(arrived_index, result);
+                    }
+                    Err(_) => {
+                        // Every decode worker finished (or errored and
+                        // stopped) without ever delivering `index`. Report
+                        // this as a frontend-side failure rather than
+                        // silently truncating the replay.
+                        let _ = sender.send(Err(BasaltAdapterError::Output(format!(
+                            "decode-ahead channel closed before frame {index} was delivered"
+                        ))));
+                        return (timing, Ok(()));
+                    }
+                }
+            },
         };
         let frame = match frame_result {
             Ok(frame) => frame,
