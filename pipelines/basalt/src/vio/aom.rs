@@ -12,6 +12,7 @@ use nalgebra::{
     DMatrix, DVector, Matrix2x3, Matrix3, Matrix3x2, Matrix6, Point2, Point3, Quaternion, SMatrix,
     UnitQuaternion, Vector2, Vector3, Vector6,
 };
+use rayon::prelude::*;
 use serde_json::json;
 use std::{
     cell::Cell,
@@ -4171,6 +4172,108 @@ pub fn model_cost_decrease(
     decrease.is_finite().then_some(decrease)
 }
 
+/// One factor's independent model-cost-decrease contribution from the
+/// parallel pre-pass in [`model_cost_decrease_f32`], mirroring the four
+/// outcomes its per-factor loop body could reach for an *unpaired* factor
+/// (the Imu/Bias pairing decision is precomputed separately, since it needs
+/// the adjacent factor too). `DimensionMismatch` and `Failure` both make the
+/// overall function return `None`; kept distinct only for readability.
+enum FactorEvaluation {
+    DimensionMismatch,
+    DeferredPrior(f32),
+    Direct(f32),
+    Failure,
+}
+
+/// Pure per-factor evaluation extracted from `model_cost_decrease_f32`'s
+/// loop body, unchanged in arithmetic: every step below (the dimension
+/// check, `prior_model_inputs_f32`, the zero-landmark scalar contribution,
+/// and the full QR path) is copied verbatim, it just returns its outcome
+/// instead of mutating a shared `decrease`/`deferred_prior`.
+fn evaluate_model_decrease_factor(
+    factor: &WhitenedFactorRowStack,
+    step: &DVector<f32>,
+    state_step: &DVector<f64>,
+    threshold: f32,
+) -> FactorEvaluation {
+    if factor.state_jacobian.ncols() != step.len() {
+        return FactorEvaluation::DimensionMismatch;
+    }
+    if let Some((j, rhs, compact_step)) = prior_model_inputs_f32(factor, state_step) {
+        return FactorEvaluation::DeferredPrior(prior_model_f32(&j, &rhs, &compact_step));
+    }
+    let state = as_f32_matrix(&factor.state_jacobian);
+    let residual = as_f32_vector(&factor.residual);
+    let landmark_columns = factor.landmark_jacobian.ncols();
+    if landmark_columns == 0 {
+        let increment = state * step;
+        let contribution = -increment.dot(&(0.5_f32 * &increment + &residual));
+        return if factor.kind == FactorKind::Prior {
+            FactorEvaluation::DeferredPrior(contribution)
+        } else {
+            FactorEvaluation::Direct(contribution)
+        };
+    }
+    let landmark = as_f32_matrix(&factor.landmark_jacobian);
+    let Some(qr) = LandmarkHouseholderF32::factor(&state, &landmark, &residual) else {
+        return FactorEvaluation::Failure;
+    };
+    let rank = (0..landmark_columns)
+        .filter(|&index| qr.pivots[index].abs() > threshold)
+        .count();
+    if rank < landmark_columns {
+        let increment = state * step;
+        return FactorEvaluation::Direct(-increment.dot(&(0.5_f32 * &increment + &residual)));
+    }
+    let transformed_state = qr.transformed_state();
+    let transformed_residual =
+        DMatrix::from_column_slice(qr.rows, 1, qr.transformed_residual().as_slice());
+    let r = qr.upper_r();
+    let mut qj_inc = eigen_row_major_gemv_f32(&transformed_state, step);
+    let mut rhs = transformed_residual
+        .column(0)
+        .rows(0, landmark_columns)
+        .into_owned();
+    for row in 0..landmark_columns {
+        rhs[row] += qj_inc[row];
+    }
+    let mut landmark_inc = DVector::<f32>::zeros(landmark_columns);
+    if landmark_columns == 3 {
+        let d2 = r[(2, 2)];
+        let d1 = r[(1, 1)];
+        let d0 = r[(0, 0)];
+        if d2.abs() <= threshold || d1.abs() <= threshold || d0.abs() <= threshold {
+            return FactorEvaluation::Failure;
+        }
+        let x2 = rhs[2] / d2;
+        let x1 = (-r[(1, 2)]).mul_add(x2, rhs[1]) / d1;
+        let row0_dot = r[(0, 2)].mul_add(x2, r[(0, 1)] * x1);
+        let x0 = (rhs[0] - row0_dot) / d0;
+        landmark_inc[0] = -x0;
+        landmark_inc[1] = -x1;
+        landmark_inc[2] = -x2;
+    } else {
+        rhs = -rhs;
+        for row in (0..landmark_columns).rev() {
+            let mut value = rhs[row];
+            for column in (row + 1)..landmark_columns {
+                value -= r[(row, column)] * landmark_inc[column];
+            }
+            let diagonal = r[(row, row)];
+            if diagonal.abs() <= threshold {
+                return FactorEvaluation::Failure;
+            }
+            landmark_inc[row] = value / diagonal;
+        }
+    }
+    let q1_inc = r * landmark_inc;
+    for row in 0..landmark_columns {
+        qj_inc[row] += q1_inc[row];
+    }
+    let qres = transformed_residual.column(0).into_owned();
+    FactorEvaluation::Direct(-eigen_visual_model_dot_f32(&qj_inc, &qres))
+}
+
 fn model_cost_decrease_f32(
     factors: &[WhitenedFactorRowStack],
     state_step: &DVector<f64>,
@@ -4178,100 +4281,63 @@ fn model_cost_decrease_f32(
 ) -> Option<f64> {
     let step = as_f32_vector(state_step);
     let threshold = tolerance as f32;
+
+    // Every factor's Imu/Bias pairing check (needs only that factor and its
+    // immediate successor) and its ordinary evaluation (needs only that one
+    // factor) are pure and independent of every other factor's result and
+    // of the running `decrease`/`deferred_prior`/`paired_bias_index` state
+    // -- so both run in parallel below. `imu_bias_pair_model_dot_f32`
+    // re-checks the same state-column/`step.len()` match internally, so a
+    // factor whose own dimensions are wrong can never produce `Some` here
+    // (see the comment in the serial fold). The fold afterwards makes
+    // exactly the sequential decisions the original loop made -- pairing
+    // precedence, immediate `None` on dimension/QR failure, deferred-prior
+    // push order, `decrease +=` order -- just by reading each
+    // already-computed pure result instead of recomputing it, so the f32
+    // rounding tree is unchanged.
+    let imu_pair_dots: Vec<Option<f32>> = factors
+        .par_iter()
+        .enumerate()
+        .map(|(index, factor)| {
+            if factor.kind != FactorKind::Imu {
+                return None;
+            }
+            factors
+                .get(index + 1)
+                .and_then(|bias| imu_bias_pair_model_dot_f32(factor, bias, &step))
+        })
+        .collect();
+    let evaluations: Vec<FactorEvaluation> = factors
+        .par_iter()
+        .map(|factor| evaluate_model_decrease_factor(factor, &step, state_step, threshold))
+        .collect();
+
     let mut decrease = 0.0_f32;
     let mut deferred_prior = Vec::new();
     let mut paired_bias_index = None;
-    for (factor_index, factor) in factors.iter().enumerate() {
+    for factor_index in 0..factors.len() {
         if paired_bias_index == Some(factor_index) {
             paired_bias_index = None;
             continue;
         }
-        if factor.state_jacobian.ncols() != step.len() {
-            return None;
-        }
-        if factor.kind == FactorKind::Imu {
-            if let Some(bias) = factors.get(factor_index + 1) {
-                if let Some(dot) = imu_bias_pair_model_dot_f32(factor, bias, &step) {
-                    decrease -= dot;
-                    paired_bias_index = Some(factor_index + 1);
-                    continue;
-                }
-            }
-        }
-        if let Some((j, rhs, compact_step)) = prior_model_inputs_f32(factor, state_step) {
-            deferred_prior.push(prior_model_f32(&j, &rhs, &compact_step));
+        // A factor whose own `state_jacobian` width does not match `step`
+        // cannot also produce `Some` from the pairing check above (that
+        // check re-validates the same width on both the Imu and Bias
+        // factor), so consulting the pairing result first cannot skip past
+        // a dimension failure the original per-factor check would have
+        // caught -- either this branch is not taken and `evaluations`
+        // reports `DimensionMismatch` below, or the successor's own turn
+        // later in this same fold reports it.
+        if let Some(dot) = imu_pair_dots[factor_index] {
+            decrease -= dot;
+            paired_bias_index = Some(factor_index + 1);
             continue;
         }
-        let state = as_f32_matrix(&factor.state_jacobian);
-        let residual = as_f32_vector(&factor.residual);
-        let landmark_columns = factor.landmark_jacobian.ncols();
-        if landmark_columns == 0 {
-            let increment = state * &step;
-            let contribution = -increment.dot(&(0.5_f32 * &increment + &residual));
-            if factor.kind == FactorKind::Prior {
-                deferred_prior.push(contribution);
-            } else {
-                decrease += contribution;
-            }
-            continue;
+        match evaluations[factor_index] {
+            FactorEvaluation::DimensionMismatch | FactorEvaluation::Failure => return None,
+            FactorEvaluation::DeferredPrior(value) => deferred_prior.push(value),
+            FactorEvaluation::Direct(value) => decrease += value,
         }
-        let landmark = as_f32_matrix(&factor.landmark_jacobian);
-        let qr = LandmarkHouseholderF32::factor(&state, &landmark, &residual)?;
-        let rank = (0..landmark_columns)
-            .filter(|&index| qr.pivots[index].abs() > threshold)
-            .count();
-        if rank < landmark_columns {
-            let increment = state * &step;
-            decrease -= increment.dot(&(0.5_f32 * &increment + &residual));
-            continue;
-        }
-        let transformed_state = qr.transformed_state();
-        let transformed_residual =
-            DMatrix::from_column_slice(qr.rows, 1, qr.transformed_residual().as_slice());
-        let r = qr.upper_r();
-        let mut qj_inc = eigen_row_major_gemv_f32(&transformed_state, &step);
-        let mut rhs = transformed_residual
-            .column(0)
-            .rows(0, landmark_columns)
-            .into_owned();
-        for row in 0..landmark_columns {
-            rhs[row] += qj_inc[row];
-        }
-        let mut landmark_inc = DVector::<f32>::zeros(landmark_columns);
-        if landmark_columns == 3 {
-            let d2 = r[(2, 2)];
-            let d1 = r[(1, 1)];
-            let d0 = r[(0, 0)];
-            if d2.abs() <= threshold || d1.abs() <= threshold || d0.abs() <= threshold {
-                return None;
-            }
-            let x2 = rhs[2] / d2;
-            let x1 = (-r[(1, 2)]).mul_add(x2, rhs[1]) / d1;
-            let row0_dot = r[(0, 2)].mul_add(x2, r[(0, 1)] * x1);
-            let x0 = (rhs[0] - row0_dot) / d0;
-            landmark_inc[0] = -x0;
-            landmark_inc[1] = -x1;
-            landmark_inc[2] = -x2;
-        } else {
-            rhs = -rhs;
-            for row in (0..landmark_columns).rev() {
-                let mut value = rhs[row];
-                for column in (row + 1)..landmark_columns {
-                    value -= r[(row, column)] * landmark_inc[column];
-                }
-                let diagonal = r[(row, row)];
-                if diagonal.abs() <= threshold {
-                    return None;
-                }
-                landmark_inc[row] = value / diagonal;
-            }
-        }
-        let q1_inc = r * landmark_inc;
-        for row in 0..landmark_columns {
-            qj_inc[row] += q1_inc[row];
-        }
-        let qres = transformed_residual.column(0).into_owned();
-        decrease -= eigen_visual_model_dot_f32(&qj_inc, &qres);
     }
     // Upstream starts with the visual parallel-reduction result, applies all
     // ImuBlock terms, and only then adds the marginal-prior model change.
@@ -6301,6 +6367,27 @@ pub(crate) fn compact_trial_preparation_for_test(
     .into_trial_preparation(state, state_step, tolerance)
 }
 
+/// One factor's independent projection result from the parallel pre-pass in
+/// [`reduce_landmark_factors_f32_checked_with_options`]. `Visual::compact`
+/// carries a fresh, factor-local arena (its `storage_offset` is `0`, as if
+/// it were the first and only entry) rather than an offset into the shared
+/// `compact_storage` arena, because that arena's real, cumulative offsets
+/// can only be assigned once factors are visited in order again.
+enum ProjectedLandmarkFactor {
+    Plain {
+        jacobian: DMatrix<f32>,
+        residual: DVector<f32>,
+        rank: usize,
+    },
+    Visual {
+        jacobian: DMatrix<f32>,
+        residual: DVector<f32>,
+        rank: usize,
+        compact: Option<(Vec<f32>, CompactLandmarkBackSubstitutionEntryF32)>,
+        invalidates_compact_mapping: bool,
+    },
+}
+
 fn reduce_landmark_factors_f32_checked_with_options(
     factors: &[WhitenedFactorRowStack],
     state_dof: usize,
@@ -6374,8 +6461,6 @@ fn reduce_landmark_factors_f32_checked_with_options(
             Some(capacity) => Vec::with_capacity(capacity),
             None => Vec::new(),
         };
-        #[cfg(feature = "basalt-lm-workspace-reuse")]
-        let mut landmark_workspace = LandmarkHouseholderWorkspace::default();
         let mut compact_mapping_valid = compact_capacity_valid;
         let mut seen_landmark_indices = if compact_capacity_valid {
             Vec::with_capacity(compact_capacity)
@@ -6383,74 +6468,131 @@ fn reduce_landmark_factors_f32_checked_with_options(
             Vec::new()
         };
         let mut projected = Vec::with_capacity(factors.len());
-        for factor in factors {
-            if factor.landmark_jacobian.ncols() == 0 {
-                projected.push(landmark_nullspace_projection_f32(factor, tolerance));
-                continue;
-            }
-            let metadata = (factor.kind == FactorKind::Visual)
-                .then_some(factor.landmark_metadata)
-                .flatten();
-            if factor.kind != FactorKind::Visual || metadata.is_none() {
-                // The factor still contributes its ordinary Q2 rows, but a
-                // missing/non-visual identity makes the compact mapping
-                // unsafe.  The caller can observe `None` and use legacy
-                // recovery without guessing from factor position.
-                compact_mapping_valid = false;
-            }
-            let use_direct_visual_pack = factor.kind == FactorKind::Visual
-                && compact_capacity_valid
-                && metadata.is_some()
-                && factor.landmark_jacobian.ncols() <= 3;
-            #[cfg(feature = "basalt-lm-workspace-reuse")]
-            let (jacobian, residual, rank, compact) = if use_direct_visual_pack {
-                landmark_nullspace_projection_f32_with_compact_into_with_workspace(
-                    factor,
-                    tolerance,
-                    metadata,
-                    &mut compact_storage,
-                    &mut landmark_workspace,
-                )
-            } else {
-                // Keep generic/non-visual and invalid visual mappings on the
-                // historical materialized constructor.  They can still
-                // contribute their ordinary Q2 rows, but they must not enter
-                // the direct visual compact allocation path.
-                let (jacobian, residual, rank, _) =
-                    landmark_nullspace_projection_f32_with_compact(factor, tolerance, None);
-                (jacobian, residual, rank, None)
-            };
-            #[cfg(not(feature = "basalt-lm-workspace-reuse"))]
-            let (jacobian, residual, rank, compact) = if use_direct_visual_pack {
-                // The non-reuse compatibility wrapper allocates a fresh
-                // scratch workspace for this factor.  It is the historical
-                // ownership path and intentionally shares the exact packed
-                // conversion, Householder walk, and Q2/compact extraction.
-                landmark_nullspace_projection_f32_with_compact_into(
-                    factor,
-                    tolerance,
-                    metadata,
-                    &mut compact_storage,
-                )
-            } else {
-                // Keep generic/non-visual and invalid visual mappings on the
-                // historical materialized constructor.  They can still
-                // contribute their ordinary Q2 rows, but they must not enter
-                // the direct visual compact allocation path.
-                let (jacobian, residual, rank, _) =
-                    landmark_nullspace_projection_f32_with_compact(factor, tolerance, None);
-                (jacobian, residual, rank, None)
-            };
-            if let Some(compact) = compact {
-                if seen_landmark_indices.contains(&compact.landmark_index) {
-                    compact_mapping_valid = false;
+        // Every factor's own projection -- QR-eliminating its landmark
+        // columns (the expensive Householder walk) and, for eligible visual
+        // factors, extracting the compact Q1/R payload -- depends only on
+        // that one factor's own data plus `tolerance`/`compact_capacity_valid`
+        // (both already fixed above), never on another factor's projection.
+        // So every factor's projection runs in parallel below. A worker that
+        // produces a compact payload writes it into its own fresh,
+        // factor-local arena (starting at offset `0`, exactly as
+        // `compact_back_substitution_into` would against an empty shared
+        // arena) instead of the one growing `compact_storage` the serial
+        // code used to share across all factors -- which is also why the
+        // reusable-workspace parameter is no longer threaded through here:
+        // capacity reuse *across* factors is inherently serial, and
+        // `basalt-lm-workspace-reuse`'s own contract is "capacity-only
+        // reuse" (see its Cargo.toml feature doc comment), so a fresh
+        // per-factor arena/workspace cannot change any computed value, only
+        // how much scratch memory ends up (re)allocated.
+        //
+        // The sequential fold below then rebuilds `compact_storage`,
+        // `compact_entries`, `seen_landmark_indices`, and
+        // `compact_mapping_valid` by walking the parallel results **in the
+        // original factor order**: appending each factor-local arena to
+        // `compact_storage` and shifting its entry's `storage_offset` by the
+        // running length reproduces, byte-for-byte, the same
+        // `compact_storage` contents and the same `storage_offset` values
+        // the always-serial version produced (that fold performs the exact
+        // same appends in the exact same order), and the duplicate/validity
+        // bookkeeping only ever reads each factor's own classification plus
+        // that running state -- never a QR result from another factor. Only
+        // the side-effect-free QR/projection work feeding each append now
+        // happens off the critical thread; its own arithmetic is untouched
+        // (`landmark_nullspace_projection_f32_with_compact_into` and
+        // `landmark_nullspace_projection_f32_with_compact` are called
+        // completely unmodified below, exactly as the serial code called
+        // them).
+        let projected_parallel: Vec<ProjectedLandmarkFactor> = factors
+            .par_iter()
+            .map(|factor| {
+                if factor.landmark_jacobian.ncols() == 0 {
+                    let (jacobian, residual, rank) =
+                        landmark_nullspace_projection_f32(factor, tolerance);
+                    return ProjectedLandmarkFactor::Plain {
+                        jacobian,
+                        residual,
+                        rank,
+                    };
                 }
-                seen_landmark_indices.push(compact.landmark_index);
-                compact_entries.push(compact);
-            } else {
-                compact_mapping_valid = false;
+                let metadata = (factor.kind == FactorKind::Visual)
+                    .then_some(factor.landmark_metadata)
+                    .flatten();
+                let use_direct_visual_pack = factor.kind == FactorKind::Visual
+                    && compact_capacity_valid
+                    && metadata.is_some()
+                    && factor.landmark_jacobian.ncols() <= 3;
+                let (jacobian, residual, rank, compact) = if use_direct_visual_pack {
+                    let mut local_arena = Vec::new();
+                    let (jacobian, residual, rank, compact) =
+                        landmark_nullspace_projection_f32_with_compact_into(
+                            factor,
+                            tolerance,
+                            metadata,
+                            &mut local_arena,
+                        );
+                    (
+                        jacobian,
+                        residual,
+                        rank,
+                        compact.map(|entry| (local_arena, entry)),
+                    )
+                } else {
+                    // Keep generic/non-visual and invalid visual mappings on
+                    // the historical materialized constructor.  They can
+                    // still contribute their ordinary Q2 rows, but they must
+                    // not enter the direct visual compact allocation path.
+                    let (jacobian, residual, rank, _) =
+                        landmark_nullspace_projection_f32_with_compact(factor, tolerance, None);
+                    (jacobian, residual, rank, None)
+                };
+                ProjectedLandmarkFactor::Visual {
+                    jacobian,
+                    residual,
+                    rank,
+                    compact,
+                    // The factor still contributes its ordinary Q2 rows, but
+                    // a missing/non-visual identity makes the compact
+                    // mapping unsafe.  The caller can observe `None` and use
+                    // legacy recovery without guessing from factor position.
+                    invalidates_compact_mapping: factor.kind != FactorKind::Visual
+                        || metadata.is_none(),
+                }
+            })
+            .collect();
+        for result in projected_parallel {
+            match result {
+                ProjectedLandmarkFactor::Plain {
+                    jacobian,
+                    residual,
+                    rank,
+                } => {
+                    projected.push((jacobian, residual, rank));
+                }
+                ProjectedLandmarkFactor::Visual {
+                    jacobian,
+                    residual,
+                    rank,
+                    compact,
+                    invalidates_compact_mapping,
+                } => {
+                    if invalidates_compact_mapping {
+                        compact_mapping_valid = false;
+                    }
+                    if let Some((local_arena, mut entry)) = compact {
+                        entry.storage_offset += compact_storage.len();
+                        compact_storage.extend_from_slice(&local_arena);
+                        if seen_landmark_indices.contains(&entry.landmark_index) {
+                            compact_mapping_valid = false;
+                        }
+                        seen_landmark_indices.push(entry.landmark_index);
+                        compact_entries.push(entry);
+                    } else {
+                        compact_mapping_valid = false;
+                    }
+                    projected.push((jacobian, residual, rank));
+                }
             }
-            projected.push((jacobian, residual, rank));
         }
         let compact = compact_mapping_valid.then_some(CompactLandmarkBackSubstitutionBatchF32 {
             storage: compact_storage,
@@ -6477,6 +6619,45 @@ fn reduce_landmark_factors_f32_checked_with_options(
             });
         }
     }
+
+    // Every landmark/visual factor's H/b contribution below depends only on
+    // that one factor's own already-projected `(jacobian, residual)` pair
+    // (computed above, serially, into `projected`); there is no shared
+    // mutable state between factors here, matching upstream Basalt's own
+    // `tbb::parallel_reduce` over landmark blocks. Precomputing every
+    // contribution in parallel and then folding each into `visual_h` /
+    // `visual_b` **serially below, in the exact same factor-index order the
+    // sequential loop always visited them in** reproduces the identical
+    // `+=` sequence -- and therefore the identical f32 rounding tree --
+    // as calling `eigen_visual_gram_packet_tail_f32` /
+    // `accumulate_transpose_vector_f32_eigen` inline did; only *when* each
+    // pure contribution is computed changes, never its value, its order of
+    // use, or the two audited kernels' own internal arithmetic (both are
+    // called completely unmodified below, just against a scratch
+    // zero-accumulator for the vector case so the contribution can be
+    // captured instead of accumulated in place).
+    let visual_factor_indices: Vec<usize> = factors
+        .iter()
+        .enumerate()
+        .filter(|(_, factor)| factor.landmark_jacobian.ncols() != 0)
+        .map(|(index, _)| index)
+        .collect();
+    let visual_contributions: Vec<(DMatrix<f32>, DVector<f32>)> = visual_factor_indices
+        .par_iter()
+        .map(|&index| {
+            let factor = &factors[index];
+            let (jacobian, residual, _) = &projected[index];
+            let h = if factor.kind == FactorKind::Visual {
+                eigen_visual_gram_packet_tail_f32(jacobian)
+            } else {
+                jacobian.transpose() * jacobian
+            };
+            let mut b = DVector::<f32>::zeros(jacobian.ncols());
+            accumulate_transpose_vector_f32_eigen(&mut b, jacobian, residual, false);
+            (h, b)
+        })
+        .collect();
+    let mut visual_contribution_cursor = 0usize;
 
     let mut factor_index = 0;
     while factor_index < factors.len() {
@@ -6506,12 +6687,11 @@ fn reduce_landmark_factors_f32_checked_with_options(
             } else {
                 None
             };
-            if factor.kind == FactorKind::Visual {
-                visual_h += eigen_visual_gram_packet_tail_f32(jacobian);
-            } else {
-                visual_h += jacobian.transpose() * jacobian;
-            }
-            accumulate_transpose_vector_f32_eigen(&mut visual_b, jacobian, residual, false);
+            let (contribution_h, contribution_b) =
+                &visual_contributions[visual_contribution_cursor];
+            visual_contribution_cursor += 1;
+            visual_h += contribution_h;
+            visual_b += contribution_b;
             if let (Some(writer), Some(prefix)) = (visual_prefix_trace.as_mut(), prefix) {
                 writer.finish_visual_prefix(prefix, &visual_h, &visual_b)?;
             }
@@ -20062,8 +20242,13 @@ mod tests {
         assert_eq!(active_diagnostic_lm_iteration(), None);
     }
 
-    #[test]
-    fn m11_full70_frame4_ordered_f32_legacy_compact_model_recovery_parity() {
+    /// Builds the 70-factor (1 prior + 61 visual landmark + 4x(IMU+bias))
+    /// frame-4 fixture shared by [`m11_full70_frame4_ordered_f32_legacy_compact_model_recovery_parity`]
+    /// and the parallel-landmark-reduction bit-identity test below. Kept as
+    /// its own helper so both tests build the exact same factor set from
+    /// one source of truth instead of two independently hand-maintained
+    /// copies drifting apart.
+    fn build_full70_frame4_factors() -> (Vec<WhitenedFactorRowStack>, usize) {
         let state_dof = 75;
         let prior_jacobian = DMatrix::from_fn(15, state_dof, |row, column| {
             if column == row {
@@ -20172,6 +20357,12 @@ mod tests {
         }
 
         validate_full70_frame4_factors(&factors, state_dof).expect("strict frame-4 factor order");
+        (factors, state_dof)
+    }
+
+    #[test]
+    fn m11_full70_frame4_ordered_f32_legacy_compact_model_recovery_parity() {
+        let (factors, state_dof) = build_full70_frame4_factors();
         let legacy = reduce_landmark_factors_f32_checked(&factors, state_dof, 1e-10)
             .expect("legacy f32 frame-4 reduction");
         let compact = reduce_landmark_factors_f32_checked_with_compact_back_substitution(
@@ -20327,6 +20518,117 @@ mod tests {
         assert!(payload["recovery"]["landmark_steps"]
             .as_array()
             .is_some_and(|steps| steps.iter().all(|step| step["bitwise_equal"] == true)));
+    }
+
+    /// Proves the per-landmark parallel H/b contribution pre-pass in
+    /// `reduce_landmark_factors_f32_checked_with_options` is bit-identical
+    /// regardless of the rayon thread-pool size it runs under. Reuses the
+    /// real 70-factor (1 prior + 61 visual landmark + 4x(IMU+bias)) frame-4
+    /// fixture from [`m11_full70_frame4_ordered_f32_legacy_compact_model_recovery_parity`]
+    /// as the dense H/b oracle: the reduction is run inside three separately
+    /// scoped rayon thread pools (1, 4, and 8 threads -- 1 thread forces the
+    /// same effectively-serial execution order the pre-parallelization code
+    /// always used), and the resulting `h`/`b` (plus the derived compact
+    /// back-substitution landmark recovery and the model cost decrease used
+    /// by the LM trial step) must match exactly, to the bit, across all
+    /// three. Landmark contributions are pure functions of their own
+    /// already-projected `(jacobian, residual)`, folded into `visual_h` /
+    /// `visual_b` by a `+=` sequence that is unconditionally serial and in
+    /// original factor-index order (see the comment above that fold in
+    /// `reduce_landmark_factors_f32_checked_with_options`), so thread count
+    /// must not be observable in the result.
+    #[test]
+    fn m11_full70_frame4_parallel_landmark_reduction_is_thread_count_invariant() {
+        let (factors, state_dof) = build_full70_frame4_factors();
+        let state_step =
+            DVector::from_fn(state_dof, |column, _| (column as f64 - 23.0) * 0.0078125);
+
+        let mut previous: Option<(ReducedNormalSystemF32, f64, Vec<Vec<f64>>)> = None;
+        for threads in [1usize, 4, 8] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .expect("scoped rayon pool");
+            let reduced = pool
+                .install(|| {
+                    reduce_landmark_factors_f32_checked_with_compact_back_substitution(
+                        &factors, state_dof, 1e-10,
+                    )
+                })
+                .expect("f32 frame-4 reduction");
+
+            // The model cost decrease consumes the same per-factor Q1/Q2
+            // payloads the parallel pre-pass feeds from; check it is also
+            // unaffected, since an LM trial step depends on it every
+            // iteration.
+            let model_decrease = pool
+                .install(|| model_cost_decrease_f32(&factors, &state_step, 1e-10))
+                .expect("model cost decrease");
+            assert!(
+                model_decrease.is_finite(),
+                "model decrease not finite at threads={threads}"
+            );
+
+            let compact_batch = reduced
+                .compact_back_substitution
+                .as_ref()
+                .expect("all 61 visual factors have compact entries");
+            assert_eq!(compact_batch.entries.len(), 61);
+            let recovered_steps: Vec<Vec<f64>> = compact_batch
+                .entries
+                .iter()
+                .map(|entry| {
+                    let step = pool
+                        .install(|| {
+                            back_substitute_landmark_compact_entry_f32(
+                                entry,
+                                &compact_batch.storage,
+                                &state_step,
+                                1e-10,
+                            )
+                        })
+                        .expect("compact visual recovery");
+                    assert!(
+                        step.iter().all(|value| value.is_finite()),
+                        "landmark recovery not finite at threads={threads}"
+                    );
+                    step.iter().copied().collect::<Vec<f64>>()
+                })
+                .collect();
+
+            if let Some((previous_reduced, previous_decrease, previous_steps)) = previous.as_ref() {
+                assert!(
+                    full70_matrix_bits_match(&previous_reduced.h, &reduced.h),
+                    "H differs at threads={threads}"
+                );
+                assert!(
+                    full70_vector_bits_match(&previous_reduced.b, &reduced.b),
+                    "b differs at threads={threads}"
+                );
+                assert_eq!(
+                    previous_decrease.to_bits(),
+                    model_decrease.to_bits(),
+                    "model cost decrease differs at threads={threads}"
+                );
+                assert_eq!(previous_steps.len(), recovered_steps.len());
+                for (entry_index, (previous_step, step)) in
+                    previous_steps.iter().zip(&recovered_steps).enumerate()
+                {
+                    assert_eq!(previous_step.len(), step.len());
+                    for (lane, (previous_value, value)) in
+                        previous_step.iter().zip(step).enumerate()
+                    {
+                        assert_eq!(
+                            previous_value.to_bits(),
+                            value.to_bits(),
+                            "landmark recovery factor {entry_index} lane {lane} differs at threads={threads}"
+                        );
+                    }
+                }
+            }
+
+            previous = Some((reduced, model_decrease, recovered_steps));
+        }
     }
 
     #[test]

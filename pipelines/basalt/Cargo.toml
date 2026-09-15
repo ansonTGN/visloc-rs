@@ -74,6 +74,7 @@ basalt-lm-workspace-reuse = []
 base64 = "0.22"
 image = { version = "=0.25.5", default-features = false, features = ["png"] }
 nalgebra = { workspace = true }
+rayon = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = { workspace = true }
