@@ -29,7 +29,7 @@
 //! ```
 
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     env, fs,
     path::PathBuf,
     process,
@@ -44,6 +44,7 @@ use visloc_basalt::{
     vio::MargData,
     BasaltVioEstimatorAdapter, EurocSensorDataset,
 };
+use visloc_core::geometry::SE3;
 
 #[derive(Debug)]
 struct Args {
@@ -210,6 +211,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_observations = 0usize;
     let mut mapper_packet_count = 0u64;
     let mut max_queue_depth = 0usize;
+    // Every processed frame's raw VIO body-to-world pose, keyed by frame_id.
+    // Used after the run to propagate the mapper's keyframe corrections to
+    // every frame (see `propagate_to_all_frames` below) -- the same rigid
+    // spanning-tree convention as scripts/propagate_basalt_mapper_corrections.py.
+    let mut vio_trajectory: BTreeMap<u64, (i64, SE3)> = BTreeMap::new();
     let vio_start = Instant::now();
     for index in 0..frame_limit {
         let sensor_frame = dataset.frame(index)?;
@@ -230,6 +236,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         last_timestamp_ns = timestamp_ns;
         total_imu += output.imu_count;
         total_observations += output.tracks.observations.len();
+        vio_trajectory.insert(
+            output.tracks.frame.frame_id,
+            (timestamp_ns, output.estimator.state.imu_to_world.clone()),
+        );
 
         if output.estimator.marg_data.is_mapper_packet() {
             let depth_after_send = {
@@ -266,6 +276,52 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let final_report = online_mapper.finalize()?;
     let total_wall_seconds = vio_start.elapsed().as_secs_f64();
+
+    // Propagate the mapper's keyframe corrections to every VIO frame (rigid
+    // spanning-tree: scripts/propagate_basalt_mapper_corrections.py's exact
+    // convention, ported to Rust). `final_report.trajectory_tum` remains the
+    // keyframe-only trajectory (written separately below); this is the
+    // full-frame trajectory the sweep evaluates, matching the offline
+    // path's `trajectory_full_propagated.tum` protocol.
+    let mapper_poses: BTreeMap<u64, SE3> = final_report
+        .result
+        .poses
+        .iter()
+        .map(|record| {
+            let [qw, qx, qy, qz] = record.quaternion_wxyz;
+            let pose = SE3::new(
+                nalgebra::UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(
+                    qw, qx, qy, qz,
+                )),
+                nalgebra::Vector3::new(
+                    record.translation[0],
+                    record.translation[1],
+                    record.translation[2],
+                ),
+            );
+            (record.frame_id, pose)
+        })
+        .collect();
+    let propagated = propagate_to_all_frames(&vio_trajectory, &mapper_poses)?;
+    let full_trajectory_tum = {
+        let mut buffer = String::from("# timestamp tx ty tz qx qy qz qw\n");
+        for (timestamp_ns, pose) in &propagated {
+            let q = pose.rotation.quaternion();
+            buffer.push_str(&format!(
+                "{:.18e} {:.18e} {:.18e} {:.18e} {:.18e} {:.18e} {:.18e} {:.18e}\n",
+                *timestamp_ns as f64 * 1e-9,
+                pose.translation.x,
+                pose.translation.y,
+                pose.translation.z,
+                q.i,
+                q.j,
+                q.k,
+                q.w,
+            ));
+        }
+        buffer
+    };
+    let propagated_frame_count = propagated.len();
 
     let dataset_duration_seconds =
         (last_timestamp_ns - first_timestamp_ns.unwrap_or(last_timestamp_ns)) as f64 * 1e-9;
@@ -324,11 +380,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "pose_count": final_report.result.poses.len(),
             "landmark_count": final_report.result.landmarks.len(),
         },
+        "propagated_frame_count": propagated_frame_count,
         "peak_working_set_bytes": peak_rss_bytes,
     });
 
+    // `trajectory_online.tum` is the full-frame propagated trajectory (every
+    // VIO frame, keyframe corrections applied) -- the file the evaluation
+    // sweep scores, matching the offline path's protocol.
+    // `trajectory_online_kf.tum` is the mapper's own keyframe-only output,
+    // kept for debugging/comparison.
     fs::write(
         args.out_dir.join("trajectory_online.tum"),
+        &full_trajectory_tum,
+    )?;
+    fs::write(
+        args.out_dir.join("trajectory_online_kf.tum"),
         &final_report.trajectory_tum,
     )?;
     fs::write(
@@ -408,6 +474,69 @@ fn peak_working_set_bytes() -> u64 {
 #[cfg(not(windows))]
 fn peak_working_set_bytes() -> u64 {
     0
+}
+
+/// Rigid spanning-tree propagation of the mapper's keyframe corrections to
+/// every VIO frame. A direct Rust port of
+/// `scripts/propagate_basalt_mapper_corrections.py::propagate` (kept
+/// numerically equivalent, not merely similar -- see that script's
+/// module docstring for the exact convention):
+///
+/// ```text
+/// V_f  = raw VIO body-to-world pose at frame f (rotation R_f, translation t_f)
+/// M_k  = mapper-corrected body-to-world pose at the nearest preceding
+///        keyframe k (frame_id <= f)
+/// V_k  = raw VIO body-to-world pose at that same keyframe k
+///
+/// corrected(f) = Delta_k * V_f,  where Delta_k = M_k * V_k^{-1}
+/// ```
+///
+/// i.e. each frame keeps its VIO-derived relative motion to the nearest
+/// preceding keyframe; only the keyframe's mapper correction moves it. This
+/// is exact at keyframes themselves (f == k, `Delta_k * V_k == M_k`) and,
+/// like the Python original, uses the *first* keyframe's delta for any
+/// frame before it (there is no earlier keyframe to interpolate from).
+fn propagate_to_all_frames(
+    vio_trajectory: &BTreeMap<u64, (i64, SE3)>,
+    mapper_poses: &BTreeMap<u64, SE3>,
+) -> Result<Vec<(i64, SE3)>, Box<dyn std::error::Error>> {
+    let keyframe_ids: Vec<u64> = mapper_poses.keys().copied().collect();
+    if keyframe_ids.is_empty() {
+        return Err("mapper produced no keyframe poses".into());
+    }
+    let missing: Vec<u64> = keyframe_ids
+        .iter()
+        .copied()
+        .filter(|k| !vio_trajectory.contains_key(k))
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "{} mapper keyframe frame_ids are absent from the VIO trajectory (first few: {:?})",
+            missing.len(),
+            &missing[..missing.len().min(5)]
+        )
+        .into());
+    }
+
+    let delta_by_keyframe: BTreeMap<u64, SE3> = keyframe_ids
+        .iter()
+        .map(|&k| {
+            let (_, v_k) = &vio_trajectory[&k];
+            let m_k = &mapper_poses[&k];
+            (k, m_k.compose(&v_k.inverse()))
+        })
+        .collect();
+
+    let mut output = Vec::with_capacity(vio_trajectory.len());
+    let mut cursor = 0usize;
+    for (&frame_id, (timestamp_ns, v_f)) in vio_trajectory {
+        while cursor + 1 < keyframe_ids.len() && keyframe_ids[cursor + 1] <= frame_id {
+            cursor += 1;
+        }
+        let delta = &delta_by_keyframe[&keyframe_ids[cursor]];
+        output.push((*timestamp_ns, delta.compose(v_f)));
+    }
+    Ok(output)
 }
 
 impl Args {
@@ -535,5 +664,63 @@ mod tests {
         assert!(args.realtime);
         assert_eq!(args.optimize_every_k, 5);
         assert_eq!(args.periodic_iterations, 2);
+    }
+
+    fn se3(tx: f64, ty: f64, tz: f64, yaw_deg: f64) -> SE3 {
+        SE3::new(
+            nalgebra::UnitQuaternion::from_euler_angles(0.0, 0.0, yaw_deg.to_radians()),
+            nalgebra::Vector3::new(tx, ty, tz),
+        )
+    }
+
+    #[test]
+    fn propagation_is_exact_at_keyframes() {
+        let mut vio = BTreeMap::new();
+        vio.insert(0, (0, se3(0.0, 0.0, 0.0, 0.0)));
+        vio.insert(10, (10, se3(1.0, 0.0, 0.0, 0.0)));
+        let mut mapper = BTreeMap::new();
+        // A keyframe correction that moves frame 10 sideways and rotates it.
+        mapper.insert(0, se3(0.0, 0.0, 0.0, 0.0));
+        mapper.insert(10, se3(1.5, 0.2, 0.0, 5.0));
+
+        let propagated = propagate_to_all_frames(&vio, &mapper).expect("propagates");
+        let by_frame: BTreeMap<i64, &SE3> = propagated
+            .iter()
+            .map(|(timestamp_ns, pose)| (*timestamp_ns, pose))
+            .collect();
+        let corrected_10 = by_frame[&10];
+        assert!((corrected_10.translation - mapper[&10].translation).norm() < 1e-9);
+        assert!(corrected_10.rotation.angle_to(&mapper[&10].rotation).abs() < 1e-9);
+    }
+
+    #[test]
+    fn propagation_keeps_relative_motion_to_nearest_preceding_keyframe() {
+        let mut vio = BTreeMap::new();
+        vio.insert(0, (0, se3(0.0, 0.0, 0.0, 0.0)));
+        vio.insert(5, (5, se3(0.5, 0.0, 0.0, 0.0))); // non-keyframe, between 0 and 10
+        vio.insert(10, (10, se3(1.0, 0.0, 0.0, 0.0)));
+        let mut mapper = BTreeMap::new();
+        mapper.insert(0, se3(2.0, 0.0, 0.0, 0.0)); // shift everything by +2.0 in x
+        mapper.insert(10, se3(3.0, 0.0, 0.0, 0.0));
+
+        let propagated = propagate_to_all_frames(&vio, &mapper).expect("propagates");
+        let by_frame: BTreeMap<i64, &SE3> = propagated
+            .iter()
+            .map(|(timestamp_ns, pose)| (*timestamp_ns, pose))
+            .collect();
+        // Frame 5's raw VIO relative motion from keyframe 0 is +0.5 in x;
+        // keyframe 0's correction shifts everything by +2.0, so frame 5
+        // should land at 2.5, not be independently corrected.
+        assert!((by_frame[&5].translation.x - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn propagation_rejects_a_keyframe_missing_from_the_vio_trajectory() {
+        let mut vio = BTreeMap::new();
+        vio.insert(0, (0, se3(0.0, 0.0, 0.0, 0.0)));
+        let mut mapper = BTreeMap::new();
+        mapper.insert(0, se3(0.0, 0.0, 0.0, 0.0));
+        mapper.insert(99, se3(1.0, 0.0, 0.0, 0.0)); // not in vio_trajectory
+        assert!(propagate_to_all_frames(&vio, &mapper).is_err());
     }
 }
