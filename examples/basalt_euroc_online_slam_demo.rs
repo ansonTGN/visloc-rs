@@ -42,7 +42,8 @@ use serde_json::json;
 use visloc_basalt::{
     mapper_online::{run_mapper_thread, OnlineIngestReport, OnlineMapperConfig, OnlineNfrMapper},
     vio::MargData,
-    BasaltVioEstimatorAdapter, EurocSensorDataset,
+    BasaltAdapterError, BasaltAdapterOutput, BasaltVioEstimatorAdapter, EurocSensorDataset,
+    TimingBreakdown,
 };
 use visloc_core::geometry::SE3;
 
@@ -56,6 +57,10 @@ struct Args {
     optimize_every_k: usize,
     periodic_iterations: usize,
     realtime: bool,
+    pipeline: bool,
+    pipeline_capacity: usize,
+    decode_threads: usize,
+    threads: Option<usize>,
 }
 
 fn main() {
@@ -121,6 +126,24 @@ impl MapperAggregate {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse(env::args_os().skip(1))
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+    if args.pipeline && args.realtime {
+        // The pipelined frontend decodes ahead of the estimator by design
+        // (that overlap is the whole point); there is no clean per-frame
+        // insertion point for dataset-rate pacing without reaching into
+        // `process_euroc_stream_pipelined` itself, which must stay
+        // untouched for bit-identical VIO output. `--realtime` only paces
+        // the serial path.
+        return Err("--realtime is not supported together with --pipeline".into());
+    }
+    // Sizes the process-wide rayon pool used by data-parallel stages inside
+    // the adapter/estimator (PR #153). Same flag/behavior as
+    // examples/basalt_euroc_vio_demo.rs's `--threads`.
+    if let Some(threads) = args.threads {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build_global()
+            .map_err(|error| format!("failed to configure rayon thread pool: {error}"))?;
+    }
     fs::create_dir_all(&args.out_dir)?;
 
     let dataset = EurocSensorDataset::open(&args.euroc_dir, &args.calibration, &args.config)?;
@@ -211,27 +234,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_observations = 0usize;
     let mut mapper_packet_count = 0u64;
     let mut max_queue_depth = 0usize;
+    let mut demo_index = 0usize;
     // Every processed frame's raw VIO body-to-world pose, keyed by frame_id.
     // Used after the run to propagate the mapper's keyframe corrections to
     // every frame (see `propagate_to_all_frames` below) -- the same rigid
     // spanning-tree convention as scripts/propagate_basalt_mapper_corrections.py.
     let mut vio_trajectory: BTreeMap<u64, (i64, SE3)> = BTreeMap::new();
     let vio_start = Instant::now();
-    for index in 0..frame_limit {
-        let sensor_frame = dataset.frame(index)?;
-        if args.realtime {
-            if let Some(first) = first_timestamp_ns {
-                let target_offset =
-                    Duration::from_nanos((sensor_frame.timestamp_ns - first).max(0) as u64);
-                let target = vio_start + target_offset;
-                let now = Instant::now();
-                if target > now {
-                    thread::sleep(target - now);
-                }
-            }
-        }
-        let output = adapter.process(sensor_frame)?;
+
+    // Shared per-frame handler for both the serial loop and the `--pipeline`
+    // two-thread path below -- identical to how
+    // examples/basalt_euroc_vio_demo.rs shares one `handle_output` between
+    // its own serial and pipelined call sites. This closure only reads
+    // `output` (already fully computed by the adapter) and updates this
+    // demo's own bookkeeping/channel-send; it never touches VIO arithmetic,
+    // which is what keeps `--pipeline`'s output identical to the serial
+    // path's.
+    let mut handle_output = |output: BasaltAdapterOutput,
+                             _timing: &mut TimingBreakdown|
+     -> Result<(), BasaltAdapterError> {
         let timestamp_ns = output.tracks.frame.timestamp_ns;
+        if last_timestamp_ns != 0 && timestamp_ns <= last_timestamp_ns {
+            return Err(BasaltAdapterError::Output(format!(
+                "non-monotonic output timestamp at frame {demo_index}"
+            )));
+        }
         first_timestamp_ns.get_or_insert(timestamp_ns);
         last_timestamp_ns = timestamp_ns;
         total_imu += output.imu_count;
@@ -248,17 +275,61 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 guard.len()
             };
             max_queue_depth = max_queue_depth.max(depth_after_send);
-            sender
-                .send(output.estimator.marg_data)
-                .map_err(|_| "mapper thread ended before the VIO stream finished")?;
+            sender.send(output.estimator.marg_data).map_err(|_| {
+                BasaltAdapterError::Output(
+                    "mapper thread ended before the VIO stream finished".into(),
+                )
+            })?;
             mapper_packet_count += 1;
         }
 
-        if index == 0 || (index + 1) % 50 == 0 || index + 1 == frame_limit {
+        if demo_index == 0 || (demo_index + 1) % 50 == 0 || demo_index + 1 == frame_limit {
             eprintln!(
                 "frame={} timestamp_ns={} mapper_packets={} imu={}",
                 output.tracks.frame.frame_id, timestamp_ns, mapper_packet_count, total_imu,
             );
+        }
+        demo_index += 1;
+        Ok(())
+    };
+
+    if args.pipeline {
+        // Two-thread pipeline: a frontend/producer thread (dataset
+        // acquisition + tracking) overlapped in wall time with the
+        // estimator/consumer thread running on this thread (PR #153). Frame
+        // order and every per-frame computation are unchanged from the
+        // serial path below; this demo supplies the same `handle_output`
+        // either way.
+        let (_producer_timing, _consumer_timing) = adapter.process_euroc_stream_pipelined(
+            &dataset,
+            frame_limit,
+            true,  // retain_marg_data: this demo always needs mapper packets
+            false, // retain_trace: this demo has no --no-trace-style trace output
+            args.pipeline_capacity,
+            args.decode_threads,
+            handle_output,
+        )?;
+    } else {
+        let mut timing = TimingBreakdown::from_env();
+        // Tracked separately from the closure-captured `first_timestamp_ns`
+        // (a borrow of which would otherwise have to outlive the closure
+        // itself) -- pacing only needs the first frame's own timestamp,
+        // read directly off the dataset before `handle_output` runs.
+        let mut pacing_first_timestamp_ns: Option<i64> = None;
+        for index in 0..frame_limit {
+            let sensor_frame = dataset.frame(index)?;
+            if args.realtime {
+                let first = *pacing_first_timestamp_ns.get_or_insert(sensor_frame.timestamp_ns);
+                let target_offset =
+                    Duration::from_nanos((sensor_frame.timestamp_ns - first).max(0) as u64);
+                let target = vio_start + target_offset;
+                let now = Instant::now();
+                if target > now {
+                    thread::sleep(target - now);
+                }
+            }
+            let output = adapter.process(sensor_frame)?;
+            handle_output(output, &mut timing)?;
         }
     }
     let vio_wall_seconds = vio_start.elapsed().as_secs_f64();
@@ -552,6 +623,16 @@ impl Args {
         let mut optimize_every_k = OnlineMapperConfig::default().optimize_every_k;
         let mut periodic_iterations = OnlineMapperConfig::default().periodic_iterations;
         let mut realtime = false;
+        // Same flags/defaults as examples/basalt_euroc_vio_demo.rs's
+        // `--pipeline`/`--pipeline-capacity`/`--decode-threads`/`--threads`
+        // (PR #153): a bit-identical two-thread frontend/estimator overlap,
+        // reused unmodified via `BasaltVioEstimatorAdapter::
+        // process_euroc_stream_pipelined` below -- this demo only supplies
+        // the same `on_output` callback the serial path already used.
+        let mut pipeline = false;
+        let mut pipeline_capacity = 4usize;
+        let mut decode_threads = 3usize;
+        let mut threads = None;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy().into_owned();
@@ -585,6 +666,32 @@ impl Args {
                 }
                 "--realtime" => realtime = true,
                 "--as-fast-as-possible" => realtime = false,
+                "--pipeline" => pipeline = true,
+                "--pipeline-capacity" => {
+                    pipeline_capacity = next(&mut arguments, &option)?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --pipeline-capacity: {error}"))?;
+                    if pipeline_capacity == 0 {
+                        return Err("--pipeline-capacity must be positive".into());
+                    }
+                }
+                "--decode-threads" => {
+                    decode_threads = next(&mut arguments, &option)?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --decode-threads: {error}"))?;
+                }
+                "--threads" => {
+                    let value = next(&mut arguments, &option)?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --threads: {error}"))?;
+                    if value == 0 {
+                        return Err("--threads must be positive".into());
+                    }
+                    threads = Some(value);
+                }
                 unknown => return Err(format!("unknown option `{unknown}`\n\n{}", Self::usage())),
             }
         }
@@ -599,13 +706,18 @@ impl Args {
             optimize_every_k,
             periodic_iterations,
             realtime,
+            pipeline,
+            pipeline_capacity,
+            decode_threads,
+            threads,
         })
     }
 
     fn usage() -> String {
         "usage: basalt_euroc_online_slam_demo --euroc-dir DIR --calibration FILE \
          [--config FILE] [--out-dir DIR] [--max-frames N] [--optimize-every-k K] \
-         [--periodic-iterations N] [--realtime | --as-fast-as-possible]"
+         [--periodic-iterations N] [--realtime | --as-fast-as-possible] \
+         [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N]"
             .into()
     }
 }
@@ -664,6 +776,69 @@ mod tests {
         assert!(args.realtime);
         assert_eq!(args.optimize_every_k, 5);
         assert_eq!(args.periodic_iterations, 2);
+    }
+
+    #[test]
+    fn parser_defaults_pipeline_off_with_vio_demo_matching_defaults() {
+        let args = Args::parse(["--euroc-dir", "d", "--calibration", "c.json"].map(Into::into))
+            .expect("parses");
+        assert!(!args.pipeline);
+        assert_eq!(args.pipeline_capacity, 4);
+        assert_eq!(args.decode_threads, 3);
+        assert_eq!(args.threads, None);
+    }
+
+    #[test]
+    fn parser_accepts_pipeline_and_thread_flags() {
+        let args = Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--pipeline",
+                "--pipeline-capacity",
+                "8",
+                "--decode-threads",
+                "2",
+                "--threads",
+                "4",
+            ]
+            .map(Into::into),
+        )
+        .expect("parses");
+        assert!(args.pipeline);
+        assert_eq!(args.pipeline_capacity, 8);
+        assert_eq!(args.decode_threads, 2);
+        assert_eq!(args.threads, Some(4));
+    }
+
+    #[test]
+    fn parser_rejects_zero_pipeline_capacity_and_threads() {
+        assert!(Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--pipeline-capacity",
+                "0"
+            ]
+            .map(Into::into)
+        )
+        .is_err());
+        assert!(Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--threads",
+                "0"
+            ]
+            .map(Into::into)
+        )
+        .is_err());
     }
 
     fn se3(tx: f64, ty: f64, tz: f64, yaw_deg: f64) -> SE3 {
