@@ -6,7 +6,8 @@
 //! cargo run --release --example colmap_incremental_mapper -- \
 //!   --manifest <rig manifest> --features-dir <dir> \
 //!   --pairs-export <VISLOC-COLMAP-1 .bin> --out-colmap <dir> \
-//!   [--random-seed 0] [--num-threads N]
+//!   [--random-seed 0] [--num-threads N] [--pose-solver gp3p|dlt6pt]
+//!   [--local-ba-point-policy colmap|window]
 //! ```
 //!
 //! Loads the same three inputs `DatabaseCache::from_generalized_rig_export`
@@ -37,6 +38,8 @@ struct Args {
     pairs_export: PathBuf,
     out_colmap: PathBuf,
     random_seed: u64,
+    pose_solver: String,
+    local_ba_point_policy: String,
 }
 
 fn parse_args() -> Args {
@@ -67,6 +70,14 @@ fn parse_args() -> Args {
             .get("random-seed")
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(0),
+        pose_solver: flags
+            .get("pose-solver")
+            .cloned()
+            .unwrap_or_else(|| "gp3p".to_string()),
+        local_ba_point_policy: flags
+            .get("local-ba-point-policy")
+            .cloned()
+            .unwrap_or_else(|| "colmap".to_string()),
     }
 }
 
@@ -96,6 +107,25 @@ fn main() {
 
     let mut options = pipeline::PipelineOptions::default();
     options.mapper.random_seed = args.random_seed;
+    options.mapper.pose_solver = match args.pose_solver.as_str() {
+        "gp3p" => visloc_slam::colmap_incremental::mapper::PoseSolverBackend::Gp3p,
+        "dlt6pt" => visloc_slam::colmap_incremental::mapper::PoseSolverBackend::Dlt6pt,
+        other => panic!("unknown --pose-solver {other} (gp3p|dlt6pt)"),
+    };
+    // `LocalBaPointPolicy` lives on `BundleAdjustmentOptions` (consumed
+    // directly by `bundle_adjustment::solve`), not on `mapper::Options` —
+    // `PipelineOptions::local_ba`/`global_ba` are independent
+    // `BundleAdjustmentOptions` instances, so both are set here rather than
+    // through `options.mapper`. `global_ba`'s copy is inert
+    // (`adjust_global_bundle` never calls `add_variable_point`, see
+    // `BundleAdjustmentOptions::global`'s doc) but is set for consistency.
+    let local_ba_point_policy = match args.local_ba_point_policy.as_str() {
+        "colmap" => visloc_slam::colmap_incremental::LocalBaPointPolicy::Colmap,
+        "window" => visloc_slam::colmap_incremental::LocalBaPointPolicy::WindowOnly,
+        other => panic!("unknown --local-ba-point-policy {other} (colmap|window)"),
+    };
+    options.local_ba.local_ba_point_policy = local_ba_point_policy;
+    options.global_ba.local_ba_point_policy = local_ba_point_policy;
 
     fs::create_dir_all(&args.out_colmap).expect("failed to create --out-colmap directory");
 
@@ -111,10 +141,12 @@ fn main() {
 
     let mut log_lines: Vec<String> = vec![
         format!(
-            "colmap_incremental_mapper: manifest={} pairs_export={} random_seed={}",
+            "colmap_incremental_mapper: manifest={} pairs_export={} random_seed={} pose_solver={} local_ba_point_policy={}",
             args.manifest.display(),
             args.pairs_export.display(),
-            args.random_seed
+            args.random_seed,
+            args.pose_solver,
+            args.local_ba_point_policy,
         ),
         format!(
             "database: {} rigs, {} cameras, {} frames, {} images",

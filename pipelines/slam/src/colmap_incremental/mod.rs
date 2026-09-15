@@ -30,7 +30,9 @@ pub(crate) mod rig_ba_solver;
 pub(crate) mod test_support;
 pub mod types;
 
-pub use bundle_adjustment::{BundleAdjustmentConfig, BundleAdjustmentOptions, Gauge};
+pub use bundle_adjustment::{
+    BundleAdjustmentConfig, BundleAdjustmentOptions, Gauge, LocalBaPointPolicy,
+};
 pub use database_cache::{DatabaseCache, DatabaseCacheError};
 pub use incremental_triangulator::IncrementalTriangulator;
 pub use mapper::{IncrementalMapper, LocalBundleAdjustmentReport, Options as MapperOptions};

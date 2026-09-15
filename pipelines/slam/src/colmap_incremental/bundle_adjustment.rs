@@ -213,10 +213,38 @@ pub enum BaBackend {
     Legacy,
 }
 
+/// A/B switch for the "Deviation 3" pull-in behavior documented above
+/// (`AddPointToProblem`, `bundle_adjustment_ceres.cc:819-879`). Added after
+/// a 5k-frame real-data A/B (lead review) showed the literal COLMAP pull-in
+/// regressing ATE relative to the pre-pull-in snapshot at that scale (0.273m
+/// -> 0.699m holding the DLT pose solver fixed) despite this port's pull-in
+/// mechanics re-auditing clean against COLMAP line-for-line (see this
+/// module's `solve()` doc comment on the re-audit) — kept as a live A/B
+/// lever pending further investigation, not because a coding bug was found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LocalBaPointPolicy {
+    /// Faithful `AddPointToProblem` pull-in (this module's "Deviation 3"
+    /// fix): a point explicitly requested variable
+    /// (`BundleAdjustmentConfig::add_variable_point`) gets its *entire*
+    /// track pulled in, including observations from frames outside the
+    /// window (added with their pose held fixed).
+    #[default]
+    Colmap,
+    /// Pre-C2.6 behavior: a point is variable iff its *entire* track is
+    /// already inside `config.image_ids` (`track_fully_in_window`) or it is
+    /// explicitly variable *and* already fully in the window — i.e.
+    /// `add_variable_point` alone never expands a point's residual set
+    /// beyond the window. Matches this module's original (conservative)
+    /// "Deviation 3" simplification before this session's COLMAP-faithful
+    /// pull-in fix.
+    WindowOnly,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BundleAdjustmentOptions {
     pub max_num_iterations: usize,
     pub backend: BaBackend,
+    pub local_ba_point_policy: LocalBaPointPolicy,
 }
 
 impl BundleAdjustmentOptions {
@@ -225,13 +253,21 @@ impl BundleAdjustmentOptions {
         Self {
             max_num_iterations: 25,
             backend: BaBackend::default(),
+            local_ba_point_policy: LocalBaPointPolicy::default(),
         }
     }
     /// `kDefaultCeresGlobalMaxNumIterations` (`incremental_pipeline.cc:48`).
+    /// `local_ba_point_policy` is moot for global BA: `adjust_global_bundle`
+    /// never calls `add_variable_point` (every point's track is trivially
+    /// "fully in window" once every registered frame is in the config), so
+    /// the pull-in branch never fires there either way — kept in sync with
+    /// `local()` purely so a single CLI flag can set both without the field
+    /// being silently ignored for one of the two call sites.
     pub fn global() -> Self {
         Self {
             max_num_iterations: 50,
             backend: BaBackend::default(),
+            local_ba_point_policy: LocalBaPointPolicy::default(),
         }
     }
 }
@@ -255,6 +291,94 @@ fn sensor_from_rig_for_image(recon: &Reconstruction, image_id: ImageT) -> SE3 {
 /// point positions back into `recon`. Returns `true` iff the solve
 /// succeeded and produced a usable solution (mirrors
 /// `summary->IsSolutionUsable()`).
+///
+/// ## Pull-in re-audit (5k real-data regression, lead review)
+/// A 5k-frame real-data A/B showed `Colmap`'s literal pull-in regressing ATE
+/// relative to the pre-pull-in snapshot (holding the DLT pose solver fixed:
+/// 0.273m -> 0.699m; COLMAP itself: 0.123m at this scale). Re-audited every
+/// mechanical detail against COLMAP with fresh eyes; found no coding bug:
+/// - **(a) Which points are pulled in?** Only `config.VariablePoints()`
+///   (`bundle_adjustment_ceres.h:616-618`'s constructor loop calling
+///   `AddPointToProblem` for `config_.VariablePoints()`), i.e. only the
+///   caller-chosen set — `AdjustLocalBundle` populates it from its
+///   `point3D_ids` argument (the triangulator's `ModifiedPoints3D()`, *not*
+///   "every point observed by a window image"), filtered to
+///   `!point3D.HasError() || track.Length() <= 15`
+///   (`incremental_mapper.cc:1067-1080`, "make sure we refine all new and
+///   short-track 3D points, no matter if they are fully contained in the
+///   local image set or not" — pull-in for exactly these points is the
+///   documented *intent*, not a side effect). `mapper.rs::adjust_local_bundle`
+///   already reproduces this filter faithfully (its own `MAX_TRACK_LENGTH`
+///   constant) — confirmed unchanged by this session's work.
+/// - **(b) Must pulled-in images be registered?** `AddPointToProblem` never
+///   checks `HasPose()`/`IsRegistered()` explicitly — it relies on the
+///   invariant that a `Point3D`'s track only ever contains observations from
+///   currently-registered images (deregistration removes the observation,
+///   `DeRegisterFrameEvent`/`ObservationManager`). This port maintains the
+///   same invariant (`observation_manager.rs`'s deregister path removes
+///   track elements); a pulled-in image's frame is therefore always
+///   currently registered, but its **pose value may be stale** relative to
+///   the *last* global BA — this is true of COLMAP's own pull-in too (it
+///   reads `image.FramePtr()->RigFromWorld()`, whatever is currently
+///   stored, `bundle_adjustment_ceres.cc:852,863`), so staleness itself is
+///   not a deviation from COLMAP, but see the hypothesis below.
+/// - **(c) Do pulled-in images contribute their *other* residuals?** No —
+///   `AddPointToProblem` adds exactly one residual per track element (the
+///   *specific* `(point3D_id, track_el.image_id)` observation), never the
+///   pulled-in image's other 2D points against other 3D points
+///   (`bundle_adjustment_ceres.cc:839-878`). This port's pull-in loop adds
+///   exactly one `BaRigObservation` per track element for the same reason —
+///   confirmed matching.
+/// - **(d) How is the pulled-in image's pose held constant?** Not via
+///   `SetParameterBlockConstant` on an existing block — the pose is never a
+///   Ceres parameter for that residual at all; `ReprojErrorConstantPoseCostFunctor`
+///   bakes `cam_from_world` as plain data (`bundle_adjustment_ceres.cc:852-859`,
+///   `:865-870`). This port's `ba.add_pose(..); ba.fix_pose(..)` is the
+///   bit-for-bit equivalent given `bundle.rs`'s existing (pre-dating this
+///   port) fixed-pose handling: a fixed frame is excluded from
+///   `free_frame_slot` entirely (`rig_ba_solver.rs`'s `Problem::free_frame_slot`),
+///   so it never gets a column/row in the reduced camera system — confirmed
+///   by `native_constant_frames_and_points_unchanged` and this session's new
+///   `local_ba_pulls_in_out_of_window_observation_for_variable_point` test
+///   (outside pose asserted bit-identical after solve).
+/// - **(e) Schur elimination when one fixed frame is shared by many pulled-in
+///   points?** Re-checked `rig_ba_solver.rs::linearize_point`: a fixed
+///   frame's observations still fold into `hpp`/`bp` (point block,
+///   unconditional) but never receive a `bc`/`diag`/`hcp` slot (guarded by
+///   `target_frames.binary_search`, and `target_frames` is built from
+///   *free* frames only — `point_free_frames`, `build_reduced_system_pattern`).
+///   Multiple points sharing the same fixed frame each independently fold
+///   their own contribution into their own `hpp`/`bp`; there is no shared,
+///   frame-indexed accumulator a fixed frame could corrupt. No indexing bug
+///   found.
+/// - **Bug hunt (task 3):** re-checked for (i) double-adding a window-image
+///   observation via pull-in — guarded by `config.image_ids.contains(...)`
+///   `continue`, confirmed exercised by the existing test; (ii) wrong
+///   `sensor_from_rig` for the pulled-in image — uses the same
+///   `sensor_from_rig_for_image` helper as every other call site; (iii) a
+///   pulled-in frame being eligible for `Gauge::TwoFramesFromWorld` — that
+///   gauge is only used by `adjust_global_bundle`, which never populates
+///   `variable_point3d_ids` at all (every point's track is trivially "fully
+///   in window" there), so pull-in structurally cannot interact with it;
+///   `Gauge::ThreePoints` (used by local BA) selects from `added_points`
+///   filtered to not-yet-fixed, matching COLMAP's own "any unfixed point
+///   qualifies" `FixGaugeWithThreePoints` rule exactly. **No coding bug
+///   found in (a)-(e) or the bug-hunt list.**
+/// - **Leading hypothesis (untested against real data, per instructions):**
+///   the regression is a genuine large-scale interaction between two
+///   *independently* faithful, already-documented pieces: pulling in a
+///   revisited old point's full (possibly wide-track, temporally-distant)
+///   track as hard constraints compounds when combined with this module's
+///   own **deviation 4** (whole-pose/whole-point `Gauge::ThreePoints`
+///   gauge-fixing is strictly more rigid than COLMAP's per-DoF
+///   `SetParameterization`) and **deviation 5**/6 (this port's LM
+///   convergence criteria differ from Ceres', plausibly letting a
+///   pulled-in-biased local window run further from its window-only optimum
+///   in the allotted iterations than COLMAP's `gradient_tolerance=1e-4`
+///   Ceres solve would). Both are pre-existing, independently-documented
+///   deviations, not introduced by the pull-in fix itself — flagged for
+///   follow-up, not fixed here. [`LocalBaPointPolicy`] is the requested A/B
+///   lever pending the lead's own real-data A/B.
 pub fn solve(
     options: &BundleAdjustmentOptions,
     config: &BundleAdjustmentConfig,
@@ -337,13 +461,23 @@ pub fn solve(
             .track
             .iter()
             .all(|el| config.image_ids.contains(&el.image_id));
+        // `LocalBaPointPolicy::WindowOnly` (see its doc for why this switch
+        // exists) reverts to the pre-pull-in rule: an explicit
+        // `add_variable_point` request only takes effect if the track is
+        // *already* fully in the window: `Colmap` (COLMAP's literal rule)
+        // honors it unconditionally, later pulling in the rest of the track.
+        let pull_in_enabled = options.local_ba_point_policy == LocalBaPointPolicy::Colmap;
         let variable = !config.constant_point3d_ids.contains(&point3d_id)
-            && (config.variable_point3d_ids.contains(&point3d_id) || track_fully_in_window);
+            && (track_fully_in_window
+                || (pull_in_enabled && config.variable_point3d_ids.contains(&point3d_id)));
         if !variable {
             ba.fix_landmark(point3d_id);
             continue;
         }
-        if config.variable_point3d_ids.contains(&point3d_id) && !track_fully_in_window {
+        if pull_in_enabled
+            && config.variable_point3d_ids.contains(&point3d_id)
+            && !track_fully_in_window
+        {
             // `AddPointToProblem` (`bundle_adjustment_ceres.cc:819-879`):
             // pull in every remaining track observation from images outside
             // `config.Images()`, with that image's pose baked in as fixed
@@ -775,5 +909,255 @@ mod tests {
             &before_anchor0,
             "gauge-anchor frame moved"
         );
+    }
+
+    /// Total squared pixel reprojection error over exactly `window_images`'
+    /// own observations (never a pulled-in residual), evaluated at `recon`'s
+    /// *current* state — used by
+    /// `local_ba_point_policy_matches_colmap_local_bundle_scenario` to
+    /// compare `Colmap` vs `WindowOnly` on a common, policy-independent cost.
+    fn window_reprojection_cost(recon: &Reconstruction, window_images: &[ImageT]) -> f64 {
+        let mut cost = 0.0;
+        for &iid in window_images {
+            let image = recon.image(iid);
+            let rig_from_world = recon.frame(image.frame_id).rig_from_world().clone();
+            let sensor_from_rig = sensor_from_rig_for_image(recon, iid);
+            let camera = recon.camera(image.camera_id);
+            for point2d in &image.points2d {
+                let Some(pid) = point2d.point3d_id else {
+                    continue;
+                };
+                let xyz = recon.point3d(pid).xyz;
+                let p_rig = rig_from_world.transform_point(&xyz);
+                let p_sensor = sensor_from_rig.transform_point(&p_rig);
+                cost += match camera.project(&p_sensor) {
+                    Some(proj) => (proj - point2d.xy).norm_squared(),
+                    None => 1.0e6,
+                };
+            }
+        }
+        cost
+    }
+
+    /// C2.6 task (lead review after the 5k real-data A/B): a small
+    /// `AdjustLocalBundle`-shaped scenario — 12 frames, a 6-frame local
+    /// window, points seen both inside and outside the window — exercising
+    /// [`LocalBaPointPolicy::Colmap`] vs [`LocalBaPointPolicy::WindowOnly`]
+    /// side by side from an identical starting state. Checks: (1) frames
+    /// outside the window stay bit-identical under *both* policies (never a
+    /// free parameter either way — `Colmap` adds them fixed for pull-in,
+    /// `WindowOnly` never touches them at all); (2) a point explicitly
+    /// requested variable with a track leaving the window converges close to
+    /// ground truth under `Colmap` (pull-in sees its whole track) but stays
+    /// *exactly* at its perturbed value under `WindowOnly` (falls back to
+    /// constant — the pre-C2.6 policy); (3) a point whose track is already
+    /// fully inside the window is unaffected by the policy switch either
+    /// way; (4) on this noiseless, fully-consistent synthetic scene (a
+    /// single shared ground truth, so both policies' problems share the same
+    /// zero-cost global optimum), `Colmap`'s final window-only reprojection
+    /// cost is not worse than `WindowOnly`'s.
+    #[test]
+    fn local_ba_point_policy_matches_colmap_local_bundle_scenario() {
+        let scene = build_synthetic_rig_scene(12, 11);
+        let window_frames: [u64; 6] = [3, 4, 5, 6, 7, 8];
+        let outside_frames: [u64; 6] = [0, 1, 2, 9, 10, 11];
+
+        let build_recon = || {
+            let mut recon = reconstruction_from_cache(&scene.db);
+            for (&frame_id, gt) in &scene.ground_truth_rig_from_world {
+                recon.frame_mut(frame_id).set_rig_from_world(gt.clone());
+                recon.register_frame(frame_id);
+            }
+            recon
+        };
+        let track_for = |frames: &[u64], idx: usize| -> Vec<TrackElement> {
+            let mut track = Vec::new();
+            for &f in frames {
+                let (i1, i2) = scene.images_per_frame[f as usize];
+                track.push(TrackElement {
+                    image_id: i1,
+                    point2d_idx: idx,
+                });
+                track.push(TrackElement {
+                    image_id: i2,
+                    point2d_idx: idx,
+                });
+            }
+            track
+        };
+        let all_frames: Vec<u64> = (0u64..12).collect();
+
+        // 3 "gauge fodder" points: track confined to 2 window frames, added
+        // *before* the real test points so `Gauge::ThreePoints`'s smallest-id
+        // scan (`added_points` is a `BTreeSet`, ascending numeric order,
+        // matching COLMAP's own "any unfixed point qualifies"
+        // `FixGaugeWithThreePoints`) consumes exactly these 3, leaving every
+        // other variable point below genuinely free to assert on.
+        let noise = Vector3::new(0.02, -0.015, 0.01);
+        let mut recon = build_recon();
+        let mut gauge_fodder = Vec::new();
+        for j in 0..3 {
+            let gt = scene.ground_truth_points[j];
+            let id = recon.add_point3d(gt, track_for(&[4, 5], j));
+            gauge_fodder.push(id);
+        }
+        // 4 points with a *full* 12-frame track, explicitly requested
+        // variable (mirrors a revisited old landmark newly re-observed by
+        // the just-registered frame) — the pull-in-vs-constant contrast.
+        let mut p_pulled = Vec::new();
+        let mut p_pulled_gt = Vec::new();
+        for j in 3..7 {
+            let gt = scene.ground_truth_points[j];
+            let id = recon.add_point3d(gt + noise, track_for(&all_frames, j));
+            p_pulled.push(id);
+            p_pulled_gt.push(gt);
+        }
+        // 2 points whose track never leaves the window (freshly triangulated
+        // by the local window itself) — variable under both policies.
+        let mut p_window_only = Vec::new();
+        let mut p_window_only_gt = Vec::new();
+        for j in 7..9 {
+            let gt = scene.ground_truth_points[j];
+            let id = recon.add_point3d(gt + noise, track_for(&window_frames, j));
+            p_window_only.push(id);
+            p_window_only_gt.push(gt);
+        }
+        // Remaining points: full 12-frame track, never requested variable —
+        // stay constant under both policies, providing direct (unconditional
+        // `bc`/`diag`) constraints on the window frames' poses.
+        let mut p_control = Vec::new();
+        for j in 9..scene.ground_truth_points.len() {
+            let gt = scene.ground_truth_points[j];
+            let id = recon.add_point3d(gt, track_for(&all_frames, j));
+            p_control.push(id);
+        }
+
+        let mut config = BundleAdjustmentConfig::new();
+        for &f in &window_frames {
+            config.add_frame(&recon, f);
+        }
+        config.fix_gauge(Gauge::ThreePoints);
+        for &id in gauge_fodder.iter().chain(&p_pulled).chain(&p_window_only) {
+            config.add_variable_point(id);
+        }
+        let window_images: Vec<ImageT> = window_frames
+            .iter()
+            .flat_map(|&f| {
+                let (i1, i2) = scene.images_per_frame[f as usize];
+                [i1, i2]
+            })
+            .collect();
+
+        let outside_poses_before: Vec<_> = outside_frames
+            .iter()
+            .map(|&f| recon.frame(f).rig_from_world().clone())
+            .collect();
+
+        let mut options = BundleAdjustmentOptions::global();
+        options.max_num_iterations = 60;
+
+        // --- Colmap policy ---
+        options.local_ba_point_policy = LocalBaPointPolicy::Colmap;
+        assert!(
+            solve(&options, &config, &mut recon),
+            "Colmap-policy solve failed"
+        );
+        for (&f, before) in outside_frames.iter().zip(&outside_poses_before) {
+            assert_eq!(
+                recon.frame(f).rig_from_world(),
+                before,
+                "outside frame {f} moved under Colmap policy"
+            );
+        }
+        for (j, &pid) in p_pulled.iter().enumerate() {
+            let err = (recon.point3d(pid).xyz - p_pulled_gt[j]).norm();
+            assert!(
+                err < 0.01,
+                "Colmap policy: pulled-in point {j} did not converge (error {err})"
+            );
+        }
+        for (j, &pid) in p_window_only.iter().enumerate() {
+            let err = (recon.point3d(pid).xyz - p_window_only_gt[j]).norm();
+            assert!(
+                err < 0.01,
+                "Colmap policy: window-only point {j} did not converge (error {err})"
+            );
+        }
+        let colmap_cost = window_reprojection_cost(&recon, &window_images);
+
+        // --- WindowOnly policy, from an identical starting state ---
+        let mut recon2 = build_recon();
+        for j in 0..3 {
+            recon2.add_point3d(scene.ground_truth_points[j], track_for(&[4, 5], j));
+        }
+        for j in 3..7 {
+            recon2.add_point3d(
+                scene.ground_truth_points[j] + noise,
+                track_for(&all_frames, j),
+            );
+        }
+        for j in 7..9 {
+            recon2.add_point3d(
+                scene.ground_truth_points[j] + noise,
+                track_for(&window_frames, j),
+            );
+        }
+        for j in 9..scene.ground_truth_points.len() {
+            recon2.add_point3d(scene.ground_truth_points[j], track_for(&all_frames, j));
+        }
+        options.local_ba_point_policy = LocalBaPointPolicy::WindowOnly;
+        assert!(
+            solve(&options, &config, &mut recon2),
+            "WindowOnly-policy solve failed"
+        );
+        for &f in &outside_frames {
+            assert_eq!(
+                recon2.frame(f).rig_from_world(),
+                recon.frame(f).rig_from_world(),
+                "outside frame {f} moved under WindowOnly policy"
+            );
+        }
+        for (j, &pid) in p_pulled.iter().enumerate() {
+            let perturbed = p_pulled_gt[j] + noise;
+            assert_eq!(
+                recon2.point3d(pid).xyz,
+                perturbed,
+                "WindowOnly policy: out-of-window point {j} should stay exactly constant"
+            );
+        }
+        for (j, &pid) in p_window_only.iter().enumerate() {
+            let err = (recon2.point3d(pid).xyz - p_window_only_gt[j]).norm();
+            assert!(
+                err < 0.01,
+                "WindowOnly policy: window-only point {j} did not converge (error {err})"
+            );
+        }
+        let window_only_cost = window_reprojection_cost(&recon2, &window_images);
+
+        // `WindowOnly` cannot reach zero window-only cost here: `p_pulled`'s
+        // points stay frozen at their perturbed positions (constant), yet
+        // *are* observed by window images (their track spans all 12
+        // frames), so those specific residuals carry irreducible error the
+        // window frames' poses cannot compensate away. `Colmap` *can* move
+        // those points (pull-in sees their whole track), so on this
+        // noiseless, single-ground-truth scene it reaches (about) zero
+        // window-only cost — strictly better than (never worse than)
+        // `WindowOnly`'s.
+        assert!(
+            colmap_cost <= window_only_cost + 1.0e-6,
+            "Colmap policy window-only cost {colmap_cost} exceeds WindowOnly's {window_only_cost}"
+        );
+        assert!(
+            colmap_cost < 1.0e-6,
+            "Colmap policy window-only cost {colmap_cost} not near zero"
+        );
+        assert!(
+            window_only_cost > 1.0,
+            "expected WindowOnly's frozen out-of-window points to leave a non-trivial \
+             window-only residual (cost {window_only_cost}) — otherwise this test isn't \
+             exercising the intended contrast"
+        );
+
+        let _ = p_control; // kept alive: constrains the window frames above.
     }
 }
