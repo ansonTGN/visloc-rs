@@ -3514,8 +3514,8 @@ impl WindowProblem {
     /// owned candidate or the prepared view; never to base linearization rows.
     fn trial_objective_f32(
         &self,
-        nav: impl Fn(usize, bool) -> Option<BasaltNavState>,
-        parameter: impl Fn(usize) -> Option<InverseDistanceLandmark>,
+        nav: impl Fn(usize, bool) -> Option<BasaltNavState> + Sync,
+        parameter: impl Fn(usize) -> Option<InverseDistanceLandmark> + Sync,
         prior_cost: f64,
     ) -> Result<f64, LmFailure> {
         let ranks = self
@@ -3552,31 +3552,53 @@ impl WindowProblem {
                 }
             }
         }
+        // Each observation's reprojection cost depends only on its own
+        // landmark/host/target data (all read through `self`, `nav`, and
+        // `parameter`, never through another observation's result), so
+        // every observation's cost is computed in parallel below. The
+        // items are collected from `observations` (a `BTreeMap`, so already
+        // in the same deterministic `(rank, target, track_id)` key order
+        // the serial loop iterated in) into a `Vec` first specifically so
+        // that order survives into the results `Vec` -- `par_iter().map()`
+        // preserves input order -- and the fold immediately afterward adds
+        // each `Some` cost into `visual` serially, in that same order, via
+        // the same `+=` the loop used. A failing item's error is still
+        // surfaced at the same position in that order (via `cost?` before
+        // the corresponding `visual +=` would have run), matching the
+        // original loop's early-return exactly.
+        let ordered_observations: Vec<_> = observations.into_iter().collect();
+        let observation_costs: Vec<Result<Option<f32>, LmFailure>> = ordered_observations
+            .par_iter()
+            .map(|((rank, target, _), (index, observation))| {
+                let landmark = &self.landmarks[*index];
+                let host = self.trial_host_order[*rank];
+                let from = nav(landmark.anchor_state_index, true).ok_or(LmFailure::LinearSolve)?;
+                let to = nav(observation.state_index, true).ok_or(LmFailure::LinearSolve)?;
+                let point = parameter(*index).ok_or(LmFailure::LinearSolve)?;
+                let matrix = super::aom::upstream_trial_transform_f32(
+                    &from.imu_to_world,
+                    &to.imu_to_world,
+                    &self.camera_to_imu(host.1).ok_or(LmFailure::LinearSolve)?,
+                    &self.camera_to_imu(target.1).ok_or(LmFailure::LinearSolve)?,
+                    host == *target,
+                );
+                let result = super::aom::upstream_trial_observation_f32(
+                    self.camera_model(target.1).ok_or(LmFailure::LinearSolve)?,
+                    matrix,
+                    Vector3::new(
+                        point.direction.xy.x as f32,
+                        point.direction.xy.y as f32,
+                        point.inverse_distance as f32,
+                    ),
+                    nalgebra::Vector2::new(observation.pixel.x as f32, observation.pixel.y as f32),
+                    FactorConfig::default(),
+                );
+                Ok(result.map(|(_, cost)| cost))
+            })
+            .collect();
         let mut visual = 0.0_f32;
-        for ((rank, target, _), (index, observation)) in observations {
-            let landmark = &self.landmarks[index];
-            let host = self.trial_host_order[rank];
-            let from = nav(landmark.anchor_state_index, true).ok_or(LmFailure::LinearSolve)?;
-            let to = nav(observation.state_index, true).ok_or(LmFailure::LinearSolve)?;
-            let point = parameter(index).ok_or(LmFailure::LinearSolve)?;
-            let matrix = super::aom::upstream_trial_transform_f32(
-                &from.imu_to_world,
-                &to.imu_to_world,
-                &self.camera_to_imu(host.1).ok_or(LmFailure::LinearSolve)?,
-                &self.camera_to_imu(target.1).ok_or(LmFailure::LinearSolve)?,
-                host == target,
-            );
-            if let Some((_, cost)) = super::aom::upstream_trial_observation_f32(
-                self.camera_model(target.1).ok_or(LmFailure::LinearSolve)?,
-                matrix,
-                Vector3::new(
-                    point.direction.xy.x as f32,
-                    point.direction.xy.y as f32,
-                    point.inverse_distance as f32,
-                ),
-                nalgebra::Vector2::new(observation.pixel.x as f32, observation.pixel.y as f32),
-                FactorConfig::default(),
-            ) {
+        for cost in observation_costs {
+            if let Some(cost) = cost? {
                 visual += cost;
             }
         }
