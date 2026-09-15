@@ -254,20 +254,51 @@ pub enum LocalBaPointPolicy {
     VariableWithoutPullIn,
 }
 
+/// Port of `CeresBundleAdjustmentOptions::LossFunctionType`
+/// (`bundle_adjustment_ceres.h`) restricted to the three variants COLMAP's
+/// control actually reaches (`TRIVIAL`, `SOFT_L1`, `CAUCHY` — `HUBER` is
+/// never selected by any call site this port implements, see [`solve`]'s
+/// doc for the full per-call-site audit, so it is not ported). The `f64`
+/// payload on `SoftL1`/`Cauchy` is Ceres' loss-function `scale` parameter
+/// `a` (`CeresBundleAdjustmentOptions::loss_function_scale`, or
+/// `AbsolutePoseRefinementOptions::loss_function_scale` for the
+/// GP3P-refinement call site — see [`super::rig_ba_solver::evaluate_loss`]
+/// for where `a` enters the `rho(s)` formula). Evaluated/applied by
+/// [`super::rig_ba_solver`]'s `Corrector` (a direct port of Ceres'
+/// `internal/ceres/corrector.{h,cc}`); see that module's doc.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum LossFunction {
+    #[default]
+    Trivial,
+    SoftL1(f64),
+    Cauchy(f64),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BundleAdjustmentOptions {
     pub max_num_iterations: usize,
     pub backend: BaBackend,
     pub local_ba_point_policy: LocalBaPointPolicy,
+    pub loss_function: LossFunction,
 }
 
 impl BundleAdjustmentOptions {
     /// `kDefaultCeresLocalMaxNumIterations` (`incremental_pipeline.cc:47`).
+    /// `loss_function`: `LocalBundleAdjustment()` sets `SOFT_L1` with
+    /// `loss_function_scale = 1.0` (`incremental_pipeline.cc:217-219`).
+    /// Callers driving `IterativeLocalRefinement`'s multi-iteration loop
+    /// (`mapper.rs::iterative_local_refinement`) must downgrade this to
+    /// `Trivial` after the first iteration themselves — see that function's
+    /// doc for the exact COLMAP citation
+    /// (`sfm/incremental_mapper.cc:1277-1281`, "Only use robust cost
+    /// function for first iteration"); `local()` alone always returns the
+    /// first-iteration (robust) configuration.
     pub fn local() -> Self {
         Self {
             max_num_iterations: 25,
             backend: BaBackend::default(),
             local_ba_point_policy: LocalBaPointPolicy::default(),
+            loss_function: LossFunction::SoftL1(1.0),
         }
     }
     /// `kDefaultCeresGlobalMaxNumIterations` (`incremental_pipeline.cc:48`).
@@ -277,11 +308,17 @@ impl BundleAdjustmentOptions {
     /// the pull-in branch never fires there either way — kept in sync with
     /// `local()` purely so a single CLI flag can set both without the field
     /// being silently ignored for one of the two call sites.
+    /// `loss_function`: `GlobalBundleAdjustment()` sets `TRIVIAL`
+    /// (`incremental_pipeline.cc:267-268`) — every `IterativeGlobalRefinement`
+    /// iteration uses the *same* `ba_options` unchanged
+    /// (`sfm/incremental_mapper.cc:1286-1317`; unlike local refinement there
+    /// is no per-iteration loss switch for global BA).
     pub fn global() -> Self {
         Self {
             max_num_iterations: 50,
             backend: BaBackend::default(),
             local_ba_point_policy: LocalBaPointPolicy::default(),
+            loss_function: LossFunction::Trivial,
         }
     }
 }
@@ -584,8 +621,29 @@ pub fn solve(
     let n_lm = ba.landmarks.len();
     let n_fixed_lm = ba.fixed_landmarks.len();
     let solved = match options.backend {
-        BaBackend::Legacy => ba.optimize(&ba_config),
-        BaBackend::Native => super::rig_ba_solver::optimize(&mut ba, options.max_num_iterations),
+        BaBackend::Legacy => {
+            // `Legacy` (`bundle::BundleAdjustment::optimize`) predates
+            // `LossFunction` and does not implement Ceres' `Corrector`
+            // (`super::rig_ba_solver`'s port) — it always solves the
+            // trivial-loss problem regardless of `options.loss_function`.
+            // Not wired up: `Legacy` is a regression/parity escape hatch,
+            // never this port's default backend (`BaBackend::default() ==
+            // Native`), and every test/call site that needs robust loss
+            // uses `Native`.
+            if options.loss_function != LossFunction::Trivial {
+                eprintln!(
+                    "BA_SOLVE WARNING backend=Legacy loss_function={:?} is ignored \
+                     (Legacy is trivial-loss only); use backend=Native for robust loss",
+                    options.loss_function
+                );
+            }
+            ba.optimize(&ba_config)
+        }
+        BaBackend::Native => super::rig_ba_solver::optimize(
+            &mut ba,
+            options.max_num_iterations,
+            options.loss_function,
+        ),
     };
     let Ok(result) = solved else {
         return false;

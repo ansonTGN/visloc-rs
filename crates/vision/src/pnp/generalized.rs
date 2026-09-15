@@ -274,12 +274,44 @@ impl GeneralizedDltPoseEstimator {
 }
 
 /// Shared-rig nonlinear pose refiner.
+///
+/// Port of COLMAP's post-RANSAC generalized-pose refinement,
+/// `RefineGeneralizedAbsolutePose` (`estimators/generalized_pose.cc:280-431`),
+/// as called from `RegisterNextGeneralFrame`
+/// (`sfm/incremental_mapper.cc:601-641`) — the routine this crate's
+/// `GeneralizedPnPRansac` uses this refiner for. That routine hardcodes a
+/// Cauchy loss unconditionally (`generalized_pose.cc:298-299`:
+/// `std::make_unique<ceres::CauchyLoss>(options.loss_function_scale)` — there
+/// is no `Trivial`/`SoftL1` option at this call site to mirror, unlike
+/// `colmap_incremental::bundle_adjustment::LossFunction`'s BA path), so
+/// `loss_scale` here is *always* applied as a Cauchy loss, not a switchable
+/// enum. `AbsolutePoseRefinementOptions::loss_function_scale`'s default is
+/// `1.0` (`estimators/pose.h:73`), reproduced by
+/// [`GeneralizedGaussNewtonPoseRefiner::default`].
+///
+/// This refiner computes its Jacobian by finite differences on the *raw*
+/// (loss-free) stacked residual vector (unchanged from before this port), so
+/// the robust-loss correction is applied as a distinct step afterward,
+/// per-observation (one `[x,y]` sub-block per correspondence, matching
+/// Ceres' per-residual-block granularity exactly): see
+/// [`apply_robust_loss`], a block-local port of `ceres::internal::Corrector`
+/// (`internal/ceres/corrector.cc`) — the same algorithm as
+/// `colmap_incremental::rig_ba_solver::Corrector` (that module's doc has the
+/// full citation), reimplemented here directly on `DVector`/`DMatrix`
+/// row-slices rather than shared across crates, since this refiner's problem
+/// (stacked finite-difference Jacobian, not a per-observation analytic
+/// Jacobian folded into a Schur-complement system) has a different enough
+/// shape that sharing the fixed-size `SMatrix`-based type from
+/// `rig_ba_solver.rs` would need its own adapter either way.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GeneralizedGaussNewtonPoseRefiner {
     pub iterations: usize,
     pub damping: f64,
     pub finite_difference_epsilon: f64,
     pub minimum_error_reduction: f64,
+    /// Cauchy loss scale `a` (`AbsolutePoseRefinementOptions::loss_function_scale`,
+    /// `estimators/pose.h:73`, default `1.0`).
+    pub loss_scale: f64,
 }
 
 impl Default for GeneralizedGaussNewtonPoseRefiner {
@@ -289,6 +321,7 @@ impl Default for GeneralizedGaussNewtonPoseRefiner {
             damping: 1.0e-6,
             finite_difference_epsilon: 1.0e-6,
             minimum_error_reduction: 1.0e-10,
+            loss_scale: 1.0,
         }
     }
 }
@@ -306,14 +339,16 @@ impl GeneralizedGaussNewtonPoseRefiner {
             || self.damping < 0.0
             || !self.finite_difference_epsilon.is_finite()
             || self.finite_difference_epsilon <= 0.0
+            || !self.loss_scale.is_finite()
+            || self.loss_scale <= 0.0
         {
             return None;
         }
         let mut pose = initial_pose.clone();
-        let mut best_error = mean_squared_error(rig, &pose, correspondences)?;
+        let mut best_cost = robust_cost(rig, &pose, correspondences, self.loss_scale)?;
         for _ in 0..self.iterations {
-            let residual = residuals(rig, &pose, correspondences)?;
-            let mut jacobian = DMatrix::<f64>::zeros(residual.len(), 6);
+            let raw_residual = residuals(rig, &pose, correspondences)?;
+            let mut jacobian = DMatrix::<f64>::zeros(raw_residual.len(), 6);
             for parameter in 0..6 {
                 let mut delta = DVector::<f64>::zeros(6);
                 delta[parameter] = self.finite_difference_epsilon;
@@ -321,9 +356,14 @@ impl GeneralizedGaussNewtonPoseRefiner {
                 let perturbed = residuals(rig, &perturbed_pose, correspondences)?;
                 jacobian.set_column(
                     parameter,
-                    &((perturbed - &residual) / self.finite_difference_epsilon),
+                    &((perturbed - &raw_residual) / self.finite_difference_epsilon),
                 );
             }
+            // Robust-loss correction, per observation block — mutates both
+            // in place (Jacobian first, from the still-raw residual, then
+            // the residual itself; see `apply_robust_loss`'s doc).
+            let mut residual = raw_residual;
+            apply_robust_loss(self.loss_scale, &mut residual, &mut jacobian);
             let transpose = jacobian.transpose();
             let mut hessian = &transpose * &jacobian;
             for diagonal in 0..6 {
@@ -335,16 +375,103 @@ impl GeneralizedGaussNewtonPoseRefiner {
                 break;
             }
             let candidate = perturb_pose(&pose, &step);
-            let Some(candidate_error) = mean_squared_error(rig, &candidate, correspondences) else {
+            let Some(candidate_cost) =
+                robust_cost(rig, &candidate, correspondences, self.loss_scale)
+            else {
                 break;
             };
-            if candidate_error + self.minimum_error_reduction >= best_error {
+            if candidate_cost + self.minimum_error_reduction >= best_cost {
                 break;
             }
             pose = candidate;
-            best_error = candidate_error;
+            best_cost = candidate_cost;
         }
         Some(pose)
+    }
+}
+
+/// `rho(s), rho'(s), rho''(s)` for `ceres::CauchyLoss` — port of
+/// `CauchyLoss::Evaluate` (`internal/ceres/loss_function.cc:77-84`),
+/// `b=a²,c=1/b` from `include/ceres/loss_function.h:207-217`. Identical
+/// formula to `colmap_incremental::rig_ba_solver::evaluate_loss`'s
+/// `LossFunction::Cauchy` arm; duplicated here (rather than shared) since
+/// this crate (`visloc-vision`) does not depend on `visloc-slam`.
+#[inline]
+fn cauchy_loss(scale: f64, s: f64) -> [f64; 3] {
+    let b = scale * scale;
+    let c = 1.0 / b;
+    let sum = 1.0 + s * c;
+    let inv = 1.0 / sum;
+    let rho0 = b * sum.ln();
+    let rho1 = inv.max(f64::MIN_POSITIVE);
+    let rho2 = -c * (inv * inv);
+    [rho0, rho1, rho2]
+}
+
+/// `Σ rho(s_i)` over every observation's own squared residual norm
+/// `s_i = r_i.x² + r_i.y²` — the robustified analog of `mean_squared_error`,
+/// matching Ceres' `cost = Σ 0.5·rho(s_i)` convention up to the constant
+/// `0.5`/`N` factors (irrelevant here: only used to compare a candidate
+/// step's cost against the current best, `residual_block.cc:161-168`).
+fn robust_cost(
+    rig: &GeneralizedCameraRig,
+    pose: &Pose,
+    correspondences: &[GeneralizedCorrespondence2D3D],
+    loss_scale: f64,
+) -> Option<f64> {
+    let r = residuals(rig, pose, correspondences)?;
+    let num_obs = r.len() / 2;
+    let mut cost = 0.0;
+    for i in 0..num_obs {
+        let s = r[2 * i] * r[2 * i] + r[2 * i + 1] * r[2 * i + 1];
+        cost += cauchy_loss(loss_scale, s)[0];
+    }
+    Some(cost)
+}
+
+/// Block-local port of `ceres::internal::Corrector`
+/// (`internal/ceres/corrector.cc:41-155`; see
+/// `colmap_incremental::rig_ba_solver::Corrector`'s doc for the full
+/// algorithm citation and the exact call-order/cost-convention rationale
+/// this mirrors, `residual_block.cc:161-197`) applied independently to each
+/// `[x,y]` observation sub-block of `residual`/`jacobian` (rows `2i,2i+1`) —
+/// i.e. at the same per-residual-block granularity Ceres itself uses,
+/// despite `jacobian` being one finite-difference-assembled `2N×6` matrix
+/// here rather than N separate analytic `2×6` blocks. Mutates both in place;
+/// `jacobian`'s correction uses the *pre-correction* residual values (must
+/// run first, matching Ceres), so `residual` is corrected last.
+fn apply_robust_loss(loss_scale: f64, residual: &mut DVector<f64>, jacobian: &mut DMatrix<f64>) {
+    let num_obs = residual.len() / 2;
+    let ncols = jacobian.ncols();
+    for i in 0..num_obs {
+        let r0 = residual[2 * i];
+        let r1 = residual[2 * i + 1];
+        let s = r0 * r0 + r1 * r1;
+        let rho = cauchy_loss(loss_scale, s);
+        let sqrt_rho1 = rho[1].max(0.0).sqrt();
+        let (residual_scaling, alpha_sq_norm) = if s == 0.0 || rho[2] <= 0.0 {
+            (sqrt_rho1, 0.0)
+        } else {
+            let d = 1.0 + 2.0 * s * rho[2] / rho[1];
+            let alpha = 1.0 - d.sqrt();
+            (sqrt_rho1 / (1.0 - alpha), alpha / s)
+        };
+        if alpha_sq_norm == 0.0 {
+            for c in 0..ncols {
+                jacobian[(2 * i, c)] *= sqrt_rho1;
+                jacobian[(2 * i + 1, c)] *= sqrt_rho1;
+            }
+        } else {
+            for c in 0..ncols {
+                let j0 = jacobian[(2 * i, c)];
+                let j1 = jacobian[(2 * i + 1, c)];
+                let r_transpose_j = r0 * j0 + r1 * j1;
+                jacobian[(2 * i, c)] = sqrt_rho1 * (j0 - alpha_sq_norm * r0 * r_transpose_j);
+                jacobian[(2 * i + 1, c)] = sqrt_rho1 * (j1 - alpha_sq_norm * r1 * r_transpose_j);
+            }
+        }
+        residual[2 * i] *= residual_scaling;
+        residual[2 * i + 1] *= residual_scaling;
     }
 }
 
@@ -721,6 +848,12 @@ fn score_pose(
     }
 }
 
+/// Trivial-loss mean squared reprojection error — only used by
+/// `tests::nonlinear_refinement_reduces_joint_sensor_error` to report a
+/// loss-independent before/after error metric; [`GeneralizedGaussNewtonPoseRefiner::refine_pose`]
+/// itself now uses [`robust_cost`] (Cauchy-weighted) since it always applies
+/// a robust loss, see that struct's doc.
+#[cfg(test)]
 fn mean_squared_error(
     rig: &GeneralizedCameraRig,
     pose: &Pose,

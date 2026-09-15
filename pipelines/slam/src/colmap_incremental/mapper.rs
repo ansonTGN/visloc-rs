@@ -903,6 +903,15 @@ impl IncrementalMapper {
     /// control's steady-state loss exactly per §1.6, so there is nothing to
     /// switch away from).
     #[allow(clippy::too_many_arguments)] // mirrors the COLMAP signature
+    /// Port of `IterativeLocalRefinement` (`.cc:1248-1284`). C2.7: mirrors
+    /// `custom_ba_options.ceres->loss_function_type =
+    /// CeresBundleAdjustmentOptions::LossFunctionType::TRIVIAL;`
+    /// (`sfm/incremental_mapper.cc:1277-1281`, "Only use robust cost
+    /// function for first iteration") — `ba_options` (the caller-supplied
+    /// `BundleAdjustmentOptions::local()`, `LossFunction::SoftL1(1.0)` by
+    /// default) is used as-is for the first iteration; every subsequent
+    /// iteration of this same call downgrades to `LossFunction::Trivial`,
+    /// exactly like COLMAP's per-call-site `custom_ba_options` copy.
     pub fn iterative_local_refinement(
         &mut self,
         max_num_refinements: usize,
@@ -914,12 +923,13 @@ impl IncrementalMapper {
         graph: &CorrespondenceGraph,
         image_id: ImageT,
     ) {
+        let mut custom_ba_options = *ba_options;
         for _ in 0..max_num_refinements {
             let modified: BTreeSet<Point3DT> =
                 self.triangulator.modified_point3d_ids(recon).clone();
             let report = self.adjust_local_bundle(
                 options,
-                ba_options,
+                &custom_ba_options,
                 tri_options,
                 recon,
                 graph,
@@ -937,6 +947,9 @@ impl IncrementalMapper {
             if changed < max_refinement_change {
                 break;
             }
+            // Only use robust cost function for first iteration
+            // (`incremental_mapper.cc:1277-1281`).
+            custom_ba_options.loss_function = super::bundle_adjustment::LossFunction::Trivial;
         }
         self.triangulator.clear_modified_point3d_ids();
     }
