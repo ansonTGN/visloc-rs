@@ -36,6 +36,7 @@ use crate::{TimingBreakdown, TimingBucket};
 use nalgebra::{
     DMatrix, DVector, Matrix3, Matrix4, Point2, Quaternion, SymmetricEigen, UnitQuaternion, Vector3,
 };
+use rayon::prelude::*;
 use serde_json::{json, Value as JsonValue};
 use std::{
     cell::Cell,
@@ -3513,8 +3514,8 @@ impl WindowProblem {
     /// owned candidate or the prepared view; never to base linearization rows.
     fn trial_objective_f32(
         &self,
-        nav: impl Fn(usize, bool) -> Option<BasaltNavState>,
-        parameter: impl Fn(usize) -> Option<InverseDistanceLandmark>,
+        nav: impl Fn(usize, bool) -> Option<BasaltNavState> + Sync,
+        parameter: impl Fn(usize) -> Option<InverseDistanceLandmark> + Sync,
         prior_cost: f64,
     ) -> Result<f64, LmFailure> {
         let ranks = self
@@ -3551,31 +3552,53 @@ impl WindowProblem {
                 }
             }
         }
+        // Each observation's reprojection cost depends only on its own
+        // landmark/host/target data (all read through `self`, `nav`, and
+        // `parameter`, never through another observation's result), so
+        // every observation's cost is computed in parallel below. The
+        // items are collected from `observations` (a `BTreeMap`, so already
+        // in the same deterministic `(rank, target, track_id)` key order
+        // the serial loop iterated in) into a `Vec` first specifically so
+        // that order survives into the results `Vec` -- `par_iter().map()`
+        // preserves input order -- and the fold immediately afterward adds
+        // each `Some` cost into `visual` serially, in that same order, via
+        // the same `+=` the loop used. A failing item's error is still
+        // surfaced at the same position in that order (via `cost?` before
+        // the corresponding `visual +=` would have run), matching the
+        // original loop's early-return exactly.
+        let ordered_observations: Vec<_> = observations.into_iter().collect();
+        let observation_costs: Vec<Result<Option<f32>, LmFailure>> = ordered_observations
+            .par_iter()
+            .map(|((rank, target, _), (index, observation))| {
+                let landmark = &self.landmarks[*index];
+                let host = self.trial_host_order[*rank];
+                let from = nav(landmark.anchor_state_index, true).ok_or(LmFailure::LinearSolve)?;
+                let to = nav(observation.state_index, true).ok_or(LmFailure::LinearSolve)?;
+                let point = parameter(*index).ok_or(LmFailure::LinearSolve)?;
+                let matrix = super::aom::upstream_trial_transform_f32(
+                    &from.imu_to_world,
+                    &to.imu_to_world,
+                    &self.camera_to_imu(host.1).ok_or(LmFailure::LinearSolve)?,
+                    &self.camera_to_imu(target.1).ok_or(LmFailure::LinearSolve)?,
+                    host == *target,
+                );
+                let result = super::aom::upstream_trial_observation_f32(
+                    self.camera_model(target.1).ok_or(LmFailure::LinearSolve)?,
+                    matrix,
+                    Vector3::new(
+                        point.direction.xy.x as f32,
+                        point.direction.xy.y as f32,
+                        point.inverse_distance as f32,
+                    ),
+                    nalgebra::Vector2::new(observation.pixel.x as f32, observation.pixel.y as f32),
+                    FactorConfig::default(),
+                );
+                Ok(result.map(|(_, cost)| cost))
+            })
+            .collect();
         let mut visual = 0.0_f32;
-        for ((rank, target, _), (index, observation)) in observations {
-            let landmark = &self.landmarks[index];
-            let host = self.trial_host_order[rank];
-            let from = nav(landmark.anchor_state_index, true).ok_or(LmFailure::LinearSolve)?;
-            let to = nav(observation.state_index, true).ok_or(LmFailure::LinearSolve)?;
-            let point = parameter(index).ok_or(LmFailure::LinearSolve)?;
-            let matrix = super::aom::upstream_trial_transform_f32(
-                &from.imu_to_world,
-                &to.imu_to_world,
-                &self.camera_to_imu(host.1).ok_or(LmFailure::LinearSolve)?,
-                &self.camera_to_imu(target.1).ok_or(LmFailure::LinearSolve)?,
-                host == target,
-            );
-            if let Some((_, cost)) = super::aom::upstream_trial_observation_f32(
-                self.camera_model(target.1).ok_or(LmFailure::LinearSolve)?,
-                matrix,
-                Vector3::new(
-                    point.direction.xy.x as f32,
-                    point.direction.xy.y as f32,
-                    point.inverse_distance as f32,
-                ),
-                nalgebra::Vector2::new(observation.pixel.x as f32, observation.pixel.y as f32),
-                FactorConfig::default(),
-            ) {
+        for cost in observation_costs {
+            if let Some(cost) = cost? {
                 visual += cost;
             }
         }
@@ -6500,13 +6523,31 @@ fn checked_lm_linearization_cost(linearization: &LmLinearization) -> Result<f64,
 }
 
 impl WindowProblem {
-    fn linearize_view<V: WindowValueView>(&self, values: &V) -> Result<LmLinearization, LmFailure> {
+    fn linearize_view<V: WindowValueView + Sync>(
+        &self,
+        values: &V,
+    ) -> Result<LmLinearization, LmFailure> {
         let layout = self.layout();
         let mut factors = self.prior_factors_view(values);
-        for landmark_index in 0..self.landmarks.len() {
-            if let Some(factor) = self.visual_factor_view(values, landmark_index) {
-                factors.push(factor);
-            }
+        // Each landmark's visual factor depends only on that landmark's own
+        // anchor/observation state views (`values`, shared and read-only)
+        // and its own landmark index -- there is no shared mutable state
+        // between landmarks (`visual_factor_view` builds and returns a fresh
+        // local `WhitenedFactorRowStack`, it does not accumulate into any
+        // caller-owned state). Computing every landmark's factor in
+        // parallel and then pushing the `Some` results into `factors`
+        // serially, in the same ascending `landmark_index` order the
+        // sequential loop always used, reproduces the identical factor list
+        // -- and therefore every downstream f32 rounding tree that depends
+        // on factor order, e.g. the landmark-reduction accumulation --
+        // bit-for-bit; only *when* each pure per-landmark factor is
+        // computed changes, never its value or its position in `factors`.
+        let visual_factors: Vec<Option<WhitenedFactorRowStack>> = (0..self.landmarks.len())
+            .into_par_iter()
+            .map(|landmark_index| self.visual_factor_view(values, landmark_index))
+            .collect();
+        for factor in visual_factors.into_iter().flatten() {
+            factors.push(factor);
         }
         for link in self.imu_links.iter().cloned() {
             if let Some(factor) = self.imu_factor_view(values, link.clone()) {

@@ -22,6 +22,7 @@
 use std::collections::BTreeMap;
 
 use nalgebra::{Matrix2, Matrix3, Point2, Vector2};
+use rayon::prelude::*;
 use thiserror::Error;
 
 use crate::{
@@ -211,7 +212,11 @@ pub struct DirectKltStream {
     tracks: BTreeMap<TrackId, ActiveTrack>,
     next_track_id: TrackId,
     cumulative_rejects: RejectReasonCounters,
-    pyramid_scratch: Vec<i32>,
+    // Separate cam0/cam1 scratch buffers (rather than one shared buffer)
+    // let the two pyramids build concurrently below -- each subsample pass
+    // only ever touches its own camera's buffer.
+    pyramid_scratch_cam0: Vec<i32>,
+    pyramid_scratch_cam1: Vec<i32>,
 }
 
 impl DirectKltStream {
@@ -248,7 +253,8 @@ impl DirectKltStream {
             tracks: BTreeMap::new(),
             next_track_id: 0,
             cumulative_rejects: RejectReasonCounters::default(),
-            pyramid_scratch: Vec::new(),
+            pyramid_scratch_cam0: Vec::new(),
+            pyramid_scratch_cam1: Vec::new(),
         })
     }
 
@@ -289,19 +295,36 @@ impl DirectKltStream {
         }
 
         let pyramid_started = timing.start();
-        let cam0 = RawU16Pyramid::from_image_with_scratch(
-            frame.cam0,
-            self.config.pyramid_levels,
-            &mut self.pyramid_scratch,
-        )?;
-        let cam1 = match frame.cam1 {
-            Some(image) => Some(RawU16Pyramid::from_image_with_scratch(
-                image,
-                self.config.pyramid_levels,
-                &mut self.pyramid_scratch,
-            )?),
-            None => None,
-        };
+        // cam0 and cam1 pyramid construction are fully independent (each
+        // reads only its own camera's decoded image and writes only its own
+        // scratch buffer -- see the separate `pyramid_scratch_cam0` /
+        // `pyramid_scratch_cam1` fields), so they run concurrently here.
+        // `subsample_binomial5_with_scratch`'s own contract already
+        // guarantees a scratch buffer's retained contents cannot affect the
+        // computed pixels (every element is overwritten before it is read),
+        // so this is bit-identical to building them one after another.
+        let pyramid_levels = self.config.pyramid_levels;
+        let cam1_image = frame.cam1;
+        let (cam0_result, cam1_result) = rayon::join(
+            || {
+                RawU16Pyramid::from_image_with_scratch(
+                    frame.cam0,
+                    pyramid_levels,
+                    &mut self.pyramid_scratch_cam0,
+                )
+            },
+            || match cam1_image {
+                Some(image) => RawU16Pyramid::from_image_with_scratch(
+                    image,
+                    pyramid_levels,
+                    &mut self.pyramid_scratch_cam1,
+                )
+                .map(Some),
+                None => Ok(None),
+            },
+        );
+        let cam0 = cam0_result?;
+        let cam1 = cam1_result?;
         let current = FramePyramids { cam0, cam1 };
         timing.finish(TimingBucket::FrontendPyramid, pyramid_started);
         let mut counters = RejectReasonCounters::default();
@@ -327,100 +350,47 @@ impl DirectKltStream {
 
         let temporal_started = timing.start();
         if let Some(previous) = &self.previous {
-            for (&track_id, &old_track) in &old_tracks {
-                // `FrameToFrameOpticalFlow::trackPoints` runs once for each
-                // camera map.  Do not gate the cam1 search on cam0 success.
-                let cam0 = old_track.cam0.and_then(|old_cam0| {
-                    let frame_transform = match track_direction(
-                        &previous.cam0,
-                        &current.cam0,
-                        old_cam0,
-                        &self.config,
-                    ) {
-                        Ok(transform) => transform,
-                        Err(failure) => {
-                            counters.record(RejectReason::FrameForward(failure));
-                            rejected_track_ids.push(track_id);
-                            return None;
-                        }
-                    };
-
-                    let recovered = match track_direction(
-                        &current.cam0,
-                        &previous.cam0,
-                        frame_transform,
-                        &self.config,
-                    ) {
-                        Ok(transform) => transform,
-                        Err(failure) => {
-                            counters.record(RejectReason::FrameBackward(failure));
-                            rejected_track_ids.push(track_id);
-                            return None;
-                        }
-                    };
-                    let fb_squared =
-                        (old_cam0.translation() - recovered.translation()).norm_squared();
-                    if fb_squared >= self.config.fb_squared_threshold {
-                        counters.record(RejectReason::FrameFbSquared);
-                        rejected_track_ids.push(track_id);
-                        None
-                    } else {
-                        retained_track_ids.push(track_id);
-                        Some(frame_transform)
+            // Each track's forward/backward KLT and FB^2 gate reads only the
+            // (read-only, shared) previous/current pyramids plus that one
+            // track's own prior observation -- there is no shared mutable
+            // state inside `temporal_track_update`. Computing the per-track
+            // results with rayon and then folding them into `counters` /
+            // `retained_track_ids` / `rejected_track_ids` / `current_tracks`
+            // serially, in the same key order `BTreeMap` iteration already
+            // used, reproduces the exact push/record sequence (and therefore
+            // the exact `current_tracks` contents and the exact, purely
+            // integer-count `counters`) the sequential loop produced: no
+            // floating-point reduction crosses a track boundary here, so
+            // this is bit-identical for any thread count.
+            let entries: Vec<(TrackId, ActiveTrack)> =
+                old_tracks.iter().map(|(&id, &track)| (id, track)).collect();
+            let results: Vec<TemporalTrackResult> = entries
+                .par_iter()
+                .map(|&(track_id, old_track)| {
+                    temporal_track_update(track_id, old_track, previous, &current, &self.config)
+                })
+                .collect();
+            for result in results {
+                match result.cam0_classification {
+                    Some(Cam0Classification::Retained) => retained_track_ids.push(result.track_id),
+                    Some(Cam0Classification::Rejected(reason)) => {
+                        counters.record(reason);
+                        rejected_track_ids.push(result.track_id);
                     }
-                });
-
-                let cam1 = match (
-                    old_track.cam1,
-                    previous.cam1.as_ref(),
-                    current.cam1.as_ref(),
-                ) {
-                    (Some(old_cam1), Some(previous_cam1), Some(current_cam1)) => {
-                        match track_direction(previous_cam1, current_cam1, old_cam1, &self.config) {
-                            Ok(stereo_transform) => {
-                                let recovered = match track_direction(
-                                    current_cam1,
-                                    previous_cam1,
-                                    stereo_transform,
-                                    &self.config,
-                                ) {
-                                    Ok(transform) => Some(transform),
-                                    Err(failure) => {
-                                        counters
-                                            .record(RejectReason::ExistingStereoBackward(failure));
-                                        None
-                                    }
-                                };
-                                recovered.and_then(|recovered| {
-                                    if (old_cam1.translation() - recovered.translation())
-                                        .norm_squared()
-                                        >= self.config.fb_squared_threshold
-                                    {
-                                        counters.record(RejectReason::ExistingStereoFbSquared);
-                                        None
-                                    } else {
-                                        Some(stereo_transform)
-                                    }
-                                })
-                            }
-                            Err(failure) => {
-                                counters.record(RejectReason::ExistingStereoForward(failure));
-                                None
-                            }
-                        }
-                    }
-                    _ => None,
-                };
-
+                    None => {}
+                }
+                if let Some(reason) = result.cam1_reject {
+                    counters.record(reason);
+                }
                 // Preserve a shared ID whenever either independent upstream
                 // observation map retained it.
-                if cam0.is_some() || cam1.is_some() {
+                if result.cam0.is_some() || result.cam1.is_some() {
                     current_tracks.insert(
-                        track_id,
+                        result.track_id,
                         ActiveTrack {
-                            cam0,
-                            cam1,
-                            created_frame_id: old_track.created_frame_id,
+                            cam0: result.cam0,
+                            cam1: result.cam1,
+                            created_frame_id: result.created_frame_id,
                         },
                     );
                 }
@@ -573,6 +543,128 @@ impl DirectKltStream {
         self.previous_frame = Some(output.frame);
         timing.finish(TimingBucket::FrontendOutput, output_started);
         Ok(output)
+    }
+}
+
+/// One track's cam0 classification from [`temporal_track_update`], carried
+/// out of the parallel worker instead of mutating a shared
+/// `RejectReasonCounters` / `Vec<TrackId>` pair so the per-track computation
+/// has no shared mutable state.
+#[derive(Debug, Clone, Copy)]
+enum Cam0Classification {
+    Retained,
+    Rejected(RejectReason),
+}
+
+/// Output of one track's independent temporal KLT update, folded back into
+/// the caller's `counters` / `retained_track_ids` / `rejected_track_ids` /
+/// `current_tracks` serially in the same order [`DirectKltStream::tracks`]
+/// (a `BTreeMap`) already iterates in.
+struct TemporalTrackResult {
+    track_id: TrackId,
+    created_frame_id: FrameId,
+    cam0: Option<AffineCompact2f>,
+    cam0_classification: Option<Cam0Classification>,
+    cam1: Option<AffineCompact2f>,
+    cam1_reject: Option<RejectReason>,
+}
+
+/// Pure, side-effect-free per-track temporal KLT update: forward/backward
+/// cam0 tracking plus its FB^2 gate, and independently, forward/backward
+/// cam1 tracking plus its FB^2 gate. Reads only `previous`/`current`
+/// (shared, read-only) and this one track's own prior observation, so many
+/// tracks can run this concurrently with no coordination and no change to
+/// any individual track's arithmetic.
+fn temporal_track_update(
+    track_id: TrackId,
+    old_track: ActiveTrack,
+    previous: &FramePyramids,
+    current: &FramePyramids,
+    config: &DirectKltConfig,
+) -> TemporalTrackResult {
+    // `FrameToFrameOpticalFlow::trackPoints` runs once for each camera map.
+    // Do not gate the cam1 search on cam0 success.
+    let mut cam0_classification = None;
+    let cam0 = old_track.cam0.and_then(|old_cam0| {
+        let frame_transform = match track_direction(&previous.cam0, &current.cam0, old_cam0, config)
+        {
+            Ok(transform) => transform,
+            Err(failure) => {
+                cam0_classification = Some(Cam0Classification::Rejected(
+                    RejectReason::FrameForward(failure),
+                ));
+                return None;
+            }
+        };
+
+        let recovered =
+            match track_direction(&current.cam0, &previous.cam0, frame_transform, config) {
+                Ok(transform) => transform,
+                Err(failure) => {
+                    cam0_classification = Some(Cam0Classification::Rejected(
+                        RejectReason::FrameBackward(failure),
+                    ));
+                    return None;
+                }
+            };
+        let fb_squared = (old_cam0.translation() - recovered.translation()).norm_squared();
+        if fb_squared >= config.fb_squared_threshold {
+            cam0_classification = Some(Cam0Classification::Rejected(RejectReason::FrameFbSquared));
+            None
+        } else {
+            cam0_classification = Some(Cam0Classification::Retained);
+            Some(frame_transform)
+        }
+    });
+
+    let mut cam1_reject = None;
+    let cam1 = match (
+        old_track.cam1,
+        previous.cam1.as_ref(),
+        current.cam1.as_ref(),
+    ) {
+        (Some(old_cam1), Some(previous_cam1), Some(current_cam1)) => {
+            match track_direction(previous_cam1, current_cam1, old_cam1, config) {
+                Ok(stereo_transform) => {
+                    let recovered = match track_direction(
+                        current_cam1,
+                        previous_cam1,
+                        stereo_transform,
+                        config,
+                    ) {
+                        Ok(transform) => Some(transform),
+                        Err(failure) => {
+                            cam1_reject = Some(RejectReason::ExistingStereoBackward(failure));
+                            None
+                        }
+                    };
+                    recovered.and_then(|recovered| {
+                        if (old_cam1.translation() - recovered.translation()).norm_squared()
+                            >= config.fb_squared_threshold
+                        {
+                            cam1_reject = Some(RejectReason::ExistingStereoFbSquared);
+                            None
+                        } else {
+                            Some(stereo_transform)
+                        }
+                    })
+                }
+                Err(failure) => {
+                    cam1_reject = Some(RejectReason::ExistingStereoForward(failure));
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+
+    TemporalTrackResult {
+        track_id,
+        created_frame_id: old_track.created_frame_id,
+        cam0,
+        cam0_classification,
+        cam1,
+        cam1_reject,
     }
 }
 
