@@ -6302,6 +6302,27 @@ pub(crate) fn compact_trial_preparation_for_test(
     .into_trial_preparation(state, state_step, tolerance)
 }
 
+/// One factor's independent projection result from the parallel pre-pass in
+/// [`reduce_landmark_factors_f32_checked_with_options`]. `Visual::compact`
+/// carries a fresh, factor-local arena (its `storage_offset` is `0`, as if
+/// it were the first and only entry) rather than an offset into the shared
+/// `compact_storage` arena, because that arena's real, cumulative offsets
+/// can only be assigned once factors are visited in order again.
+enum ProjectedLandmarkFactor {
+    Plain {
+        jacobian: DMatrix<f32>,
+        residual: DVector<f32>,
+        rank: usize,
+    },
+    Visual {
+        jacobian: DMatrix<f32>,
+        residual: DVector<f32>,
+        rank: usize,
+        compact: Option<(Vec<f32>, CompactLandmarkBackSubstitutionEntryF32)>,
+        invalidates_compact_mapping: bool,
+    },
+}
+
 fn reduce_landmark_factors_f32_checked_with_options(
     factors: &[WhitenedFactorRowStack],
     state_dof: usize,
@@ -6375,8 +6396,6 @@ fn reduce_landmark_factors_f32_checked_with_options(
             Some(capacity) => Vec::with_capacity(capacity),
             None => Vec::new(),
         };
-        #[cfg(feature = "basalt-lm-workspace-reuse")]
-        let mut landmark_workspace = LandmarkHouseholderWorkspace::default();
         let mut compact_mapping_valid = compact_capacity_valid;
         let mut seen_landmark_indices = if compact_capacity_valid {
             Vec::with_capacity(compact_capacity)
@@ -6384,74 +6403,131 @@ fn reduce_landmark_factors_f32_checked_with_options(
             Vec::new()
         };
         let mut projected = Vec::with_capacity(factors.len());
-        for factor in factors {
-            if factor.landmark_jacobian.ncols() == 0 {
-                projected.push(landmark_nullspace_projection_f32(factor, tolerance));
-                continue;
-            }
-            let metadata = (factor.kind == FactorKind::Visual)
-                .then_some(factor.landmark_metadata)
-                .flatten();
-            if factor.kind != FactorKind::Visual || metadata.is_none() {
-                // The factor still contributes its ordinary Q2 rows, but a
-                // missing/non-visual identity makes the compact mapping
-                // unsafe.  The caller can observe `None` and use legacy
-                // recovery without guessing from factor position.
-                compact_mapping_valid = false;
-            }
-            let use_direct_visual_pack = factor.kind == FactorKind::Visual
-                && compact_capacity_valid
-                && metadata.is_some()
-                && factor.landmark_jacobian.ncols() <= 3;
-            #[cfg(feature = "basalt-lm-workspace-reuse")]
-            let (jacobian, residual, rank, compact) = if use_direct_visual_pack {
-                landmark_nullspace_projection_f32_with_compact_into_with_workspace(
-                    factor,
-                    tolerance,
-                    metadata,
-                    &mut compact_storage,
-                    &mut landmark_workspace,
-                )
-            } else {
-                // Keep generic/non-visual and invalid visual mappings on the
-                // historical materialized constructor.  They can still
-                // contribute their ordinary Q2 rows, but they must not enter
-                // the direct visual compact allocation path.
-                let (jacobian, residual, rank, _) =
-                    landmark_nullspace_projection_f32_with_compact(factor, tolerance, None);
-                (jacobian, residual, rank, None)
-            };
-            #[cfg(not(feature = "basalt-lm-workspace-reuse"))]
-            let (jacobian, residual, rank, compact) = if use_direct_visual_pack {
-                // The non-reuse compatibility wrapper allocates a fresh
-                // scratch workspace for this factor.  It is the historical
-                // ownership path and intentionally shares the exact packed
-                // conversion, Householder walk, and Q2/compact extraction.
-                landmark_nullspace_projection_f32_with_compact_into(
-                    factor,
-                    tolerance,
-                    metadata,
-                    &mut compact_storage,
-                )
-            } else {
-                // Keep generic/non-visual and invalid visual mappings on the
-                // historical materialized constructor.  They can still
-                // contribute their ordinary Q2 rows, but they must not enter
-                // the direct visual compact allocation path.
-                let (jacobian, residual, rank, _) =
-                    landmark_nullspace_projection_f32_with_compact(factor, tolerance, None);
-                (jacobian, residual, rank, None)
-            };
-            if let Some(compact) = compact {
-                if seen_landmark_indices.contains(&compact.landmark_index) {
-                    compact_mapping_valid = false;
+        // Every factor's own projection -- QR-eliminating its landmark
+        // columns (the expensive Householder walk) and, for eligible visual
+        // factors, extracting the compact Q1/R payload -- depends only on
+        // that one factor's own data plus `tolerance`/`compact_capacity_valid`
+        // (both already fixed above), never on another factor's projection.
+        // So every factor's projection runs in parallel below. A worker that
+        // produces a compact payload writes it into its own fresh,
+        // factor-local arena (starting at offset `0`, exactly as
+        // `compact_back_substitution_into` would against an empty shared
+        // arena) instead of the one growing `compact_storage` the serial
+        // code used to share across all factors -- which is also why the
+        // reusable-workspace parameter is no longer threaded through here:
+        // capacity reuse *across* factors is inherently serial, and
+        // `basalt-lm-workspace-reuse`'s own contract is "capacity-only
+        // reuse" (see its Cargo.toml feature doc comment), so a fresh
+        // per-factor arena/workspace cannot change any computed value, only
+        // how much scratch memory ends up (re)allocated.
+        //
+        // The sequential fold below then rebuilds `compact_storage`,
+        // `compact_entries`, `seen_landmark_indices`, and
+        // `compact_mapping_valid` by walking the parallel results **in the
+        // original factor order**: appending each factor-local arena to
+        // `compact_storage` and shifting its entry's `storage_offset` by the
+        // running length reproduces, byte-for-byte, the same
+        // `compact_storage` contents and the same `storage_offset` values
+        // the always-serial version produced (that fold performs the exact
+        // same appends in the exact same order), and the duplicate/validity
+        // bookkeeping only ever reads each factor's own classification plus
+        // that running state -- never a QR result from another factor. Only
+        // the side-effect-free QR/projection work feeding each append now
+        // happens off the critical thread; its own arithmetic is untouched
+        // (`landmark_nullspace_projection_f32_with_compact_into` and
+        // `landmark_nullspace_projection_f32_with_compact` are called
+        // completely unmodified below, exactly as the serial code called
+        // them).
+        let projected_parallel: Vec<ProjectedLandmarkFactor> = factors
+            .par_iter()
+            .map(|factor| {
+                if factor.landmark_jacobian.ncols() == 0 {
+                    let (jacobian, residual, rank) =
+                        landmark_nullspace_projection_f32(factor, tolerance);
+                    return ProjectedLandmarkFactor::Plain {
+                        jacobian,
+                        residual,
+                        rank,
+                    };
                 }
-                seen_landmark_indices.push(compact.landmark_index);
-                compact_entries.push(compact);
-            } else {
-                compact_mapping_valid = false;
+                let metadata = (factor.kind == FactorKind::Visual)
+                    .then_some(factor.landmark_metadata)
+                    .flatten();
+                let use_direct_visual_pack = factor.kind == FactorKind::Visual
+                    && compact_capacity_valid
+                    && metadata.is_some()
+                    && factor.landmark_jacobian.ncols() <= 3;
+                let (jacobian, residual, rank, compact) = if use_direct_visual_pack {
+                    let mut local_arena = Vec::new();
+                    let (jacobian, residual, rank, compact) =
+                        landmark_nullspace_projection_f32_with_compact_into(
+                            factor,
+                            tolerance,
+                            metadata,
+                            &mut local_arena,
+                        );
+                    (
+                        jacobian,
+                        residual,
+                        rank,
+                        compact.map(|entry| (local_arena, entry)),
+                    )
+                } else {
+                    // Keep generic/non-visual and invalid visual mappings on
+                    // the historical materialized constructor.  They can
+                    // still contribute their ordinary Q2 rows, but they must
+                    // not enter the direct visual compact allocation path.
+                    let (jacobian, residual, rank, _) =
+                        landmark_nullspace_projection_f32_with_compact(factor, tolerance, None);
+                    (jacobian, residual, rank, None)
+                };
+                ProjectedLandmarkFactor::Visual {
+                    jacobian,
+                    residual,
+                    rank,
+                    compact,
+                    // The factor still contributes its ordinary Q2 rows, but
+                    // a missing/non-visual identity makes the compact
+                    // mapping unsafe.  The caller can observe `None` and use
+                    // legacy recovery without guessing from factor position.
+                    invalidates_compact_mapping: factor.kind != FactorKind::Visual
+                        || metadata.is_none(),
+                }
+            })
+            .collect();
+        for result in projected_parallel {
+            match result {
+                ProjectedLandmarkFactor::Plain {
+                    jacobian,
+                    residual,
+                    rank,
+                } => {
+                    projected.push((jacobian, residual, rank));
+                }
+                ProjectedLandmarkFactor::Visual {
+                    jacobian,
+                    residual,
+                    rank,
+                    compact,
+                    invalidates_compact_mapping,
+                } => {
+                    if invalidates_compact_mapping {
+                        compact_mapping_valid = false;
+                    }
+                    if let Some((local_arena, mut entry)) = compact {
+                        entry.storage_offset += compact_storage.len();
+                        compact_storage.extend_from_slice(&local_arena);
+                        if seen_landmark_indices.contains(&entry.landmark_index) {
+                            compact_mapping_valid = false;
+                        }
+                        seen_landmark_indices.push(entry.landmark_index);
+                        compact_entries.push(entry);
+                    } else {
+                        compact_mapping_valid = false;
+                    }
+                    projected.push((jacobian, residual, rank));
+                }
             }
-            projected.push((jacobian, residual, rank));
         }
         let compact = compact_mapping_valid.then_some(CompactLandmarkBackSubstitutionBatchF32 {
             storage: compact_storage,
