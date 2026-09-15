@@ -25,8 +25,8 @@ use visloc_basalt::{
         AomBlockData, ImuLinkDiagnostics, LmRunDiagnostics, NativeCompanionIdentity,
         WindowDiagnostics,
     },
-    BasaltAdapterOutput, BasaltNavState, BasaltVioEstimatorAdapter, EurocSensorDataset,
-    TimingBreakdown, TimingBucket,
+    BasaltAdapterError, BasaltAdapterOutput, BasaltNavState, BasaltVioEstimatorAdapter,
+    EurocSensorDataset, TimingBreakdown, TimingBucket,
 };
 
 #[derive(Debug)]
@@ -39,6 +39,9 @@ struct Args {
     no_trace: bool,
     no_marg_data: bool,
     native_companion_binding: Option<PathBuf>,
+    pipeline: bool,
+    pipeline_capacity: usize,
+    threads: Option<usize>,
 }
 
 const NATIVE_COMPANION_BINDING_SCHEMA: &str = "basalt.rust.native_companion_binding.v1";
@@ -55,6 +58,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
     if args.no_marg_data && args.native_companion_binding.is_some() {
         return Err("--native-companion-binding requires MargData output".into());
+    }
+    // Sizes the process-wide rayon pool used by data-parallel stages (e.g.
+    // the frontend's per-track temporal KLT). Left unset, rayon lazily sizes
+    // its default global pool to `std::thread::available_parallelism()` on
+    // first use -- no numeric behavior depends on this count, only wall time.
+    if let Some(threads) = args.threads {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build_global()
+            .map_err(|error| format!("failed to configure rayon thread pool: {error}"))?;
     }
     // Load the immutable native identity before replay or output creation.
     // This makes the resulting packet a capture-time paired artifact rather
@@ -104,86 +117,90 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut last_timestamp_ns = None;
     let mut mapper_packet_ordinal = 0u64;
     let mut native_companion_bound = false;
+    let mut demo_index = 0usize;
 
-    for index in 0..frame_limit {
-        let sensor_frame = if timing.enabled() {
-            timing.measure_with(TimingBucket::DatasetFrameAcquisition, |timing| {
-                dataset.frame_with_timing(index, timing)
-            })?
-        } else {
-            dataset.frame(index)?
-        };
-        let output = match adapter_process_mode(args.no_trace, args.no_marg_data) {
-            AdapterProcessMode::Full => adapter.process(sensor_frame)?,
-            AdapterProcessMode::WithoutMargData => {
-                adapter.process_without_marg_data(sensor_frame)?
-            }
-            AdapterProcessMode::WithoutMargDataAndTrace => {
-                adapter.process_without_marg_data_no_trace(sensor_frame)?
-            }
-        };
+    let mode = adapter_process_mode(args.no_trace, args.no_marg_data);
+    let (retain_marg_data, retain_trace) = match mode {
+        AdapterProcessMode::Full => (true, true),
+        AdapterProcessMode::WithoutMargData => (false, true),
+        AdapterProcessMode::WithoutMargDataAndTrace => (false, false),
+    };
+
+    // Shared per-frame trajectory/trace/MargData writer for both the serial
+    // loop below and the two-thread `--pipeline` path.  Running the exact
+    // same body from both call sites -- only the wall-clock overlap between
+    // frontend and estimator differs -- is what keeps their outputs
+    // identical: this closure never touches the estimator's or frontend's
+    // arithmetic, only serializes what they already produced.
+    let mut handle_output = |output: BasaltAdapterOutput,
+                             demo_timing: &mut TimingBreakdown|
+     -> Result<(), BasaltAdapterError> {
         let timestamp_ns = output.tracks.frame.timestamp_ns;
         if last_timestamp_ns.is_some_and(|previous| timestamp_ns <= previous) {
-            return Err(format!("non-monotonic output timestamp at frame {index}").into());
+            return Err(BasaltAdapterError::Output(format!(
+                "non-monotonic output timestamp at frame {demo_index}"
+            )));
         }
         last_timestamp_ns = Some(timestamp_ns);
         total_imu += output.imu_count;
         total_observations += output.tracks.observations.len();
 
-        timing.measure(
-            TimingBucket::DemoOutput,
-            || -> Result<(), Box<dyn std::error::Error>> {
-                append_trajectory(&mut tum, &mut csv, &output);
-                if let Some(trace) = trace.as_mut() {
-                    trace.push_str(&trace_json(&output));
-                }
-                // Basalt computes state-only marginalization on many frames, but its
-                // mapper queue receives MargData only for a selected KF removal.
-                // Keep the diagnostic record in the in-process output while writing
-                // only actual mapper packets to the on-disk stream.
-                if let Some(marg_dir) = marg_dir.as_ref() {
-                    if output.estimator.marg_data.is_mapper_packet() {
-                        let bind_identity = native_companion_identity
-                            .as_ref()
-                            .filter(|identity| identity.event_ordinal == mapper_packet_ordinal);
-                        if let Some(identity) = bind_identity {
-                            output
-                                .estimator
-                                .marg_data
-                                .validate_native_companion_identity(
-                                    identity,
-                                    mapper_packet_ordinal,
-                                )?;
-                        }
-                        let marg_path = marg_dir
-                            .join(format!("frame_{:06}.json", output.tracks.frame.frame_id));
-                        let file = fs::File::create(marg_path)?;
-                        let mut writer = BufWriter::new(file);
-                        if let Some(identity) = bind_identity {
-                            output
-                                .estimator
-                                .marg_data
-                                .write_mapper_packet_json_with_native_companion_identity(
-                                    &mut writer,
-                                    identity,
-                                    mapper_packet_ordinal,
-                                )?;
-                            native_companion_bound = true;
-                        } else {
-                            output
-                                .estimator
-                                .marg_data
-                                .write_mapper_packet_json(&mut writer)?;
-                        }
-                        writer.flush()?;
-                        mapper_packet_ordinal += 1;
+        demo_timing
+            .measure(
+                TimingBucket::DemoOutput,
+                || -> Result<(), Box<dyn std::error::Error>> {
+                    append_trajectory(&mut tum, &mut csv, &output);
+                    if let Some(trace) = trace.as_mut() {
+                        trace.push_str(&trace_json(&output));
                     }
-                }
-                Ok(())
-            },
-        )?;
+                    // Basalt computes state-only marginalization on many frames, but its
+                    // mapper queue receives MargData only for a selected KF removal.
+                    // Keep the diagnostic record in the in-process output while writing
+                    // only actual mapper packets to the on-disk stream.
+                    if let Some(marg_dir) = marg_dir.as_ref() {
+                        if output.estimator.marg_data.is_mapper_packet() {
+                            let bind_identity = native_companion_identity
+                                .as_ref()
+                                .filter(|identity| identity.event_ordinal == mapper_packet_ordinal);
+                            if let Some(identity) = bind_identity {
+                                output
+                                    .estimator
+                                    .marg_data
+                                    .validate_native_companion_identity(
+                                        identity,
+                                        mapper_packet_ordinal,
+                                    )?;
+                            }
+                            let marg_path = marg_dir
+                                .join(format!("frame_{:06}.json", output.tracks.frame.frame_id));
+                            let file = fs::File::create(marg_path)?;
+                            let mut writer = BufWriter::new(file);
+                            if let Some(identity) = bind_identity {
+                                output
+                                    .estimator
+                                    .marg_data
+                                    .write_mapper_packet_json_with_native_companion_identity(
+                                        &mut writer,
+                                        identity,
+                                        mapper_packet_ordinal,
+                                    )?;
+                                native_companion_bound = true;
+                            } else {
+                                output
+                                    .estimator
+                                    .marg_data
+                                    .write_mapper_packet_json(&mut writer)?;
+                            }
+                            writer.flush()?;
+                            mapper_packet_ordinal += 1;
+                        }
+                    }
+                    Ok(())
+                },
+            )
+            .map_err(|error| BasaltAdapterError::Output(error.to_string()))?;
 
-        if index == 0 || (index + 1) % 10 == 0 || index + 1 == frame_limit {
+        if demo_index == 0 || (demo_index + 1) % 10 == 0 || demo_index + 1 == frame_limit {
             eprintln!(
                 "frame={} timestamp_ns={} observations={} imu={} created={} retained={} rejected={}",
                 output.tracks.frame.frame_id,
@@ -194,6 +211,47 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 output.tracks.retained_track_ids.len(),
                 output.tracks.rejected_track_ids.len(),
             );
+        }
+        demo_index += 1;
+        Ok(())
+    };
+
+    if args.pipeline {
+        // Two-thread pipeline: a frontend/producer thread (dataset
+        // acquisition + `DirectKltStream` tracking) overlapped in wall time
+        // with the estimator/consumer thread running on this thread, mirroring
+        // upstream Basalt's `OpticalFlow` thread ‖ estimator thread split.
+        // Frame order and every per-frame computation are unchanged from the
+        // serial path below; see `BasaltVioEstimatorAdapter::process_euroc_stream_pipelined`.
+        let (producer_timing, consumer_timing) = adapter.process_euroc_stream_pipelined(
+            &dataset,
+            frame_limit,
+            retain_marg_data,
+            retain_trace,
+            args.pipeline_capacity,
+            handle_output,
+        )?;
+        timing.merge_from(&producer_timing);
+        timing.merge_from(&consumer_timing);
+    } else {
+        for index in 0..frame_limit {
+            let sensor_frame = if timing.enabled() {
+                timing.measure_with(TimingBucket::DatasetFrameAcquisition, |timing| {
+                    dataset.frame_with_timing(index, timing)
+                })?
+            } else {
+                dataset.frame(index)?
+            };
+            let output = match mode {
+                AdapterProcessMode::Full => adapter.process(sensor_frame)?,
+                AdapterProcessMode::WithoutMargData => {
+                    adapter.process_without_marg_data(sensor_frame)?
+                }
+                AdapterProcessMode::WithoutMargDataAndTrace => {
+                    adapter.process_without_marg_data_no_trace(sensor_frame)?
+                }
+            };
+            handle_output(output, &mut timing)?;
         }
     }
 
@@ -247,8 +305,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let timing_path = args.out_dir.join("timing_breakdown.json");
     timing.measure_with(TimingBucket::DemoTeardown, |timing| {
         if timing.enabled() {
-            let adapter_timing = adapter.timing_breakdown_with_estimator();
-            timing.merge_from(&adapter_timing);
+            // The `--pipeline` path already merged the frontend/estimator
+            // producer and consumer collectors (including the estimator's
+            // internal LM/Estimator* buckets) into `timing` above; merging
+            // `adapter.timing_breakdown_with_estimator()` again here would
+            // double-count those buckets. The serial path never touches the
+            // adapter's own `self.timing` field or reads the estimator's
+            // internal collector until this point, so it still needs the
+            // merge.
+            if !args.pipeline {
+                let adapter_timing = adapter.timing_breakdown_with_estimator();
+                timing.merge_from(&adapter_timing);
+            }
             // All trajectory/output strings are already materialized.  The
             // collector is merged before the explicit drops, making the
             // process-side teardown gap visible without changing the normal
@@ -690,6 +758,9 @@ impl Args {
         let mut no_trace = false;
         let mut no_marg_data = false;
         let mut native_companion_binding = None;
+        let mut pipeline = false;
+        let mut pipeline_capacity = 4usize;
+        let mut threads = None;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy();
@@ -724,6 +795,31 @@ impl Args {
                 "--native-companion-binding" => {
                     native_companion_binding = Some(next_path(&mut arguments, &option)?);
                 }
+                "--pipeline" => pipeline = true,
+                "--pipeline-capacity" => {
+                    let value = arguments
+                        .next()
+                        .ok_or_else(|| format!("{option} requires a value"))?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --pipeline-capacity: {error}"))?;
+                    if value == 0 {
+                        return Err("--pipeline-capacity must be positive".into());
+                    }
+                    pipeline_capacity = value;
+                }
+                "--threads" => {
+                    let value = arguments
+                        .next()
+                        .ok_or_else(|| format!("{option} requires a value"))?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --threads: {error}"))?;
+                    if value == 0 {
+                        return Err("--threads must be positive".into());
+                    }
+                    threads = Some(value);
+                }
                 unknown => return Err(format!("unknown option `{unknown}`\n\n{}", Self::usage())),
             }
         }
@@ -740,11 +836,14 @@ impl Args {
             no_trace,
             no_marg_data,
             native_companion_binding,
+            pipeline,
+            pipeline_capacity,
+            threads,
         })
     }
 
     fn usage() -> String {
-        "usage: basalt_euroc_vio_demo --euroc-dir DIR --calibration FILE [--config FILE] [--out-dir DIR] [--max-frames N] [--no-trace] [--no-marg-data] [--native-companion-binding FILE]".into()
+        "usage: basalt_euroc_vio_demo --euroc-dir DIR --calibration FILE [--config FILE] [--out-dir DIR] [--max-frames N] [--no-trace] [--no-marg-data] [--native-companion-binding FILE] [--pipeline] [--pipeline-capacity N] [--threads N]".into()
     }
 }
 
@@ -852,5 +951,48 @@ mod tests {
             args.native_companion_binding,
             Some(PathBuf::from("identity.json"))
         );
+    }
+
+    #[test]
+    fn pipeline_flags_default_off_and_are_parsed() {
+        let args = parse(&["--euroc-dir", "dataset", "--calibration", "calib.json"]);
+        assert!(!args.pipeline);
+        assert_eq!(args.pipeline_capacity, 4);
+
+        let args = parse(&[
+            "--euroc-dir",
+            "dataset",
+            "--calibration",
+            "calib.json",
+            "--pipeline",
+            "--pipeline-capacity",
+            "8",
+        ]);
+        assert!(args.pipeline);
+        assert_eq!(args.pipeline_capacity, 8);
+    }
+
+    #[test]
+    fn usage_documents_pipeline_flags() {
+        let usage = Args::usage();
+        assert!(usage.contains("--pipeline"));
+        assert!(usage.contains("--pipeline-capacity"));
+        assert!(usage.contains("--threads"));
+    }
+
+    #[test]
+    fn threads_flag_defaults_unset_and_is_parsed() {
+        let args = parse(&["--euroc-dir", "dataset", "--calibration", "calib.json"]);
+        assert_eq!(args.threads, None);
+
+        let args = parse(&[
+            "--euroc-dir",
+            "dataset",
+            "--calibration",
+            "calib.json",
+            "--threads",
+            "6",
+        ]);
+        assert_eq!(args.threads, Some(6));
     }
 }
