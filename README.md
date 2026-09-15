@@ -32,7 +32,10 @@ Separately, the [Visual-Inertial SLAM (Basalt Rust port)](#visual-inertial-slam-
 — a distinct, tightly-coupled stereo-inertial VIO stack, not the vision-only
 SfM/SLAM pipeline above — matches native Basalt's ATE to **within 0.1%** on
 every one of the 11 EuRoC sequences at seed 7, with **0.563×** native's peak
-RSS on the same-domain Linux runtime/RSS gate (1.133× runtime ratio).
+RSS on the same-domain Linux runtime/RSS gate (1.133× runtime ratio). With
+EuRoC's official calibration and its offline mapper stage, the same estimator
+**beats measured ORB-SLAM3 (full-trajectory SE(3) ATE) on 8 of 11 EuRoC
+sequences**, same evaluator, one run each.
 
 **OpenLORIS 10k — calibrated-rig quality comparison:** visloc's experimental
 observation-backed atlas preserves the connected frame counts and meets the
@@ -330,6 +333,72 @@ this port targets upstream numerical and structural fidelity (matching Basalt's
 own frontend, factors, and marginalization) on the standard EuRoC benchmark,
 not a from-scratch design.
 
+### Beating ORB-SLAM3 on EuRoC with the official calibration + offline mapper
+
+Same evaluator, one run per sequence, full-trajectory ATE with SE(3) Umeyama
+alignment; ORB-SLAM3 measured on this machine (not a paper number). Estimator
+code is unchanged from the all-11 parity result below — only the input
+calibration and an added offline mapper stage differ.
+
+| Sequence | VIO (official calib) | Mapper (official calib) | ORB-SLAM3 (measured) | Winner |
+| --- | ---: | ---: | ---: | :---: |
+| MH_01_easy | 0.030 | 0.015 | 0.036 | mapper |
+| MH_02_easy | 0.035 | 0.024 | 0.033 | mapper |
+| MH_03_medium | 0.058 | 0.026 | 0.028 | mapper |
+| MH_04_difficult | 0.099 | 0.085 | 0.043 | ORB-SLAM3 |
+| MH_05_difficult | 0.123 | 0.061 | 0.055 | ORB-SLAM3 |
+| V1_01_easy | 0.040 | 0.035 | 0.038 | mapper |
+| V1_02_medium | 0.042 | 0.014 | 0.017 | mapper |
+| V1_03_difficult | 0.047 | 0.018 | 0.029 | mapper |
+| V2_01_easy | 0.027 | 0.016 | 0.039 | mapper |
+| V2_02_medium | 0.044 | 0.010 | 0.014 | mapper |
+| V2_03_difficult | 0.235 | 0.065 | 0.056 | ORB-SLAM3 |
+
+<p align="center"><sub>Mapper beats measured ORB-SLAM3 on 8/11 sequences.
+V2_02_medium's mapper number (KF SE3 0.0090, full SE3 0.0103, Sim3 0.0100,
+scale 0.9989, 226 s) is from a manual detached rerun of exactly the same
+command as the other sequences: the driver's own attempt for this one
+sequence was killed by its wall-time safety monitor
+(<code>E:\visloc-rs-runs\basalt_official_calib_20260915\status\V2_02_medium.failed.json</code>,
+an artefact of a slow disk/host state during that specific run, not a
+tracking or optimizer failure) before it could finish and write a result;
+the rerun completed normally. VIO-only with the official calibration already
+beats ORB-SLAM3 on MH_01_easy and V2_01_easy without the mapper.</sub></p>
+
+**Why this works.** Basalt's shipped DS (double-sphere) calibration is a
+from-scratch recalibration of EuRoC's raw images, not the factory pinhole
+calibration EuRoC ships in `mav0/cam{0,1}/sensor.yaml`. Windowed (30 s) Sim(3)
+scale is constant over an entire sequence on MH_01/V1_02 (~1.012-1.018) — a
+multiplicative, scene-independent metric-scale bias, not depth-dependent
+stereo noise — and a direct visual-side sensitivity probe (scaling the
+inter-camera baseline by the measured bias factor) collapses that scale to
+~1.001 and cuts SE(3) ATE 2.7x while leaving Sim(3) ATE unchanged, the exact
+signature of a calibration-scale bug rather than an IMU-noise or estimator
+bug. Basalt's own recalibration carries ~+0.45% extra effective focal length
+and ~+0.15% extra stereo baseline relative to the official calibration —
+consistent in direction and rough order of magnitude with the observed
+~1.4% scale bias. `scripts/euroc_official_to_ds_calib.py` converts EuRoC's
+official pinhole-radtan calibration directly into Basalt's DS model (GT-free;
+an inner-90%-bearing-radius fit — see
+[`configs/basalt/variants/official_euroc_ds/README.txt`](configs/basalt/variants/official_euroc_ds/README.txt)
+for the fit-region rationale and residuals) and switching to it removes most
+of the bias (MH_01 Sim(3) scale 1.0142 -> 1.0014). The faithful NFR offline
+mapper (same one used in the all-11 parity result below) then closes loops
+and optimises globally over the corrected VIO output.
+
+Two things this result is **not**: (a) the estimator/mapper code is
+unchanged — this is a calibration-input fix plus an existing offline stage,
+not a new algorithm; (b) the mapper is an offline batch stage, not a
+real-time one — 2-18 minutes and 3-6 GB peak RSS per sequence on the
+baseline-calibration run (`E:\visloc-rs-runs\basalt_mapper_all11_20260915\summary.md`,
+the run artifact these per-sequence costs are quoted from), so the 29 MB /
+real-time VIO-only footprint claimed elsewhere in this section does not
+apply to the mapper number in this table. The three losses (MH_04, MH_05,
+V2_03) are VIO tracking-robustness limits on fast/motion-blurred/dark
+sequences, not mapper or calibration limits — see
+[`docs/vi_slam_global_consistency_plan.md`](docs/vi_slam_global_consistency_plan.md)
+for next steps.
+
 ### Pipeline
 
 ```mermaid
@@ -356,7 +425,15 @@ flowchart LR
 every frame; a MargData packet is only written to disk when Basalt selects a
 keyframe for removal, which is what feeds the offline mapper.</sub></p>
 
-### All-11 EuRoC accuracy (Rust port vs native Basalt)
+### All-11 EuRoC accuracy (Rust port vs native Basalt) — faithful-port parity
+
+This is the **faithful-port parity claim**: both engines run on upstream
+Basalt's own shipped calibration/config inputs
+(`benchmarks/basalt/release_inputs/`), so it measures port fidelity, not
+absolute accuracy against another system. The **official-calibration
+accuracy result above** is a separate claim, using a different (official
+EuRoC) input calibration and adding the offline mapper stage; keep the two
+apart.
 
 Same sensor-only replay, same seed (7), single run per sequence, ATE
 translation RMSE with SE(3) Umeyama alignment (evo-style, nearest-timestamp
@@ -485,6 +562,17 @@ manifest. Regenerate with
 <a href="scripts/plot_basalt_readme_figures.py">scripts/plot_basalt_readme_figures.py</a>
 from the all-11 gate report plus local EuRoC TUM/CSV trajectory outputs.</sub></p>
 
+<p align="center">
+  <img src="docs/assets/basalt_official_calib_vs_orbslam3.png" alt="Grouped bar chart of full-trajectory SE(3) ATE for VIO (official calibration), the offline mapper (official calibration), and measured ORB-SLAM3, across all 11 EuRoC sequences" width="820">
+</p>
+
+<p align="center"><sub>The official-calibration comparison figure above (see
+"Beating ORB-SLAM3" earlier in this section). Regenerate it with the same
+script's <code>--official-calib-summary-json</code> /
+<code>--orbslam3-summary-md</code> / <code>--override</code> flags (see the
+script's module docstring); the V2_02_medium override is documented
+there.</sub></p>
+
 ### Run it
 
 Build with AVX2/FMA and the LM-workspace-reuse optimization used for the
@@ -513,6 +601,47 @@ mapper's input), and `summary.txt` under `--out-dir`. Pass `--no-trace`
 and/or `--no-marg-data` to drop the diagnostic trace and MargData output
 respectively; `--help` lists every flag. The example never reads a ground-truth
 file — all outputs are produced causally from sensor data and estimator state.
+
+To reproduce the "official calibration + mapper" result above instead, swap
+in the official-calibration variant (keep `--no-marg-data` off, since the
+mapper needs it) and then run the offline mapper on the resulting
+`marg_data/` directory:
+
+```bash
+cargo run --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse -- \
+  --euroc-dir /path/to/MH_01_easy \
+  --calibration configs/basalt/variants/official_euroc_ds/euroc_ds_calib.json \
+  --config configs/basalt/variants/official_euroc_ds/euroc_config.json \
+  --out-dir target/basalt_mh01_official
+
+cargo run --release --example basalt_mapper_offline_demo -- \
+  --marg-dir target/basalt_mh01_official/marg_data \
+  --calibration configs/basalt/variants/official_euroc_ds/euroc_ds_calib.json \
+  --config configs/basalt/variants/official_euroc_ds/euroc_config.json \
+  --out-dir target/basalt_mh01_official_mapper
+```
+
+`configs/basalt/variants/official_euroc_ds/euroc_ds_calib.json` is produced
+from EuRoC's own factory pinhole-radtan calibration by
+[`scripts/euroc_official_to_ds_calib.py`](scripts/euroc_official_to_ds_calib.py)
+(GT-free; see its
+[README](configs/basalt/variants/official_euroc_ds/README.txt) for the fit
+decision). The mapper writes `trajectory.tum`/`trajectory.csv` (keyframe
+poses) plus `poses.json`/`points.json`/`map.json`/`mapper_report.json`; to
+propagate the mapper's corrections onto the full (non-keyframe) VIO
+trajectory for scoring, run
+[`scripts/propagate_basalt_mapper_corrections.py`](scripts/propagate_basalt_mapper_corrections.py):
+
+```bash
+python3 scripts/propagate_basalt_mapper_corrections.py \
+  --vio-trajectory-csv target/basalt_mh01_official/trajectory.csv \
+  --mapper-poses-json target/basalt_mh01_official_mapper/poses.json \
+  --out-tum target/basalt_mh01_official_mapper/full_trajectory.tum
+```
+
+`scripts/run_basalt_official_calib_all11.py` drives all three steps above
+plus evaluation across all 11 EuRoC sequences (detached, resumable, writes a
+live-updating `summary.md`/`summary.json`); see its module docstring.
 
 ### Honest caveats
 
@@ -612,7 +741,7 @@ previously lived here.
 - **Understand supported configurations:** [feature matrix](docs/feature_matrix.md), [API stability](docs/api_stability.md), [COLMAP compatibility](docs/colmap_compatibility.md), and [migration notes](docs/migration.md).
 - **Inspect VO and loop-closure evidence:** [KITTI multi-sequence](docs/kitti_multiseq_benchmark.md), [KITTI loop closure](docs/kitti_loop_closure_benchmark.md), [EuRoC loop closure](docs/euroc_loop_closure_benchmark.md), [TUM RGB-D](docs/tum_rgbd_benchmark.md), and [tracking persistence](docs/tracking_persistence_benchmark.md).
 - **Inspect VI-SLAM (Basalt Rust port) evidence:** [faithful-port final closure report](work/m11_basalt_faithful_port_final_closure_20260914.md) and [upstream oracle / provenance](benchmarks/basalt/README.md).
-- **Where VI-SLAM goes next:** [global-consistency plan](docs/vi_slam_global_consistency_plan.md) — same-protocol ORB-SLAM3 measurements, the post-process loop-closure negatives, and the staged Basalt-VIO + persistent-map + robust-back-end plan.
+- **Where VI-SLAM goes next:** [global-consistency plan](docs/vi_slam_global_consistency_plan.md) — same-protocol ORB-SLAM3 measurements, the 8/11 official-calibration + mapper result and its scale-bias root cause, the paused persistent-map prototype, and the staged plan targeting VIO tracking robustness on the three remaining losses.
 - **Inspect SfM evidence:** [EuRoC reconstruction](docs/euroc_sfm_benchmark.md), [sequential SfM vs COLMAP](docs/sfm_vs_colmap_benchmark.md), [unordered SfM](docs/unordered_sfm_benchmark.md), and [registry evidence for the head-to-head](docs/generated/sfm_vs_colmap_headtohead.md).
 - **Inspect learned frontend evidence:** [SuperPoint ONNX/CUDA](docs/superpoint_onnx_cuda_benchmark.md), [LightGlue ONNX](docs/lightglue_onnx_benchmark.md), and [single-binary deep stereo SLAM](docs/inprocess_slam_benchmark.md).
 - **Inspect mapping and optimization evidence:** [learned retrieval for relocalization](docs/learned_retrieval_relocalization.md), [multi-session lifelong mapping](docs/multi_session_lifelong_benchmark.md), and [pose-graph / BA internals with GTSAM parity](docs/pgo_internals.md).

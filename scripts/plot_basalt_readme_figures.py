@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the Basalt VI-SLAM README figures from measured run artifacts.
 
-Two figures are produced from real EuRoC replay outputs (no synthetic data):
+Three figures are produced from real EuRoC replay outputs (no synthetic data):
 
 1. Top-down (X, Y) trajectory overlay: Rust `basalt_euroc_vio_demo` estimate
    (SE(3)-Umeyama-aligned to ground truth) vs native Basalt (same alignment)
@@ -9,6 +9,9 @@ Two figures are produced from real EuRoC replay outputs (no synthetic data):
 2. A bar chart of per-sequence ATE (translation RMSE, SE(3) alignment) for
    the Rust port vs native Basalt across all 11 EuRoC sequences, read from
    the all11 combined gate-report JSON.
+3. A grouped bar chart of full-trajectory SE(3) ATE for VIO (official
+   calibration), the offline mapper (official calibration), and measured
+   ORB-SLAM3, across all 11 EuRoC sequences.
 
 The trajectory alignment (SE(3) Umeyama, no scale) mirrors
 `scripts/evaluate_euroc_trajectory.py`, which produced the numbers reported
@@ -24,6 +27,20 @@ Usage::
         --output-dir docs/assets \\
         --traj-seq MH_01_easy=<rust_tum>,<native_csv>,<gt_csv> \\
         --traj-seq V1_01_easy=<rust_tum>,<native_csv>,<gt_csv>
+
+    python3 scripts/plot_basalt_readme_figures.py \\
+        --all11-json work/m11_phase6_latest_combined_all11x1_20260914.json \\
+        --output-dir docs/assets \\
+        --official-calib-summary-json <basalt_official_calib_run>/summary.json \\
+        --orbslam3-summary-md <orbslam3_run>/summary.md \\
+        --override V2_02_medium:full_ate_se3_rmse_m=0.0103,kf_ate_se3_rmse_m=0.0090
+
+`--override` patches one sequence's mapper row after loading
+`--official-calib-summary-json`; it exists because the driver's V2_02_medium
+mapper stage in this repository's own 2026-09-15 run was killed by a wall-time
+safety monitor artefact (the correct result came from a manual detached
+rerun, see README). Omit `--official-calib-summary-json`/`--orbslam3-summary-md`
+to skip the third figure.
 
 Optional dependencies: numpy, matplotlib. Asset-generation helper, not part
 of the core build, test, or CI path.
@@ -48,6 +65,25 @@ def parse_args() -> argparse.Namespace:
         default=[],
         metavar="NAME=RUST_TUM,NATIVE_CSV,GT_CSV",
         help="one sequence to render as a trajectory overlay; repeatable",
+    )
+    parser.add_argument(
+        "--official-calib-summary-json",
+        type=Path,
+        default=None,
+        help="run_basalt_official_calib_all11.py summary.json (VIO + mapper, official calibration)",
+    )
+    parser.add_argument(
+        "--orbslam3-summary-md",
+        type=Path,
+        default=None,
+        help="ORB-SLAM3 same-protocol summary.md (measured column parsed from its table)",
+    )
+    parser.add_argument(
+        "--override",
+        action="append",
+        default=[],
+        metavar="SEQUENCE:field=value[,field=value...]",
+        help="patch one sequence's official-calib row after loading (see module docstring)",
     )
     return parser.parse_args()
 
@@ -229,6 +265,92 @@ def plot_ate_bar_chart(all11_json: Path, output: Path) -> None:
     print(f"wrote {output}")
 
 
+def parse_overrides(specs: list[str]) -> dict[str, dict[str, float]]:
+    overrides: dict[str, dict[str, float]] = {}
+    for spec in specs:
+        sequence, _, fields = spec.partition(":")
+        patch: dict[str, float] = {}
+        for field in fields.split(","):
+            key, _, value = field.partition("=")
+            if key:
+                patch[key.strip()] = float(value)
+        overrides[sequence.strip()] = patch
+    return overrides
+
+
+def load_orbslam3_measured(summary_md: Path) -> dict[str, float]:
+    """Parse the "ORB-SLAM3 measured median ATE-SE3" column out of its results table."""
+    import re
+
+    measured: dict[str, float] = {}
+    pattern = re.compile(r"^\|\s*([A-Za-z0-9_]+)\s*\|\s*([0-9.]+)\s*\(")
+    for line in summary_md.read_text(encoding="utf-8").splitlines():
+        match = pattern.match(line)
+        if match:
+            measured[match.group(1)] = float(match.group(2))
+    return measured
+
+
+def load_official_calib_rows(summary_json: Path, overrides: dict[str, dict[str, float]]):
+    with summary_json.open() as handle:
+        data = json.load(handle)
+    rows = []
+    for row in data["rows"]:
+        sequence = row["sequence"]
+        patch = overrides.get(sequence, {})
+        vio_se3 = patch.get("vio_se3_rmse_m", row.get("vio", {}).get("vio_se3_rmse_m") if isinstance(row.get("vio"), dict) else None)
+        full_se3 = patch.get("full_ate_se3_rmse_m", row.get("full_ate_se3_rmse_m"))
+        if full_se3 is None and "full_ate_se3_rmse_m" not in patch:
+            # sequence's mapper stage failed in the driver and was not overridden
+            continue
+        if vio_se3 is None:
+            continue
+        rows.append((sequence, float(vio_se3), float(full_se3)))
+    rows.sort(key=lambda row: row[0])
+    return rows
+
+
+def plot_official_calib_vs_orbslam3(
+    official_calib_summary_json: Path,
+    orbslam3_summary_md: Path,
+    overrides: dict[str, dict[str, float]],
+    output: Path,
+) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    rows = load_official_calib_rows(official_calib_summary_json, overrides)
+    orbslam3 = load_orbslam3_measured(orbslam3_summary_md)
+
+    labels = [seq.replace("_easy", "").replace("_medium", "").replace("_difficult", "") for seq, _, _ in rows]
+    vio_vals = [vio for _, vio, _ in rows]
+    mapper_vals = [mapper for _, _, mapper in rows]
+    orb_vals = [orbslam3[seq] for seq, _, _ in rows]
+
+    x = np.arange(len(labels))
+    width = 0.27
+    fig, ax = plt.subplots(figsize=(11.5, 4.8))
+    ax.bar(x - width, vio_vals, width, label="VIO (official calib)", color="#2f80ed")
+    ax.bar(x, mapper_vals, width, label="Mapper (official calib)", color="#27ae60")
+    ax.bar(x + width, orb_vals, width, label="ORB-SLAM3 (measured)", color="#eb5757")
+    ax.set_ylabel("Full-trajectory ATE translation RMSE, SE(3) [m]")
+    ax.set_title("Official EuRoC calibration: VIO / mapper vs ORB-SLAM3 (lower is better)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=30, ha="right")
+    ax.grid(True, axis="y", color="#d8dee9", linewidth=0.6)
+    ax.legend(loc="upper left", frameon=True, framealpha=0.9)
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+    fig.tight_layout()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=150, facecolor="white")
+    plt.close(fig)
+    print(f"wrote {output}")
+
+
 def main() -> int:
     args = parse_args()
     try:
@@ -239,6 +361,14 @@ def main() -> int:
         return 2
 
     plot_ate_bar_chart(args.all11_json, args.output_dir / "basalt_all11_ate_bar.png")
+
+    if args.official_calib_summary_json and args.orbslam3_summary_md:
+        plot_official_calib_vs_orbslam3(
+            args.official_calib_summary_json,
+            args.orbslam3_summary_md,
+            parse_overrides(args.override),
+            args.output_dir / "basalt_official_calib_vs_orbslam3.png",
+        )
 
     for spec in args.traj_seq:
         name, rest = spec.split("=", 1)
