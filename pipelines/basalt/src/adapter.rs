@@ -255,8 +255,8 @@ impl BasaltVioEstimatorAdapter {
     /// [`Self::timing_breakdown_with_estimator`] merges the serial path's.
     ///
     /// `decode_threads` sizes a small pool that decodes PNG frames ahead of
-    /// the frontend thread (see [`run_pipeline_decode_worker`]) so dataset
-    /// acquisition -- disk I/O plus PNG/DEFLATE decode -- comes off the
+    /// the frontend thread (see the private `run_pipeline_decode_worker`)
+    /// so dataset acquisition -- disk I/O plus PNG/DEFLATE decode -- comes off the
     /// frontend thread's own critical path and multiple reads can be in
     /// flight with the OS/disk concurrently, making wall time more robust
     /// to disk contention from other processes. It changes no numerics:
@@ -667,9 +667,9 @@ pub enum BasaltAdapterError {
     #[error("EuRoC dataset error: {0}")]
     Dataset(#[from] EurocReaderError),
     /// A caller-provided `on_output` callback (e.g. trajectory/MargData
-    /// serialization in [`Self::process_euroc_stream_pipelined`]) failed.
-    /// This variant exists purely to carry that error type through the
-    /// pipelined API's `Result<_, BasaltAdapterError>` boundary.
+    /// serialization in [`BasaltVioEstimatorAdapter::process_euroc_stream_pipelined`])
+    /// failed. This variant exists purely to carry that error type through
+    /// the pipelined API's `Result<_, BasaltAdapterError>` boundary.
     #[error("pipeline output callback error: {0}")]
     Output(String),
 }
