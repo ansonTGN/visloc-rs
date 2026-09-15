@@ -122,12 +122,50 @@ V2_01_easy.
 
 ## Quickstart
 
-Requires Rust 1.83+.
+Requires Rust 1.83+ only — no C++/OpenCV/CUDA toolchain.
+
+Smallest end-to-end: localize a synthetic query against a 1-landmark map.
 
 ```bash
 cargo build
 cargo run --example localize_dummy
 ```
+
+Load a real COLMAP model and localize a query photo against it (downloads ~100 MB
+on first run). Datasets are external inputs and are not bundled with this
+repository. Fetch the dataset once:
+
+```bash
+mkdir -p ~/datasets/south-building && cd ~/datasets/south-building && \
+  curl -L -o south-building.zip \
+    https://github.com/colmap/colmap/releases/download/3.11.1/south-building.zip && \
+  unzip south-building.zip
+```
+
+Then, from the repository root, localize a query photo against the sparse model:
+
+```bash
+cargo run --release --features image-io --example deep_localization_demo -- \
+  --root ~/datasets/south-building/south-building \
+  --map-image P1180141.JPG --query-image P1180155.JPG
+```
+
+<p align="center">
+  <img src="docs/assets/south-building-localization.gif" alt="Public-data localization: real query photos localized frame by frame against a reusable COLMAP sparse SfM map" width="820"><br>
+  <sub>Public-data localization: real query photos localized frame by frame against the same reusable sparse visual map (COLMAP South Building). Details: <a href="docs/public_data_demo.md">public COLMAP map-reuse demo</a>.</sub>
+</p>
+
+| First run | Command | What it shows |
+| --- | --- | --- |
+| Synthetic localization | `cargo run --example localize_dummy` | Smallest end-to-end: one query, one landmark, PnP RANSAC estimate |
+| Map-reuse localization | `cargo run --release --features image-io --example deep_localization_demo -- --root <south-building> --map-image P1180141.JPG --query-image P1180155.JPG` | A real query photo localized against a COLMAP model, classical vs deep frontend |
+| Sequence tracking | `cargo run --features image-io --example track_image_sequence_from_common_images` | Moving-camera tracking smoke with per-frame pose continuity |
+| KITTI revisit scanner | `python scripts/run_kitti_deep_vo_revisit_smoke.py` | Public KITTI 00 revisit smoke (downloads start/revisit slices) |
+| Full local quality gate | `scripts/check.sh` | `fmt` + `clippy` + `test` + `doc` in one command |
+
+More runnable demos and the full index are in the
+[demo strategy](docs/demo_strategy.md) and the
+[archived README details](docs/readme_details.md#demos).
 
 ## Verified results
 
