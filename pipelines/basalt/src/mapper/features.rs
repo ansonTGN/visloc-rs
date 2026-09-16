@@ -1796,7 +1796,22 @@ fn opengv_optimize_pose(
     matches: &[DescriptorMatch],
     inliers: &[usize],
 ) -> RelativePoseModel {
-    if inliers.is_empty() {
+    // `opengv_eigen_cpqr` performs a column-pivoted QR of a (rows x 6)
+    // Jacobian (one row per inlier residual, six columns for the
+    // translation+Cayley-rotation parameters) and indexes qr[(k, k)] for
+    // k in 0..6, so it requires rows >= 6. `raw_matches.len() <
+    // OPENGV_RANSAC_SAMPLE_SIZE` in `run_opengv_ransac` only bounds the
+    // *candidate* match count, not the RANSAC consensus set eventually
+    // passed here as `inliers`: `best_count` starts below zero, so even a
+    // 1-5-point consensus set is accepted as "best" and forwarded to this
+    // 6-DOF refinement, previously panicking with "Matrix index out of
+    // bounds" on any frame pair whose best RANSAC model has fewer than 6
+    // inliers (observed on LaMAria's wider-FOV imagery, which produces
+    // more marginal two-view geometries than EuRoC's data). Skipping
+    // refinement below 6 inliers -- the same "return the unrefined model"
+    // behavior already used for the zero-inlier case -- is the minimal
+    // generalization of the existing guard.
+    if inliers.len() < 6 {
         return initial;
     }
     let mut x = DVector::<f64>::zeros(6);
@@ -2447,6 +2462,41 @@ mod tests {
         // GCC 11.4's std::uniform_int_distribution<int>(0, INT_MAX),
         // including the 624-value mt19937 twist boundary.
         assert_eq!(hash, 4_040_478_949_708_829_921);
+    }
+
+    /// Regression test for a panic ("Matrix index out of bounds" at
+    /// `opengv_eigen_cpqr`'s `qr[(k, k)]`) observed on real (non-EuRoC)
+    /// imagery whose two-view RANSAC best-consensus set has fewer than 6
+    /// inliers. `opengv_eigen_cpqr` column-pivots a (rows x 6) Jacobian and
+    /// indexes row k for k in 0..6, so it needs rows >= 6; `inliers.len()`
+    /// becomes the row count. Below 6 inliers, `opengv_optimize_pose` must
+    /// return the unrefined `initial` model (matching its existing
+    /// zero-inlier early return) instead of calling into the QR at all.
+    #[test]
+    fn opengv_optimize_pose_skips_refinement_below_six_inliers() {
+        let initial = RelativePoseModel {
+            rotation: Matrix3::identity(),
+            translation: Vector3::new(0.1, 0.2, 0.3),
+        };
+        // Five candidate correspondences: enough to be a non-empty
+        // consensus set, but one short of the 6 rows the LM Jacobian needs.
+        let left_rays: Vec<[f64; 4]> = (0..5)
+            .map(|i| [1.0, 0.1 * i as f64, 0.05 * i as f64, 0.0])
+            .collect();
+        let right_rays: Vec<[f64; 4]> = left_rays.clone();
+        let matches: Vec<DescriptorMatch> = (0..5)
+            .map(|i| DescriptorMatch {
+                left: i,
+                right: i,
+                distance: 0,
+            })
+            .collect();
+        let inliers: Vec<usize> = (0..5).collect();
+
+        let refined = opengv_optimize_pose(initial, &left_rays, &right_rays, &matches, &inliers);
+
+        assert_eq!(refined.rotation, initial.rotation);
+        assert_eq!(refined.translation, initial.translation);
     }
 
     #[test]
