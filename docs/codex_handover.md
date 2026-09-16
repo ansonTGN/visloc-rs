@@ -86,6 +86,31 @@
   `benchmarks/electro/m9-openloris-colmap-port-ceres-gauge6-10000-v1.json`。
   次は「なぜ2つ目のmodelが始まらないか」の診断（`num_shared_reg_images`/
   `max_model_overlap`/`max_num_models`、frontier枯渇、structure-less fallback不在）。
+- **10k model分割の診断結果（2026-09-16）**: COLMAP 10k controlはmodel0=frames
+  **0–4493**（連続）、model1=frames **4495–4999**（連続）、**frame 4494のみ未登録**で2分割
+  （model0 initは多数のbad pairの後の成功、`logs/mapper.log:10033,11878`に2回Keeping）。
+  移植版は1 modelで全5000 frame: initは 3181/3213 を試してBadInitialPair→388/420で成功、
+  以後ほぼframe順に登録。**境界のframe 4497をrank 4492で inliers=9/corr=9 で登録**して
+  4495+領域へ橋渡し（4495 rank4494、4496 rank4495）。frame 4494は最後（rank 4997）に登録。
+  → 分割ロジック（`num_shared_reg_images>=max_model_overlap`、`min_model_size`）は移植済みで
+  問題ではなく、**model0のfrontierがCOLMAPでは4493で枯渇するのに移植版では枯渇しない**
+  ことが原因。候補ゲートは両者`abs_pose_min_num_inliers=8`（control override、§0.1）で同一
+  なので、境界での**visible 3D点のtrisangulation状態/ObservationManager差**が本質。
+  次は境界フレーム（4494/4497近傍）の`num_visible_points3d`を移植版に計装してCOLMAPと比較。
+- **境界計装の結果（2026-09-16、A案）**: `find_next_images`にenv
+  `VISLOC_DEBUG_BOUNDARY_FRAMES`/`VISLOC_DEBUG_BOUNDARY_MIN_REG`を追加（読み取り専用）。
+  実測: n_reg=4492は候補2、4493は候補1（image 9493 visible=12）→ frame 4493登録、
+  **n_reg=4494で候補が1つだけになり、それが image 9497 = frame 4497**（登録して橋渡し）、
+  その後 n_reg=4495で候補4（frame4495 visible=9, 4496=8, 4498=8, 4505…）に開き4505選択。
+  → 移植版はframe 4493登録直後のtriangulationでimage 9497のvisible点が8以上になり、
+  model0内で4497を登録して4495+領域を開く。COLMAPは同点で候補が枯渇しmodel1を開始。
+  候補ゲート（`abs_pose_min_num_inliers=8`/`max_reg_trials=3`/`MIN_UNCERTAINTY`/
+  ratio0.25）は両者一致で、分割ロジックも移植済み。**差は境界でのtriangulation/visible
+  点状態（ObservationManager）**。深いparity課題で、COLMAP側を同点計装して比較するか、
+  統合modelを許容してper-component採点を変えるかの判断が必要。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-10k-boundary-diag-v1.json`
+  （root `tier-10000-boundary-debug-v1`は境界取得後に停止、modelは
+  `tier-10000-ceres-gauge6-v1`と同一）。
 - 未commit/未push: 10k証跡とこの追記（gauge6のコード/証跡2件は`0f38eb4`でpush済み）。
 
 ### 2026-09-15 追記: 2.5k/5k 登録順LCSとframe単位pose差（plan §4.2 items 1-3）

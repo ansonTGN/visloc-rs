@@ -1051,13 +1051,55 @@ impl IncrementalMapper {
     /// `pipeline.rs` module doc's deviation on
     /// `structure_less_registration_fallback`).
     pub fn find_next_images(&self, options: &Options, recon: &Reconstruction) -> Vec<ImageT> {
-        mapper_impl::find_next_images(
+        let ranked = mapper_impl::find_next_images(
             options.abs_pose_min_num_inliers,
             options.max_reg_trials,
             recon,
             &self.obs,
             &self.filtered_frames,
             &self.num_reg_trials,
-        )
+        );
+
+        // Env-gated boundary diagnostic for the 10k model-splitting
+        // investigation: dump the visibility/trial state of specific frames
+        // as the frontier approaches them, and the chosen next image.
+        // `VISLOC_DEBUG_BOUNDARY_FRAMES=4493,4494,...`,
+        // `VISLOC_DEBUG_BOUNDARY_MIN_REG=4480`.
+        if let Some(spec) = std::env::var_os("VISLOC_DEBUG_BOUNDARY_FRAMES") {
+            let min_reg: usize = std::env::var("VISLOC_DEBUG_BOUNDARY_MIN_REG")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            let n_reg = recon.num_reg_frames();
+            if n_reg >= min_reg && n_reg <= min_reg + 40 {
+                let frames: BTreeSet<FrameT> = spec
+                    .to_string_lossy()
+                    .split(',')
+                    .filter_map(|s| s.trim().parse::<FrameT>().ok())
+                    .collect();
+                let chosen = ranked.first().map(|&iid| (iid, recon.image(iid).frame_id));
+                eprintln!(
+                    "BOUNDARY n_reg={} n_candidates={} chosen={:?}",
+                    n_reg,
+                    ranked.len(),
+                    chosen
+                );
+                for (&image_id, image) in recon.images() {
+                    if !frames.contains(&image.frame_id) {
+                        continue;
+                    }
+                    eprintln!(
+                        "BOUNDARY frame={} image={} registered={} visible={} trials={} in_candidates={}",
+                        image.frame_id,
+                        image_id,
+                        recon.is_image_registered(image_id),
+                        self.obs.num_visible_points3d(image_id),
+                        *self.num_reg_trials.get(&image_id).unwrap_or(&0),
+                        ranked.contains(&image_id),
+                    );
+                }
+            }
+        }
+        ranked
     }
 }
