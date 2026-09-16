@@ -65,8 +65,18 @@
   （対照2:02）。local BA収束parityがスケール時の主レバーだった。証跡
   `benchmarks/electro/m9-openloris-colmap-port-ceres-local-ba-5000-v1.json`。
   commit/push済み。COLMAP parityは未達（残差要因は下記）。
-- 5kの残差要因候補: gaugeの自由度単位化（§9.2、COLMAPは7 DoF/移植版12 DoF）、
-  structure-less登録、filter cadence。
+- 2026-09-16 **gauge 6 DoF修正（ソース§9.2準拠）で5kがほぼCOLMAP parity**:
+  移植版はrig baselineが固定パラメータでscaleが既に決まるため、剛体gaugeは6 DoFで完結。
+  従来の2姿勢固定(12 DoF)は6 DoF過拘束だった。`Gauge::OneFrameFromWorld`（1姿勢固定）を
+  追加しglobal BAで使用。**2.5k**: rmse 0.0695（2frame 0.0709/COLMAP0.0718）、scale
+  1.0251（1.0296/1.0263）、local max 1.0051、ゲート全PASS。**5k**: rmse **0.1361**
+  （2frame 0.2263/対照0.4359/COLMAP0.1227=**1.11x**）、scale **1.0655**（1.0859/1.1531/
+  1.0676とほぼ一致）、p95 0.2435（0.3984/0.6806/0.236）、local_scale max **1.0117**
+  （1.1155/1.1878）、pose mean **0.0278**（0.1234/0.3394）、wall 1:14:00。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-gauge6-{2500,5000}-v1.json`。
+  → gaugeの12 DoF過拘束が5k固有の後半ドリフトの主因だった。残差はATE 1.11x/p95僅差で、
+  次の候補はCOLMAP厳密な7 DoF（per-DoF baseline軸）・structure-less登録・filter cadence。
+- 未commit/未push: gauge6のコード（bundle_adjustment.rs/mapper.rs）と証跡2件・この追記。
 
 ### 2026-09-15 追記: 2.5k/5k 登録順LCSとframe単位pose差（plan §4.2 items 1-3）
 

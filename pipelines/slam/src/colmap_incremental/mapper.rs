@@ -895,7 +895,7 @@ impl IncrementalMapper {
                 config.add_variable_point(point3d_id);
             }
         }
-        config.fix_gauge(Gauge::TwoFramesFromWorld);
+        config.fix_gauge(Gauge::OneFrameFromWorld);
         let num_images = config.num_images();
         let num_points = recon.num_points3d();
         let ok = bundle_adjustment::solve(ba_options, &config, recon);

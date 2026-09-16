@@ -1,0 +1,282 @@
+{
+  "change": "Global-BA gauge uses one whole frame (6 DoF) instead of two (12 DoF). This port's sensor_from_rig baseline is a hard-fixed parameter, so scale is already pinned and the rigid gauge is complete at 6 DoF; COLMAP's FixGaugeWithTwoCamsFromWorld fixes frame1 (6) + frame2's largest baseline translation axis (1) = 7 DoF, where the 7th is the scale axis the port hard-fixes. The previous whole-two-frame choice over-constrained by 6. See docs/colmap_rig_mapper_port_plan.md \u00a79.2.",
+  "colmap": {
+    "models": 1,
+    "p95_m": 0.2360154639213036,
+    "registered_images": 5000,
+    "rmse_m": 0.12268531994957262,
+    "sim3_scale": 1.0676117399443572
+  },
+  "control": {
+    "models": 1,
+    "p95_m": 0.6805582759138297,
+    "registered_images": 5000,
+    "rmse_m": 0.4358619718336859,
+    "sim3_scale": 1.1530539219645124
+  },
+  "date": "2026-09-16",
+  "new": {
+    "models": 1,
+    "p95_m": 0.24350913310586347,
+    "registered_images": 5000,
+    "rmse_m": 0.1360714724559536,
+    "sim3_scale": 1.0655213223665392
+  },
+  "new_local_scale_max": 1.011717705500672,
+  "new_local_scale_min": 0.9819118962858621,
+  "new_local_scale_windows": [
+    {
+      "frame_end": 199,
+      "frame_start": 0,
+      "scale": 0.9999210096894511
+    },
+    {
+      "frame_end": 249,
+      "frame_start": 50,
+      "scale": 0.9998673284089603
+    },
+    {
+      "frame_end": 299,
+      "frame_start": 100,
+      "scale": 0.9997585625206051
+    },
+    {
+      "frame_end": 349,
+      "frame_start": 150,
+      "scale": 0.9998182536364905
+    },
+    {
+      "frame_end": 399,
+      "frame_start": 200,
+      "scale": 0.9995673366624301
+    },
+    {
+      "frame_end": 449,
+      "frame_start": 250,
+      "scale": 0.9984027041235362
+    },
+    {
+      "frame_end": 499,
+      "frame_start": 300,
+      "scale": 0.9966713504165826
+    },
+    {
+      "frame_end": 549,
+      "frame_start": 350,
+      "scale": 0.9980808129297922
+    },
+    {
+      "frame_end": 599,
+      "frame_start": 400,
+      "scale": 0.9999926282032747
+    },
+    {
+      "frame_end": 649,
+      "frame_start": 450,
+      "scale": 1.0028971596393972
+    },
+    {
+      "frame_end": 699,
+      "frame_start": 500,
+      "scale": 1.001371472874804
+    },
+    {
+      "frame_end": 749,
+      "frame_start": 550,
+      "scale": 0.9976597614256588
+    },
+    {
+      "frame_end": 799,
+      "frame_start": 600,
+      "scale": 0.9918792561187831
+    },
+    {
+      "frame_end": 849,
+      "frame_start": 650,
+      "scale": 0.9902442835790972
+    },
+    {
+      "frame_end": 899,
+      "frame_start": 700,
+      "scale": 0.9915331025440837
+    },
+    {
+      "frame_end": 949,
+      "frame_start": 750,
+      "scale": 0.9919688434224585
+    },
+    {
+      "frame_end": 999,
+      "frame_start": 800,
+      "scale": 0.9912954236353013
+    },
+    {
+      "frame_end": 1049,
+      "frame_start": 850,
+      "scale": 0.9897296157525042
+    },
+    {
+      "frame_end": 1099,
+      "frame_start": 900,
+      "scale": 0.9902315231165875
+    },
+    {
+      "frame_end": 1149,
+      "frame_start": 950,
+      "scale": 0.9898842711759482
+    },
+    {
+      "frame_end": 1199,
+      "frame_start": 1000,
+      "scale": 0.9886944441766069
+    },
+    {
+      "frame_end": 1249,
+      "frame_start": 1050,
+      "scale": 0.987723436974317
+    },
+    {
+      "frame_end": 1299,
+      "frame_start": 1100,
+      "scale": 0.9887561962786536
+    },
+    {
+      "frame_end": 1349,
+      "frame_start": 1150,
+      "scale": 0.9931036351854048
+    },
+    {
+      "frame_end": 1399,
+      "frame_start": 1200,
+      "scale": 0.9975585699729939
+    },
+    {
+      "frame_end": 1449,
+      "frame_start": 1250,
+      "scale": 1.0007763794797362
+    },
+    {
+      "frame_end": 1499,
+      "frame_start": 1300,
+      "scale": 1.0051062249426659
+    },
+    {
+      "frame_end": 1549,
+      "frame_start": 1350,
+      "scale": 1.0093555217087664
+    },
+    {
+      "frame_end": 1599,
+      "frame_start": 1400,
+      "scale": 1.011717705500672
+    },
+    {
+      "frame_end": 1649,
+      "frame_start": 1450,
+      "scale": 1.0091348101651199
+    },
+    {
+      "frame_end": 1699,
+      "frame_start": 1500,
+      "scale": 1.005136966030475
+    },
+    {
+      "frame_end": 1749,
+      "frame_start": 1550,
+      "scale": 1.0013589083125691
+    },
+    {
+      "frame_end": 1799,
+      "frame_start": 1600,
+      "scale": 0.9984325399241968
+    },
+    {
+      "frame_end": 1849,
+      "frame_start": 1650,
+      "scale": 0.9968873203315309
+    },
+    {
+      "frame_end": 1899,
+      "frame_start": 1700,
+      "scale": 0.9968672570010477
+    },
+    {
+      "frame_end": 1949,
+      "frame_start": 1750,
+      "scale": 0.9985998641798972
+    },
+    {
+      "frame_end": 1999,
+      "frame_start": 1800,
+      "scale": 0.9992587218915412
+    },
+    {
+      "frame_end": 2049,
+      "frame_start": 1850,
+      "scale": 0.9993326379422945
+    },
+    {
+      "frame_end": 2099,
+      "frame_start": 1900,
+      "scale": 0.9985574847548357
+    },
+    {
+      "frame_end": 2149,
+      "frame_start": 1950,
+      "scale": 0.9972250251392291
+    },
+    {
+      "frame_end": 2199,
+      "frame_start": 2000,
+      "scale": 0.9966229329419104
+    },
+    {
+      "frame_end": 2249,
+      "frame_start": 2050,
+      "scale": 0.9954320910086466
+    },
+    {
+      "frame_end": 2299,
+      "frame_start": 2100,
+      "scale": 0.9908014384283788
+    },
+    {
+      "frame_end": 2349,
+      "frame_start": 2150,
+      "scale": 0.9856573761146705
+    },
+    {
+      "frame_end": 2399,
+      "frame_start": 2200,
+      "scale": 0.9835808844558462
+    },
+    {
+      "frame_end": 2449,
+      "frame_start": 2250,
+      "scale": 0.9819118962858621
+    },
+    {
+      "frame_end": 2499,
+      "frame_start": 2300,
+      "scale": 0.9889540759810312
+    }
+  ],
+  "new_pose_center_error_m": {
+    "max": 0.09316920534330367,
+    "mean": 0.027804308070060815,
+    "median": 0.02300405736662319,
+    "p95": 0.05956365816140058
+  },
+  "new_wall": "01:14:00",
+  "previous_two_frame": {
+    "models": 1,
+    "p95_m": 0.398351399663504,
+    "registered_images": 5000,
+    "rmse_m": 0.22625664726837488,
+    "sim3_scale": 1.085855609317827
+  },
+  "reproduction": "root colmap-port-c2-v1/tier-5000-gauge6-v1; comparators tier-5000-local-ceres-v1; scorer scripts/score_openloris_model.py; diag scripts/compare_colmap_mapper_registration.py",
+  "schema": "visloc_colmap_mapper_gauge_gate_v1",
+  "status": "passed",
+  "tier": 5000
+}

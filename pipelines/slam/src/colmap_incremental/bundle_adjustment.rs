@@ -131,6 +131,14 @@ use super::types::{FrameT, ImageT, Point3DT, SensorT};
 /// doc deviation 4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Gauge {
+    /// New (2026-09-16): fix a single whole frame (6 DoF). Because this
+    /// port's `sensor_from_rig` baseline is a hard-fixed (non-optimized)
+    /// parameter, metric scale is already pinned, so the remaining gauge is
+    /// the 6-DoF rigid one. This is closer to COLMAP's
+    /// `FixGaugeWithTwoCamsFromWorld` (frame 1 whole + frame 2's largest
+    /// baseline translation axis = 7 DoF, where the 7th is the scale axis
+    /// this port hard-fixes) than the previous whole-two-frame 12-DoF choice.
+    OneFrameFromWorld,
     #[default]
     Unspecified,
     TwoFramesFromWorld,
@@ -635,6 +643,17 @@ pub fn solve(
 
     match config.gauge {
         Gauge::Unspecified => {}
+        Gauge::OneFrameFromWorld => {
+            let candidates: Vec<FrameT> = frame_ids
+                .iter()
+                .copied()
+                .filter(|id| !ba.fixed_poses.contains(id))
+                .take(1)
+                .collect();
+            for id in candidates {
+                ba.fix_pose(id);
+            }
+        }
         Gauge::TwoFramesFromWorld => {
             let candidates: Vec<FrameT> = frame_ids
                 .iter()
