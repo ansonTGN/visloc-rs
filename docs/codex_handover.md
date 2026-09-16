@@ -16,11 +16,18 @@
   ヘッダ不可、Cloudflare Pages/Netlify/Vercel等が必要。参考の
   `offlinetools.io/colmap-landing/` はマルチスレッド（`crossOriginIsolated`/
   `SharedArrayBuffer`必須）＋SIFT WebGPUで、stock COLMAP比の高速化を主張。
-- 実行中: 5k A/B `$R/colmap-port-c2-v1/tier-5000-global-ba-points-v1`（GP3P+colmap、
-  auto init）。仮説「global BAが点を変数化していない（`adjust_global_bundle`が
-  `add_variable_point`を呼ばない）のが5k後半の局所scaleドリフトの原因」。コード変更
-  `mapper.rs`/`bundle_adjustment.rs`（`points_observed_by`）は**未commit**、完了後に
-  local scale/ATE/RPEで採否（回帰ならrevert）。対照は `tier-5000-v2`（0.436、点固定）。
+- 2026-09-16 global BA点variable A/B (**棄却**、証跡
+  `benchmarks/electro/m9-openloris-colmap-port-global-ba-points-ab-v1.json`)。仮説
+  「global BAが点を変数化していない（`adjust_global_bundle`が`add_variable_point`を
+  呼ばない）のが5k後半の局所scaleドリフトの原因」は5kでは部分的に支持: local_scale max
+  1.188→1.135、pose mean 0.339→0.292、rmse 0.436→0.364。しかし**2.5k非回帰FAIL**
+  （rmse 0.087→0.154、scale 1.043→1.083、local_scale max 1.025→1.093）、5kもp95が
+  0.681→0.770へ悪化・global scaleが1.181へ後退、large BAが~2.6-3x遅（300s→771s）。
+  naiveな全点variable+trivial lossは小tierで自由度過剰、コスト過大。コード変更はrevert
+  済み（未commitだった）。root: 新規 `tier-{2500,5000}-global-ba-points-v1`、対照
+  `tier-2500-gp3p-colmap-repeat`/`tier-5000-v2`。構造refinementが5kドリフトを減らす
+  方向は確認できたので、次に試すなら事前登録ゲート＋コスト最適化（全点でなく
+  inlier/観測数上限、robust loss、global BA頻度）が必要。
 
 ### 2026-09-15 追記: 2.5k/5k 登録順LCSとframe単位pose差（plan §4.2 items 1-3）
 
