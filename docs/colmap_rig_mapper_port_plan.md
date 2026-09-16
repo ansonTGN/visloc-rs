@@ -828,3 +828,39 @@ under `benchmarks/electro/`):
 4. Only if the 2.5k gate passes may this reach the 5k/10k comparison; a
    2.5k regression again means the LM-side parity work (item 1/2) is the
    prerequisite, not more point-variable plumbing.
+
+### 8.4 Ceres-side measurement (2.2.0, 2026-09-16)
+
+A standalone Ceres program (12 cams / 120 points, noiseless projections,
+small pose+point perturbation) run with COLMAP's global options
+(`function_tolerance=0`, `parameter_tolerance=0`, `max_num_iterations=50`,
+TRIVIAL loss, DENSE_QR) gives:
+
+| `gradient_tolerance` | points | iterations | final cost |
+|---|---|---|---|
+| 1.0 (COLMAP global) | fixed | 2 | 0.94 (nearly no reduction) |
+| 1.0 (COLMAP global) | variable | 2 | 1.3e-3 |
+| 10.0 (COLMAP local) | variable | 1 | unchanged |
+| 1e-4 | fixed | 4 | 0.94 |
+| 1e-4 | variable | 4 | 4.6e-17 |
+| 0.0 | variable | 23 | 1.9e-29 |
+
+Conclusions:
+
+- **Ceres' `gradient_tolerance` is relative and loose.** With COLMAP's
+  global `1.0` (or local `10.0`) Ceres terminates after 1-2 iterations, i.e.
+  the port's `bundle_adjustment.rs`/`rig_ba_solver.rs` characterisation
+  ("10.0/1.0 effectively runs to `max_num_iterations`") and deviation 6's
+  "stops on `gradient_tolerance=1e-4`" are both wrong. The port instead uses
+  an absolute `‖g‖_∞ ≤ 1e-4` check and runs far more optimisation than
+  COLMAP's global/local BA.
+- **With points variable, 2-4 iterations already drive the cost to ~1e-3 or
+  better; with points fixed the cost cannot fall below ~0.94** in this
+  problem. This is solver-side confirmation of §8.1: COLMAP's global BA
+  genuinely refines structure, and freezing points is not equivalent.
+- Therefore the port currently has two coupled global-BA deviations: points
+  frozen (§8.1) *and* a much stricter/different convergence rule (§8.3
+  item 2). The next attempt must fix both together and gate on 2.5k
+  non-regression; fixing only the point set (the 2026-09-16 run) traded one
+  deviation for worse 2.5k quality because convergence was still
+  non-Ceres.
