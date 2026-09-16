@@ -40,7 +40,8 @@ Branch: `feat/lamaria-stage0b` (on top of `feat/lamaria-stage0`, merged with
 |---|---|---|---|---|---|---|---|
 | R_11_5cp | VIO only | **49.65** | 20.0 % | 16.0 % | 100.0 % | 1.94 m | 0.965 |
 | R_11_5cp | + mapper | **57.66** | 20.0 % | 17.1 % | 100.0 % | 1.37 m | 0.960 |
-| sequence_1_19 | VIO | not completed — see [Known issue](#known-issue-sequence_1_19-vio-crash) | | | | | |
+| sequence_1_19 | VIO only | 12.75 | 7.1 % | 0.0 % | 5.4 % | — | — |
+| sequence_1_19 | + mapper | **16.98** | 0.0 % | 0.3 % | 37.1 % | — | — |
 
 Leaderboard context (bino+imu track, Short subset where applicable):
 
@@ -63,6 +64,12 @@ refinement; the offline mapper pass adds another +8 points on top.
   is a Sim3 alignment + per-CP piecewise score over just those 5 points, so
   it has real variance — this is not yet a statistically solid estimate of
   test-set performance, just a genuine, honestly-computed first data point.
+- **sequence_1_19 is a mixed result** (14 control points): the mapper lifts
+  the aggregate Score 12.75 → 16.98 and pGT pose recall @5 m 5.4 % → 37.1 %,
+  but CP@1m falls 7.1 % → 0.0 % — the mapper's global correction moves the
+  one near control point back out past 1 m. Overall drift over 1.5 km / 15 min
+  is still far larger than the Short-track target; the mapper helps but is not
+  sufficient at this range.
 - **These are training sequences**, not the held-out test set; the official
   leaderboard number comes only from submitting to the 63 test sequences.
 - Evaluator run exactly as published (`evaluate_wrt_control_points` +
@@ -108,6 +115,13 @@ completed in 43.7 minutes with peak RSS staying low throughout.
 
 ### Known issue: sequence_1_19 VIO crash
 
+**Fixed** (PR #158): the crash was `basalt_euroc_vio_demo` buffering the
+whole run's `trace.jsonl` in one in-process `String`; the fix streams each
+trace line to disk as it is produced. With the fix, `sequence_1_19` completes
+all 18,352 frames (MH_01 trajectory byte-identical), and the sequence is now
+scored above (VIO 12.75, +mapper 16.98). The original diagnosis is kept
+below for the record.
+
 `basalt_euroc_vio_demo --pipeline --threads 12` on sequence_1_19 (18,351
 frames, ~15 min) **crashes deterministically at frame 10849** with
 `memory allocation of 18723373056 bytes failed` (~18.7 GB single
@@ -125,9 +139,12 @@ similarly long test sequence) can be scored.
 
 ## Not done in Stage 0b
 
-- sequence_1_19 mapper/score (blocked on the VIO crash above).
 - R_01_easy mapper score (an earlier, unfixed mapper run on R_01 ran for
   6+ hours without finishing and was abandoned/killed; not rerun with the
   fixes in this branch).
 - Full 23-sequence training sweep, and the 63-sequence test submission.
-- Root-causing/fixing the sequence_1_19 VIO crash.
+
+Done since this section was written: the sequence_1_19 VIO crash is fixed
+(PR #158) and the sequence has been run end to end — 2,615 mapper packets /
+2,622 poses / 6,410 landmarks in **5 h 30 min**, the mapper's second global
+optimisation now clearly the dominant cost at this scale.

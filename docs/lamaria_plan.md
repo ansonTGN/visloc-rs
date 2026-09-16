@@ -42,7 +42,7 @@ Training-sequence results, all from the official evaluator
 | R_11_5cp | training | VIO only | 49.65 | 20.0 % | 100 % | 1.94 m | 0.965 |
 | R_11_5cp | training | + offline mapper | 57.66 | 20.0 % | 100 % | 1.37 m | 0.960 |
 | sequence_1_19 | Short (1.5 km, 15 min) | VIO only | 12.75 | 7.1 % | 5.4 % | — | — |
-| sequence_1_19 | Short (1.5 km, 15 min) | + mapper | *pending* | | | | |
+| sequence_1_19 | Short (1.5 km, 15 min) | + offline mapper | 16.98 | 0.0 % | 37.1 % | — | — |
 
 Infrastructure already in place: real-time two-thread VIO pipeline (RTF 1.07
 EuRoC / 1.10 R_01 near-uncontended, PR #153), online NFR mapper that keeps pace
@@ -55,11 +55,13 @@ The two open gaps that the numbers expose:
 1. **VIO-only drift over km / minutes** — sequence_1_19 VIO-only is 12.75
    (Pose R@5m 5.4 %): the mapper is not optional on the Short track, let alone
    Medium/Long.
-2. **Mapper cost at city scale** — the online mapper runs ~2.4 s/packet vs the
-   ~0.4 s keyframe interval (the real-time blocker), and the offline mapper's
-   second global optimisation took 1,151 s alone for 1,357 packets (R_11_5cp),
-   scaling roughly with packet count. Both must improve before a full test
-   sweep (22 h of data) is affordable.
+2. **Mapper cost at city scale** — the online mapper runs ~0.42–0.55 s/packet
+   of synchronous work vs the ~0.4 s real-time keyframe interval (still the
+   real-time blocker; PR #160 parallelises detection and match/RANSAC for
+   ~1.5× on this host), and the offline mapper's second global optimisation
+   dominates: R_11_5cp took 44 min for 1,357 packets, `sequence_1_19` took
+   **5 h 30 min for 2,615 packets**. A full test sweep (~22 h of sensor data)
+   needs this before it is affordable.
 
 ## 3. Milestones
 
@@ -69,7 +71,7 @@ sequences only (test scores are only obtainable by submission).
 | # | Milestone | Exit criterion | Status |
 |---|---|---|---|
 | M0 | Stage 0: first official scores; mapper usable at scale | R_11_5cp 49.65 VIO / 57.66 mapper; sequence_1_19 VIO 12.75; mapper perf/memory fixes merged | **done** (PR #156) |
-| M1 | Beat the best academic baseline on Short | mapper-scored sequence_1_19 (and ≥3 Short training sequences) ≥ 27.7, toward microSLAM's 64.5 | in progress |
+| M1 | Beat the best academic baseline on Short | mapper-scored sequence_1_19 (and ≥3 Short training sequences) ≥ 27.7, toward microSLAM's 64.5 — currently 16.98 on sequence_1_19 | in progress |
 | M2 | Medium/Long consistency | loop-closure/mapper holds at km scale; mean Short/Medium/Long Score clearly above 27.7; no >2 km drift blow-up | not started |
 | M3 | Low-light robustness | low-light training sequences score comparably to Short; no tracking loss | not started |
 | M4 | Moving-platform handling | moving-platform training sequences tracked without divergence | not started |
