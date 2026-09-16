@@ -1,0 +1,37 @@
+{
+  "artifact": "root colmap-port-c2-v1/tier-10000-boundary-debug-v1 (stderr.log has the BOUNDARY lines; run stopped after the boundary was captured; model equals tier-10000-ceres-gauge6-v1)",
+  "boundary_mechanism": {
+    "instrumentation": "VISLOC_DEBUG_BOUNDARY_FRAMES + VISLOC_DEBUG_BOUNDARY_MIN_REG in IncrementalMapper::find_next_images (read-only)",
+    "interpretation": "After registering frame 4493, the port has enough visible 3D points on image 9497 (frame 4497, cam2) to register it within model 0, which then triangulates points that open the 4495-4999 region. COLMAP's model 0 frontier exhausts after frame 4493 (no candidate reaches 8 visible points), so it starts model 1. The difference is the triangulation/visible-point state produced at the boundary, not the split logic (num_shared_reg_images/max_model_overlap/min_model_size are ported) nor the candidate gates (identical).",
+    "n_reg_4492": "2 candidates; chosen frame 4492",
+    "n_reg_4493": "1 candidate (image 9493, visible=12); chosen frame 4493",
+    "n_reg_4494": "1 candidate; chosen image 9497 (frame 4497) -- the bridge",
+    "n_reg_4495": "4 candidates (visible: frame4495=9, frame4496=8, frame4498=8, frame4505...); chosen frame 4505"
+  },
+  "colmap_structure": {
+    "frame_4494": "unregistered",
+    "model0_frames": "0-4493 (contiguous, 4494 frames)",
+    "model1_frames": "4495-4999 (contiguous, 505 frames)",
+    "models": 2,
+    "source": "corridor1-1-m8-colmap/tier-10000-rig-v3/models-text/{0,1}/images.txt"
+  },
+  "conclusion": "10k divergence is a deep triangulation/ObservationManager parity difference at the frame-4493/4497 boundary, amplified by the port's ability to register a low-correspondence bridge frame (image 9497) that COLMAP cannot. Resolving it requires comparing the port's per-frame visible-point/triangulation state at the frontier against COLMAP instrumented at the same point (a COLMAP source patch + run), or accepting the port's merged model and scoring per-component differently.",
+  "config_parity_checked": {
+    "abs_pose_min_inlier_ratio": "0.25 (both)",
+    "abs_pose_min_num_inliers": "8 (control override, both)",
+    "image_selection_method": "MIN_UNCERTAINTY (both)",
+    "max_reg_trials": "3 (both)"
+  },
+  "date": "2026-09-16",
+  "port_structure": {
+    "frames": "0-4999",
+    "init_attempts": "frames 3181/3213 (BadInitialPair) then 388/420 (success)",
+    "models": 1,
+    "order": "approximately frame-sequential"
+  },
+  "question": "Why does the port produce 1 model where COLMAP produces 2, causing the 10k collapse?",
+  "reproduction": "VISLOC_DEBUG_BOUNDARY_FRAMES=4490,...,4498 VISLOC_DEBUG_BOUNDARY_MIN_REG=4470 <mapper> ...",
+  "schema": "visloc_colmap_mapper_10k_boundary_diag_v1",
+  "status": "mechanism_identified_root_cause_deep",
+  "tier": 10000
+}

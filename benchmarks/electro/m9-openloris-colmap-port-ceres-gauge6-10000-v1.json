@@ -1,0 +1,30 @@
+{
+  "change": "All validated fixes (global-BA refine_points3D + relative gradient, local relative gradient, gauge 6 DoF) applied; the 10k run uses the COLMAP-verified 10k graph (openloris-tier10000-colmap-graph-visloc-mapper-v1).",
+  "colmap_10k_control": {
+    "models": 2,
+    "rmse_m": 0.384307
+  },
+  "date": "2026-09-16",
+  "new": {
+    "models": 1,
+    "p95_m": 4.989147058980344,
+    "registered_images": 10000,
+    "rmse_m": 3.3300609637560945,
+    "sim3_scale": 1.4083244811067313
+  },
+  "new_models": 1,
+  "new_wall": "02:41:31",
+  "next": "Diagnose the 10k model splitting: why the port never starts a second model (num_shared_reg_images/max_model_overlap/max_num_models, model frontier exhaustion, and whether COLMAP's second component is unreachable without the structure-less registration fallback).",
+  "previous_10k": {
+    "models": 1,
+    "p95_m": 5.134973281878768,
+    "registered_images": 10000,
+    "rmse_m": 3.2735801299322893,
+    "sim3_scale": 1.5839089699573334
+  },
+  "reproduction": "root colmap-port-c2-v1/tier-10000-ceres-gauge6-v1; comparators tier-10000-v2, COLMAP 10k control; scorer scripts/score_openloris_model.py",
+  "schema": "visloc_colmap_mapper_ceres_gauge6_10k_v1",
+  "status": "collapsed_no_improvement",
+  "tier": 10000,
+  "verdict": "No improvement at 10k: ATE 3.3301 vs the old 3.2736 and COLMAP 0.384 (2 models); scale 1.408 vs 1.584. The 2.5k/5k fixes do not transfer because the 10k failure is a different regime: the port produces a single model that merges what COLMAP keeps as two independent models (COLMAP model 0 ~4494 frames + model 1 ~505). This is the component-structure / max_model_overlap / model-splitting issue already flagged in the handover (2026-09-15 checkpoint, item 4), not a BA convergence/point/gauge issue. The 10k initial pair is also different (images 8181/8213 = frames 3181/3213 vs the 2.5k/5k 776/840)."
+}

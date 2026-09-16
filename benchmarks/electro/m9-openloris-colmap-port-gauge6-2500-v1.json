@@ -1,0 +1,157 @@
+{
+  "change": "Global-BA gauge uses one whole frame (6 DoF) instead of two (12 DoF). This port's sensor_from_rig baseline is a hard-fixed parameter, so scale is already pinned and the rigid gauge is complete at 6 DoF; COLMAP's FixGaugeWithTwoCamsFromWorld fixes frame1 (6) + frame2's largest baseline translation axis (1) = 7 DoF, where the 7th is the scale axis the port hard-fixes. The previous whole-two-frame choice over-constrained by 6. See docs/colmap_rig_mapper_port_plan.md \u00a79.2.",
+  "colmap": {
+    "models": 1,
+    "p95_m": 0.14773839578562403,
+    "registered_images": 2500,
+    "rmse_m": 0.07183921961099571,
+    "sim3_scale": 1.026344318016754
+  },
+  "control": {
+    "models": 1,
+    "p95_m": 0.1505918848640985,
+    "registered_images": 2500,
+    "rmse_m": 0.08739385798808699,
+    "sim3_scale": 1.0434111081188566
+  },
+  "date": "2026-09-16",
+  "new": {
+    "models": 1,
+    "p95_m": 0.14605282157804161,
+    "registered_images": 2500,
+    "rmse_m": 0.06947800579466007,
+    "sim3_scale": 1.0250867923219216
+  },
+  "new_local_scale_max": 1.0050913221241242,
+  "new_local_scale_min": 0.9945765614467393,
+  "new_local_scale_windows": [
+    {
+      "frame_end": 199,
+      "frame_start": 0,
+      "scale": 0.9966211207274995
+    },
+    {
+      "frame_end": 249,
+      "frame_start": 50,
+      "scale": 0.9964725776081447
+    },
+    {
+      "frame_end": 299,
+      "frame_start": 100,
+      "scale": 0.9961542517293095
+    },
+    {
+      "frame_end": 349,
+      "frame_start": 150,
+      "scale": 0.9955950014413607
+    },
+    {
+      "frame_end": 399,
+      "frame_start": 200,
+      "scale": 0.9955222089469937
+    },
+    {
+      "frame_end": 449,
+      "frame_start": 250,
+      "scale": 0.9957949248916959
+    },
+    {
+      "frame_end": 499,
+      "frame_start": 300,
+      "scale": 0.9954900265782943
+    },
+    {
+      "frame_end": 549,
+      "frame_start": 350,
+      "scale": 0.9982763676947313
+    },
+    {
+      "frame_end": 599,
+      "frame_start": 400,
+      "scale": 1.0010201621680481
+    },
+    {
+      "frame_end": 649,
+      "frame_start": 450,
+      "scale": 1.0047252595046814
+    },
+    {
+      "frame_end": 699,
+      "frame_start": 500,
+      "scale": 1.0050913221241242
+    },
+    {
+      "frame_end": 749,
+      "frame_start": 550,
+      "scale": 1.0026512299598669
+    },
+    {
+      "frame_end": 799,
+      "frame_start": 600,
+      "scale": 0.9994127335309166
+    },
+    {
+      "frame_end": 849,
+      "frame_start": 650,
+      "scale": 1.0003803492466865
+    },
+    {
+      "frame_end": 899,
+      "frame_start": 700,
+      "scale": 1.0018692668055573
+    },
+    {
+      "frame_end": 949,
+      "frame_start": 750,
+      "scale": 1.0014195491120745
+    },
+    {
+      "frame_end": 999,
+      "frame_start": 800,
+      "scale": 0.9997512112422952
+    },
+    {
+      "frame_end": 1049,
+      "frame_start": 850,
+      "scale": 0.9972592543709259
+    },
+    {
+      "frame_end": 1099,
+      "frame_start": 900,
+      "scale": 0.9950684500108311
+    },
+    {
+      "frame_end": 1149,
+      "frame_start": 950,
+      "scale": 0.994803891209926
+    },
+    {
+      "frame_end": 1199,
+      "frame_start": 1000,
+      "scale": 0.9945765614467393
+    },
+    {
+      "frame_end": 1249,
+      "frame_start": 1050,
+      "scale": 0.9948752580194903
+    }
+  ],
+  "new_pose_center_error_m": {
+    "max": 0.018045017911764445,
+    "mean": 0.006252695941231309,
+    "median": 0.005433171069621132,
+    "p95": 0.013010918247180035
+  },
+  "new_wall": "00:35:19",
+  "previous_two_frame": {
+    "models": 1,
+    "p95_m": 0.14822162066755537,
+    "registered_images": 2500,
+    "rmse_m": 0.07085745273337402,
+    "sim3_scale": 1.0296150361085719
+  },
+  "reproduction": "root colmap-port-c2-v1/tier-2500-gauge6-v1; comparators tier-2500-local-ceres-v1; scorer scripts/score_openloris_model.py; diag scripts/compare_colmap_mapper_registration.py",
+  "schema": "visloc_colmap_mapper_gauge_gate_v1",
+  "status": "passed",
+  "tier": 2500
+}

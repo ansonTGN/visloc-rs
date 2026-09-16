@@ -1,0 +1,804 @@
+{
+  "change": "adjust_global_bundle now adds every point observed by a config image as a variable point (COLMAP refine_points default true). Uncommitted; reverted after this A/B.",
+  "control": "global BA with points fixed (pre-change binary)",
+  "date": "2026-09-16",
+  "hypothesis": "adjust_global_bundle never adds variable points, so global BA optimizes poses against frozen structure; this was suspected to be the cause of the ported mapper's second-half local scale drift (frames 1250-2200, up to +19% vs COLMAP at 5k).",
+  "reproduction": "roots: colmap-port-c2-v1/tier-{2500,5000}-global-ba-points-v1 (run.sh, stderr.log, model/model/0/images.txt, score.json); controls: tier-2500-gp3p-colmap-repeat, tier-5000-v2; scorer scripts/score_openloris_model.py; registration/local-scale scripts/compare_colmap_mapper_registration.py",
+  "schema": "visloc_colmap_mapper_global_ba_points_ab_v1",
+  "status": "rejected",
+  "tiers": {
+    "2500": {
+      "colmap": {
+        "models": 1,
+        "p95_m": 0.14773839578562403,
+        "registered_images": 2500,
+        "rmse_m": 0.07183921961099571,
+        "sim3_scale": 1.026344318016754
+      },
+      "control": {
+        "models": 1,
+        "p95_m": 0.1505918848640985,
+        "registered_images": 2500,
+        "rmse_m": 0.08739385798808699,
+        "sim3_scale": 1.0434111081188566
+      },
+      "control_diag": {
+        "lcs_ratio": 0.708,
+        "local_scale_max": 1.0249975338584507,
+        "local_scale_min": 0.9820672543207625,
+        "local_scale_windows": [
+          {
+            "frame_end": 199,
+            "frame_start": 0,
+            "scale": 1.002624756575874
+          },
+          {
+            "frame_end": 249,
+            "frame_start": 50,
+            "scale": 1.0039326248298595
+          },
+          {
+            "frame_end": 299,
+            "frame_start": 100,
+            "scale": 1.00464907903265
+          },
+          {
+            "frame_end": 349,
+            "frame_start": 150,
+            "scale": 1.0039910122479343
+          },
+          {
+            "frame_end": 399,
+            "frame_start": 200,
+            "scale": 1.0030373230702556
+          },
+          {
+            "frame_end": 449,
+            "frame_start": 250,
+            "scale": 1.0008744682049304
+          },
+          {
+            "frame_end": 499,
+            "frame_start": 300,
+            "scale": 1.0001596334872425
+          },
+          {
+            "frame_end": 549,
+            "frame_start": 350,
+            "scale": 1.00126924701606
+          },
+          {
+            "frame_end": 599,
+            "frame_start": 400,
+            "scale": 1.0031914322878488
+          },
+          {
+            "frame_end": 649,
+            "frame_start": 450,
+            "scale": 1.0030029752577947
+          },
+          {
+            "frame_end": 699,
+            "frame_start": 500,
+            "scale": 0.9876936332273318
+          },
+          {
+            "frame_end": 749,
+            "frame_start": 550,
+            "scale": 0.9820672543207625
+          },
+          {
+            "frame_end": 799,
+            "frame_start": 600,
+            "scale": 0.9913543767396272
+          },
+          {
+            "frame_end": 849,
+            "frame_start": 650,
+            "scale": 1.0150986335949066
+          },
+          {
+            "frame_end": 899,
+            "frame_start": 700,
+            "scale": 1.0237718826790978
+          },
+          {
+            "frame_end": 949,
+            "frame_start": 750,
+            "scale": 1.0249975338584507
+          },
+          {
+            "frame_end": 999,
+            "frame_start": 800,
+            "scale": 1.0231279222083938
+          },
+          {
+            "frame_end": 1049,
+            "frame_start": 850,
+            "scale": 1.0197927218928715
+          },
+          {
+            "frame_end": 1099,
+            "frame_start": 900,
+            "scale": 1.0189155874953875
+          },
+          {
+            "frame_end": 1149,
+            "frame_start": 950,
+            "scale": 1.0173577880349454
+          },
+          {
+            "frame_end": 1199,
+            "frame_start": 1000,
+            "scale": 1.0146645871233835
+          },
+          {
+            "frame_end": 1249,
+            "frame_start": 1050,
+            "scale": 1.0144937660702944
+          }
+        ],
+        "pose_center_error_m": {
+          "max": 0.09250020779994361,
+          "mean": 0.03233074051841588,
+          "median": 0.022699408982931758,
+          "p95": 0.07725735986667644
+        }
+      },
+      "max_large_ba_control_ms": 272619,
+      "max_large_ba_new_ms": 369067,
+      "new": {
+        "models": 1,
+        "p95_m": 0.25164397702073477,
+        "registered_images": 2500,
+        "rmse_m": 0.15417398176217678,
+        "sim3_scale": 1.0825395896631802
+      },
+      "new_diag": {
+        "lcs_ratio": 0.7064,
+        "local_scale_max": 1.0933888992345797,
+        "local_scale_min": 0.9916886050986394,
+        "local_scale_windows": [
+          {
+            "frame_end": 199,
+            "frame_start": 0,
+            "scale": 1.0019258192286555
+          },
+          {
+            "frame_end": 249,
+            "frame_start": 50,
+            "scale": 1.0023834092755588
+          },
+          {
+            "frame_end": 299,
+            "frame_start": 100,
+            "scale": 1.0027044902001372
+          },
+          {
+            "frame_end": 349,
+            "frame_start": 150,
+            "scale": 1.0013866523811976
+          },
+          {
+            "frame_end": 399,
+            "frame_start": 200,
+            "scale": 0.9999215642661982
+          },
+          {
+            "frame_end": 449,
+            "frame_start": 250,
+            "scale": 0.9984926637085505
+          },
+          {
+            "frame_end": 499,
+            "frame_start": 300,
+            "scale": 0.9978298700273746
+          },
+          {
+            "frame_end": 549,
+            "frame_start": 350,
+            "scale": 0.9995603086426846
+          },
+          {
+            "frame_end": 599,
+            "frame_start": 400,
+            "scale": 1.0013055026853768
+          },
+          {
+            "frame_end": 649,
+            "frame_start": 450,
+            "scale": 1.001748955533525
+          },
+          {
+            "frame_end": 699,
+            "frame_start": 500,
+            "scale": 0.9932811667416585
+          },
+          {
+            "frame_end": 749,
+            "frame_start": 550,
+            "scale": 0.9916886050986394
+          },
+          {
+            "frame_end": 799,
+            "frame_start": 600,
+            "scale": 1.0025702148864242
+          },
+          {
+            "frame_end": 849,
+            "frame_start": 650,
+            "scale": 1.0388418851207564
+          },
+          {
+            "frame_end": 899,
+            "frame_start": 700,
+            "scale": 1.0619298540955948
+          },
+          {
+            "frame_end": 949,
+            "frame_start": 750,
+            "scale": 1.0753946320711694
+          },
+          {
+            "frame_end": 999,
+            "frame_start": 800,
+            "scale": 1.0820519069078827
+          },
+          {
+            "frame_end": 1049,
+            "frame_start": 850,
+            "scale": 1.0868360611543095
+          },
+          {
+            "frame_end": 1099,
+            "frame_start": 900,
+            "scale": 1.0911937090399373
+          },
+          {
+            "frame_end": 1149,
+            "frame_start": 950,
+            "scale": 1.0926896114683808
+          },
+          {
+            "frame_end": 1199,
+            "frame_start": 1000,
+            "scale": 1.0933888992345797
+          },
+          {
+            "frame_end": 1249,
+            "frame_start": 1050,
+            "scale": 1.0932129263668033
+          }
+        ],
+        "pose_center_error_m": {
+          "max": 0.30330084906082677,
+          "mean": 0.09683646940376778,
+          "median": 0.072298382229434,
+          "p95": 0.20301025561149758
+        }
+      }
+    },
+    "5000": {
+      "colmap": {
+        "models": 1,
+        "p95_m": 0.2360154639213036,
+        "registered_images": 5000,
+        "rmse_m": 0.12268531994957262,
+        "sim3_scale": 1.0676117399443572
+      },
+      "control": {
+        "models": 1,
+        "p95_m": 0.6805582759138297,
+        "registered_images": 5000,
+        "rmse_m": 0.4358619718336859,
+        "sim3_scale": 1.1530539219645124
+      },
+      "control_diag": {
+        "lcs_ratio": 0.7964,
+        "local_scale_max": 1.1878248134636307,
+        "local_scale_min": 0.9783774854486834,
+        "local_scale_windows": [
+          {
+            "frame_end": 199,
+            "frame_start": 0,
+            "scale": 1.0060416631918332
+          },
+          {
+            "frame_end": 249,
+            "frame_start": 50,
+            "scale": 1.0073858960158464
+          },
+          {
+            "frame_end": 299,
+            "frame_start": 100,
+            "scale": 1.0082736015368192
+          },
+          {
+            "frame_end": 349,
+            "frame_start": 150,
+            "scale": 1.0082437302358465
+          },
+          {
+            "frame_end": 399,
+            "frame_start": 200,
+            "scale": 1.007099649996644
+          },
+          {
+            "frame_end": 449,
+            "frame_start": 250,
+            "scale": 1.0034437469273407
+          },
+          {
+            "frame_end": 499,
+            "frame_start": 300,
+            "scale": 1.0012970793332705
+          },
+          {
+            "frame_end": 549,
+            "frame_start": 350,
+            "scale": 1.0010840135939285
+          },
+          {
+            "frame_end": 599,
+            "frame_start": 400,
+            "scale": 1.0022257657174494
+          },
+          {
+            "frame_end": 649,
+            "frame_start": 450,
+            "scale": 1.0014284587262694
+          },
+          {
+            "frame_end": 699,
+            "frame_start": 500,
+            "scale": 0.9849960899353698
+          },
+          {
+            "frame_end": 749,
+            "frame_start": 550,
+            "scale": 0.9783774854486834
+          },
+          {
+            "frame_end": 799,
+            "frame_start": 600,
+            "scale": 0.9850242489811946
+          },
+          {
+            "frame_end": 849,
+            "frame_start": 650,
+            "scale": 1.0052877727232656
+          },
+          {
+            "frame_end": 899,
+            "frame_start": 700,
+            "scale": 1.0132325931466872
+          },
+          {
+            "frame_end": 949,
+            "frame_start": 750,
+            "scale": 1.0151652096990271
+          },
+          {
+            "frame_end": 999,
+            "frame_start": 800,
+            "scale": 1.0141983477626901
+          },
+          {
+            "frame_end": 1049,
+            "frame_start": 850,
+            "scale": 1.0119124529310983
+          },
+          {
+            "frame_end": 1099,
+            "frame_start": 900,
+            "scale": 1.0119029806664994
+          },
+          {
+            "frame_end": 1149,
+            "frame_start": 950,
+            "scale": 1.0111191186656394
+          },
+          {
+            "frame_end": 1199,
+            "frame_start": 1000,
+            "scale": 1.0096633952161633
+          },
+          {
+            "frame_end": 1249,
+            "frame_start": 1050,
+            "scale": 1.0082512308357805
+          },
+          {
+            "frame_end": 1299,
+            "frame_start": 1100,
+            "scale": 1.0077929538394055
+          },
+          {
+            "frame_end": 1349,
+            "frame_start": 1150,
+            "scale": 1.0099928336046204
+          },
+          {
+            "frame_end": 1399,
+            "frame_start": 1200,
+            "scale": 1.0139621430868395
+          },
+          {
+            "frame_end": 1449,
+            "frame_start": 1250,
+            "scale": 1.023403383817333
+          },
+          {
+            "frame_end": 1499,
+            "frame_start": 1300,
+            "scale": 1.0423358245031435
+          },
+          {
+            "frame_end": 1549,
+            "frame_start": 1350,
+            "scale": 1.0659921010696591
+          },
+          {
+            "frame_end": 1599,
+            "frame_start": 1400,
+            "scale": 1.085625754086096
+          },
+          {
+            "frame_end": 1649,
+            "frame_start": 1450,
+            "scale": 1.0944197213123952
+          },
+          {
+            "frame_end": 1699,
+            "frame_start": 1500,
+            "scale": 1.1022788535465293
+          },
+          {
+            "frame_end": 1749,
+            "frame_start": 1550,
+            "scale": 1.1101523287746549
+          },
+          {
+            "frame_end": 1799,
+            "frame_start": 1600,
+            "scale": 1.117379750091135
+          },
+          {
+            "frame_end": 1849,
+            "frame_start": 1650,
+            "scale": 1.1226435823229337
+          },
+          {
+            "frame_end": 1899,
+            "frame_start": 1700,
+            "scale": 1.1269072825520194
+          },
+          {
+            "frame_end": 1949,
+            "frame_start": 1750,
+            "scale": 1.1339819639701945
+          },
+          {
+            "frame_end": 1999,
+            "frame_start": 1800,
+            "scale": 1.1457201630021048
+          },
+          {
+            "frame_end": 2049,
+            "frame_start": 1850,
+            "scale": 1.1646301379722444
+          },
+          {
+            "frame_end": 2099,
+            "frame_start": 1900,
+            "scale": 1.1811385711621143
+          },
+          {
+            "frame_end": 2149,
+            "frame_start": 1950,
+            "scale": 1.1878248134636307
+          },
+          {
+            "frame_end": 2199,
+            "frame_start": 2000,
+            "scale": 1.1759055265755682
+          },
+          {
+            "frame_end": 2249,
+            "frame_start": 2050,
+            "scale": 1.1485328161498138
+          },
+          {
+            "frame_end": 2299,
+            "frame_start": 2100,
+            "scale": 1.1308476642556968
+          },
+          {
+            "frame_end": 2349,
+            "frame_start": 2150,
+            "scale": 1.1221101089773244
+          },
+          {
+            "frame_end": 2399,
+            "frame_start": 2200,
+            "scale": 1.1190393925619921
+          },
+          {
+            "frame_end": 2449,
+            "frame_start": 2250,
+            "scale": 1.118385400388498
+          },
+          {
+            "frame_end": 2499,
+            "frame_start": 2300,
+            "scale": 1.1216078153412052
+          }
+        ],
+        "pose_center_error_m": {
+          "max": 0.6039404548514358,
+          "mean": 0.3393784182242395,
+          "median": 0.3296328156389537,
+          "p95": 0.5725387598297749
+        }
+      },
+      "max_large_ba_control_ms": 303807,
+      "max_large_ba_new_ms": 770965,
+      "new": {
+        "models": 1,
+        "p95_m": 0.7696026464568456,
+        "registered_images": 5000,
+        "rmse_m": 0.36430113276092485,
+        "sim3_scale": 1.1814213641586788
+      },
+      "new_diag": {
+        "lcs_ratio": 0.7872,
+        "local_scale_max": 1.1351076879835116,
+        "local_scale_min": 0.9870261792085826,
+        "local_scale_windows": [
+          {
+            "frame_end": 199,
+            "frame_start": 0,
+            "scale": 1.004990055178499
+          },
+          {
+            "frame_end": 249,
+            "frame_start": 50,
+            "scale": 1.005836934929671
+          },
+          {
+            "frame_end": 299,
+            "frame_start": 100,
+            "scale": 1.0065002870137763
+          },
+          {
+            "frame_end": 349,
+            "frame_start": 150,
+            "scale": 1.0057125239519826
+          },
+          {
+            "frame_end": 399,
+            "frame_start": 200,
+            "scale": 1.003924492846157
+          },
+          {
+            "frame_end": 449,
+            "frame_start": 250,
+            "scale": 1.0010184731882517
+          },
+          {
+            "frame_end": 499,
+            "frame_start": 300,
+            "scale": 0.9990872542625254
+          },
+          {
+            "frame_end": 549,
+            "frame_start": 350,
+            "scale": 0.999462459072303
+          },
+          {
+            "frame_end": 599,
+            "frame_start": 400,
+            "scale": 1.0002044770916383
+          },
+          {
+            "frame_end": 649,
+            "frame_start": 450,
+            "scale": 0.999507994484391
+          },
+          {
+            "frame_end": 699,
+            "frame_start": 500,
+            "scale": 0.9896601215927264
+          },
+          {
+            "frame_end": 749,
+            "frame_start": 550,
+            "scale": 0.9870261792085826
+          },
+          {
+            "frame_end": 799,
+            "frame_start": 600,
+            "scale": 0.9946156570478196
+          },
+          {
+            "frame_end": 849,
+            "frame_start": 650,
+            "scale": 1.0286086278570097
+          },
+          {
+            "frame_end": 899,
+            "frame_start": 700,
+            "scale": 1.051717148216633
+          },
+          {
+            "frame_end": 949,
+            "frame_start": 750,
+            "scale": 1.0662445168320078
+          },
+          {
+            "frame_end": 999,
+            "frame_start": 800,
+            "scale": 1.07468156743945
+          },
+          {
+            "frame_end": 1049,
+            "frame_start": 850,
+            "scale": 1.0810140138981987
+          },
+          {
+            "frame_end": 1099,
+            "frame_start": 900,
+            "scale": 1.0877527533575406
+          },
+          {
+            "frame_end": 1149,
+            "frame_start": 950,
+            "scale": 1.0904364758282539
+          },
+          {
+            "frame_end": 1199,
+            "frame_start": 1000,
+            "scale": 1.0905016082183079
+          },
+          {
+            "frame_end": 1249,
+            "frame_start": 1050,
+            "scale": 1.0884087623568566
+          },
+          {
+            "frame_end": 1299,
+            "frame_start": 1100,
+            "scale": 1.0856101260359845
+          },
+          {
+            "frame_end": 1349,
+            "frame_start": 1150,
+            "scale": 1.0853085675346823
+          },
+          {
+            "frame_end": 1399,
+            "frame_start": 1200,
+            "scale": 1.0866574426135744
+          },
+          {
+            "frame_end": 1449,
+            "frame_start": 1250,
+            "scale": 1.0893388526522991
+          },
+          {
+            "frame_end": 1499,
+            "frame_start": 1300,
+            "scale": 1.0956748374193408
+          },
+          {
+            "frame_end": 1549,
+            "frame_start": 1350,
+            "scale": 1.1026883552766118
+          },
+          {
+            "frame_end": 1599,
+            "frame_start": 1400,
+            "scale": 1.1084807600318587
+          },
+          {
+            "frame_end": 1649,
+            "frame_start": 1450,
+            "scale": 1.1123008519967625
+          },
+          {
+            "frame_end": 1699,
+            "frame_start": 1500,
+            "scale": 1.1197250994882622
+          },
+          {
+            "frame_end": 1749,
+            "frame_start": 1550,
+            "scale": 1.1274630255262164
+          },
+          {
+            "frame_end": 1799,
+            "frame_start": 1600,
+            "scale": 1.1325110688685787
+          },
+          {
+            "frame_end": 1849,
+            "frame_start": 1650,
+            "scale": 1.134544301119687
+          },
+          {
+            "frame_end": 1899,
+            "frame_start": 1700,
+            "scale": 1.1339401210406412
+          },
+          {
+            "frame_end": 1949,
+            "frame_start": 1750,
+            "scale": 1.1332937631321998
+          },
+          {
+            "frame_end": 1999,
+            "frame_start": 1800,
+            "scale": 1.1340386719673172
+          },
+          {
+            "frame_end": 2049,
+            "frame_start": 1850,
+            "scale": 1.1351076879835116
+          },
+          {
+            "frame_end": 2099,
+            "frame_start": 1900,
+            "scale": 1.1338495680585954
+          },
+          {
+            "frame_end": 2149,
+            "frame_start": 1950,
+            "scale": 1.1314657982219614
+          },
+          {
+            "frame_end": 2199,
+            "frame_start": 2000,
+            "scale": 1.1289647076426863
+          },
+          {
+            "frame_end": 2249,
+            "frame_start": 2050,
+            "scale": 1.1238713808081875
+          },
+          {
+            "frame_end": 2299,
+            "frame_start": 2100,
+            "scale": 1.117551658197462
+          },
+          {
+            "frame_end": 2349,
+            "frame_start": 2150,
+            "scale": 1.1132309095890265
+          },
+          {
+            "frame_end": 2399,
+            "frame_start": 2200,
+            "scale": 1.1122912300227081
+          },
+          {
+            "frame_end": 2449,
+            "frame_start": 2250,
+            "scale": 1.1144876670079433
+          },
+          {
+            "frame_end": 2499,
+            "frame_start": 2300,
+            "scale": 1.1243427772699044
+          }
+        ],
+        "pose_center_error_m": {
+          "max": 0.4885666933931665,
+          "mean": 0.2923318666380567,
+          "median": 0.30988071805882555,
+          "p95": 0.45180177666515703
+        }
+      }
+    }
+  },
+  "verdict": "2.5k non-regression gate FAILED (rmse 0.0874->0.1542, scale 1.043->1.083, local scale max 1.025->1.093). 5k improved on rmse (0.436->0.364), pose mean (0.339->0.292) and local scale max (1.188->1.135) but p95 worsened (0.681->0.770) and scale moved further from 1 (1.153->1.181). Global BA with all points variable is ~2.6-3x slower (large-BA elapsed 300s->771s). Rejected in this naive form: structure refinement does reduce the 5k drift, but the all-points/trivial-loss formulation over-fits the small tier and costs too much."
+}

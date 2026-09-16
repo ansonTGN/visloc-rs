@@ -2,6 +2,243 @@
 
 ## 現在の状態（以下の過去ログより優先）
 
+### 2026-09-16 追記: web(WASM+WebGPU) in-browser SfM は park（設計・実証のみ）
+
+- 設計と実証記録は `docs/web-wasm-sfm_plan.md`。spike結果: `visloc-core`/
+  `visloc-vision`/`visloc-slam`（colmap mapper全体）が `wasm32-unknown-unknown` で
+  コンパイルし、Node上で合成rig SfMを完走（10/20/40/80 frame 全登録、~0.3-2.3s、
+  release wasm ~2.4MB）。**rayonの`par_iter`/`into_par_iter`はwasmでシリアル縮退して
+  正常動作**（カスタム`ThreadPoolBuilder`のみ不可。mapperは未使用）。
+- 必要変更は `getrandom/js`（wasm RNG）と `web-time`（`std::time::Instant`はwasmで
+  panic）。spike scaffold（`spike` feature、`time_compat`、test_support公開）はpark時に
+  **revert済み**。Cargo.lock/Cargo.tomlも原状。READMEは未変更。
+- 製品化の唯一のハードルは **COOP/COEPヘッダ**（wasm threads必須）。GitHub Pagesは
+  ヘッダ不可、Cloudflare Pages/Netlify/Vercel等が必要。参考の
+  `offlinetools.io/colmap-landing/` はマルチスレッド（`crossOriginIsolated`/
+  `SharedArrayBuffer`必須）＋SIFT WebGPUで、stock COLMAP比の高速化を主張。
+- 2026-09-16 global BA点variable A/B (**棄却**、証跡
+  `benchmarks/electro/m9-openloris-colmap-port-global-ba-points-ab-v1.json`)。仮説
+  「global BAが点を変数化していない（`adjust_global_bundle`が`add_variable_point`を
+  呼ばない）のが5k後半の局所scaleドリフトの原因」は5kでは部分的に支持: local_scale max
+  1.188→1.135、pose mean 0.339→0.292、rmse 0.436→0.364。しかし**2.5k非回帰FAIL**
+  （rmse 0.087→0.154、scale 1.043→1.083、local_scale max 1.025→1.093）、5kもp95が
+  0.681→0.770へ悪化・global scaleが1.181へ後退、large BAが~2.6-3x遅（300s→771s）。
+  naiveな全点variable+trivial lossは小tierで自由度過剰、コスト過大。コード変更はrevert
+  済み（未commitだった）。root: 新規 `tier-{2500,5000}-global-ba-points-v1`、対照
+  `tier-2500-gp3p-colmap-repeat`/`tier-5000-v2`。構造refinementが5kドリフトを減らす
+  方向は確認できたので、次に試すなら事前登録ゲート＋コスト最適化（全点でなく
+  inlier/観測数上限、robust loss、global BA頻度）が必要。
+- 2026-09-16 **COLMAPソース＋実Ceres検証にもとづくglobal BA修正が2.5kゲート全PASS、
+  かつCOLMAP超え**。COLMAP 64805cbを再取得して確認: `AdjustGlobalBundle`は画像のみだが
+  `AddImageToProblem`が全観測点をparameterizeし`ParameterizePoints`は`refine_points3D`
+  （既定true）で可変にする＝COLMAPは点を最適化。加えてCeres `gradient_tolerance`は
+  **相対**（global 1.0/local 10.0）で実Ceresでは1–2反復で停止（移植版の「max反復まで
+  回す」記述とdeviation-6の「1e-4」は誤り）。両方を実装（`refine_points3d`＋
+  `adjust_global_bundle`の観測点variable化＋`optimize_with_tolerance`の相対停止）。
+  詳細は plan §8、証跡 `benchmarks/electro/m9-openloris-colmap-port-ceres-global-ba-
+  2500-v1.json`: rmse **0.0673**（対照0.0874/COLMAP0.0718）、scale **1.0173**（同1.0434/
+  1.0263）、local_scale max **1.0015**（対照1.025）、pose mean 0.0108（対照0.032）、
+  wall 55:50、large BA max 181s（対照273s）。事前登録ゲート（rmse≤0.0918,
+  |scale-1.0434|≤0.03, local max≤1.03）全PASS。**5k検証実行中**
+  `tier-5000-ceres-global-ba-v1`（対照`tier-5000-v2` 0.436/scale1.153、COLMAP
+  0.123）。コードは`30553ef`でcommit/push済み。
+- 2026-09-16 **5k検証結果**: `tier-5000-ceres-global-ba-v1` は改善したがCOLMAP parityは未達。
+  rmse 0.3618（対照0.4359/COLMAP0.1227）、scale 1.104（1.153/1.068）、p95 0.5734
+  （0.6806/0.236）、local_scale max 1.1233（対照1.1878）、pose mean 0.2466（対照
+  0.3394）、wall 2:11:28。後半ドリフトは+19%→+12%に縮小したが残存。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-ceres-global-ba-5000-v1.json`。
+- **costバグ修正済み（`1c250e8`）**: 相対停止が厳密`<`だとstep棄却時に勾配が減らず
+  **50反復まで走る**（5kで865s）。Ceres準拠の`<=`に修正。v2再実行
+  (`tier-{2500,5000}-ceres-global-ba-v2`)は**両tierともv1とbyte一致**（結果中立）で、
+  最悪大規模global BAは5k 865s→366s、2.5kも最終BAは1–4反復（12–25s）に。wallは5k
+  2:13:27 / 2.5k 1:17:59（2本並行実行のため参考値）。
+- 2026-09-16 **local BA収束parity（ソース§9.1準拠）2.5kゲート全PASS**:
+  `local().gradient_tolerance_rel=Some(10.0)`（COLMAP `incremental_pipeline.cc:201`）。
+  rmse 0.0709（対照0.0874/COLMAP0.0718）、scale 1.0296（1.0434/1.0263）、local_scale
+  max 1.0086、pose mean **0.0062**（global-ceres 0.0108）、wall **28:02**（global-ceres
+  55:50）。global-ceres単独(0.0673)よりATEは僅かに悪いがCOLMAPは上回り、pose一貫性は
+  約2倍良くBAは早期停止で高速化。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-ceres-local-ba-2500-v1.json`。
+  **5kも大幅改善**: rmse 0.2263（対照0.4359/global-ceres0.3618/COLMAP0.1227=1.84x）、
+  scale 1.0859（1.1531/1.104/1.0676）、p95 0.3984（0.6806/0.5734/0.236）、local_scale
+  max 1.1155（1.1878/1.1233）、pose mean 0.1234（0.3394/0.2466）、wall **43:24**
+  （対照2:02）。local BA収束parityがスケール時の主レバーだった。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-ceres-local-ba-5000-v1.json`。
+  commit/push済み。COLMAP parityは未達（残差要因は下記）。
+- 2026-09-16 **gauge 6 DoF修正（ソース§9.2準拠）で5kがほぼCOLMAP parity**:
+  移植版はrig baselineが固定パラメータでscaleが既に決まるため、剛体gaugeは6 DoFで完結。
+  従来の2姿勢固定(12 DoF)は6 DoF過拘束だった。`Gauge::OneFrameFromWorld`（1姿勢固定）を
+  追加しglobal BAで使用。**2.5k**: rmse 0.0695（2frame 0.0709/COLMAP0.0718）、scale
+  1.0251（1.0296/1.0263）、local max 1.0051、ゲート全PASS。**5k**: rmse **0.1361**
+  （2frame 0.2263/対照0.4359/COLMAP0.1227=**1.11x**）、scale **1.0655**（1.0859/1.1531/
+  1.0676とほぼ一致）、p95 0.2435（0.3984/0.6806/0.236）、local_scale max **1.0117**
+  （1.1155/1.1878）、pose mean **0.0278**（0.1234/0.3394）、wall 1:14:00。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-gauge6-{2500,5000}-v1.json`。
+  → gaugeの12 DoF過拘束が5k固有の後半ドリフトの主因だった。残差はATE 1.11x/p95僅差で、
+  次の候補はCOLMAP厳密な7 DoF（per-DoF baseline軸）・structure-less登録・filter cadence。
+- 2026-09-16 **10kは改善せず（別レジーム）**: 全修正込みで10kを実行
+  (`tier-10000-ceres-gauge6-v1`、COLMAP検証済み10k graph、2:41:31)。rmse **3.3301**、
+  scale 1.408、**1 model**（旧3.2736/1.584/1 model、COLMAP 0.384/2 model）。2.5k/5kの
+  修正は10kに波及せず。原因はBAでなく**component構造**: 移植版はCOLMAPが2 modelに分ける
+  ものを1 modelに統合（COLMAP model0 ~4494 frame + model1 ~505）。initも10kは
+  image 8181/8213（frames 3181/3213）で2.5k/5kの776/840と異なる。→ handover
+  2026-09-15項目4の`max_model_overlap`/`FilterImages`/model分割の課題。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-ceres-gauge6-10000-v1.json`。
+  次は「なぜ2つ目のmodelが始まらないか」の診断（`num_shared_reg_images`/
+  `max_model_overlap`/`max_num_models`、frontier枯渇、structure-less fallback不在）。
+- **10k model分割の診断結果（2026-09-16）**: COLMAP 10k controlはmodel0=frames
+  **0–4493**（連続）、model1=frames **4495–4999**（連続）、**frame 4494のみ未登録**で2分割
+  （model0 initは多数のbad pairの後の成功、`logs/mapper.log:10033,11878`に2回Keeping）。
+  移植版は1 modelで全5000 frame: initは 3181/3213 を試してBadInitialPair→388/420で成功、
+  以後ほぼframe順に登録。**境界のframe 4497をrank 4492で inliers=9/corr=9 で登録**して
+  4495+領域へ橋渡し（4495 rank4494、4496 rank4495）。frame 4494は最後（rank 4997）に登録。
+  → 分割ロジック（`num_shared_reg_images>=max_model_overlap`、`min_model_size`）は移植済みで
+  問題ではなく、**model0のfrontierがCOLMAPでは4493で枯渇するのに移植版では枯渇しない**
+  ことが原因。候補ゲートは両者`abs_pose_min_num_inliers=8`（control override、§0.1）で同一
+  なので、境界での**visible 3D点のtrisangulation状態/ObservationManager差**が本質。
+  次は境界フレーム（4494/4497近傍）の`num_visible_points3d`を移植版に計装してCOLMAPと比較。
+- **境界計装の結果（2026-09-16、A案）**: `find_next_images`にenv
+  `VISLOC_DEBUG_BOUNDARY_FRAMES`/`VISLOC_DEBUG_BOUNDARY_MIN_REG`を追加（読み取り専用）。
+  実測: n_reg=4492は候補2、4493は候補1（image 9493 visible=12）→ frame 4493登録、
+  **n_reg=4494で候補が1つだけになり、それが image 9497 = frame 4497**（登録して橋渡し）、
+  その後 n_reg=4495で候補4（frame4495 visible=9, 4496=8, 4498=8, 4505…）に開き4505選択。
+  → 移植版はframe 4493登録直後のtriangulationでimage 9497のvisible点が8以上になり、
+  model0内で4497を登録して4495+領域を開く。COLMAPは同点で候補が枯渇しmodel1を開始。
+  候補ゲート（`abs_pose_min_num_inliers=8`/`max_reg_trials=3`/`MIN_UNCERTAINTY`/
+  ratio0.25）は両者一致で、分割ロジックも移植済み。**差は境界でのtriangulation/visible
+  点状態（ObservationManager）**。深いparity課題で、COLMAP側を同点計装して比較するか、
+  統合modelを許容してper-component採点を変えるかの判断が必要。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-10k-boundary-diag-v1.json`
+  （root `tier-10000-boundary-debug-v1`は境界取得後に停止、modelは
+  `tier-10000-ceres-gauge6-v1`と同一）。
+- 未commit/未push: 10k証跡とこの追記（gauge6のコード/証跡2件は`0f38eb4`でpush済み）。
+
+### 2026-09-15 追記: 2.5k/5k 登録順LCSとframe単位pose差（plan §4.2 items 1-3）
+
+**新tool** `scripts/compare_colmap_mapper_registration.py`（+ `scripts/tests/
+test_compare_colmap_mapper_registration.py`、15 test全PASS）。COLMAP `mapper.log`と
+移植版logから初期ペア・登録順・global BAイベントを取り、対応するmodel `images.txt`の
+カメラ中心をimage名で突き合わせ、片方を他方へ1回のSim(3)（`score_openloris_model.
+umeyama`をimport）で合わせた残差をframe/登録rank別に出す。加えてframe窓ごとの局所
+Sim(3) scale（`local_scale`、`--local-scale-window/--local-scale-step`）を出す。GTは
+読まない。証跡:
+`benchmarks/electro/m9-openloris-colmap-port-registration-diag-{2500,5000}-v1.json`。
+
+| tier | 初期ペア frame (COLMAP / 移植) | LCS full / post-init | 登録集合 | global BA (C/P) | model間Sim3残差 mean / p95 / max (m) |
+|---|---|---|---|---|---|
+| 2.5k (GP3P+colmap, 0.087) | [446,462] / [388,420] | 0.708 / 0.709 | 一致 1250/1250 | 67 / 68 | **0.032 / 0.077 / 0.093** |
+| 5k (GP3P+colmap, 0.436) | [446,462] / [388,420] | 0.796 / 0.797 | 一致 2500/2500 | 76 / 78 | **0.339 / 0.573 / 0.604** |
+
+- 初期ペアは両tierで移植版が同じimage 776/840（frames 388/420）を最初に選ぶ。COLMAPは
+  2.5kで #1082/1050→#668/684→#446/462、5kで追加 #1691/1707 を経て同#446/462に到達。
+  COLMAPの推定を通った候補順と移植版の候補順が異なる（`mapper_impl.rs` module doc
+  記載の逸脱: COLMAPのmulti-model two-view classifierをvisloc essential matrix推定+
+  id昇順tie-breakで代替）。2.5kでは登録順の一致率が低い（equal positions 477/1248、
+  最長一致run 98）が最終登録集合・component構造・geometryは一致に近い。
+- 5kは逆: 登録順はむしろ近い（LCS 0.796）のにgeometry差が約10倍（rank 0-99ですでに
+  mean 0.31 m、rank 2400+で0.60 m）。
+- **局所Sim(3) scale（200 frame窓、移植→COLMAP）で原因を特定**: 2.5kは全域
+  0.982–1.025（±2.5%以内）だが、5kは frame ~1250 まで約1.007、frame ~1275から上昇し
+  frame 1350–1400 で1.038→1.073、frame ~1900 で最大1.163、その後~1.12。→ **5kの
+  quality差（ATE 0.436 vs COLMAP 0.123）は登録順ではなく、後半（frame 1250以降）の
+  局所scaleドリフト（相対+16〜19%）**。2.5kはドリフト領域の手前で終わるため合格する。
+- **初期ペア強制の試みは推定器逸脱でブロック**: exampleに`--init-image1/--init-image2`
+  （internal image id、強制のみ・autoへフォールバックせず緩和stageを進める）と
+  `PipelineOptions::forced_init_pair`、env `VISLOC_DEBUG_INIT` の拒否理由診断を追加。
+  COLMAPの5k成功ペア（image 893/925 = frames 446/462、`cam2_000893`/`cam2_000925`）を
+  強制すると、relax0は direct matches 59 < 100、relax1/2（50）は通常two-viewの
+  **median三角測量角 1.16° ≤ 16°/8°** で拒否（generalized推定に到達しない）。三角測量角
+  ゲートをenvで外すとgeneralized(GR6P)は通るが、初期三角測量（`min_angle=8–16°`）で点が
+  立たず`BadInitialPair`を繰り返す。→ `mapper_impl.rs` module doc記載の逸脱
+  （visloc `RelativePoseEstimator` vs COLMAP `EstimateTwoViewGeometry`）が初期ペア不一致の
+  直接原因。5k geometryへの寄与は未検証（強制run root
+  `colmap-port-c2-v1/tier-5000-forced-init-v1/` は0 model）。
+- 次の本命は **5k後半の局所scaleドリフト診断**。frame 1250–2200 の登録stepごとの局所
+  scale/poseをlocal/global BAイベント（`BA local image=`/`TIMING iterative_global`）に
+  重ね、どのBAで膨らむかを特定する。初期ペアの完全一致は別途
+  `EstimateTwoViewGeometry` の移植が必要（forced_init_pair toolは残す）。pose/scale差は
+  単一component・登録集合一致のときのみ意味を持つ点に注意。再現は上記toolの
+  `--colmap-log/--colmap-images/--ported-log/--ported-images/--rig-manifest/
+  --image-aliases`（aliasは`corridor1-1-m8-colmap/tier-10000-rig-v3/image_aliases.tsv`）。
+
+### 2026-09-15 引き継ぎチェックポイント: COLMAP rig mapperベタ移植（branch `feat/colmap-rig-mapper-port`）
+
+**状態**: branch `feat/colmap-rig-mapper-port`（mainから16 commit先行、push済み、worktree clean、PR未作成）。
+mainには`bench/colmap-graph-isolation`系の証跡と`docs/colmap_rig_mapper_port_plan.md`が入っていない
+（同branch上）。実行中のjobなし。
+
+**結論（10kでCOLMAPに負ける原因）**: frontendではなくmapper。COLMAP 10k controlの検証済みgraph
+（69621 pair、COLMAP keypoint）をそのまま旧`generalized_rig_sfm`へ入れるとcomponent構造は再現
+（4493 vs 4494 frame）するがSim(3) scale 0.136・ATE 11.9mに崩壊
+（`benchmarks/electro/m9-openloris-colmap-graph-isolation-10000-v1.json`）。候補pair集合は
+COLMAPと完全一致、visloc検証済み58879 pairはCOLMAP 69621の部分集合。
+
+**移植したもの**（`pipelines/slam/src/colmap_incremental/`、COLMAP commit 64805cb、各関数に
+file:line引用、参照sourceは`/tmp/.../scratchpad/colmap-port/colmap-src/`にあったが一時領域）:
+- C1 `types.rs`/`reconstruction.rs`/`database_cache.rs`（Rig/Frame/SetCamFromWorld、M2 CorrespondenceGraph流用）
+- C2 `observation_manager.rs`、`incremental_triangulator.rs`、`mapper.rs`/`mapper_impl.rs`、
+  `pipeline.rs`、`bundle_adjustment.rs`、example `examples/colmap_incremental_mapper.rs`
+  （`--manifest --features-dir --pairs-export --out-colmap [--pose-solver gp3p|dlt6pt]
+  [--local-ba-point-policy colmap|window|nopull]`）
+- C2.5 `rig_ba_solver.rs`: Ceres相当LM（trust region、gradient_tolerance 1e-4絶対、
+  function/parameter tolerance 0＝controlはCeresでも50反復回りきる）、点のSchur消去を
+  pair数累積で分割、疎ブロック縮約系、rayon決定論的。synthetic 440 frame/235k obsで114ms/反復。
+- C2.6 GP3P（`crates/vision/src/pnp/gp3p.rs`、PoseLib gp3p/re3q3移植、根はnalgebra固有値）、
+  COLMAP `ParameterizePoints`/`AddPointToProblem`のpull-in方針（`LocalBaPointPolicy::Colmap`）
+- ロバスト損失: Ceres `corrector.cc`移植、local BA初回のみSoftL1(1.0)以降trivial、global BA
+  trivial、RANSAC後の姿勢refinementはCauchy（`generalized_pose.cc:298`）
+- 未移植（記録済み逸脱）: structure-less登録（`RegisterNextStructureLessImage`）、
+  UniqueInlierSupportMeasurer、per-camera閾値の厳密平均、Sturm列（固有値で代替）、
+  gauge固定が姿勢単位（COLMAPは自由度単位）
+- 入力: `scripts/export_colmap_verified_for_visloc.py` + `examples/import_colmap_verified_snapshot`
+  でCOLMAP DBを再検証なしで変換。2.5k/5kはCOLMAP 10k DBのprefix切り出し
+  （`$R/colmap-prefix-parity-v1/tier-{2500,5000}/`、COLMAP参照modelとscore付き）。
+
+**同一入力でのCOLMAP比較（ATE RMSE / Sim(3) scale / RPE-10s、`score_openloris_model.py`＋
+`score_openloris_rpe.py`）**
+
+| 規模 | COLMAP | 旧generalized_rig_sfm | 移植版の最良 | 構成 |
+|---|---|---|---|---|
+| 1k | 0.028 / 1.136 / – | 0.027 | 0.033 / 1.152 | native BA (C2.5) |
+| 2.5k | 0.072 / 1.026 / 0.089 | 0.321 / 1.007 / 0.575 | **0.087 / 1.043 / 0.126** | GP3P+colmap方針+trivial損失（285dd15） |
+| 5k | 0.123 / 1.068 / 0.147 | 4.09 / 0.079 / 4.87 | **0.273 / 1.173 / 0.284** | native BA+DLT+旧点扱い（3740942 snapshot） |
+| 10k | 0.384 / 1.106,1.142 / 0.305（2 model） | 11.9 / 0.136（COLMAP graph） | 3.27 / 1.58 / 1.77（1 modelに統合） | GP3P+colmap方針 |
+
+2.5kはC2合格条件（ATE≤1.5x、scale±10%、RPE-10s≤1.5x）を全部PASS。5k以上は未達。
+A/B行列（決定論性はbyte一致で確認済み）:
+2.5k: GP3P+colmap 0.087、GP3P+nopull 0.162、DLT+window 0.198、GP3P+window 1.17、
+GP3P+colmap+ロバスト損失 0.154。
+5k: 旧点扱い+DLT 0.273、GP3P+colmap 0.436、GP3P+nopull 0.440、DLT+colmap 0.699、GP3P+window 2.39。
+→ 個々には忠実な変更で結果が2〜5倍揺れる。COLMAPは安定。残る構造的差（登録順/next-image選択、
+filter cadence、BA収束、structure-less登録欠如、gauge固定）が本命で、これ以上のA/Bより
+**COLMAPのmapper.logとの登録順・frame単位pose比較**（plan §4.2）を先にやること。
+
+**性度以外**: 2.5kのwallはCOLMAP 1:35に対し移植版0:47〜1:05（同時実行あり、非厳密）、
+5k 1:49〜2:02（COLMAP 2:11）、10k 4:27（COLMAP 4:38）、RSS最大4.8GB。初期pair探索は
+2.5kで約5分（COLMAPも約7分）。
+
+**証跡JSON**（`benchmarks/electro/`）: `m9-openloris-colmap-graph-isolation-{1000,10000}-v1`、
+`m9-openloris-colmap-prefix-parity-v1`、`m9-openloris-colmap-port-c2-parity-v1`、
+`m9-openloris-colmap-port-c2-5-native-ba-v1`、`m9-openloris-colmap-port-c2-6-gp3p-v1`、
+`m9-openloris-colmap-port-5000-native-ba-v1`、`m9-openloris-colmap-port-point-policy-ab-v1`、
+`m9-openloris-colmap-port-robust-loss-nopull-v1`。
+run root: `$R/colmap-port-c2-v1/tier-*`（各`mapper.bin`＝使用binary、`run.sh`＝正確なコマンド、
+`stderr.log`にINIT_PAIR/REGISTER/BA_SOLVE行、`model/model/<k>/`、`score.json`、`rpe.json`）。
+`$R=/home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1`。上書き・削除禁止、新実験はfresh root。
+
+**次の担当者へ**
+1. `main`へのPRはまだ。branchをそのままPRにしてよい（CI: `cargo test -p visloc-slam --lib`、
+   Python testsは`tests/`と`scripts/tests/`）。
+2. 診断: 2.5k（GP3P+colmap、0.087m）とCOLMAPの登録順LCS・frame単位pose差（Sim3 align後）を
+   出し、差が生まれる時点とイベント（global BA/retriangulate/filter）を特定する。
+3. structure-less登録の移植（COLMAPが5k/10kで使っている可能性）と、gauge固定の自由度単位化。
+4. 10kで1 modelに統合されている点（COLMAPは2 model）: `min_model_overlap`/`FilterImages`/
+   `max_model_overlap`の挙動確認。
+5. 実行のコツ: 長時間runは`setsid nohup run.sh`＋pidファイル、`ulimit -v`で上限。`pkill -f`に
+   自分のコマンド文字列を含めると自分が死ぬ。監視のsleepはメモリ警告で止められることがある。
+   BA log `BA_SOLVE ... iterations=50`は正常（controlのCeres設定と同じ）。
+
+
 ### 2026-09-14 区切りまとめ（次の担当者はまずここを読む）
 
 branch `feat/m9-learned-retrieval`、HEADはこの節を含むcommit（直前`e75aad4`）、push済み、
