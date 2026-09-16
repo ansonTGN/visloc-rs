@@ -1144,11 +1144,12 @@ fn gradient_inf_norm(points_lin: &[PointLin], frame_bc_raw: &[Vector6<f64>]) -> 
 /// `ba.landmarks`) and returns the same [`BaResult`]
 /// `bundle_adjustment.rs::solve` already expects from the `Legacy` backend.
 /// See module doc for the full algorithm.
-/// Solves `ba`'s rig-reprojection problem with an optional **relative**
-/// gradient stopping
-/// criterion matching Ceres' `gradient_tolerance` semantics: terminate once
-/// `‖g‖` has fallen below `rel * ‖g_initial‖` (strictly, i.e. at least one
-/// step is attempted). COLMAP sets this to `1.0` for global BA and `10.0` for
+///
+/// `gradient_tolerance_rel` adds Ceres' **relative** `gradient_tolerance`
+/// stopping criterion: terminate once `‖g‖` has fallen to or below
+/// `rel * ‖g_initial‖` (the first iteration only records the initial norm, so
+/// at least one step is attempted). COLMAP sets this to `1.0` for global BA
+/// and `10.0` for
 /// local BA (`incremental_pipeline.cc:236-283`/`:192-235`); real Ceres then
 /// terminates after ~1-2 iterations, whereas this port's legacy absolute
 /// `‖g‖_∞ <= 1e-4` runs to the iteration cap. Passing `None` preserves the
@@ -1194,7 +1195,12 @@ pub(crate) fn optimize_with_tolerance(
             Some(rel) => match initial_grad_norm {
                 None => initial_grad_norm = Some(grad_norm),
                 Some(g0) => {
-                    if grad_norm < rel * g0 {
+                    // `<=` (not `<`): if the first step was rejected the
+                    // gradient is unchanged, and a strict comparison would
+                    // never fire and run to the iteration cap (observed as a
+                    // single 865s global BA at 5k). Ceres stops after 1-2
+                    // iterations with these tolerances.
+                    if grad_norm <= rel * g0 {
                         converged = true;
                         break;
                     }
