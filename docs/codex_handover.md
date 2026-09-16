@@ -76,7 +76,17 @@
   `benchmarks/electro/m9-openloris-colmap-port-gauge6-{2500,5000}-v1.json`。
   → gaugeの12 DoF過拘束が5k固有の後半ドリフトの主因だった。残差はATE 1.11x/p95僅差で、
   次の候補はCOLMAP厳密な7 DoF（per-DoF baseline軸）・structure-less登録・filter cadence。
-- 未commit/未push: gauge6のコード（bundle_adjustment.rs/mapper.rs）と証跡2件・この追記。
+- 2026-09-16 **10kは改善せず（別レジーム）**: 全修正込みで10kを実行
+  (`tier-10000-ceres-gauge6-v1`、COLMAP検証済み10k graph、2:41:31)。rmse **3.3301**、
+  scale 1.408、**1 model**（旧3.2736/1.584/1 model、COLMAP 0.384/2 model）。2.5k/5kの
+  修正は10kに波及せず。原因はBAでなく**component構造**: 移植版はCOLMAPが2 modelに分ける
+  ものを1 modelに統合（COLMAP model0 ~4494 frame + model1 ~505）。initも10kは
+  image 8181/8213（frames 3181/3213）で2.5k/5kの776/840と異なる。→ handover
+  2026-09-15項目4の`max_model_overlap`/`FilterImages`/model分割の課題。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-ceres-gauge6-10000-v1.json`。
+  次は「なぜ2つ目のmodelが始まらないか」の診断（`num_shared_reg_images`/
+  `max_model_overlap`/`max_num_models`、frontier枯渇、structure-less fallback不在）。
+- 未commit/未push: 10k証跡とこの追記（gauge6のコード/証跡2件は`0f38eb4`でpush済み）。
 
 ### 2026-09-15 追記: 2.5k/5k 登録順LCSとframe単位pose差（plan §4.2 items 1-3）
 
