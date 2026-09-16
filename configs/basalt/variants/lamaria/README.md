@@ -24,13 +24,26 @@ Per-sequence calibration/config variants for the Project Aria LaMAria benchmark
 
 ## Why the big window
 
-Basalt's default window is tuned for short, room-scale sequences. On the
-1.5 km LaMAria `sequence_1_19` (18,352 frames) it leaves `sequence_1_19`
-VIO-only at official CP Score **12.75**; enlarging the window is a
-config-only, parity-safe change that lifts it to **27.09** (CP@1m 7.1 % →
-14.3 %, pGT pose recall @5 m 5.4 % → 30.0 %), essentially matching the best
-published academic baseline (27.7). Global ATE keeps improving further at
-`vio_max_states = 15` / `vio_max_kfs = 45` (SE3 13.60 → 11.91 m) but the
-official 14-control-point Score drops to 22.27, so the window should be
-selected on the official metric, not ATE. Wall time for the 18,352-frame
-sequence: 12 min (3/7), 58 min (10/30), 1 h 51 min (15/45).
+Basalt's default window is tuned for short, room-scale sequences. With it,
+LaMAria VIO-only scores **49.65** on `R_11_5cp` and **12.75** on the 1.5 km
+`sequence_1_19` (18,352 frames). Enlarging the window is a config-only,
+parity-safe change:
+
+| sequence | default 3/7 | **10/30** |
+|---|---:|---:|
+| R_11_5cp CP Score | 49.65 (CP@1m 20 %) | **63.19** (CP@1m 60 %) |
+| R_11_5cp pGT R@1m | 16 % | **51.8 %** |
+| sequence_1_19 CP Score | 12.75 (CP@1m 7.1 %) | **27.09** (CP@1m 14.3 %) |
+| sequence_1_19 pGT R@5m | 5.4 % | **30.0 %** |
+
+On `R_11_5cp` the larger-window VIO alone beats the default-window offline
+mapper (57.66) and approaches microSLAM (mono, 64.5); the best published
+academic baseline is 27.7.
+
+Global ATE keeps improving further at `vio_max_states = 15` / `vio_max_kfs =
+45` (sequence_1_19 SE3 13.60 → 11.91 m) but the official 14-control-point
+Score drops to 22.27, so the window should be selected on the official metric,
+not ATE. Wall time for the 18,352-frame sequence: 12 min (3/7), 58 min (10/30),
+1 h 51 min (15/45). Note the marginalization packets at 10/30 are ~3.7× larger
+(~73.5 MB vs ~20 MB), so the file-based offline mapper dump is impractical at
+this window size.
