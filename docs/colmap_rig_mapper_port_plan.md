@@ -742,3 +742,89 @@ cleanest "missing," not "deviates," row in §2's table.
   existing `rig_sfm.rs` test suite (`rig_sfm.rs` has substantial inline
   `#[test]` coverage, e.g. the assertions at `rig_sfm.rs:7593-7594`) staying
   green.
+
+---
+
+## 8. 2026-09-16 addendum — global-BA point policy verified against source
+
+The 2026-09-16 experiment ("make `adjust_global_bundle` add every observed
+point as a variable point") was motivated by prose in §1.2/§3.3 but not by a
+fresh source read; that read is recorded here after re-cloning the pinned
+commit. Source: `git clone --filter=blob:none
+https://github.com/colmap/colmap.git && git checkout
+64805cb870b574a569dccc34918d95a2db2b2fee`.
+
+### 8.1 What COLMAP actually does
+
+- `IncrementalMapper::AdjustGlobalBundle` (`sfm/incremental_mapper.cc:1118`)
+  builds a `BundleAdjustmentConfig` with `AddImage` only — it does **not**
+  call `AddVariablePoint` (the only exceptions are the optional
+  redundant-points pass, `.cc:1218-1238`, off by default).
+- `DefaultBundleAdjuster`'s constructor (`estimators/bundle_adjustment_ceres.cc:598-625`)
+  adds points from `config.VariablePoints()`/`ConstantPoints()` only — but
+  `AddImageToProblem` (`:678`, trivial-frame `:697`, non-trivial `:753`)
+  adds a residual block for **every observation whose `point3D_id` is valid
+  and not `IsIgnoredPoint`**, which implicitly creates that point's
+  parameter block. So in global BA (all registered frames in the config)
+  every observed point enters the problem.
+- `ParameterizePoints` (`:538-554`) then sets a point constant iff
+  `!options.refine_points3D || point3D.track.Length() > num_observations`,
+  plus every point in `config.ConstantPoints()`. `refine_points3D = true`
+  by default (`estimators/bundle_adjustment.h:191`), and the control does
+  **not** set `--Mapper.ba_refine_points3D 0`. Therefore **COLMAP's global
+  BA optimises points as well as poses**, while this port's
+  `adjust_global_bundle` currently fixes every point (its `solve` only adds
+  landmarks from `config.variable/constant_point3d_ids`, which are empty).
+  This is a real, source-confirmed fidelity gap.
+- Global solver options (`controllers/incremental_pipeline.cc:236-283`):
+  `gradient_tolerance = 1.0`, `function_tolerance =
+  ba_global_function_tolerance` (default `0.0`), `parameter_tolerance = 0.0`,
+  `max_num_iterations` default `kDefaultCeresGlobalMaxNumIterations`,
+  loss `TRIVIAL`. Local (`:192-235`): `gradient_tolerance = 10.0`, loss
+  `SOFT_L1`. Reconstructions with `<10` registered frames divide all three
+  tolerances by 10 and double `max_num_iterations`.
+- `ba_global_ignore_redundant_points3D = false` and
+  `ba_global_ignore_redundant_points3D_min_coverage_gain = 0.05`
+  (`sfm/incremental_mapper.h:115,119`); when enabled it calls
+  `FindRedundantPoints3D` and `config.IgnorePoint(...)`.
+- `min_track_length` (default `0`) and `config.IsIgnoredPoint` are the only
+  per-point filters inside `AddImageToProblem`.
+
+### 8.2 Why the 2026-09-16 attempt is not yet the fix
+
+The port's `BundleAdjustment::solve` already makes a point variable when its
+whole track is inside `config.images()` (`track_fully_in_window`), which for
+a global config is exactly `ParameterizePoints`' `track.Length() ==
+num_observations` condition, so the variable/constant selection was already
+equivalent. The measured regression is therefore in the solver/handling
+around the larger problem, not in the point selection. Two concrete
+candidates:
+
+1. **Convergence/trust-region parity.** `bundle_adjustment.rs` deviation 6
+   says "COLMAP stops Ceres on `gradient_tolerance=1e-4`". The source above
+   shows global `1.0` / local `10.0` (i.e. run to the iteration cap), so that
+   comment is wrong; the port's `relative_cost_tolerance=1e-6` stand-in may
+   stop the joint problem earlier or later than Ceres.
+2. **Parameterization.** COLMAP's `refine_points3D`, `min_track_length`,
+   `IsIgnoredPoint`, and the `constant_point3d_ids` interaction are not
+   modelled in the port's options.
+
+### 8.3 Pre-registered protocol for the next attempt
+
+Before running anything, record source citations and gates (evidence JSON
+under `benchmarks/electro/`):
+
+1. Add `refine_points3D: bool = true` to `BundleAdjustmentOptions`; in
+   `adjust_global_bundle` add points per `points_observed_by`, and in `solve`
+   implement `ParameterizePoints` exactly: constant iff
+   `!refine_points3D || track_len > num_observed`, plus constant points.
+2. Model COLMAP's global/local solver tolerances (1.0/10.0 gradient,
+   function 0, parameter 0, 25/50 iterations, the `<10` frames adjustment)
+   and remove the incorrect deviation-6 note; keep `relative_cost_tolerance`
+   only if it demonstrably matches the iteration caps.
+3. Gates: 2.5k **non-regression** (ATE RMSE ≤ 0.0874 × 1.05, |scale−1.0434| ≤
+   0.03, local-scale max ≤ 1.03), 5k improvement over 0.4359 or explicit
+   parity, max large-BA `elapsed_ms` ≤ 1.5× the control, 2.5k wall ≤ 1.5×.
+4. Only if the 2.5k gate passes may this reach the 5k/10k comparison; a
+   2.5k regression again means the LM-side parity work (item 1/2) is the
+   prerequisite, not more point-variable plumbing.
