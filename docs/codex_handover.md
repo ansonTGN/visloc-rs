@@ -41,7 +41,17 @@
   wall 55:50、large BA max 181s（対照273s）。事前登録ゲート（rmse≤0.0918,
   |scale-1.0434|≤0.03, local max≤1.03）全PASS。**5k検証実行中**
   `tier-5000-ceres-global-ba-v1`（対照`tier-5000-v2` 0.436/scale1.153、COLMAP
-  0.123）。コードは未commit（bundle_adjustment.rs/mapper.rs/rig_ba_solver.rs）。
+  0.123）。コードは`30553ef`でcommit/push済み。
+- 2026-09-16 **5k検証結果**: `tier-5000-ceres-global-ba-v1` は改善したがCOLMAP parityは未達。
+  rmse 0.3618（対照0.4359/COLMAP0.1227）、scale 1.104（1.153/1.068）、p95 0.5734
+  （0.6806/0.236）、local_scale max 1.1233（対照1.1878）、pose mean 0.2466（対照
+  0.3394）、wall 2:11:28。後半ドリフトは+19%→+12%に縮小したが残存。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-ceres-global-ba-5000-v1.json`。
+- **既知のcostバグ（要修正）**: `optimize_with_tolerance`の相対停止が厳密`<`のため、
+  最初の大規模global BAでstep棄却により勾配が減らず**50反復まで走る**（5kで865s、
+  対照304sの~2.8x）。Ceres準拠は`<=`（実Ceresは1–2反復で停止）。`<=`に直せば
+  costも揃う見込み。5kの残差要因候補: local BA収束parity（Ceres gradient_tolerance
+  =10.0）、gaugeの自由度単位化、structure-less登録、filter cadence。
 
 ### 2026-09-15 追記: 2.5k/5k 登録順LCSとframe単位pose差（plan §4.2 items 1-3）
 

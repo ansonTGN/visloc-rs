@@ -1,0 +1,283 @@
+{
+  "change": "Same as the 2.5k gate: global BA parameterizes every observed point (refine_points3D) and uses the Ceres-relative gradient stop (1.0).",
+  "colmap": {
+    "models": 1,
+    "p95_m": 0.2360154639213036,
+    "registered_images": 5000,
+    "rmse_m": 0.12268531994957262,
+    "sim3_scale": 1.0676117399443572
+  },
+  "control": {
+    "models": 1,
+    "p95_m": 0.6805582759138297,
+    "registered_images": 5000,
+    "rmse_m": 0.4358619718336859,
+    "sim3_scale": 1.1530539219645124
+  },
+  "control_local_scale_max": 1.1878,
+  "control_max_large_ba_ms": 303807,
+  "control_pose_center_error_m": {
+    "max": 0.6039404548514358,
+    "mean": 0.3393784182242395
+  },
+  "date": "2026-09-16",
+  "new": {
+    "models": 1,
+    "p95_m": 0.5733784249481887,
+    "registered_images": 5000,
+    "rmse_m": 0.36182880499362735,
+    "sim3_scale": 1.1040219660323212
+  },
+  "new_local_scale_max": 1.1232784025105458,
+  "new_local_scale_min": 0.9800493873665098,
+  "new_local_scale_windows": [
+    {
+      "frame_end": 199,
+      "frame_start": 0,
+      "scale": 1.0013176504226546
+    },
+    {
+      "frame_end": 249,
+      "frame_start": 50,
+      "scale": 1.0019717112276394
+    },
+    {
+      "frame_end": 299,
+      "frame_start": 100,
+      "scale": 1.0023757344133892
+    },
+    {
+      "frame_end": 349,
+      "frame_start": 150,
+      "scale": 1.0020943425947682
+    },
+    {
+      "frame_end": 399,
+      "frame_start": 200,
+      "scale": 1.001316728621206
+    },
+    {
+      "frame_end": 449,
+      "frame_start": 250,
+      "scale": 0.9992918902301846
+    },
+    {
+      "frame_end": 499,
+      "frame_start": 300,
+      "scale": 0.9976329466441851
+    },
+    {
+      "frame_end": 549,
+      "frame_start": 350,
+      "scale": 0.9985317859975489
+    },
+    {
+      "frame_end": 599,
+      "frame_start": 400,
+      "scale": 0.9996507103372072
+    },
+    {
+      "frame_end": 649,
+      "frame_start": 450,
+      "scale": 0.9994881446295323
+    },
+    {
+      "frame_end": 699,
+      "frame_start": 500,
+      "scale": 0.9940270504280254
+    },
+    {
+      "frame_end": 749,
+      "frame_start": 550,
+      "scale": 0.990145925481525
+    },
+    {
+      "frame_end": 799,
+      "frame_start": 600,
+      "scale": 0.9843134714487024
+    },
+    {
+      "frame_end": 849,
+      "frame_start": 650,
+      "scale": 0.9822411540400064
+    },
+    {
+      "frame_end": 899,
+      "frame_start": 700,
+      "scale": 0.9831267470666061
+    },
+    {
+      "frame_end": 949,
+      "frame_start": 750,
+      "scale": 0.9830867024637225
+    },
+    {
+      "frame_end": 999,
+      "frame_start": 800,
+      "scale": 0.9820211422531939
+    },
+    {
+      "frame_end": 1049,
+      "frame_start": 850,
+      "scale": 0.9800493873665098
+    },
+    {
+      "frame_end": 1099,
+      "frame_start": 900,
+      "scale": 0.982326764745624
+    },
+    {
+      "frame_end": 1149,
+      "frame_start": 950,
+      "scale": 0.9834139535173694
+    },
+    {
+      "frame_end": 1199,
+      "frame_start": 1000,
+      "scale": 0.9834916522547477
+    },
+    {
+      "frame_end": 1249,
+      "frame_start": 1050,
+      "scale": 0.9839573717801632
+    },
+    {
+      "frame_end": 1299,
+      "frame_start": 1100,
+      "scale": 0.9860762863422325
+    },
+    {
+      "frame_end": 1349,
+      "frame_start": 1150,
+      "scale": 0.9910407748037949
+    },
+    {
+      "frame_end": 1399,
+      "frame_start": 1200,
+      "scale": 0.9966599124249126
+    },
+    {
+      "frame_end": 1449,
+      "frame_start": 1250,
+      "scale": 1.001665177969468
+    },
+    {
+      "frame_end": 1499,
+      "frame_start": 1300,
+      "scale": 1.0096179936847753
+    },
+    {
+      "frame_end": 1549,
+      "frame_start": 1350,
+      "scale": 1.0184082236935885
+    },
+    {
+      "frame_end": 1599,
+      "frame_start": 1400,
+      "scale": 1.0269307775820076
+    },
+    {
+      "frame_end": 1649,
+      "frame_start": 1450,
+      "scale": 1.0319141469561088
+    },
+    {
+      "frame_end": 1699,
+      "frame_start": 1500,
+      "scale": 1.0381508401018291
+    },
+    {
+      "frame_end": 1749,
+      "frame_start": 1550,
+      "scale": 1.0445624568877283
+    },
+    {
+      "frame_end": 1799,
+      "frame_start": 1600,
+      "scale": 1.0518082720018538
+    },
+    {
+      "frame_end": 1849,
+      "frame_start": 1650,
+      "scale": 1.0589244223891743
+    },
+    {
+      "frame_end": 1899,
+      "frame_start": 1700,
+      "scale": 1.0662589656038068
+    },
+    {
+      "frame_end": 1949,
+      "frame_start": 1750,
+      "scale": 1.0733945878887585
+    },
+    {
+      "frame_end": 1999,
+      "frame_start": 1800,
+      "scale": 1.0823004680518065
+    },
+    {
+      "frame_end": 2049,
+      "frame_start": 1850,
+      "scale": 1.0929307935955161
+    },
+    {
+      "frame_end": 2099,
+      "frame_start": 1900,
+      "scale": 1.1052418548698137
+    },
+    {
+      "frame_end": 2149,
+      "frame_start": 1950,
+      "scale": 1.115568141192299
+    },
+    {
+      "frame_end": 2199,
+      "frame_start": 2000,
+      "scale": 1.1232298604550812
+    },
+    {
+      "frame_end": 2249,
+      "frame_start": 2050,
+      "scale": 1.1232784025105458
+    },
+    {
+      "frame_end": 2299,
+      "frame_start": 2100,
+      "scale": 1.1138049152303375
+    },
+    {
+      "frame_end": 2349,
+      "frame_start": 2150,
+      "scale": 1.1073226664194011
+    },
+    {
+      "frame_end": 2399,
+      "frame_start": 2200,
+      "scale": 1.1074355234595654
+    },
+    {
+      "frame_end": 2449,
+      "frame_start": 2250,
+      "scale": 1.108536406769137
+    },
+    {
+      "frame_end": 2499,
+      "frame_start": 2300,
+      "scale": 1.1138473581919945
+    }
+  ],
+  "new_max_large_ba_ms": 865029,
+  "new_pose_center_error_m": {
+    "max": 0.7028291108396321,
+    "mean": 0.24659709734962354,
+    "median": 0.22663243642769704,
+    "p95": 0.43006969018906394
+  },
+  "new_wall": "02:11:28",
+  "reproduction": "root colmap-port-c2-v1/tier-5000-ceres-global-ba-v1; control tier-5000-v2; scorer scripts/score_openloris_model.py; diag scripts/compare_colmap_mapper_registration.py",
+  "schema": "visloc_colmap_mapper_ceres_global_ba_gate_v1",
+  "status": "improved_but_parity_not_reached",
+  "tier": 5000,
+  "verdict": "5k improves vs control (ATE 0.436->0.362, scale 1.153->1.104, p95 0.681->0.573, local-scale max 1.188->1.123, pose mean 0.339->0.247) but remains well short of COLMAP (0.123 / 1.068 / 0.236). The second-half scale drift is reduced, not eliminated; remaining candidates are local-BA convergence parity (Ceres gradient_tolerance=10.0), per-DoF gauge fixing, structure-less registration, and filter cadence."
+}
