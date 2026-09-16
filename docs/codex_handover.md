@@ -58,8 +58,13 @@
   max 1.0086、pose mean **0.0062**（global-ceres 0.0108）、wall **28:02**（global-ceres
   55:50）。global-ceres単独(0.0673)よりATEは僅かに悪いがCOLMAPは上回り、pose一貫性は
   約2倍良くBAは早期停止で高速化。証跡
-  `benchmarks/electro/m9-openloris-colmap-port-ceres-local-ba-2500-v1.json`。5k検証実行中
-  `tier-5000-local-ceres-v1`。
+  `benchmarks/electro/m9-openloris-colmap-port-ceres-local-ba-2500-v1.json`。
+  **5kも大幅改善**: rmse 0.2263（対照0.4359/global-ceres0.3618/COLMAP0.1227=1.84x）、
+  scale 1.0859（1.1531/1.104/1.0676）、p95 0.3984（0.6806/0.5734/0.236）、local_scale
+  max 1.1155（1.1878/1.1233）、pose mean 0.1234（0.3394/0.2466）、wall **43:24**
+  （対照2:02）。local BA収束parityがスケール時の主レバーだった。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-ceres-local-ba-5000-v1.json`。
+  commit/push済み。COLMAP parityは未達（残差要因は下記）。
 - 5kの残差要因候補: gaugeの自由度単位化（§9.2、COLMAPは7 DoF/移植版12 DoF）、
   structure-less登録、filter cadence。
 

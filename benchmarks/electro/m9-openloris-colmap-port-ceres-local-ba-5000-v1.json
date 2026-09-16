@@ -1,0 +1,283 @@
+{
+  "change": "Same as the 2.5k local-BA gate: local() uses the Ceres-relative gradient_tolerance=10.0.",
+  "colmap": {
+    "models": 1,
+    "p95_m": 0.2360154639213036,
+    "registered_images": 5000,
+    "rmse_m": 0.12268531994957262,
+    "sim3_scale": 1.0676117399443572
+  },
+  "control": {
+    "models": 1,
+    "p95_m": 0.6805582759138297,
+    "registered_images": 5000,
+    "rmse_m": 0.4358619718336859,
+    "sim3_scale": 1.1530539219645124
+  },
+  "date": "2026-09-16",
+  "global_ceres": {
+    "models": 1,
+    "p95_m": 0.5733784249481887,
+    "registered_images": 5000,
+    "rmse_m": 0.36182880499362735,
+    "sim3_scale": 1.1040219660323212
+  },
+  "new": {
+    "models": 1,
+    "p95_m": 0.398351399663504,
+    "registered_images": 5000,
+    "rmse_m": 0.22625664726837488,
+    "sim3_scale": 1.085855609317827
+  },
+  "new_local_scale_max": 1.1155340542157866,
+  "new_local_scale_min": 0.9922589459696425,
+  "new_local_scale_windows": [
+    {
+      "frame_end": 199,
+      "frame_start": 0,
+      "scale": 1.0001003023081843
+    },
+    {
+      "frame_end": 249,
+      "frame_start": 50,
+      "scale": 0.9998940535273063
+    },
+    {
+      "frame_end": 299,
+      "frame_start": 100,
+      "scale": 0.9999151752642528
+    },
+    {
+      "frame_end": 349,
+      "frame_start": 150,
+      "scale": 0.9999955810072385
+    },
+    {
+      "frame_end": 399,
+      "frame_start": 200,
+      "scale": 0.9999495379892434
+    },
+    {
+      "frame_end": 449,
+      "frame_start": 250,
+      "scale": 0.9985436513459693
+    },
+    {
+      "frame_end": 499,
+      "frame_start": 300,
+      "scale": 0.9971037103093953
+    },
+    {
+      "frame_end": 549,
+      "frame_start": 350,
+      "scale": 0.9984977309312537
+    },
+    {
+      "frame_end": 599,
+      "frame_start": 400,
+      "scale": 1.0003085594717291
+    },
+    {
+      "frame_end": 649,
+      "frame_start": 450,
+      "scale": 1.0028203792399282
+    },
+    {
+      "frame_end": 699,
+      "frame_start": 500,
+      "scale": 1.0018251579600548
+    },
+    {
+      "frame_end": 749,
+      "frame_start": 550,
+      "scale": 0.9992414676195422
+    },
+    {
+      "frame_end": 799,
+      "frame_start": 600,
+      "scale": 0.9957546363556015
+    },
+    {
+      "frame_end": 849,
+      "frame_start": 650,
+      "scale": 0.996380430638825
+    },
+    {
+      "frame_end": 899,
+      "frame_start": 700,
+      "scale": 0.9980901100983487
+    },
+    {
+      "frame_end": 949,
+      "frame_start": 750,
+      "scale": 0.9983200837886491
+    },
+    {
+      "frame_end": 999,
+      "frame_start": 800,
+      "scale": 0.9972516138387749
+    },
+    {
+      "frame_end": 1049,
+      "frame_start": 850,
+      "scale": 0.9947394842307666
+    },
+    {
+      "frame_end": 1099,
+      "frame_start": 900,
+      "scale": 0.9947293913165214
+    },
+    {
+      "frame_end": 1149,
+      "frame_start": 950,
+      "scale": 0.9941403440847543
+    },
+    {
+      "frame_end": 1199,
+      "frame_start": 1000,
+      "scale": 0.9929289117669775
+    },
+    {
+      "frame_end": 1249,
+      "frame_start": 1050,
+      "scale": 0.9922589459696425
+    },
+    {
+      "frame_end": 1299,
+      "frame_start": 1100,
+      "scale": 0.9933797442880499
+    },
+    {
+      "frame_end": 1349,
+      "frame_start": 1150,
+      "scale": 0.9964471508658931
+    },
+    {
+      "frame_end": 1399,
+      "frame_start": 1200,
+      "scale": 0.9990132383327612
+    },
+    {
+      "frame_end": 1449,
+      "frame_start": 1250,
+      "scale": 1.001694468236523
+    },
+    {
+      "frame_end": 1499,
+      "frame_start": 1300,
+      "scale": 1.005997526181583
+    },
+    {
+      "frame_end": 1549,
+      "frame_start": 1350,
+      "scale": 1.0106468166623697
+    },
+    {
+      "frame_end": 1599,
+      "frame_start": 1400,
+      "scale": 1.013699164812367
+    },
+    {
+      "frame_end": 1649,
+      "frame_start": 1450,
+      "scale": 1.0144229687287991
+    },
+    {
+      "frame_end": 1699,
+      "frame_start": 1500,
+      "scale": 1.0167263659126125
+    },
+    {
+      "frame_end": 1749,
+      "frame_start": 1550,
+      "scale": 1.0192387219523416
+    },
+    {
+      "frame_end": 1799,
+      "frame_start": 1600,
+      "scale": 1.020696683948529
+    },
+    {
+      "frame_end": 1849,
+      "frame_start": 1650,
+      "scale": 1.0215324415781368
+    },
+    {
+      "frame_end": 1899,
+      "frame_start": 1700,
+      "scale": 1.0253765690529317
+    },
+    {
+      "frame_end": 1949,
+      "frame_start": 1750,
+      "scale": 1.0304886432779528
+    },
+    {
+      "frame_end": 1999,
+      "frame_start": 1800,
+      "scale": 1.0334912818588566
+    },
+    {
+      "frame_end": 2049,
+      "frame_start": 1850,
+      "scale": 1.0343369596578476
+    },
+    {
+      "frame_end": 2099,
+      "frame_start": 1900,
+      "scale": 1.0366872478254585
+    },
+    {
+      "frame_end": 2149,
+      "frame_start": 1950,
+      "scale": 1.0406724093937452
+    },
+    {
+      "frame_end": 2199,
+      "frame_start": 2000,
+      "scale": 1.0488232776241262
+    },
+    {
+      "frame_end": 2249,
+      "frame_start": 2050,
+      "scale": 1.0609108480910057
+    },
+    {
+      "frame_end": 2299,
+      "frame_start": 2100,
+      "scale": 1.0669866029223163
+    },
+    {
+      "frame_end": 2349,
+      "frame_start": 2150,
+      "scale": 1.0677594880168197
+    },
+    {
+      "frame_end": 2399,
+      "frame_start": 2200,
+      "scale": 1.0714713848321802
+    },
+    {
+      "frame_end": 2449,
+      "frame_start": 2250,
+      "scale": 1.0772768850286105
+    },
+    {
+      "frame_end": 2499,
+      "frame_start": 2300,
+      "scale": 1.1155340542157866
+    }
+  ],
+  "new_pose_center_error_m": {
+    "max": 0.7292970212656564,
+    "mean": 0.12339154308784823,
+    "median": 0.10620371219319999,
+    "p95": 0.2753105908640064
+  },
+  "new_wall": "00:43:24",
+  "reproduction": "root colmap-port-c2-v1/tier-5000-local-ceres-v1; comparators tier-5000-ceres-global-ba-v2, tier-5000-v2; scorer scripts/score_openloris_model.py; diag scripts/compare_colmap_mapper_registration.py",
+  "schema": "visloc_colmap_mapper_ceres_local_ba_gate_v1",
+  "status": "improved",
+  "tier": 5000,
+  "verdict": "Large 5k improvement: ATE 0.2263 (control 0.4359, global-ceres 0.3618, COLMAP 0.1227 = 1.84x), scale 1.0859 (1.1531/1.104/1.0676), p95 0.3984 (0.6806/0.5734/0.236), local-scale max 1.1155 (1.1878/1.1233), pose mean 0.1234 (0.3394/0.2466), wall 43:24 (2:02 / 2:13). The local-BA convergence parity was the dominant lever at scale. COLMAP parity still not reached; next candidate is the per-DoF gauge (plan \u00a79.2)."
+}
