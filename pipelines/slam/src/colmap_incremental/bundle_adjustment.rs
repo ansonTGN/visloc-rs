@@ -280,6 +280,18 @@ pub struct BundleAdjustmentOptions {
     pub backend: BaBackend,
     pub local_ba_point_policy: LocalBaPointPolicy,
     pub loss_function: LossFunction,
+    /// Port of Ceres `BundleAdjustmentOptions::refine_points3D`
+    /// (`estimators/bundle_adjustment.h:191`, default `true`). When `false`,
+    /// `solve` keeps every landmark constant, mirroring
+    /// `ParameterizePoints`' `!refine_points3D` branch
+    /// (`bundle_adjustment_ceres.cc:546`).
+    pub refine_points3d: bool,
+    /// Optional **relative** gradient stopping criterion (Ceres
+    /// `gradient_tolerance` semantics, see
+    /// `rig_ba_solver::optimize_with_tolerance`). `None` keeps this port's
+    /// legacy absolute `‖g‖_∞ <= 1e-4` criterion; COLMAP uses `1.0` for
+    /// global BA and `10.0` for local BA (`incremental_pipeline.cc:244,201`).
+    pub gradient_tolerance_rel: Option<f64>,
 }
 
 impl BundleAdjustmentOptions {
@@ -299,6 +311,12 @@ impl BundleAdjustmentOptions {
             backend: BaBackend::default(),
             local_ba_point_policy: LocalBaPointPolicy::default(),
             loss_function: LossFunction::SoftL1(1.0),
+            refine_points3d: true,
+            // Local BA convergence parity (Ceres `gradient_tolerance=10.0`,
+            // `incremental_pipeline.cc:201`) is deliberately deferred; the
+            // windowed local refinement's full-iteration behaviour is what
+            // the 2.5k A/B validated, so it is left at the legacy criterion.
+            gradient_tolerance_rel: None,
         }
     }
     /// `kDefaultCeresGlobalMaxNumIterations` (`incremental_pipeline.cc:48`).
@@ -319,6 +337,12 @@ impl BundleAdjustmentOptions {
             backend: BaBackend::default(),
             local_ba_point_policy: LocalBaPointPolicy::default(),
             loss_function: LossFunction::Trivial,
+            // COLMAP's global BA refines structure (`refine_points3D=true`)
+            // and stops on the Ceres-relative `gradient_tolerance=1.0`
+            // (`incremental_pipeline.cc:244`), which real Ceres reaches after
+            // ~1-2 iterations (see docs/colmap_rig_mapper_port_plan.md §8.4).
+            refine_points3d: true,
+            gradient_tolerance_rel: Some(1.0),
         }
     }
 }
@@ -430,6 +454,29 @@ fn sensor_from_rig_for_image(recon: &Reconstruction, image_id: ImageT) -> SE3 {
 ///   deviations, not introduced by the pull-in fix itself — flagged for
 ///   follow-up, not fixed here. [`LocalBaPointPolicy`] is the requested A/B
 ///   lever pending the lead's own real-data A/B.
+///
+/// Every point observed by at least one image in `images`.
+///
+/// COLMAP's `AddImageToProblem` (`bundle_adjustment_ceres.cc:678`) creates a
+/// residual (hence a point parameter block) for every observation whose
+/// `point3D_id` is valid and not `IsIgnoredPoint`, so a global config (all
+/// registered frames) parameterizes every observed point. `ParameterizePoints`
+/// (`:538`) then keeps each one variable iff `refine_points3D` and its track
+/// is fully observed in the problem.
+pub fn points_observed_by(recon: &Reconstruction, images: &BTreeSet<ImageT>) -> BTreeSet<Point3DT> {
+    recon
+        .points3d()
+        .iter()
+        .filter(|(_, point3d)| {
+            point3d
+                .track
+                .iter()
+                .any(|element| images.contains(&element.image_id))
+        })
+        .map(|(&point3d_id, _)| point3d_id)
+        .collect()
+}
+
 pub fn solve(
     options: &BundleAdjustmentOptions,
     config: &BundleAdjustmentConfig,
@@ -528,7 +575,12 @@ pub fn solve(
             options.local_ba_point_policy,
             LocalBaPointPolicy::Colmap | LocalBaPointPolicy::VariableWithoutPullIn
         );
-        let variable = !config.constant_point3d_ids.contains(&point3d_id)
+        // `ParameterizePoints` (`bundle_adjustment_ceres.cc:546`): a point is
+        // constant when `!refine_points3D` or when its track is longer than
+        // the number of observations added to this problem (the latter is
+        // exactly `!track_fully_in_window`).
+        let variable = options.refine_points3d
+            && !config.constant_point3d_ids.contains(&point3d_id)
             && (track_fully_in_window || (honor_explicit_variable && explicit_variable));
         if !variable {
             ba.fix_landmark(point3d_id);
@@ -608,10 +660,12 @@ pub fn solve(
 
     let ba_config = BaConfig {
         max_iterations: options.max_num_iterations,
-        // Deviation 6: COLMAP stops Ceres on gradient_tolerance=1e-4
-        // (function_tolerance=0). bundle.rs has no gradient criterion, so a
-        // relative cost tolerance stands in for it; without it every solve
-        // runs to max_iterations while the cost changes by <1e-6.
+        // COLMAP's global/local Ceres `gradient_tolerance` is *relative*
+        // (1.0 global / 10.0 local, `incremental_pipeline.cc:244,201`) and
+        // real Ceres terminates after ~1-2 iterations with it; this port
+        // implements that relative criterion in `optimize_with_tolerance`
+        // when `options.gradient_tolerance_rel` is `Some`. The cost tolerance
+        // below is only a fallback for the legacy absolute path.
         relative_cost_tolerance: Some(1.0e-6),
         ..BaConfig::default()
     };
@@ -639,10 +693,11 @@ pub fn solve(
             }
             ba.optimize(&ba_config)
         }
-        BaBackend::Native => super::rig_ba_solver::optimize(
+        BaBackend::Native => super::rig_ba_solver::optimize_with_tolerance(
             &mut ba,
             options.max_num_iterations,
             options.loss_function,
+            options.gradient_tolerance_rel,
         ),
     };
     let Ok(result) = solved else {
@@ -828,6 +883,9 @@ mod tests {
 
         let mut native_options = BundleAdjustmentOptions::global();
         native_options.max_num_iterations = 30;
+        // This test compares the two backends' *full-convergence* results, so
+        // disable the Ceres-relative early stop to let both run the budget.
+        native_options.gradient_tolerance_rel = None;
         native_options.backend = BaBackend::Native;
         let mut legacy_options = native_options;
         legacy_options.backend = BaBackend::Legacy;
@@ -1138,6 +1196,9 @@ mod tests {
 
         let mut options = BundleAdjustmentOptions::global();
         options.max_num_iterations = 60;
+        // This test asserts the pull-in *point policy* outcome, not the
+        // Ceres-relative global convergence; run the full budget.
+        options.gradient_tolerance_rel = None;
 
         // --- Colmap policy ---
         options.local_ba_point_policy = LocalBaPointPolicy::Colmap;

@@ -885,6 +885,16 @@ impl IncrementalMapper {
         if config.num_images() < 2 {
             return false;
         }
+        // COLMAP's `AddImageToProblem` parameterizes every observed point
+        // (source-verified against 64805cb, see
+        // `docs/colmap_rig_mapper_port_plan.md` §8); `solve` then keeps each
+        // variable iff `refine_points3d`. Without this the global pass only
+        // optimizes poses against frozen structure.
+        if ba_options.refine_points3d {
+            for point3d_id in bundle_adjustment::points_observed_by(recon, config.images()) {
+                config.add_variable_point(point3d_id);
+            }
+        }
         config.fix_gauge(Gauge::TwoFramesFromWorld);
         let num_images = config.num_images();
         let num_points = recon.num_points3d();

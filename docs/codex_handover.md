@@ -28,6 +28,20 @@
   `tier-2500-gp3p-colmap-repeat`/`tier-5000-v2`。構造refinementが5kドリフトを減らす
   方向は確認できたので、次に試すなら事前登録ゲート＋コスト最適化（全点でなく
   inlier/観測数上限、robust loss、global BA頻度）が必要。
+- 2026-09-16 **COLMAPソース＋実Ceres検証にもとづくglobal BA修正が2.5kゲート全PASS、
+  かつCOLMAP超え**。COLMAP 64805cbを再取得して確認: `AdjustGlobalBundle`は画像のみだが
+  `AddImageToProblem`が全観測点をparameterizeし`ParameterizePoints`は`refine_points3D`
+  （既定true）で可変にする＝COLMAPは点を最適化。加えてCeres `gradient_tolerance`は
+  **相対**（global 1.0/local 10.0）で実Ceresでは1–2反復で停止（移植版の「max反復まで
+  回す」記述とdeviation-6の「1e-4」は誤り）。両方を実装（`refine_points3d`＋
+  `adjust_global_bundle`の観測点variable化＋`optimize_with_tolerance`の相対停止）。
+  詳細は plan §8、証跡 `benchmarks/electro/m9-openloris-colmap-port-ceres-global-ba-
+  2500-v1.json`: rmse **0.0673**（対照0.0874/COLMAP0.0718）、scale **1.0173**（同1.0434/
+  1.0263）、local_scale max **1.0015**（対照1.025）、pose mean 0.0108（対照0.032）、
+  wall 55:50、large BA max 181s（対照273s）。事前登録ゲート（rmse≤0.0918,
+  |scale-1.0434|≤0.03, local max≤1.03）全PASS。**5k検証実行中**
+  `tier-5000-ceres-global-ba-v1`（対照`tier-5000-v2` 0.436/scale1.153、COLMAP
+  0.123）。コードは未commit（bundle_adjustment.rs/mapper.rs/rig_ba_solver.rs）。
 
 ### 2026-09-15 追記: 2.5k/5k 登録順LCSとframe単位pose差（plan §4.2 items 1-3）
 

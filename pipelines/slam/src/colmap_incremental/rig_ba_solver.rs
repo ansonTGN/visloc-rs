@@ -1144,10 +1144,20 @@ fn gradient_inf_norm(points_lin: &[PointLin], frame_bc_raw: &[Vector6<f64>]) -> 
 /// `ba.landmarks`) and returns the same [`BaResult`]
 /// `bundle_adjustment.rs::solve` already expects from the `Legacy` backend.
 /// See module doc for the full algorithm.
-pub(crate) fn optimize(
+/// Solves `ba`'s rig-reprojection problem with an optional **relative**
+/// gradient stopping
+/// criterion matching Ceres' `gradient_tolerance` semantics: terminate once
+/// `‖g‖` has fallen below `rel * ‖g_initial‖` (strictly, i.e. at least one
+/// step is attempted). COLMAP sets this to `1.0` for global BA and `10.0` for
+/// local BA (`incremental_pipeline.cc:236-283`/`:192-235`); real Ceres then
+/// terminates after ~1-2 iterations, whereas this port's legacy absolute
+/// `‖g‖_∞ <= 1e-4` runs to the iteration cap. Passing `None` preserves the
+/// legacy absolute behaviour (used by every existing caller/test).
+pub(crate) fn optimize_with_tolerance(
     ba: &mut BundleAdjustment,
     max_num_iterations: usize,
     loss: LossFunction,
+    gradient_tolerance_rel: Option<f64>,
 ) -> Result<BaResult, BaError> {
     let mut problem = build_problem(ba)?;
     let mut timings = PhaseTimings::default();
@@ -1167,12 +1177,29 @@ pub(crate) fn optimize(
     let mut iterations: Vec<BaIterationStats> = Vec::new();
     let mut trace_lines: Vec<String> = Vec::new();
     let mut converged = false;
+    let mut initial_grad_norm: Option<f64> = None;
 
     for it in 0..max_num_iterations {
         let grad_norm = gradient_inf_norm(&points_lin, &frame_bc_raw);
-        if grad_norm <= GRADIENT_TOLERANCE {
-            converged = true;
-            break;
+        match gradient_tolerance_rel {
+            // Legacy absolute criterion (unchanged).
+            None => {
+                if grad_norm <= GRADIENT_TOLERANCE {
+                    converged = true;
+                    break;
+                }
+            }
+            // Ceres-relative criterion: stop once the gradient has decreased
+            // by the requested factor; always attempt at least one step.
+            Some(rel) => match initial_grad_norm {
+                None => initial_grad_norm = Some(grad_norm),
+                Some(g0) => {
+                    if grad_norm < rel * g0 {
+                        converged = true;
+                        break;
+                    }
+                }
+            },
         }
         let mu = 1.0 / radius;
         let Some((dx_frames, dx_points, predicted)) = solve_step(
@@ -1508,7 +1535,7 @@ mod tests {
             .expect("thread pool");
         let started = Instant::now();
         let result = pool
-            .install(|| optimize(&mut ba, 50, LossFunction::Trivial))
+            .install(|| optimize_with_tolerance(&mut ba, 50, LossFunction::Trivial, None))
             .expect("synthetic BA solve should succeed");
         let elapsed_ms = started.elapsed().as_secs_f64() * 1e3;
         let per_iter_ms = elapsed_ms / result.iterations.len().max(1) as f64;
@@ -1557,7 +1584,7 @@ mod tests {
             .expect("thread pool");
         let started = Instant::now();
         let result = pool
-            .install(|| optimize(&mut ba, 50, LossFunction::Trivial))
+            .install(|| optimize_with_tolerance(&mut ba, 50, LossFunction::Trivial, None))
             .expect("synthetic BA solve should succeed");
         let elapsed_ms = started.elapsed().as_secs_f64() * 1e3;
         let per_iter_ms = elapsed_ms / result.iterations.len().max(1) as f64;
@@ -1634,7 +1661,7 @@ mod tests {
             .expect("thread pool");
         let started = Instant::now();
         let result = pool
-            .install(|| optimize(&mut ba, 50, LossFunction::Trivial))
+            .install(|| optimize_with_tolerance(&mut ba, 50, LossFunction::Trivial, None))
             .expect("synthetic BA solve should succeed");
         let elapsed_ms = started.elapsed().as_secs_f64() * 1e3;
         let per_iter_ms = elapsed_ms / result.iterations.len().max(1) as f64;
