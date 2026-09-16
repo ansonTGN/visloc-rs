@@ -2,6 +2,26 @@
 
 ## 現在の状態（以下の過去ログより優先）
 
+### 2026-09-16 追記: web(WASM+WebGPU) in-browser SfM は park（設計・実証のみ）
+
+- 設計と実証記録は `docs/web-wasm-sfm_plan.md`。spike結果: `visloc-core`/
+  `visloc-vision`/`visloc-slam`（colmap mapper全体）が `wasm32-unknown-unknown` で
+  コンパイルし、Node上で合成rig SfMを完走（10/20/40/80 frame 全登録、~0.3-2.3s、
+  release wasm ~2.4MB）。**rayonの`par_iter`/`into_par_iter`はwasmでシリアル縮退して
+  正常動作**（カスタム`ThreadPoolBuilder`のみ不可。mapperは未使用）。
+- 必要変更は `getrandom/js`（wasm RNG）と `web-time`（`std::time::Instant`はwasmで
+  panic）。spike scaffold（`spike` feature、`time_compat`、test_support公開）はpark時に
+  **revert済み**。Cargo.lock/Cargo.tomlも原状。READMEは未変更。
+- 製品化の唯一のハードルは **COOP/COEPヘッダ**（wasm threads必須）。GitHub Pagesは
+  ヘッダ不可、Cloudflare Pages/Netlify/Vercel等が必要。参考の
+  `offlinetools.io/colmap-landing/` はマルチスレッド（`crossOriginIsolated`/
+  `SharedArrayBuffer`必須）＋SIFT WebGPUで、stock COLMAP比の高速化を主張。
+- 実行中: 5k A/B `$R/colmap-port-c2-v1/tier-5000-global-ba-points-v1`（GP3P+colmap、
+  auto init）。仮説「global BAが点を変数化していない（`adjust_global_bundle`が
+  `add_variable_point`を呼ばない）のが5k後半の局所scaleドリフトの原因」。コード変更
+  `mapper.rs`/`bundle_adjustment.rs`（`points_observed_by`）は**未commit**、完了後に
+  local scale/ATE/RPEで採否（回帰ならrevert）。対照は `tier-5000-v2`（0.436、点固定）。
+
 ### 2026-09-15 追記: 2.5k/5k 登録順LCSとframe単位pose差（plan §4.2 items 1-3）
 
 **新tool** `scripts/compare_colmap_mapper_registration.py`（+ `scripts/tests/
