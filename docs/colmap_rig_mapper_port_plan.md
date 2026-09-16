@@ -864,3 +864,62 @@ Conclusions:
   non-regression; fixing only the point set (the 2026-09-16 run) traded one
   deviation for worse 2.5k quality because convergence was still
   non-Ceres.
+
+---
+
+## 9. 2026-09-16 addendum — local BA and gauge verified against source
+
+Both candidates were checked against the pinned checkout (`64805cb`) before
+being proposed; the local-BA port is more faithful than assumed, and the
+gauge deviation is real.
+
+### 9.1 `AdjustLocalBundle` (`sfm/incremental_mapper.cc:991-1108`)
+
+- `ba_config.FixGauge(BundleAdjustmentGauge::THREE_POINTS)` — local BA,
+  unlike global's `TWO_CAMS_FROM_WORLD`.
+- Variable points are only the caller's modified `point3D_ids`, and only
+  when `!point3D.HasError() || point3D.track.Length() <= 15`
+  (`kMaxTrackLength = 15`, `.cc:1072-1081`).
+- Rig/camera blocks not fully represented in the window are set constant
+  (`.cc:1036-1065`); irrelevant here because sensor-from-rig and intrinsics
+  are never parameters in this port (control refines neither).
+- After the solve it runs `MergeTracks`, `CompleteTracks`, `CompleteImage`,
+  then `FilterPoints3DInImages`/`FilterPoints3D`.
+- **The port's `adjust_local_bundle` (mapper.rs) reproduces all of the
+  above** (`Gauge::ThreePoints`, the `track.len() <= 15` rule, the
+  merge/complete/filter calls). The only local-BA deviation left is
+  convergence: COLMAP's `LocalBundleAdjustment()` uses the relative
+  `gradient_tolerance = 10.0` (`incremental_pipeline.cc:201`), which real
+  Ceres satisfies after ~1 iteration, while the port still uses its legacy
+  absolute `‖g‖_∞ <= 1e-4` (local is left at `gradient_tolerance_rel: None`).
+
+### 9.2 Gauge fixing (`estimators/bundle_adjustment_ceres.cc:262-347`)
+
+- `FixGaugeWithTwoCamsFromWorld`: makes **frame 1 fully constant (6 DoF)** and
+  frame 2 fixes **only one translation dimension** — the largest baseline
+  axis — via `CreateSubsetManifold(3, {dim})` plus an
+  `EigenQuaternionManifold` (`.cc:320-347`). Total 7 DoF. Falls back to
+  `FixGaugeWithThreePoints` when no usable baseline pair exists.
+- `FixGaugeWithThreePoints` fixes points' DoF, not whole points.
+- The port documents (and implements) deviation 4: whole-pose / whole-point
+  fixing (`bundle_adjustment.rs` module doc), i.e. global fixes **12 DoF**
+  (two whole frames) where COLMAP fixes 7, and local fixes whole points where
+  COLMAP fixes per-DoF. Over-constraining the gauge removes DoF that COLMAP
+  leaves free, which can bias the pose/scale solution.
+
+### 9.3 Source-grounded next candidates
+
+1. **Local-BA convergence parity** — one-line
+   (`BundleAdjustmentOptions::local().gradient_tolerance_rel = Some(10.0)`),
+   then the 2.5k gate and 5k. Directly analogous to the global-BA fix that
+   passed.
+2. **Per-DoF gauge** — implement COLMAP's `FixGaugeWithTwoCamsFromWorld`
+   (frame 1 whole, frame 2 one baseline translation dim) and a per-DoF
+   `ThreePoints`, replacing the whole-pose `fix_pose` over-constraint. This is
+   the remaining known geometric deviation and the more likely driver of the
+   residual 5k drift.
+3. Structure-less registration and filter cadence remain unported (already
+   recorded in §2/§1.2).
+
+Neither candidate is to be run without a recorded gate (2.5k non-regression
+first) per §8.3.
