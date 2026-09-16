@@ -30,6 +30,12 @@ pub mod fast;
 pub mod imu;
 pub mod initialization;
 pub mod mapper;
+// Physically lives under `mapper/` (`pipelines/basalt/src/mapper/online.rs`,
+// per `docs/basalt_online_mapper_design.md`) but is declared here rather
+// than with a `mod` line inside `mapper/mod.rs` so that file -- the pinned
+// offline/parity module root -- stays byte-for-byte untouched.
+#[path = "mapper/online.rs"]
+pub mod mapper_online;
 pub mod patch;
 pub mod pattern;
 pub mod provenance;

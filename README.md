@@ -111,59 +111,64 @@ commands, and the connected-component export mode are in the
 
 A separate, faithful Rust port of upstream
 [Basalt](https://github.com/VladyslavUsenko/basalt) commit `0f3b2b52` — a
-tightly-coupled stereo-inertial VIO estimator plus an offline SfM mapper — in
-[`pipelines/basalt`](pipelines/basalt). On upstream Basalt's own inputs it
-matches native Basalt's ATE to **within 0.1%** on all 11 EuRoC sequences
-(**1.13×** runtime, **0.56×** peak RSS). With EuRoC's official calibration and
-its offline mapper it beats measured ORB-SLAM3 (full-trajectory SE(3) ATE) on
-**8 of 11** EuRoC sequences; the VIO stage alone already wins MH_01_easy and
-V2_01_easy.
+tightly-coupled stereo-inertial VIO estimator plus a keyframe/loop-closure
+mapper — in [`pipelines/basalt`](pipelines/basalt). On upstream Basalt's own
+inputs it matches native Basalt's ATE to **within 0.1%** on all 11 EuRoC
+sequences (**1.13×** runtime, **0.56×** peak RSS). With EuRoC's official
+calibration, the mapper now runs **online** — a dedicated thread ingesting
+each keyframe as the VIO produces it, not a separate offline batch job — and
+beats measured ORB-SLAM3 (full-trajectory SE(3) ATE) on **8 of 11** EuRoC
+sequences, the same 8 the original offline-mapper result won; the VIO stage
+alone already wins MH_01_easy and V2_01_easy.
 
 <p align="center">
-  <img src="docs/assets/basalt_vs_orbslam3_trajectories.png" alt="EuRoC top-down trajectories: visloc-rs Basalt port vs ORB-SLAM3 vs ground truth, all SE(3)-aligned" width="820"><br>
-  <sub>Six of the eight winning EuRoC sequences: visloc-rs Basalt VIO + offline mapper (blue) vs measured ORB-SLAM3 (red), both SE(3)-aligned to ground truth (black).</sub>
+  <img src="docs/assets/basalt_online_vs_orbslam3_trajectories.png" alt="EuRoC top-down trajectories: visloc-rs online VI-SLAM vs ORB-SLAM3 vs ground truth, all SE(3)-aligned" width="820"><br>
+  <sub>Six of the eight winning EuRoC sequences: visloc-rs online VI-SLAM (blue) vs measured ORB-SLAM3 (red), both SE(3)-aligned to ground truth (black).</sub>
 </p>
 
-| Sequence | visloc-rs (Basalt port + offline mapper) | ORB-SLAM3 stereo-inertial | Winner |
+| Sequence | visloc-rs (online VI-SLAM) | ORB-SLAM3 stereo-inertial | Winner |
 | --- | ---: | ---: | :---: |
-| MH_01_easy | 0.015 | 0.036 | visloc-rs |
-| MH_02_easy | 0.024 | 0.033 | visloc-rs |
-| MH_03_medium | 0.026 | 0.028 | visloc-rs |
-| MH_04_difficult | 0.085 | 0.043 | ORB-SLAM3 |
-| MH_05_difficult | 0.061 | 0.055 | ORB-SLAM3 |
+| MH_01_easy | 0.017 | 0.036 | visloc-rs |
+| MH_02_easy | 0.025 | 0.033 | visloc-rs |
+| MH_03_medium | 0.027 | 0.028 | visloc-rs |
+| MH_04_difficult | 0.082 | 0.043 | ORB-SLAM3 |
+| MH_05_difficult | 0.059 | 0.055 | ORB-SLAM3 |
 | V1_01_easy | 0.035 | 0.038 | visloc-rs |
 | V1_02_medium | 0.014 | 0.017 | visloc-rs |
-| V1_03_difficult | 0.018 | 0.029 | visloc-rs |
+| V1_03_difficult | 0.022 | 0.029 | visloc-rs |
 | V2_01_easy | 0.016 | 0.039 | visloc-rs |
-| V2_02_medium | 0.010 | 0.014 | visloc-rs |
-| V2_03_difficult | 0.065 | 0.056 | ORB-SLAM3 |
+| V2_02_medium | 0.012 | 0.014 | visloc-rs |
+| V2_03_difficult | 0.108 | 0.056 | ORB-SLAM3 |
 
 <p align="center">
-  <img src="docs/assets/basalt_official_calib_vs_orbslam3.png" alt="Bar chart of full-trajectory SE(3) ATE, visloc-rs vs measured ORB-SLAM3, across all 11 EuRoC sequences" width="820">
+  <img src="docs/assets/basalt_online_vs_orbslam3.png" alt="Bar chart of full-trajectory SE(3) ATE, visloc-rs online VI-SLAM vs measured ORB-SLAM3, across all 11 EuRoC sequences" width="820">
 </p>
 
-<p align="center"><sub>8/11 wins; full-trajectory ATE translation RMSE in metres, lower is better. Per-sequence captions, the pipeline diagram, run commands, the ~1.4% scale-bias root cause, and the honest caveats (an offline 2-18 min / 3-6 GB mapper vs the 29 MB real-time VIO; three remaining difficult-sequence losses) are in the <a href="docs/vi_slam_benchmarks.md">VI-SLAM benchmark details</a>. Parity evidence: <a href="work/m11_basalt_faithful_port_final_closure_20260914.md">faithful-port closure report</a> and <a href="benchmarks/basalt/README.md">upstream oracle / provenance</a>; next steps: <a href="docs/vi_slam_global_consistency_plan.md">global-consistency plan</a>.</sub></p>
+<p align="center"><sub>8/11 wins; full-trajectory ATE translation RMSE in metres, lower is better, same protocol as the prior offline-mapper result. The mapper thread never blocked the VIO thread on any sequence (whole-run wall time stayed within ~10% of VIO-alone wall time; peak queue lag ≤4.5s) — see <a href="docs/vi_slam_benchmarks.md">VI-SLAM benchmark details</a> for the per-sequence RTF/lag/loop/RSS numbers and the two sequences (V1_03, V2_03) whose online ATE is a real, reported gap from the offline number rather than a match. RTF (dataset duration / wall time, 0.09-0.38× here) is bounded by the VIO estimator, which is still single-threaded on this branch — real-time VIO performance is a separate initiative (PR #153), not this stage's claim. The prior offline (batch, 2-18 min / 3-6 GB) mapper path still exists, unchanged and byte-for-byte untouched, for parity/comparison. Parity evidence: <a href="work/m11_basalt_faithful_port_final_closure_20260914.md">faithful-port closure report</a> and <a href="benchmarks/basalt/README.md">upstream oracle / provenance</a>; design and next steps: <a href="docs/basalt_online_mapper_design.md">online mapper design</a> and <a href="docs/vi_slam_global_consistency_plan.md">global-consistency plan</a>.</sub></p>
 
 ### Run the VI-SLAM demo
 
-Build with AVX2/FMA and replay a EuRoC sequence — the calibration and config
-are checked into the repo, `--euroc-dir` is an external dataset path:
+Build with AVX2/FMA and replay a EuRoC sequence through the online VIO +
+mapper — the calibration and config are checked into the repo,
+`--euroc-dir` is an external dataset path:
 
 ```bash
 RUSTFLAGS="-C target-feature=+avx2,+fma" \
-  cargo build --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse
+  cargo build --release --example basalt_euroc_online_slam_demo --features basalt-lm-workspace-reuse
 
-cargo run --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse -- \
+cargo run --release --example basalt_euroc_online_slam_demo --features basalt-lm-workspace-reuse -- \
   --euroc-dir /path/to/MH_01_easy \
-  --calibration benchmarks/basalt/release_inputs/euroc_ds_calib.json \
-  --config configs/basalt/euroc_config.json \
-  --out-dir target/basalt_mh01 \
+  --calibration configs/basalt/variants/official_euroc_ds/euroc_ds_calib.json \
+  --config configs/basalt/variants/official_euroc_ds/euroc_config.json \
+  --out-dir target/basalt_mh01_online \
   --max-frames 80
 ```
 
-This writes `trajectory.tum`, `trajectory.csv`, `trace.jsonl`, and the
-`marg_data/` packets the offline mapper consumes. The official-calibration
-reproduction and offline mapper commands are in the
+This writes `trajectory_online.tum` (the full-frame trajectory, mapper
+corrections propagated to every VIO frame — what the table above scores),
+`trajectory_online_kf.tum` (keyframes only), and `timing_breakdown_online.json`
+(RTF, mapper queue lag, loop/trigger counts, peak RSS). The original offline
+VIO + batch-mapper commands are unchanged and still documented in the
 [VI-SLAM benchmark details](docs/vi_slam_benchmarks.md#run-it).
 
 Add `--pipeline` to run the frontend (dataset decode + optical flow) and the
@@ -256,7 +261,7 @@ previously lived here.
 - **Understand supported configurations:** [feature matrix](docs/feature_matrix.md), [API stability](docs/api_stability.md), [COLMAP compatibility](docs/colmap_compatibility.md), and [migration notes](docs/migration.md).
 - **Inspect VO and loop-closure evidence:** [KITTI multi-sequence](docs/kitti_multiseq_benchmark.md), [KITTI loop closure](docs/kitti_loop_closure_benchmark.md), [EuRoC loop closure](docs/euroc_loop_closure_benchmark.md), [TUM RGB-D](docs/tum_rgbd_benchmark.md), and [tracking persistence](docs/tracking_persistence_benchmark.md).
 - **Inspect VI-SLAM (Basalt Rust port) evidence:** [VI-SLAM benchmark details](docs/vi_slam_benchmarks.md), [faithful-port final closure report](work/m11_basalt_faithful_port_final_closure_20260914.md), and [upstream oracle / provenance](benchmarks/basalt/README.md).
-- **Where VI-SLAM goes next:** [global-consistency plan](docs/vi_slam_global_consistency_plan.md) — same-protocol ORB-SLAM3 measurements, the 8/11 official-calibration + mapper result and its scale-bias root cause, the paused persistent-map prototype, and the staged plan targeting VIO tracking robustness on the three remaining losses.
+- **Where VI-SLAM goes next:** [global-consistency plan](docs/vi_slam_global_consistency_plan.md) — same-protocol ORB-SLAM3 measurements, the 8/11 official-calibration + mapper result (now online, §1.5) and its scale-bias root cause, the paused persistent-map prototype, and the staged plan targeting VIO tracking robustness on the three remaining losses.
 - **Inspect SfM evidence:** [SfM benchmark details](docs/sfm_benchmarks.md), [EuRoC reconstruction](docs/euroc_sfm_benchmark.md), [sequential SfM vs COLMAP](docs/sfm_vs_colmap_benchmark.md), [unordered SfM](docs/unordered_sfm_benchmark.md), and [registry evidence for the head-to-head](docs/generated/sfm_vs_colmap_headtohead.md).
 - **Inspect learned frontend evidence:** [SuperPoint ONNX/CUDA](docs/superpoint_onnx_cuda_benchmark.md), [LightGlue ONNX](docs/lightglue_onnx_benchmark.md), and [single-binary deep stereo SLAM](docs/inprocess_slam_benchmark.md).
 - **Inspect mapping and optimization evidence:** [learned retrieval for relocalization](docs/learned_retrieval_relocalization.md), [multi-session lifelong mapping](docs/multi_session_lifelong_benchmark.md), and [pose-graph / BA internals with GTSAM parity](docs/pgo_internals.md).
