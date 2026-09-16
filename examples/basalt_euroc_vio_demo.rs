@@ -86,6 +86,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         fs::create_dir_all(&path)?;
         Some(path)
     };
+    // Trace lines are streamed straight to disk as they are produced rather
+    // than accumulated in one in-process String for the whole replay.  A
+    // long, wide-FOV sequence (e.g. LaMAria's ~18.3k-frame sequence_1_19)
+    // emits a rich per-frame window/LM/AOM diagnostic line; buffering all of
+    // them for the run's lifetime makes the buffer's capacity-doubling
+    // reallocation the largest live allocation in the process, and on a
+    // long enough sequence that doubling eventually asks the allocator for
+    // more contiguous memory than is available (observed: an 18,723,373,056
+    // byte request at frame 10849 of sequence_1_19). Streaming keeps peak
+    // trace memory at one line, independent of sequence length, and is
+    // byte-identical to the old buffered contents once concatenated.
+    let trace_path = args.out_dir.join("trace.jsonl");
+    let mut trace_writer = if args.no_trace {
+        None
+    } else {
+        Some(BufWriter::new(fs::File::create(&trace_path)?))
+    };
 
     let mut timing = TimingBreakdown::from_env();
     let dataset = if timing.enabled() {
@@ -112,7 +129,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut csv = String::from(
         "frame_id,timestamp_ns,tx,ty,tz,qw,qx,qy,qz,cam0_observations,cam1_observations,imu_samples\n",
     );
-    let mut trace = (!args.no_trace).then(String::new);
     let mut total_imu = 0usize;
     let mut total_observations = 0usize;
     let mut last_timestamp_ns = None;
@@ -151,8 +167,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 TimingBucket::DemoOutput,
                 || -> Result<(), Box<dyn std::error::Error>> {
                     append_trajectory(&mut tum, &mut csv, &output);
-                    if let Some(trace) = trace.as_mut() {
-                        trace.push_str(&trace_json(&output));
+                    if let Some(writer) = trace_writer.as_mut() {
+                        writer.write_all(trace_json(&output).as_bytes())?;
                     }
                     // Basalt computes state-only marginalization on many frames, but its
                     // mapper queue receives MargData only for a selected KF removal.
@@ -269,7 +285,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let trajectory_tum = args.out_dir.join("trajectory.tum");
     let trajectory_csv = args.out_dir.join("trajectory.csv");
-    let trace_path = args.out_dir.join("trace.jsonl");
     let trace_summary = if args.no_trace {
         "disabled".to_owned()
     } else {
@@ -298,8 +313,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     timing.measure(TimingBucket::DemoTrajectoryOutput, || {
         fs::write(&trajectory_tum, tum)?;
         fs::write(&trajectory_csv, csv)?;
-        if let Some(trace) = trace {
-            fs::write(&trace_path, trace)?;
+        if let Some(mut writer) = trace_writer {
+            writer.flush()?;
         }
         Ok::<(), std::io::Error>(())
     })?;
