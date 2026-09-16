@@ -994,6 +994,42 @@ fn cam_center(cam_from_world: &SE3) -> Point3<f64> {
     Point3::from(cam_from_world.inverse().translation)
 }
 
+/// Linear (homogeneous DLT) multi-view triangulation from `>=2` views.
+/// Standard algorithm (e.g. Hartley & Zisserman §12.2): stack two rows per
+/// view (`x * P_row2 - P_row0`, `y * P_row2 - P_row1`) using the
+/// *normalized* (undistorted, calibrated) ray so it applies uniformly
+/// across cameras with different intrinsics, and take the right singular
+/// vector of smallest singular value.
+pub(super) fn triangulate_dlt(views: &[(&SE3, Point2<f64>, &Camera)]) -> Option<Point3<f64>> {
+    let n = views.len();
+    if n < 2 {
+        return None;
+    }
+    let mut a = DMatrix::<f64>::zeros(2 * n, 4);
+    for (row, (cam_from_world, xy, camera)) in views.iter().enumerate() {
+        let normalized = camera.normalize_pixel(xy)?;
+        let r = cam_from_world.rotation.to_rotation_matrix();
+        let t = cam_from_world.translation;
+        // Projection rows in the normalized (unit-focal, zero-principal-point)
+        // camera frame: P = [R | t].
+        let p0 = [r[(0, 0)], r[(0, 1)], r[(0, 2)], t.x];
+        let p1 = [r[(1, 0)], r[(1, 1)], r[(1, 2)], t.y];
+        let p2 = [r[(2, 0)], r[(2, 1)], r[(2, 2)], t.z];
+        for c in 0..4 {
+            a[(2 * row, c)] = normalized.x * p2[c] - p0[c];
+            a[(2 * row + 1, c)] = normalized.y * p2[c] - p1[c];
+        }
+    }
+    let svd = a.svd(true, true);
+    let v_t = svd.v_t?;
+    let last = v_t.row(v_t.nrows() - 1);
+    let w = last[3];
+    if w.abs() < 1e-12 {
+        return None;
+    }
+    Some(Point3::new(last[0] / w, last[1] / w, last[2] / w))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1423,40 +1459,4 @@ mod tests {
             }
         }
     }
-}
-
-/// Linear (homogeneous DLT) multi-view triangulation from `>=2` views.
-/// Standard algorithm (e.g. Hartley & Zisserman §12.2): stack two rows per
-/// view (`x * P_row2 - P_row0`, `y * P_row2 - P_row1`) using the
-/// *normalized* (undistorted, calibrated) ray so it applies uniformly
-/// across cameras with different intrinsics, and take the right singular
-/// vector of smallest singular value.
-pub(super) fn triangulate_dlt(views: &[(&SE3, Point2<f64>, &Camera)]) -> Option<Point3<f64>> {
-    let n = views.len();
-    if n < 2 {
-        return None;
-    }
-    let mut a = DMatrix::<f64>::zeros(2 * n, 4);
-    for (row, (cam_from_world, xy, camera)) in views.iter().enumerate() {
-        let normalized = camera.normalize_pixel(xy)?;
-        let r = cam_from_world.rotation.to_rotation_matrix();
-        let t = cam_from_world.translation;
-        // Projection rows in the normalized (unit-focal, zero-principal-point)
-        // camera frame: P = [R | t].
-        let p0 = [r[(0, 0)], r[(0, 1)], r[(0, 2)], t.x];
-        let p1 = [r[(1, 0)], r[(1, 1)], r[(1, 2)], t.y];
-        let p2 = [r[(2, 0)], r[(2, 1)], r[(2, 2)], t.z];
-        for c in 0..4 {
-            a[(2 * row, c)] = normalized.x * p2[c] - p0[c];
-            a[(2 * row + 1, c)] = normalized.y * p2[c] - p1[c];
-        }
-    }
-    let svd = a.svd(true, true);
-    let v_t = svd.v_t?;
-    let last = v_t.row(v_t.nrows() - 1);
-    let w = last[3];
-    if w.abs() < 1e-12 {
-        return None;
-    }
-    Some(Point3::new(last[0] / w, last[1] / w, last[2] / w))
 }

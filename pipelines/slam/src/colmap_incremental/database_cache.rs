@@ -697,6 +697,7 @@ mod tests {
         // dropped by `CorrespondenceGraph::finalize()`'s documented
         // zero-observation-image contract (see the module doc on
         // `crates/vision/src/two_view/correspondence_graph.rs`).
+        #[allow(clippy::type_complexity)]
         let pairs: Vec<(u64, u64, Vec<(u32, u32)>)> = vec![
             (0, 1, vec![(0, 0), (1, 1)]),
             (0, 2, vec![(2, 0)]),

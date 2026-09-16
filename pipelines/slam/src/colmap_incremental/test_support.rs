@@ -242,8 +242,7 @@ pub(crate) fn build_large_synthetic_ba_problem(
 
         let lo = center.saturating_sub(half_span);
         let hi = (center + half_span).min(num_frames.saturating_sub(1));
-        for i in lo..=hi {
-            let pose = &gt_poses[i];
+        for (i, pose) in gt_poses.iter().enumerate().take(hi + 1).skip(lo) {
             for (camera, sensor_from_rig) in [
                 (&camera1, SE3::identity()),
                 (&camera2, cam2_from_rig.clone()),
