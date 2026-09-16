@@ -52,8 +52,16 @@
   (`tier-{2500,5000}-ceres-global-ba-v2`)は**両tierともv1とbyte一致**（結果中立）で、
   最悪大規模global BAは5k 865s→366s、2.5kも最終BAは1–4反復（12–25s）に。wallは5k
   2:13:27 / 2.5k 1:17:59（2本並行実行のため参考値）。
-- 5kの残差要因候補: local BA収束parity（Ceres gradient_tolerance=10.0、localは今も
-  旧絶対基準）、gaugeの自由度単位化、structure-less登録、filter cadence。
+- 2026-09-16 **local BA収束parity（ソース§9.1準拠）2.5kゲート全PASS**:
+  `local().gradient_tolerance_rel=Some(10.0)`（COLMAP `incremental_pipeline.cc:201`）。
+  rmse 0.0709（対照0.0874/COLMAP0.0718）、scale 1.0296（1.0434/1.0263）、local_scale
+  max 1.0086、pose mean **0.0062**（global-ceres 0.0108）、wall **28:02**（global-ceres
+  55:50）。global-ceres単独(0.0673)よりATEは僅かに悪いがCOLMAPは上回り、pose一貫性は
+  約2倍良くBAは早期停止で高速化。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-ceres-local-ba-2500-v1.json`。5k検証実行中
+  `tier-5000-local-ceres-v1`。
+- 5kの残差要因候補: gaugeの自由度単位化（§9.2、COLMAPは7 DoF/移植版12 DoF）、
+  structure-less登録、filter cadence。
 
 ### 2026-09-15 追記: 2.5k/5k 登録順LCSとframe単位pose差（plan §4.2 items 1-3）
 

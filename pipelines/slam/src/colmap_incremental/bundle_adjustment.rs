@@ -312,11 +312,12 @@ impl BundleAdjustmentOptions {
             local_ba_point_policy: LocalBaPointPolicy::default(),
             loss_function: LossFunction::SoftL1(1.0),
             refine_points3d: true,
-            // Local BA convergence parity (Ceres `gradient_tolerance=10.0`,
-            // `incremental_pipeline.cc:201`) is deliberately deferred; the
-            // windowed local refinement's full-iteration behaviour is what
-            // the 2.5k A/B validated, so it is left at the legacy criterion.
-            gradient_tolerance_rel: None,
+            // COLMAP's `LocalBundleAdjustment()` sets the Ceres-relative
+            // `gradient_tolerance = 10.0` (`incremental_pipeline.cc:201`),
+            // which real Ceres satisfies after ~1 iteration. Matching it is
+            // the local-BA counterpart of the global-BA convergence fix
+            // (docs/colmap_rig_mapper_port_plan.md §9.1).
+            gradient_tolerance_rel: Some(10.0),
         }
     }
     /// `kDefaultCeresGlobalMaxNumIterations` (`incremental_pipeline.cc:48`).
