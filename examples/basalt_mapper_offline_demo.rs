@@ -51,26 +51,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let optimize_config = config.mapper_global_ba_config()?;
     let calibration_text = fs::read_to_string(&args.calibration)?;
     let calibration = BasaltCalibration::from_json_str(&calibration_text)?;
-    let mut packets = packet_paths
-        .iter()
-        .map(|path| {
-            let text = fs::read_to_string(path)?;
-            MargData::from_json_checked(&text).map_err(|error| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("{}: {error}", path.display()),
-                )
-            })
-        })
-        .collect::<Result<Vec<_>, std::io::Error>>()?;
 
     let started = Instant::now();
     let mut mapper = NfrMapper::with_calibration(mapper_config, calibration);
     mapper.set_feature_config(feature_config);
     mapper.set_optimize_config(optimize_config);
-    let mut ingest = Vec::with_capacity(packets.len());
-    for (path, packet) in packet_paths.iter().zip(&mut packets) {
-        let report = mapper.add_marg_data(packet).map_err(|error| {
+    // Stream packets one at a time instead of parsing the whole
+    // `--marg-dir` into a `Vec<MargData>` up front: on LaMAria-scale inputs
+    // (1300+ packets) holding every parsed packet's raw image buffers alive
+    // for the whole ingest loop, on top of `NfrMapper::img_data`'s own copy
+    // of the same pixels (`retain_images`, session.rs), roughly doubles peak
+    // RSS during ingest for no benefit -- each packet is only ever read once,
+    // by `add_marg_data`. Read, ingest, and let `packet` drop before the next
+    // iteration.
+    let mut ingest = Vec::with_capacity(packet_paths.len());
+    for path in &packet_paths {
+        let text = fs::read_to_string(path)?;
+        let mut packet = MargData::from_json_checked(&text).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{}: {error}", path.display()),
+            )
+        })?;
+        let report = mapper.add_marg_data(&mut packet).map_err(|error| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("{}: {error:?}", path.display()),
@@ -87,6 +90,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "roll_pitch_factor_count": report.roll_pitch_factor_count,
             "image_timestamp_count": report.image_timestamp_count,
         }));
+        // `packet` (and its raw image buffers) drops here, before the next
+        // file is even read.
     }
     if ingest.iter().all(|entry| entry["accepted"] == false) {
         return Err("all MargData packets were rejected by the mapper rank gate".into());
@@ -96,7 +101,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         temporal_seed: args.temporal_seed,
         ..NfrMapperHeadlessConfig::default()
     };
-    let report = mapper.run_headless(headless_config)?;
+    // Always run the streaming/memory-conscious replica of `run_headless`
+    // (frees `img_data`'s raw image buffers right after the last stage that
+    // reads them -- see `run_headless_streaming` below); per-stage wall-clock
+    // timers are an optional diagnostic on top, gated behind
+    // BASALT_MAPPER_STAGE_TIMERS.
+    let print_stage_timers = env::var_os("BASALT_MAPPER_STAGE_TIMERS").is_some();
+    let report = run_headless_streaming(&mut mapper, headless_config, print_stage_timers)?;
     let elapsed_seconds = started.elapsed().as_secs_f64();
     let trajectory_csv = mapper.trajectory_euroc();
     let trajectory_tum = mapper.trajectory_tum();
@@ -220,6 +231,155 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         args.out_dir.display(),
     );
     Ok(())
+}
+
+/// Memory-conscious, optionally-timed re-implementation of
+/// `NfrMapper::run_headless`.
+///
+/// This calls only the mapper's existing public stage methods, in the same
+/// order `run_headless` uses internally, so it does not change mapper
+/// output -- it is an example-local restructuring, not a parity-affecting
+/// change. Two things it does differently from a direct `run_headless` call:
+///
+/// 1. Frees `mapper.img_data`'s raw image buffers right after `match_stereo`
+///    returns. `img_data` is read only by `detect_keypoints` and
+///    `match_stereo` (session.rs) -- no later stage (`match_all`,
+///    `build_tracks`, `setup_opt`, `optimize`, `filter_outliers`,
+///    `get_current_points`, `result`) touches it, so on LaMAria-scale inputs
+///    (1300+ packets' worth of raw pixels) holding it alive for the rest of
+///    the pipeline is pure waste.
+/// 2. Optionally prints a wall-clock duration for each stage to stderr (the
+///    Stage 0 slowness-diagnosis instrumentation), gated by `print_timers`
+///    (set from `BASALT_MAPPER_STAGE_TIMERS`).
+fn run_headless_streaming(
+    mapper: &mut visloc_basalt::mapper::NfrMapper,
+    config: NfrMapperHeadlessConfig,
+    print_timers: bool,
+) -> Result<visloc_basalt::mapper::NfrMapperHeadlessReport, Box<dyn std::error::Error>> {
+    use visloc_basalt::mapper::NfrMapperHeadlessStage;
+
+    macro_rules! timed {
+        ($label:expr, $body:expr) => {{
+            let t0 = Instant::now();
+            let value = $body;
+            if print_timers {
+                eprintln!(
+                    "[stage_timer] {:<24} {:>10.3}s",
+                    $label,
+                    t0.elapsed().as_secs_f64()
+                );
+            }
+            value
+        }};
+    }
+
+    let stage_record = |mapper: &visloc_basalt::mapper::NfrMapper,
+                        name: &str,
+                        point_count: usize,
+                        reprojection_error: Option<f64>| {
+        NfrMapperHeadlessStage {
+            name: name.into(),
+            pose_count: mapper.frame_poses.len(),
+            landmark_count: mapper.lmdb.num_landmarks(),
+            observation_count: mapper.lmdb.num_observations(),
+            point_count,
+            reprojection_error,
+        }
+    };
+
+    mapper.feature_corners.clear();
+    mapper.hash_index.clear();
+    mapper.feature_matches.clear();
+    mapper.feature_match_data.clear();
+    let detection = timed!("detect_keypoints", mapper.detect_keypoints())?;
+
+    mapper.feature_matches.clear();
+    mapper.feature_match_data.clear();
+    let stereo = timed!("match_stereo", mapper.match_stereo())?;
+    // `img_data` is not read again after this point in the headless
+    // lifecycle -- see the function doc above.
+    let freed_image_timestamps = mapper.img_data.len();
+    // `BTreeMap` is node-based (no spare-capacity buffer to shrink, unlike
+    // `Vec`/`HashMap`), so `clear()` alone drops every node -- and with it
+    // every `OfImageData::data` pixel buffer -- immediately.
+    mapper.img_data.clear();
+    if print_timers {
+        eprintln!("[stage_timer] freed img_data ({freed_image_timestamps} timestamps)");
+    }
+    let match_all = timed!(
+        "match_all",
+        match config.temporal_seed {
+            Some(seed) => mapper.match_all_seeded(seed),
+            None => mapper.match_all(),
+        }
+    );
+    let tracks = timed!("build_tracks", mapper.build_tracks());
+    let setup = timed!("setup_opt", mapper.setup_opt())?;
+    let initial_points = timed!("get_current_points_1", mapper.get_current_points());
+    let mut stages = vec![stage_record(
+        mapper,
+        "setup_opt_get_points",
+        initial_points.points.len(),
+        Some(timed!(
+            "compute_reprojection_error_1",
+            mapper.compute_reprojection_error()
+        )),
+    )];
+
+    let first_optimize = timed!("optimize_1", mapper.optimize(config.num_opt_iter))?;
+    let optimized_points = timed!("get_current_points_2", mapper.get_current_points());
+    stages.push(stage_record(
+        mapper,
+        "optimize",
+        optimized_points.points.len(),
+        Some(first_optimize.final_cost),
+    ));
+
+    let filter = timed!(
+        "filter_outliers",
+        mapper.filter_outliers(config.outlier_threshold, config.min_num_obs)
+    )?;
+    let filtered_points = timed!("get_current_points_3", mapper.get_current_points());
+    stages.push(stage_record(
+        mapper,
+        "filter_get_points",
+        filtered_points.points.len(),
+        Some(filter.reprojection_error),
+    ));
+
+    let second_optimize = timed!("optimize_2", mapper.optimize(config.num_opt_iter))?;
+    let optimized_filtered_points = timed!("get_current_points_4", mapper.get_current_points());
+    stages.push(stage_record(
+        mapper,
+        "optimize_filtered",
+        optimized_filtered_points.points.len(),
+        Some(second_optimize.final_cost),
+    ));
+    let final_points = timed!("get_current_points_5", mapper.get_current_points());
+    let result = timed!("result", mapper.result());
+    stages.push(stage_record(
+        mapper,
+        "final_get_points_result",
+        final_points.points.len(),
+        Some(second_optimize.final_cost),
+    ));
+
+    Ok(visloc_basalt::mapper::NfrMapperHeadlessReport {
+        config,
+        detection,
+        stereo,
+        match_all,
+        tracks,
+        setup,
+        first_optimize,
+        filter,
+        second_optimize,
+        initial_points,
+        filtered_points,
+        final_points,
+        result,
+        stages,
+    })
 }
 
 fn optimize_json(report: &NfrMapperOptimizeReport) -> Value {
