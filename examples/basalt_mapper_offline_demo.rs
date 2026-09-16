@@ -274,9 +274,9 @@ fn run_headless_streaming(
     }
 
     let stage_record = |mapper: &visloc_basalt::mapper::NfrMapper,
-                         name: &str,
-                         point_count: usize,
-                         reprojection_error: Option<f64>| {
+                        name: &str,
+                        point_count: usize,
+                        reprojection_error: Option<f64>| {
         NfrMapperHeadlessStage {
             name: name.into(),
             pose_count: mapper.frame_poses.len(),

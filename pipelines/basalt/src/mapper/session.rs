@@ -41,9 +41,9 @@ use crate::{
 };
 // Only exercised by the `tests` module's fixtures below (via `use super::*;`).
 #[cfg(test)]
-use crate::vio::margdata::MARGDATA_SCHEMA_VERSION_V3;
-#[cfg(test)]
 use crate::mapper::features::BowEntry;
+#[cfg(test)]
+use crate::vio::margdata::MARGDATA_SCHEMA_VERSION_V3;
 
 use super::{
     extract_nonlinear_factors, global_ba_with_state, linearize_mapper_observation,
@@ -1869,11 +1869,8 @@ impl NfrMapper {
                     .get(&query_id)
                     .expect("feature key was collected from feature_corners")
                     .clone();
-                let results = self.bow_candidates_via_index(
-                    query_id,
-                    &query,
-                    config.match_window as usize,
-                );
+                let results =
+                    self.bow_candidates_via_index(query_id, &query, config.match_window as usize);
                 for result in results {
                     if result.image.frame_id == query_id.frame_id
                         || result.score <= config.frames_to_match_threshold
