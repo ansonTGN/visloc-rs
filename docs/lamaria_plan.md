@@ -43,6 +43,7 @@ Training-sequence results, all from the official evaluator
 | R_11_5cp | training | + offline mapper | 57.66 | 20.0 % | 100 % | 1.37 m | 0.960 |
 | sequence_1_19 | Short (1.5 km, 15 min) | VIO only | 12.75 | 7.1 % | 5.4 % | — | — |
 | sequence_1_19 | Short (1.5 km, 15 min) | + offline mapper | 16.98 | 0.0 % | 37.1 % | — | — |
+| sequence_1_19 | Short (1.5 km, 15 min) | VIO, larger window (10 states / 30 kfs) | **27.09** | 14.3 % | 30.0 % | — | — |
 
 Infrastructure already in place: real-time two-thread VIO pipeline (RTF 1.07
 EuRoC / 1.10 R_01 near-uncontended, PR #153), online NFR mapper that keeps pace
@@ -53,8 +54,9 @@ long LaMAria sequences at 18k+ frames (PR #158, in review).
 The two open gaps that the numbers expose:
 
 1. **VIO-only drift over km / minutes** — sequence_1_19 VIO-only is 12.75
-   (Pose R@5m 5.4 %): the mapper is not optional on the Short track, let alone
-   Medium/Long.
+   (Pose R@5m 5.4 %) with the default window, but 27.09 (Pose R@5m 30.0 %)
+   once the sliding window is enlarged to 10 states / 30 keyframes; the mapper
+   is still needed for Medium/Long.
 2. **Mapper cost at city scale** — the online mapper runs ~0.42–0.55 s/packet
    of synchronous work vs the ~0.4 s real-time keyframe interval (still the
    real-time blocker; PR #160 parallelises detection and match/RANSAC for
@@ -71,7 +73,7 @@ sequences only (test scores are only obtainable by submission).
 | # | Milestone | Exit criterion | Status |
 |---|---|---|---|
 | M0 | Stage 0: first official scores; mapper usable at scale | R_11_5cp 49.65 VIO / 57.66 mapper; sequence_1_19 VIO 12.75; mapper perf/memory fixes merged | **done** (PR #156) |
-| M1 | Beat the best academic baseline on Short | mapper-scored sequence_1_19 (and ≥3 Short training sequences) ≥ 27.7, toward microSLAM's 64.5 — currently 16.98 on sequence_1_19 | in progress |
+| M1 | Beat the best academic baseline on Short | mapper-scored sequence_1_19 (and ≥3 Short training sequences) ≥ 27.7, toward microSLAM's 64.5 — currently **VIO-only 27.09** (larger VIO window) / 12.75 (default), mapper 16.98 on sequence_1_19 | in progress |
 | M2 | Medium/Long consistency | loop-closure/mapper holds at km scale; mean Short/Medium/Long Score clearly above 27.7; no >2 km drift blow-up | not started |
 | M3 | Low-light robustness | low-light training sequences score comparably to Short; no tracking loss | not started |
 | M4 | Moving-platform handling | moving-platform training sequences tracked without divergence | not started |
@@ -97,12 +99,18 @@ before/after on training sequences.
    repetitive wide-FOV texture), loop-verification thresholds, and the
    persistent-map/pose-graph path explored on EuRoC
    ([`vi_slam_global_consistency_plan.md`](vi_slam_global_consistency_plan.md)).
-3. **VIO tracking robustness.** Levers: wide-FOV optical-flow settings
+3. **VIO tracking robustness / sliding window.** **Confirmed lever (config-only):**
+   Basalt's default window (`vio_max_states` 3, `vio_max_kfs` 7) is far too
+   small for km-scale LaMAria — raising it to 10/30 lifts sequence_1_19
+   VIO-only CP Score 12.75 → **27.09** (pGT R@5m 5.4 % → 30.0 %), at 12 → 58 min
+   for 18,352 frames. Also: wide-FOV optical-flow settings
    (`optical_flow_detection_grid_size`, pyramid `levels`, `pattern`,
-   `vio_obs_std_dev`) — currently EuRoC values on a ~115° camera, so periphery
-   KLT degradation is plausible and unverified; and initialization / accel-bias
-   behaviour (R_01 accel bias converges to ~0.5 m/s², suspiciously absorbing
-   init scale/gravity residual; check static-start handling).
+   `vio_obs_std_dev`) — currently EuRoC values on a ~115° camera, unverified.
+   **Examined and refuted:** gravity/init misalignment is *not* the dominant
+   error — an opt-in gyro-compensated initial-gravity window
+   (`BASALT_INIT_GRAVITY_WINDOW_MS`, branch `exp/lamaria-moving-start-init`)
+   changed seq_1_19 SE3 ATE only 19.304 → 19.244 m, and loosening
+   `vio_init_pose_weight` 1e8 → 1e2 did nothing.
 4. **Online focal-length estimation.** Aria's focal length changes ~0.11 %
    over a session; the current calibration is fixed per sequence. An online
    focal estimate removes a systematic scale/drift source.
