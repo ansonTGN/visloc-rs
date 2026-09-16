@@ -41,6 +41,7 @@ Training-sequence results, all from the official evaluator
 |---|---|---|---|---|---|---|---|
 | R_11_5cp | training | VIO only | 49.65 | 20.0 % | 100 % | 1.94 m | 0.965 |
 | R_11_5cp | training | + offline mapper | 57.66 | 20.0 % | 100 % | 1.37 m | 0.960 |
+| R_11_5cp | training | VIO, larger window (10 states / 30 kfs) | **63.19** | 60.0 % | 100 % | — | — |
 | sequence_1_19 | Short (1.5 km, 15 min) | VIO only | 12.75 | 7.1 % | 5.4 % | — | — |
 | sequence_1_19 | Short (1.5 km, 15 min) | + offline mapper | 16.98 | 0.0 % | 37.1 % | — | — |
 | sequence_1_19 | Short (1.5 km, 15 min) | VIO, larger window (10 states / 30 kfs) | **27.09** | 14.3 % | 30.0 % | — | — |
@@ -53,10 +54,10 @@ long LaMAria sequences at 18k+ frames (PR #158, in review).
 
 The two open gaps that the numbers expose:
 
-1. **VIO-only drift over km / minutes** — sequence_1_19 VIO-only is 12.75
-   (Pose R@5m 5.4 %) with the default window, but 27.09 (Pose R@5m 30.0 %)
-   once the sliding window is enlarged to 10 states / 30 keyframes; the mapper
-   is still needed for Medium/Long.
+1. **VIO-only drift over km / minutes** — with the default window,
+   sequence_1_19 VIO-only is 12.75 and R_11_5cp 49.65; enlarging the sliding
+   window to 10 states / 30 keyframes lifts them to **27.09** and **63.19**
+   respectively. The mapper is still needed for Medium/Long.
 2. **Mapper cost at city scale** — the online mapper runs ~0.42–0.55 s/packet
    of synchronous work vs the ~0.4 s real-time keyframe interval (still the
    real-time blocker; PR #160 parallelises detection and match/RANSAC for
@@ -73,7 +74,7 @@ sequences only (test scores are only obtainable by submission).
 | # | Milestone | Exit criterion | Status |
 |---|---|---|---|
 | M0 | Stage 0: first official scores; mapper usable at scale | R_11_5cp 49.65 VIO / 57.66 mapper; sequence_1_19 VIO 12.75; mapper perf/memory fixes merged | **done** (PR #156) |
-| M1 | Beat the best academic baseline on Short | mapper-scored sequence_1_19 (and ≥3 Short training sequences) ≥ 27.7, toward microSLAM's 64.5 — currently **VIO-only 27.09** (larger VIO window) / 12.75 (default), mapper 16.98 on sequence_1_19 | in progress |
+| M1 | Beat the best academic baseline on Short | mapper-scored sequences ≥ 27.7, toward microSLAM's 64.5 — already **R_11_5cp VIO-only 63.19** (CP@1m 60 %) with the larger window, and sequence_1_19 VIO-only 27.09 (default window: R_11 49.65 / seq_1_19 12.75) | in progress |
 | M2 | Medium/Long consistency | loop-closure/mapper holds at km scale; mean Short/Medium/Long Score clearly above 27.7; no >2 km drift blow-up | not started |
 | M3 | Low-light robustness | low-light training sequences score comparably to Short; no tracking loss | not started |
 | M4 | Moving-platform handling | moving-platform training sequences tracked without divergence | not started |
@@ -101,9 +102,12 @@ before/after on training sequences.
    ([`vi_slam_global_consistency_plan.md`](vi_slam_global_consistency_plan.md)).
 3. **VIO tracking robustness / sliding window.** **Confirmed lever (config-only):**
    Basalt's default window (`vio_max_states` 3, `vio_max_kfs` 7) is far too
-   small for km-scale LaMAria — raising it to 10/30 lifts sequence_1_19
-   VIO-only CP Score 12.75 → **27.09** (pGT R@5m 5.4 % → 30.0 %), at 12 → 58 min
-   for 18,352 frames. Also: wide-FOV optical-flow settings
+   small for LaMAria — raising it to 10/30 lifts R_11_5cp VIO-only CP Score
+   49.65 → **63.19** (CP@1m 20 % → 60 %, pGT R@1m 16 % → 51.8 %) and
+   sequence_1_19 12.75 → **27.09** (pGT R@5m 5.4 % → 30.0 %). Cost: 12 → 58 min
+   for 18,352 frames; note the marginalization packets are ~3.7× larger
+   (73.5 MB), so the offline file-based mapper dump is impractical at this
+   window size. Also: wide-FOV optical-flow settings
    (`optical_flow_detection_grid_size`, pyramid `levels`, `pattern`,
    `vio_obs_std_dev`) — currently EuRoC values on a ~115° camera, unverified.
    **Examined and refuted:** gravity/init misalignment is *not* the dominant

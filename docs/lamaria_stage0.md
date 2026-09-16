@@ -42,6 +42,8 @@ Branch: `feat/lamaria-stage0b` (on top of `feat/lamaria-stage0`, merged with
 | R_11_5cp | + mapper | **57.66** | 20.0 % | 17.1 % | 100.0 % | 1.37 m | 0.960 |
 | sequence_1_19 | VIO only | 12.75 | 7.1 % | 0.0 % | 5.4 % | — | — |
 | sequence_1_19 | + mapper | **16.98** | 0.0 % | 0.3 % | 37.1 % | — | — |
+| R_11_5cp | VIO, larger window (10/30) | **63.19** | 60.0 % | 51.8 % | 100.0 % | — | — |
+| sequence_1_19 | VIO, larger window (10/30) | **27.09** | 14.3 % | 4.6 % | 30.0 % | — | — |
 
 Leaderboard context (bino+imu track, Short subset where applicable):
 
