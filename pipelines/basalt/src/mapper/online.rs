@@ -40,7 +40,8 @@
 //!    the offline path's.
 
 use std::collections::BTreeSet;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
+use std::sync::OnceLock;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -67,6 +68,29 @@ use crate::mapper::{
     GlobalBaConfig, GlobalBaOptimizerState, MapperConfig, MatchData, OfflineMapperConfig,
     TimeCamId,
 };
+
+/// Diagnostic-only fine-grained stage trace, gated by the
+/// `BASALT_ONLINE_MAPPER_TRACE` environment variable so it costs nothing
+/// (beyond one `OnceLock` read) on every production call site. Added while
+/// investigating a `--pipeline` mapper-thread stall (see
+/// `docs/basalt_online_mapper_pipelined_stall.md` if present, or the fix
+/// commit that introduced this): the per-packet counters in
+/// [`OnlineIngestReport`] only ever surface *after* a whole `ingest_packet`
+/// call returns, which gives no visibility into which sub-stage a hung call
+/// is stuck in. Kept permanently since it is zero-cost when unset and cheap
+/// to reach for the next time a live run needs the same visibility.
+fn mapper_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("BASALT_ONLINE_MAPPER_TRACE").is_some())
+}
+
+macro_rules! mapper_trace {
+    ($($arg:tt)*) => {
+        if mapper_trace_enabled() {
+            eprintln!("[mapper-trace] {}", format!($($arg)*));
+        }
+    };
+}
 
 /// Errors raised by the online mapper's incremental entry points.
 #[derive(Debug, Error)]
@@ -360,14 +384,22 @@ impl OnlineNfrMapper {
         data: &mut MargData,
         seed: Option<u32>,
     ) -> Result<OnlineIngestReport, OnlineMapperError> {
+        mapper_trace!("ingest_packet: enter, images={}", data.of_images.len());
         // Non-blocking: pick up a background optimize job's result if one
         // finished since the last packet (rule 3). Ingestion below proceeds
         // immediately either way.
+        mapper_trace!("ingest_packet: poll_pending_optimizer start");
         let optimize_merge = self.poll_pending_optimizer();
+        mapper_trace!(
+            "ingest_packet: poll_pending_optimizer done merged={}",
+            optimize_merge.is_some()
+        );
 
+        mapper_trace!("ingest_packet: add_marg_data start");
         self.mapper
             .add_marg_data(data)
             .map_err(OnlineMapperError::Ingest)?;
+        mapper_trace!("ingest_packet: add_marg_data done");
         let calibration = self
             .mapper
             .calibration
@@ -386,6 +418,10 @@ impl OnlineNfrMapper {
         let mut skipped_ineligible_timestamp_count = 0;
         let detect_stereo_start = Instant::now();
         let mut stereo_seconds_accum = 0.0;
+        mapper_trace!(
+            "ingest_packet: detect/stereo loop start, timestamps={}",
+            timestamps.len()
+        );
         for timestamp_ns in timestamps {
             let Some(images) = self.mapper.img_data.get(&timestamp_ns).cloned() else {
                 continue;
@@ -420,7 +456,17 @@ impl OnlineNfrMapper {
                 if self.mapper.feature_corners.contains_key(&key) {
                     continue;
                 }
+                mapper_trace!(
+                    "ingest_packet: detect_one_image start frame_id={} camera_id={}",
+                    image.frame_id,
+                    image.camera_id
+                );
                 let key = self.detect_one_image(image, &calibration)?;
+                mapper_trace!(
+                    "ingest_packet: detect_one_image done frame_id={} camera_id={}",
+                    image.frame_id,
+                    image.camera_id
+                );
                 new_keys.push(key);
                 any_new_at_timestamp = true;
             }
@@ -430,9 +476,11 @@ impl OnlineNfrMapper {
             // re-running stereo matching would just recompute an identical
             // (deterministic) result for free-standing cost.
             if any_new_at_timestamp {
+                mapper_trace!("ingest_packet: match_stereo_one_timestamp start ts={timestamp_ns}");
                 let stereo_start = Instant::now();
                 self.match_stereo_one_timestamp(timestamp_ns, &images, &calibration)?;
                 stereo_seconds_accum += stereo_start.elapsed().as_secs_f64();
+                mapper_trace!("ingest_packet: match_stereo_one_timestamp done ts={timestamp_ns}");
             }
 
             // Rule 1: drop the raw pixels now that detection and stereo
@@ -450,8 +498,14 @@ impl OnlineNfrMapper {
         let match_start = Instant::now();
         let mut accepted_temporal_pair_count = 0;
         let mut accepted_loop_pair_count = 0;
+        mapper_trace!(
+            "ingest_packet: match loop start, new_keys={}",
+            new_keys.len()
+        );
         for &key in &new_keys {
+            mapper_trace!("ingest_packet: match_new_keyframe start key={key:?}");
             let (accepted, loops) = self.match_new_keyframe(key, seed);
+            mapper_trace!("ingest_packet: match_new_keyframe done key={key:?} accepted={accepted} loops={loops}");
             accepted_temporal_pair_count += accepted;
             accepted_loop_pair_count += loops;
         }
@@ -482,11 +536,14 @@ impl OnlineNfrMapper {
             && self.keyframes_since_optimize >= self.config.optimize_every_k
             && cooldown_elapsed;
         if should_trigger {
+            mapper_trace!("ingest_packet: spawn_background_optimize start");
             self.spawn_background_optimize();
+            mapper_trace!("ingest_packet: spawn_background_optimize done");
             self.keyframes_since_optimize = 0;
             self.total_optimize_triggers += 1;
         }
 
+        mapper_trace!("ingest_packet: exit");
         Ok(OnlineIngestReport {
             processed_timestamp_count,
             skipped_ineligible_timestamp_count,
@@ -697,10 +754,15 @@ impl OnlineNfrMapper {
         // unchanged) -- see `OnlineMapperConfig::match_top_k`'s field doc.
         let candidates =
             self.bow_candidates_via_index(query_id, &query_features, self.config.match_top_k);
+        mapper_trace!(
+            "match_new_keyframe: query={query_id:?} candidates={}",
+            candidates.len()
+        );
 
         let mut accepted_count = 0;
         let mut loop_count = 0;
         for candidate in candidates {
+            mapper_trace!("match_new_keyframe: candidate={:?}", candidate.image);
             if candidate.image.frame_id == query_id.frame_id
                 || candidate.score <= config.frames_to_match_threshold
             {
@@ -715,7 +777,18 @@ impl OnlineNfrMapper {
                 let Some(right) = self.mapper.feature_corners.get(&right_id) else {
                     continue;
                 };
-                match_temporal_stage(left, right, match_config).raw_match_gate_passed
+                mapper_trace!(
+                    "match_new_keyframe: match_temporal_stage start left_descriptors={} right_descriptors={}",
+                    left.descriptors.len(),
+                    right.descriptors.len()
+                );
+                let stage = match_temporal_stage(left, right, match_config);
+                mapper_trace!(
+                    "match_new_keyframe: match_temporal_stage done raw_matches={} gate_passed={}",
+                    stage.raw_matches.len(),
+                    stage.raw_match_gate_passed
+                );
+                stage.raw_match_gate_passed
             };
             if !raw_gate_passed {
                 continue;
@@ -731,10 +804,17 @@ impl OnlineNfrMapper {
                     .feature_corners
                     .get(&right_id)
                     .expect("right key present");
-                match seed {
+                mapper_trace!("match_new_keyframe: ransac start");
+                let result = match seed {
                     Some(seed) => match_temporal_ransac_seeded(left, right, match_config, seed),
                     None => match_temporal_ransac(left, right, match_config),
-                }
+                };
+                mapper_trace!(
+                    "match_new_keyframe: ransac done accepted={} iterations={}",
+                    result.accepted,
+                    result.ransac_iterations
+                );
+                result
             };
             if result.accepted && !result.refined_inlier_ids.is_empty() {
                 let inliers = result.refined_inlier_ids.clone();
@@ -844,12 +924,20 @@ impl OnlineNfrMapper {
     /// one place `OnlineNfrMapper` blocks on the background thread, and it
     /// only does so once, at the natural end of the run.
     pub fn finalize(&mut self) -> Result<OnlineFinalReport, OnlineMapperError> {
+        mapper_trace!(
+            "finalize: enter, pending_optimizer={}",
+            self.pending_optimizer.is_some()
+        );
         if let Some(handle) = self.pending_optimizer.take() {
+            mapper_trace!("finalize: joining in-flight background optimize job");
             let result = handle.join().expect("background optimize thread panicked");
+            mapper_trace!("finalize: background optimize job joined");
             self.merge_background_result(result);
         }
+        mapper_trace!("finalize: optimize_pass start");
         let (first_optimize, filter, second_optimize) =
             self.optimize_pass(self.config.headless.num_opt_iter)?;
+        mapper_trace!("finalize: optimize_pass done");
         self.total_optimize_passes += 1;
         Ok(OnlineFinalReport {
             first_optimize,
@@ -1001,18 +1089,35 @@ pub fn run_mapper_thread(
 
 /// Producer handle used by the VIO thread.
 ///
-/// Deliberately unbounded, not `SyncSender`: rule (1) in the module
-/// documentation is that the VIO thread must never block on the mapper, and
-/// a bounded channel's backpressure does exactly that the moment the mapper
-/// falls behind (observed on a full-MH_01 run: the mapper's per-keyframe
-/// query cost grows with the detected-image database size, so a small bound
-/// stalled the VIO thread for minutes at a time). A queued `MargData` is
-/// cheap to hold -- it is consumed (features extracted, raw pixels dropped)
-/// in the same `ingest_packet` call that receives it, so queue growth costs
-/// keypoints/descriptors, not images (Sec1.2 of the design doc). The online
-/// demo reports queue depth/lag as an honest diagnostic instead of relying
-/// on a bound to hide it.
-pub type MapperPacketSender = Sender<MargData>;
+/// Bounded (`SyncSender`), not a plain `Sender`. An earlier revision used an
+/// unbounded channel on the theory that a queued `MargData` is cheap to hold
+/// -- it is consumed (features extracted, raw pixels dropped) in the same
+/// `ingest_packet` call that receives it, so *processed* queue growth only
+/// costs keypoints/descriptors, not images (Sec1.2 of the design doc). That
+/// reasoning misses the *unprocessed* case: a packet sitting in the channel
+/// before `ingest_packet` ever sees it still carries its full `of_images`
+/// raw pixel buffers, and `--pipeline`'s frontend/estimator overlap (PR
+/// #153) makes the VIO producer meaningfully faster than the serial path --
+/// fast enough to run many hundreds of packets ahead of a mapper that is
+/// still working through an earlier, larger match graph. That gap has no
+/// ceiling with an unbounded channel: multi-GB backlog growth was observed
+/// on a full-MH_01 `--pipeline` run whose mapper thread also happened to hit
+/// a slow packet (production `seed: None` -- see `OnlineIngestReport`'s
+/// docs -- makes per-packet cost timing-dependent, and `--pipeline`'s higher
+/// throughput changes that timing relative to the serial path), and the
+/// resulting memory pressure turned a transient slow packet into a
+/// multi-hour apparent stall (100% CPU, no forward progress) rather than a
+/// bounded delay. A bounded channel keeps the "VIO never blocks on a
+/// keeping-pace mapper" property from rule (1) above (the earlier "a small
+/// bound stalled the VIO thread for minutes" regression was measured at a
+/// bound small enough to contend during ordinary operation, not one sized
+/// to the sliding-AOM-window packet rate this channel actually sees) while
+/// putting a hard ceiling on backlog size, and therefore on backlog memory,
+/// so a slow mapper packet degrades into bounded VIO backpressure instead of
+/// unbounded queue growth. The online demo still reports queue depth/lag as
+/// an honest diagnostic; the bound only caps how bad that diagnostic number
+/// can get.
+pub type MapperPacketSender = SyncSender<MargData>;
 
 fn empty_mapper_features() -> MapperImageFeatures {
     MapperImageFeatures {

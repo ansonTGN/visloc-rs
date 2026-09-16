@@ -4,16 +4,18 @@
 //! process's main thread) consumes images/IMU at either dataset rate
 //! (`--realtime`) or as fast as possible (default), and for every
 //! `MargData` mapper packet moves it (no JSON/base64 round trip --
-//! `EstimatorOutput::marg_data` is already an owned in-memory value) into an
-//! *unbounded* channel to a dedicated mapper thread running
-//! `visloc_basalt::mapper_online::OnlineNfrMapper`. The VIO thread must
-//! never block on the mapper: a bounded channel's backpressure does exactly
-//! that the moment the mapper falls behind, which is observable and reported
-//! here instead as mapper queue depth/lag (`max_mapper_queue_depth`,
-//! `mapper_queue_lag_seconds`) -- a queued packet is cheap to hold since
-//! `ingest_packet` extracts features and drops raw pixels in the same call
-//! that receives it, so queue growth costs keypoints/descriptors, not
-//! images.
+//! `EstimatorOutput::marg_data` is already an owned in-memory value) into a
+//! *bounded* (`--mapper-queue-capacity`, generous default) channel to a
+//! dedicated mapper thread running `visloc_basalt::mapper_online::
+//! OnlineNfrMapper`. The VIO thread only blocks on the mapper once the
+//! mapper has fallen behind by a full queue capacity's worth of packets --
+//! see `mapper_online::MapperPacketSender`'s doc for why an unbounded
+//! channel here let a slow mapper packet under `--pipeline` (whose
+//! frontend/estimator overlap makes the VIO producer materially faster than
+//! serial) turn into multi-GB backlog growth and a memory-pressure-amplified
+//! apparent stall. Backpressure -- how often and how long the VIO thread
+//! actually blocks -- is observable and reported as mapper queue depth/lag
+//! (`max_mapper_queue_depth`, `mapper_queue_lag_seconds`).
 //!
 //! See `docs/basalt_online_mapper_design.md` for the full design and
 //! `docs/vi_slam_global_consistency_plan.md` Sec1.4/3/4 for why this exists:
@@ -61,7 +63,17 @@ struct Args {
     pipeline_capacity: usize,
     decode_threads: usize,
     threads: Option<usize>,
+    mapper_queue_capacity: usize,
 }
+
+/// Default bound on the VIO-to-mapper `MargData` channel (see
+/// `mapper_online::MapperPacketSender`'s doc). Sized well above the queue
+/// depths a keeping-pace mapper reaches in practice (single digits to a few
+/// dozen, per `max_mapper_queue_depth` on ordinary runs) so it does not
+/// throttle a healthy run, while still capping worst-case backlog -- and
+/// therefore worst-case retained-raw-image memory -- to a fixed multiple of
+/// one packet's `of_images` payload instead of growing without bound.
+const DEFAULT_MAPPER_QUEUE_CAPACITY: usize = 256;
 
 fn main() {
     if let Err(error) = run() {
@@ -172,13 +184,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
 
-    // Unbounded: the VIO thread must never block on the mapper (rule 1 in
-    // mapper_online's module doc). A queued MargData packet is cheap to
-    // hold -- ingest_packet extracts features and drops its raw pixels in
-    // the same call that receives it -- so queue growth costs
-    // keypoints/descriptors, not images. Backpressure is measured and
-    // reported (queue depth, lag), not silently applied.
-    let (sender, receiver) = mpsc::channel::<MargData>();
+    // Bounded: see `mapper_online::MapperPacketSender`'s doc for why an
+    // unbounded channel let a slow mapper packet turn into unbounded
+    // backlog growth (and, on a loaded host, memory-pressure-amplified
+    // apparent stalls) specifically under `--pipeline`, whose
+    // frontend/estimator overlap makes the VIO producer materially faster
+    // than the mapper's own per-packet consumption rate. The bound is sized
+    // generously (`--mapper-queue-capacity`, default below) so ordinary
+    // operation -- where the mapper keeps up within a small multiple of a
+    // packet's own processing time -- never blocks the VIO thread; it only
+    // throttles VIO once the mapper has genuinely fallen far behind, which
+    // is exactly the condition that must be bounded rather than left to
+    // grow without limit. Backpressure is still measured and reported
+    // (queue depth, lag) so a run that spends real time blocked here is
+    // visible in the summary, not just implicitly slower.
+    let (sender, receiver) = mpsc::sync_channel::<MargData>(args.mapper_queue_capacity);
     let send_times: Arc<Mutex<VecDeque<Instant>>> = Arc::new(Mutex::new(VecDeque::new()));
     let lag_seconds: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
     let aggregate: Arc<Mutex<MapperAggregate>> = Arc::new(Mutex::new(MapperAggregate::default()));
@@ -426,6 +446,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "imu_samples": total_imu,
         "observations": total_observations,
         "mapper_packets_sent": mapper_packet_count,
+        "mapper_queue_capacity": args.mapper_queue_capacity,
         "max_mapper_queue_depth": max_queue_depth,
         "mapper_queue_lag_seconds": {"max": lag_max, "mean": lag_mean, "samples": lag_sample_count},
         "mapper": {
@@ -633,6 +654,7 @@ impl Args {
         let mut pipeline_capacity = 4usize;
         let mut decode_threads = 3usize;
         let mut threads = None;
+        let mut mapper_queue_capacity = DEFAULT_MAPPER_QUEUE_CAPACITY;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy().into_owned();
@@ -692,6 +714,15 @@ impl Args {
                     }
                     threads = Some(value);
                 }
+                "--mapper-queue-capacity" => {
+                    mapper_queue_capacity = next(&mut arguments, &option)?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --mapper-queue-capacity: {error}"))?;
+                    if mapper_queue_capacity == 0 {
+                        return Err("--mapper-queue-capacity must be positive".into());
+                    }
+                }
                 unknown => return Err(format!("unknown option `{unknown}`\n\n{}", Self::usage())),
             }
         }
@@ -710,6 +741,7 @@ impl Args {
             pipeline_capacity,
             decode_threads,
             threads,
+            mapper_queue_capacity,
         })
     }
 
@@ -717,7 +749,8 @@ impl Args {
         "usage: basalt_euroc_online_slam_demo --euroc-dir DIR --calibration FILE \
          [--config FILE] [--out-dir DIR] [--max-frames N] [--optimize-every-k K] \
          [--periodic-iterations N] [--realtime | --as-fast-as-possible] \
-         [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N]"
+         [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
+         [--mapper-queue-capacity N]"
             .into()
     }
 }
@@ -786,6 +819,40 @@ mod tests {
         assert_eq!(args.pipeline_capacity, 4);
         assert_eq!(args.decode_threads, 3);
         assert_eq!(args.threads, None);
+        assert_eq!(args.mapper_queue_capacity, DEFAULT_MAPPER_QUEUE_CAPACITY);
+    }
+
+    #[test]
+    fn parser_accepts_mapper_queue_capacity_override() {
+        let args = Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--mapper-queue-capacity",
+                "16",
+            ]
+            .map(Into::into),
+        )
+        .expect("parses");
+        assert_eq!(args.mapper_queue_capacity, 16);
+    }
+
+    #[test]
+    fn parser_rejects_zero_mapper_queue_capacity() {
+        assert!(Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--mapper-queue-capacity",
+                "0"
+            ]
+            .map(Into::into)
+        )
+        .is_err());
     }
 
     #[test]
