@@ -46,6 +46,25 @@ A案（COLMAP同点計装＋snapshot）は**snapshotが出力されず**（`--Ma
   `RefineGeneralizedAbsolutePose`失敗挙動の再現、COLMAP側の同点計装。証跡
   `benchmarks/electro/m9-openloris-colmap-port-10k-register-debug-v1.json`。
 
+### 2026-09-17 追記: 制御ログで絶対姿勢仮説を否定（残因はtriangulation/frontier）
+
+既存control `logs/mapper.log`（再実行不要）を精査:
+- **model0の最終登録はimage #9497（num_reg_frames=4493）、直後の`=> Image sees 9 / 19 points`**。
+  その直後（11:33:51→11:53:48）に新規reconstructionが#9737から開始、最後に
+  `Keeping successful reconstruction`がちょうど2回（model0/model1）。
+- → COLMAPの`EstimateGeneralizedAbsolutePose`＋`RefineGeneralizedAbsolutePose`は**境界
+  フレームで成功**（可視9点、移植版frame4497のgcorrs=9と同数）。**PR #168の「絶対姿勢推定が
+  残因」は否定**。
+- 実際の差は#9497直後のfrontier: COLMAP model0は次の候補（移植版の4505/4495/4496は
+  corr 12/20/24）を登録できず停止、移植版model0はfrontierが生き続ける。これは
+  boundary-rootcauseの「移植版が弱い境界対応をtriangulateしている」結論と一致。
+- 移植版`estimate_triangulation`は依然**非忠実**: COLMAPの`TriangulateTrack`/
+  `EstimateTriangulation`はLORANSAC＋CombinationSampler（n≤15で`min_num_trials=C(n,2)`の
+  全ペア）＋`TriangulationEstimator`のmulti-view LO（**full min_tri_angle必須**）。移植版は
+  決定的総当たり＋1回DLT refit＋`min_tri_angle*0.5`フォールバック（**COLMAPに無い**）。
+- 次はこの忠実移植→2.5k非回帰ゲート→10k。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-10k-boundary-frontier-v1.json`。
+
 ### 2026-09-17 追記: 自作map × 地図ベースrelocalization（branch `feat/openloris-map-relocalization`）
 
 COLMAP port（`examples/colmap_incremental_mapper`）が出力した地図を、既存の

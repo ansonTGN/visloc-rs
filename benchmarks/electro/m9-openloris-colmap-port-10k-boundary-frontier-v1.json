@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-17",
+  "findings": [
+    "model0's last registered frame is image #9497 at num_reg_frames=4493, logged as 'Registering image #9497 (num_reg_frames=4493)' followed by '=> Image sees 9 / 19 points'.",
+    "Immediately afterwards (11:33:51 -> 11:53:48) a fresh reconstruction starts from image #9737 at num_reg_frames=2; the log ends with exactly two 'Keeping successful reconstruction' events (model0/model1) and two 'Discarding reconstruction due to insufficient size' for small 4-image segments.",
+    "=> COLMAP's EstimateGeneralizedAbsolutePose + RefineGeneralizedAbsolutePose SUCCEED for the boundary frame (9 visible points, same as the port's frame 4497 gcorrs=9). The PR #168 hypothesis that the generalized absolute-pose estimator/refinement is the remaining cause is therefore refuted.",
+    "The actual divergence is the frontier after #9497: COLMAP's model0 cannot register the next candidate frames (the port's 4505/4495/4496 see 12/20/24 correspondences in the port's single model) and stops, while the port's model0 keeps the frontier alive. This matches the earlier boundary-rootcause finding (port triangulates weak cross-boundary correspondences COLMAP does not) and the handover's triangulator conclusion.",
+    "The port's estimate_triangulation remains the non-faithful stand-in (deterministic exhaustive-pair + single DLT refit + min_tri_angle*0.5 fallback); COLMAP's TriangulateTrack/EstimateTriangulation is LORANSAC + CombinationSampler (min_num_trials=NChooseK(n,2) for n<=15) + TriangulationEstimator multi-view LO with full min_tri_angle enforcement."
+  ],
+  "next": [
+    "Faithfully port EstimateTriangulation (LORANSAC + CombinationSampler + TriangulationEstimator LO), replacing incremental_triangulator::estimate_triangulation.",
+    "2.5k non-regression gate, then 10k.",
+    "Remove the non-COLMAP min_tri_angle*0.5 fallback in favor of COLMAP's full-angle requirement."
+  ],
+  "schema": "visloc_colmap_mapper_10k_boundary_frontier_v1",
+  "source": "existing COLMAP control mapper log: corridor1-1-m8-colmap/tier-10000-rig-v3/logs/mapper.log (no re-run needed)",
+  "status": "absolute_pose_hypothesis_refuted_confirms_triangulation_frontier_difference",
+  "tier": 10000
+}
