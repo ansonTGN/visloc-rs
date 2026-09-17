@@ -46,6 +46,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use nalgebra::{Matrix3, UnitQuaternion, Vector3};
+use rayon::prelude::*;
 use thiserror::Error;
 use visloc_core::geometry::SE3;
 
@@ -59,7 +60,8 @@ use crate::mapper::{
     features::{
         extract_mapper_features, match_stereo_features, match_temporal_ransac,
         match_temporal_ransac_seeded, match_temporal_stage, mutual_descriptor_matches,
-        query_bow_candidates, FeaturePipelineError, MapperImageFeatures, MapperImageId,
+        query_bow_candidates, BowQueryCandidate, FeaturePipelineError, MapperImageFeatures,
+        MapperImageId,
     },
     session::{
         NfrMapper, NfrMapperError, NfrMapperFilterReport, NfrMapperHeadlessConfig,
@@ -422,6 +424,24 @@ impl OnlineNfrMapper {
             "ingest_packet: detect/stereo loop start, timestamps={}",
             timestamps.len()
         );
+
+        // Phase 1 (sequential, cheap): snapshot every eligible timestamp's
+        // images and collect the (still-empty) set of genuinely new keys
+        // each one needs detected -- the same overlap-skip filter as
+        // before (a MargData packet's `of_images` is the marginalization
+        // event's whole AOM window, up to 16 images, and consecutive
+        // packets' windows overlap heavily; re-detecting an already-known
+        // key would reproduce batch `match_all`'s exact re-querying cost,
+        // per the fix note this replaced). This pass only reads mapper
+        // state, so it stays a plain sequential loop; the expensive part
+        // (phase 2) is what moves to rayon.
+        struct EligibleTimestamp {
+            timestamp_ns: i64,
+            images: Vec<OfImageData>,
+            new_keys: Vec<TimeCamId>,
+        }
+        let mut eligible_timestamps = Vec::new();
+        let mut jobs: Vec<(TimeCamId, usize, usize)> = Vec::new();
         for timestamp_ns in timestamps {
             let Some(images) = self.mapper.img_data.get(&timestamp_ns).cloned() else {
                 continue;
@@ -433,60 +453,81 @@ impl OnlineNfrMapper {
                 skipped_ineligible_timestamp_count += 1;
                 continue;
             }
-
-            let mut any_new_at_timestamp = false;
-            for image in &images {
+            let timestamp_index = eligible_timestamps.len();
+            for (image_index, image) in images.iter().enumerate() {
                 if !self.mapper.frame_poses.contains_key(&image.frame_id) {
                     continue;
                 }
-                // A MargData packet's `of_images` is the marginalization
-                // event's whole AOM window (Phase A: 16 images = 8 frames x
-                // 2 cams), and consecutive packets' windows overlap heavily
-                // -- only the oldest keyframe slides out between one packet
-                // and the next. Without this check every packet re-detects
-                // and (worse) re-queries `match_new_keyframe` for images
-                // already processed by an earlier packet: O(already-seen)
-                // wasted work per packet, reproducing batch `match_all`'s
-                // exact re-querying cost (Phase A's diagnosis) instead of
-                // eliminating it. Confirmed by an MH_01 smoke run before this
-                // fix: every packet reported `new_key_count=16` (the full
-                // window every time) and per-packet match cost grew
-                // monotonically packet-over-packet.
                 let key = TimeCamId::new(image.frame_id, image.camera_id);
                 if self.mapper.feature_corners.contains_key(&key) {
                     continue;
                 }
-                mapper_trace!(
-                    "ingest_packet: detect_one_image start frame_id={} camera_id={}",
-                    image.frame_id,
-                    image.camera_id
-                );
-                let key = self.detect_one_image(image, &calibration)?;
-                mapper_trace!(
-                    "ingest_packet: detect_one_image done frame_id={} camera_id={}",
-                    image.frame_id,
-                    image.camera_id
-                );
-                new_keys.push(key);
-                any_new_at_timestamp = true;
+                jobs.push((key, timestamp_index, image_index));
             }
+            eligible_timestamps.push(EligibleTimestamp {
+                timestamp_ns,
+                images,
+                new_keys: Vec::new(),
+            });
+        }
 
-            // Same overlap reasoning for stereo: if both of this timestamp's
-            // camera images were already matched by an earlier packet,
-            // re-running stereo matching would just recompute an identical
-            // (deterministic) result for free-standing cost.
-            if any_new_at_timestamp {
-                mapper_trace!("ingest_packet: match_stereo_one_timestamp start ts={timestamp_ns}");
+        // Phase 2 (parallel): pure per-image feature extraction (FAST
+        // corners, descriptors, BoW hashing) on rayon's shared pool --
+        // dominated detect_seconds at ~0.1s/packet on a full MH_01
+        // --pipeline run before this change; every job reads only its own
+        // raw pixel buffer, so this is embarrassingly parallel regardless
+        // of which timestamp or camera it belongs to.
+        mapper_trace!("ingest_packet: parallel detect start, jobs={}", jobs.len());
+        let extracted: Vec<Result<(TimeCamId, usize, MapperImageFeatures), OnlineMapperError>> =
+            jobs.par_iter()
+                .map(|&(key, timestamp_index, image_index)| {
+                    let image = &eligible_timestamps[timestamp_index].images[image_index];
+                    extract_one_image_features(image, &calibration, self.mapper.feature_config)
+                        .map(|features| (key, timestamp_index, features))
+                })
+                .collect();
+        mapper_trace!("ingest_packet: parallel detect done");
+
+        // Phase 3 (sequential): apply results in original job order,
+        // propagating the first error exactly like the prior sequential
+        // loop's `?` did -- an image after a failing one is never
+        // inserted, matching the old early-return's observable state even
+        // though every job was already computed in parallel.
+        for result in extracted {
+            let (key, timestamp_index, features) = result?;
+            self.insert_detected_image(key, key.frame_id, features);
+            new_keys.push(key);
+            eligible_timestamps[timestamp_index].new_keys.push(key);
+        }
+
+        // Phase 4 (sequential): stereo matching + cleanup, unchanged from
+        // the prior per-timestamp behavior -- stereo needs both of a
+        // timestamp's images already detected (from this call or an
+        // earlier one), and this stays cheap (~4ms/packet total) so it is
+        // not itself a parallelization target.
+        for entry in eligible_timestamps {
+            // Same overlap reasoning as detection: if both of this
+            // timestamp's camera images were already matched by an earlier
+            // packet, re-running stereo matching would just recompute an
+            // identical (deterministic) result for free-standing cost.
+            if !entry.new_keys.is_empty() {
+                mapper_trace!(
+                    "ingest_packet: match_stereo_one_timestamp start ts={}",
+                    entry.timestamp_ns
+                );
                 let stereo_start = Instant::now();
-                self.match_stereo_one_timestamp(timestamp_ns, &images, &calibration)?;
+                self.match_stereo_one_timestamp(entry.timestamp_ns, &entry.images, &calibration)?;
                 stereo_seconds_accum += stereo_start.elapsed().as_secs_f64();
-                mapper_trace!("ingest_packet: match_stereo_one_timestamp done ts={timestamp_ns}");
+                mapper_trace!(
+                    "ingest_packet: match_stereo_one_timestamp done ts={}",
+                    entry.timestamp_ns
+                );
             }
 
             // Rule 1: drop the raw pixels now that detection and stereo
             // matching (which only needs already-extracted features, not
             // pixels) are both done for this timestamp.
-            self.mapper.img_data.remove(&timestamp_ns);
+            self.mapper.img_data.remove(&entry.timestamp_ns);
             processed_timestamp_count += 1;
         }
         let detect_seconds =
@@ -560,55 +601,26 @@ impl OnlineNfrMapper {
     }
 
     /// Mirrors `NfrMapper::detect_keypoints`'s per-image body
-    /// (`session.rs`), scoped to one already pose-eligible image.
-    fn detect_one_image(
+    /// (`session.rs`), scoped to one already pose-eligible image: runs the
+    /// pure [`extract_one_image_features`] step and applies its result to
+    /// mapper state. Detection itself (the expensive part) has moved to
+    /// `ingest_packet`'s own parallel phase; this method now only does the
+    /// cheap, must-stay-sequential bookkeeping insert.
+    fn insert_detected_image(
         &mut self,
-        image: &OfImageData,
-        calibration: &BasaltCalibration,
-    ) -> Result<TimeCamId, OnlineMapperError> {
-        let timestamp_ns = image.timestamp_ns;
-        let camera_id = image.camera_id;
-        let camera = calibration
-            .camera(camera_id)
-            .ok_or(OnlineMapperError::MissingCamera {
-                timestamp_ns,
-                camera_id,
-            })?;
-        let width = usize::try_from(image.width).map_err(|_| OnlineMapperError::Image {
-            timestamp_ns,
-            camera_id,
-            source: ImageError::DimensionOverflow,
-        })?;
-        let height = usize::try_from(image.height).map_err(|_| OnlineMapperError::Image {
-            timestamp_ns,
-            camera_id,
-            source: ImageError::DimensionOverflow,
-        })?;
-        let raw = RawU16Image::new(width, height, image.data.clone()).map_err(|source| {
-            OnlineMapperError::Image {
-                timestamp_ns,
-                camera_id,
-                source,
-            }
-        })?;
-        let features = extract_mapper_features(&raw, camera, self.mapper.feature_config).map_err(
-            |source| OnlineMapperError::Extraction {
-                timestamp_ns,
-                camera_id,
-                source,
-            },
-        )?;
-        let key = TimeCamId::new(image.frame_id, camera_id);
+        key: TimeCamId,
+        frame_id: u64,
+        features: MapperImageFeatures,
+    ) {
         for entry in &features.bow_vector {
             self.hash_index.entry(entry.hash).or_default().insert(key);
         }
         self.mapper.feature_corners.insert(key, features);
-        self.keyframe_rank.entry(image.frame_id).or_insert_with(|| {
+        self.keyframe_rank.entry(frame_id).or_insert_with(|| {
             let rank = self.next_keyframe_rank;
             self.next_keyframe_rank += 1;
             rank
         });
-        Ok(key)
     }
 
     /// Mirrors `NfrMapper::match_stereo`'s per-timestamp body, scoped to one
@@ -715,7 +727,7 @@ impl OnlineNfrMapper {
         query_id: TimeCamId,
         query_features: &MapperImageFeatures,
         match_window: usize,
-    ) -> Vec<crate::mapper::features::BowQueryCandidate> {
+    ) -> Vec<BowQueryCandidate> {
         let candidate_ids = query_features
             .bow_vector
             .iter()
@@ -759,114 +771,89 @@ impl OnlineNfrMapper {
             candidates.len()
         );
 
+        // Per-candidate descriptor matching + 5-point RANSAC dominates
+        // per-packet wall time (~0.5s/packet of the ~2.4s total measured on
+        // a full MH_01 --pipeline run, vs ~0.1s/packet for detection) and is
+        // embarrassingly parallel: each candidate's outcome depends only on
+        // `feature_corners` (read-only here -- no candidate mutates it) and
+        // its own gate/RANSAC result, never on another candidate's outcome.
+        // Run every candidate's match+RANSAC concurrently on the shared
+        // rayon pool the demo's `--threads` flag sizes, collecting outcomes
+        // into a `Vec` (an `IndexedParallelIterator`, so `collect` preserves
+        // the original candidate order regardless of completion order), and
+        // apply the accepted ones -- the `feature_match_data`/
+        // `feature_matches` inserts and the loop-count bookkeeping -- back
+        // on `self` sequentially, in that same original order. This keeps
+        // the accepted-pair set and insertion order bit-identical to the
+        // fully sequential version; only the wall-clock cost of getting
+        // there changes. (An earlier revision tried a small dedicated pool
+        // here on the theory that sharing the global pool would
+        // oversubscribe VIO's own concurrent frontend/estimator work; a
+        // second full-MH_01 measurement showed that variant with *both*
+        // worse per-packet mapper cost and worse whole-system wall time,
+        // consistent with rising host contention across the measurement
+        // session rather than a real effect of pool choice, so the simpler
+        // shared-pool version is what's kept.)
+        let feature_corners = &self.mapper.feature_corners;
+        let outcomes: Vec<Option<CandidateMatchOutcome>> = candidates
+            .par_iter()
+            .map(|candidate| {
+                evaluate_match_candidate(
+                    feature_corners,
+                    query_id,
+                    candidate,
+                    config,
+                    match_config,
+                    seed,
+                )
+            })
+            .collect();
+
         let mut accepted_count = 0;
         let mut loop_count = 0;
-        for candidate in candidates {
-            mapper_trace!("match_new_keyframe: candidate={:?}", candidate.image);
-            if candidate.image.frame_id == query_id.frame_id
-                || candidate.score <= config.frames_to_match_threshold
-            {
-                continue;
-            }
-            let other_id = TimeCamId::from(candidate.image);
-            let (left_id, right_id) = (query_id, other_id);
-            let raw_gate_passed = {
-                let Some(left) = self.mapper.feature_corners.get(&left_id) else {
-                    continue;
-                };
-                let Some(right) = self.mapper.feature_corners.get(&right_id) else {
-                    continue;
-                };
-                mapper_trace!(
-                    "match_new_keyframe: match_temporal_stage start left_descriptors={} right_descriptors={}",
-                    left.descriptors.len(),
-                    right.descriptors.len()
-                );
-                let stage = match_temporal_stage(left, right, match_config);
-                mapper_trace!(
-                    "match_new_keyframe: match_temporal_stage done raw_matches={} gate_passed={}",
-                    stage.raw_matches.len(),
-                    stage.raw_match_gate_passed
-                );
-                stage.raw_match_gate_passed
-            };
-            if !raw_gate_passed {
-                continue;
-            }
-            let result = {
-                let left = self
-                    .mapper
-                    .feature_corners
-                    .get(&left_id)
-                    .expect("left key present");
-                let right = self
-                    .mapper
-                    .feature_corners
-                    .get(&right_id)
-                    .expect("right key present");
-                mapper_trace!("match_new_keyframe: ransac start");
-                let result = match seed {
-                    Some(seed) => match_temporal_ransac_seeded(left, right, match_config, seed),
-                    None => match_temporal_ransac(left, right, match_config),
-                };
-                mapper_trace!(
-                    "match_new_keyframe: ransac done accepted={} iterations={}",
-                    result.accepted,
-                    result.ransac_iterations
-                );
-                result
-            };
-            if result.accepted && !result.refined_inlier_ids.is_empty() {
-                let inliers = result.refined_inlier_ids.clone();
-                let raw_matches = {
-                    let left = self
-                        .mapper
-                        .feature_corners
-                        .get(&left_id)
-                        .expect("left key present");
-                    let right = self
-                        .mapper
-                        .feature_corners
-                        .get(&right_id)
-                        .expect("right key present");
-                    mutual_descriptor_matches(&left.descriptors, &right.descriptors, match_config)
-                        .into_iter()
-                        .map(|match_| (match_.left, match_.right))
-                        .collect::<Vec<_>>()
-                };
-                self.mapper.feature_match_data.insert(
-                    (left_id, right_id),
-                    NfrMapperMatchData {
-                        t_i_j: temporal_result_se3(&result),
-                        matches: raw_matches,
-                        inliers: inliers.clone(),
-                    },
-                );
-                self.mapper
-                    .feature_matches
-                    .insert((left_id, right_id), MatchData::new(inliers));
-                accepted_count += 1;
-                // Compare keyframe *rank* (assignment order), not raw
-                // frame_id: frame_id is the VIO's per-frame index and
-                // advances on every processed frame, not just keyframes, so
-                // a frame_id gap is not a stable "how many keyframes apart"
-                // proxy (see the `keyframe_rank` field doc).
-                let left_rank = self
-                    .keyframe_rank
-                    .get(&left_id.frame_id)
-                    .copied()
-                    .unwrap_or(0);
-                let right_rank = self
-                    .keyframe_rank
-                    .get(&right_id.frame_id)
-                    .copied()
-                    .unwrap_or(0);
-                let gap = left_rank.abs_diff(right_rank);
-                if gap > self.config.loop_gap_keyframes {
-                    loop_count += 1;
-                }
+        for outcome in outcomes.into_iter().flatten() {
+            let CandidateMatchOutcome {
+                left_id,
+                right_id,
+                t_i_j,
+                raw_matches,
+                inliers,
+            } = outcome;
+            self.mapper.feature_match_data.insert(
+                (left_id, right_id),
+                NfrMapperMatchData {
+                    t_i_j,
+                    matches: raw_matches,
+                    inliers: inliers.clone(),
+                },
+            );
+            self.mapper
+                .feature_matches
+                .insert((left_id, right_id), MatchData::new(inliers));
+            accepted_count += 1;
+            // Compare keyframe *rank* (assignment order), not raw
+            // frame_id: frame_id is the VIO's per-frame index and
+            // advances on every processed frame, not just keyframes, so
+            // a frame_id gap is not a stable "how many keyframes apart"
+            // proxy (see the `keyframe_rank` field doc).
+            let left_rank = self
+                .keyframe_rank
+                .get(&left_id.frame_id)
+                .copied()
+                .unwrap_or(0);
+            let right_rank = self
+                .keyframe_rank
+                .get(&right_id.frame_id)
+                .copied()
+                .unwrap_or(0);
+            let gap = left_rank.abs_diff(right_rank);
+            if gap > self.config.loop_gap_keyframes {
+                loop_count += 1;
             }
         }
+        mapper_trace!(
+            "match_new_keyframe: query={query_id:?} accepted={accepted_count} loops={loop_count}"
+        );
         (accepted_count, loop_count)
     }
 
@@ -1118,6 +1105,116 @@ pub fn run_mapper_thread(
 /// an honest diagnostic; the bound only caps how bad that diagnostic number
 /// can get.
 pub type MapperPacketSender = SyncSender<MargData>;
+
+/// Pure per-image feature-extraction step of `NfrMapper::detect_keypoints`'s
+/// per-image body (`session.rs`): reads only its own raw pixel buffer plus
+/// calibration/config, and mutates no mapper state, so `ingest_packet` can
+/// run it concurrently across every newly eligible image in a packet (up to
+/// the AOM window's 16) without any image's outcome depending on another's
+/// or on processing order.
+fn extract_one_image_features(
+    image: &OfImageData,
+    calibration: &BasaltCalibration,
+    feature_config: OfflineMapperConfig,
+) -> Result<MapperImageFeatures, OnlineMapperError> {
+    let timestamp_ns = image.timestamp_ns;
+    let camera_id = image.camera_id;
+    let camera = calibration
+        .camera(camera_id)
+        .ok_or(OnlineMapperError::MissingCamera {
+            timestamp_ns,
+            camera_id,
+        })?;
+    let width = usize::try_from(image.width).map_err(|_| OnlineMapperError::Image {
+        timestamp_ns,
+        camera_id,
+        source: ImageError::DimensionOverflow,
+    })?;
+    let height = usize::try_from(image.height).map_err(|_| OnlineMapperError::Image {
+        timestamp_ns,
+        camera_id,
+        source: ImageError::DimensionOverflow,
+    })?;
+    let raw = RawU16Image::new(width, height, image.data.clone()).map_err(|source| {
+        OnlineMapperError::Image {
+            timestamp_ns,
+            camera_id,
+            source,
+        }
+    })?;
+    extract_mapper_features(&raw, camera, feature_config).map_err(|source| {
+        OnlineMapperError::Extraction {
+            timestamp_ns,
+            camera_id,
+            source,
+        }
+    })
+}
+
+/// One accepted candidate pair's match-graph payload, computed by
+/// [`evaluate_match_candidate`] on the shared rayon pool and applied back to
+/// `self.mapper` sequentially by [`OnlineNfrMapper::match_new_keyframe`].
+struct CandidateMatchOutcome {
+    left_id: TimeCamId,
+    right_id: TimeCamId,
+    t_i_j: SE3,
+    raw_matches: Vec<(u64, u64)>,
+    inliers: Vec<(u64, u64)>,
+}
+
+/// Descriptor-match/RANSAC accept logic for one BoW candidate, factored out
+/// of [`OnlineNfrMapper::match_new_keyframe`] so it can run on rayon's
+/// shared pool: reads only `feature_corners` (never mutates it, and no
+/// candidate's outcome depends on another's), so every candidate for a
+/// query can be evaluated concurrently without changing which pairs get
+/// accepted or their computed match data. Mirrors the sequential body this
+/// replaced exactly -- same gate order, same RANSAC entry point selection,
+/// same final `mutual_descriptor_matches` recomputation for the accepted
+/// pair's stored raw matches.
+fn evaluate_match_candidate(
+    feature_corners: &std::collections::BTreeMap<TimeCamId, MapperImageFeatures>,
+    query_id: TimeCamId,
+    candidate: &BowQueryCandidate,
+    config: OfflineMapperConfig,
+    match_config: OfflineMapperConfig,
+    seed: Option<u32>,
+) -> Option<CandidateMatchOutcome> {
+    if candidate.image.frame_id == query_id.frame_id
+        || candidate.score <= config.frames_to_match_threshold
+    {
+        return None;
+    }
+    let other_id = TimeCamId::from(candidate.image);
+    let (left_id, right_id) = (query_id, other_id);
+    let left = feature_corners.get(&left_id)?;
+    let right = feature_corners.get(&right_id)?;
+
+    let stage = match_temporal_stage(left, right, match_config);
+    if !stage.raw_match_gate_passed {
+        return None;
+    }
+
+    let result = match seed {
+        Some(seed) => match_temporal_ransac_seeded(left, right, match_config, seed),
+        None => match_temporal_ransac(left, right, match_config),
+    };
+    if !result.accepted || result.refined_inlier_ids.is_empty() {
+        return None;
+    }
+
+    let raw_matches =
+        mutual_descriptor_matches(&left.descriptors, &right.descriptors, match_config)
+            .into_iter()
+            .map(|match_| (match_.left, match_.right))
+            .collect::<Vec<_>>();
+    Some(CandidateMatchOutcome {
+        left_id,
+        right_id,
+        t_i_j: temporal_result_se3(&result),
+        raw_matches,
+        inliers: result.refined_inlier_ids.clone(),
+    })
+}
 
 fn empty_mapper_features() -> MapperImageFeatures {
     MapperImageFeatures {
@@ -1522,9 +1619,13 @@ mod tests {
             "incremental match graph must equal the batch match graph"
         );
         assert_eq!(
-            batch.feature_corners.len(),
-            online.mapper.feature_corners.len(),
-            "incremental detection must produce the same key count as batch"
+            batch.feature_corners, online.mapper.feature_corners,
+            "incremental detection must produce exactly the batch features (same keys, same pixels, same descriptors), \
+             not merely the same key count"
+        );
+        assert_eq!(
+            batch.feature_match_data, online.mapper.feature_match_data,
+            "incremental per-pair match data must equal the batch match data"
         );
     }
 
