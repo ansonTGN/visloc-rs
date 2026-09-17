@@ -31,6 +31,21 @@ A案（COLMAP同点計装＋snapshot）は**snapshotが出力されず**（`--Ma
 - 証跡 `benchmarks/electro/m9-openloris-colmap-port-10k-boundary-rootcause-v1.json`、
   `...-10k-boundary-triangulation-v1.json`。
 
+### 2026-09-17 追記: 10k登録デバッグ（unique support仮説は棄却、絶対姿勢推定が残因）
+
+`register_next_general_frame`にenv `VISLOC_DEBUG_REGISTER_FRAMES`を追加し、境界登録を実測:
+- **frame 4497: gcorrs=9, raw_inliers=9, unique_point3d=9, max_reproj=9.22px,
+  refinement_applied=true**（rig FoV重複なし）。4495:20/20、4496:24/24、4498:40/39、
+  4500:30/30、4505:12/12。
+- → `UniqueInlierSupportMeasurer`のunique数＝raw数なので**COLMAPも9で受理**のはず。
+  unique-support仮説は**棄却**（実装して10kはATE 12.70と悪化、1 modelのまま）。
+- 差は**一般化絶対姿勢推定/refinementの成否**に確定: COLMAPは同条件でmodel0が4493で停止
+  するため、`EstimateGeneralizedAbsolutePose`(RANSAC)＋`RefineGeneralizedAbsolutePose`
+  (Ceres)がこの9対応の近退化姿勢で失敗する（または対応集合が異なる）と考えられる。
+- 次: `ComputeMaxErrorInCamera`の閾値スケーリングとRANSAC意味論の移植、または
+  `RefineGeneralizedAbsolutePose`失敗挙動の再現、COLMAP側の同点計装。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-10k-register-debug-v1.json`。
+
 ### 2026-09-17 追記: 自作map × 地図ベースrelocalization（branch `feat/openloris-map-relocalization`）
 
 COLMAP port（`examples/colmap_incremental_mapper`）が出力した地図を、既存の
