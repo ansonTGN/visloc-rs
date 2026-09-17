@@ -3718,6 +3718,45 @@ mod m8_fixture_tests {
         assert_eq!(data, before);
     }
 
+    #[test]
+    fn m8b_skips_keyframes_absent_from_aom_order() {
+        // A window keyframe can be missing from the packet's AOM order because
+        // the AOM problem is a strict subset of the window (observed on
+        // LaMAria once `vio_max_states`/`vio_max_kfs` grow past the upstream
+        // defaults).  Such a keyframe has a pose but no reduced-system
+        // columns, so recovery must skip it rather than abort with
+        // `MissingAomBlock`.
+        let (mut data, _root) = fixture();
+        process_marg_data(&mut data).expect("M8a process");
+        let present = data.frame_poses[0].frame_id;
+        assert!(
+            !data
+                .aom_order
+                .iter()
+                .any(|block| block.frame_id == u64::MAX),
+            "fixture precondition: stray id must not be in the AOM order"
+        );
+        let mut stray = data
+            .frame_poses
+            .iter()
+            .find(|pose| pose.frame_id == present)
+            .unwrap()
+            .clone();
+        stray.frame_id = u64::MAX;
+        data.frame_poses.push(stray);
+        data.keyframes.push(u64::MAX);
+        data.kfs_all.push(u64::MAX);
+
+        let factors = extract_nonlinear_factors(&data, MapperConfig::default())
+            .expect("stray keyframe must be skipped, not abort recovery");
+        assert_eq!(factors.roll_pitch.len(), 1);
+        assert_eq!(
+            factors.relative_pose.len(),
+            7,
+            "the stray keyframe must not add a relative-pose factor"
+        );
+    }
+
     /// Opt-in integration check for the queue-facing MH01 max800 stream.
     ///
     /// The directory is intentionally supplied by the caller: this keeps the
