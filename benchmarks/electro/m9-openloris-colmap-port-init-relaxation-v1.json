@@ -1,0 +1,37 @@
+{
+  "change": "Init-threshold relaxation loop now matches COLMAP's Run (.cc:418-445): five stages (100,16),(50,16),(50,8),(25,8),(25,4) instead of three.",
+  "conclusion": "The 5-stage relaxation is a safe fidelity fix (2.5k unchanged at 0.0712; models are found at stage 1 so the extra stages do not fire on 2.5k). COLMAP's model0 initial pair (frames 446/462 cam2) has only ~1.8 deg parallax and 59 direct matches, yet COLMAP accepts it after relaxation while the port rejects it; the port's initial-pair selection/inlier set therefore still differs from COLMAP's E-matrix path. The combined 5-stage+ray-angle run improved 10k to ATE 2.91/sim3 1.314 (still 1 model) but regressed 2.5k, so only the 5-stage fix is kept.",
+  "date": "2026-09-17",
+  "next": [
+    "Match the initial two-view estimator/inlier set to COLMAP's EstimateTwoViewGeometry so the accepted initial pair matches.",
+    "Re-check whether COLMAP's control build accepts a 1.8 deg pair at all (pinned 64805cb Run uses a final tri threshold of 4 deg), i.e. whether the control matches the pinned source."
+  ],
+  "ray_angle_investigation": "COLMAP computes the initial-pair tri_angle as the median angle between the two viewing rays after rotating image2's ray into image1's frame (two_view_geometry.cc:790-805); the port triangulated each pair with a DLT and measured the angle at the 3D point. Switching to the faithful ray-angle yields 1.85 deg for COLMAP's model0 pair (image 5446/cam2 t=18.390 vs 5462), matching COLMAP model0's post-BA median of 1.79 deg. But that change regressed 2.5k to 0.0794 (above COLMAP's 0.0718), so it is not included in this change; it lives as an isolated finding.",
+  "results": {
+    "10000_5stage_plus_rayangle": {
+      "models": 1,
+      "rmse_m": 2.9094122223256185,
+      "sim3_scale": 1.3138005944791844
+    },
+    "2500_5stage_only": {
+      "models": 1,
+      "registered_images": 2500,
+      "rmse_m": 0.07124944717967145,
+      "sim3_scale": 1.03227723867398
+    },
+    "2500_5stage_plus_rayangle": {
+      "models": 1,
+      "rmse_m": 0.07943411399838854,
+      "sim3_scale": 1.0466155786726965
+    },
+    "colmap_2500": {
+      "rmse_m": 0.07183921961099571
+    },
+    "previous_10000_faithful": {
+      "models": 1,
+      "rmse_m": 3.3300609637560945,
+      "sim3_scale": 1.4083244811067313
+    }
+  },
+  "schema": "visloc_colmap_port_init_relaxation_v1"
+}
