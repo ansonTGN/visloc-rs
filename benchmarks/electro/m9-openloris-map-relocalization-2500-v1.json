@@ -1,0 +1,93 @@
+{
+  "E1_self_full_map": {
+    "failures": {},
+    "inliers": {
+      "median": 115.0,
+      "min": 0
+    },
+    "localization_rate_0p5m_2deg": 0.992,
+    "map_dir": "/tmp/opencode/loc-export-2500-none/map",
+    "missing_reference": 0,
+    "queries": 625,
+    "query_dir": "/tmp/opencode/loc-queries-cam1",
+    "reprojection_px": {
+      "median": 1.083886359890772,
+      "p95": 2.0015350618301557
+    },
+    "rotation_error_deg": {
+      "max": 161.11240613809687,
+      "mean": 0.4399760333359377,
+      "median": 0.07211188007538924,
+      "p95": 0.4292628335324574
+    },
+    "schema": "visloc_openloris_map_relocalization_eval_v1",
+    "scored": 625,
+    "success_rate": 1.0,
+    "successes": 625,
+    "translation_error_m": {
+      "max": 13.702399858215204,
+      "mean": 0.037284593060660176,
+      "median": 0.003071433288449479,
+      "p95": 0.03610772300570841
+    }
+  },
+  "E2_heldout_even_map": {
+    "failures": {},
+    "inliers": {
+      "median": 125.0,
+      "min": 0
+    },
+    "localization_rate_0p5m_2deg": 0.992,
+    "map_dir": "/tmp/opencode/loc-export-2500-even/map",
+    "missing_reference": 0,
+    "queries": 625,
+    "query_dir": "/tmp/opencode/loc-queries-cam1",
+    "reprojection_px": {
+      "median": 1.0533901408304052,
+      "p95": 1.9756176825215264
+    },
+    "rotation_error_deg": {
+      "max": 86.36185824528636,
+      "mean": 0.5450264558664544,
+      "median": 0.073464555473015,
+      "p95": 0.5019856492410089
+    },
+    "schema": "visloc_openloris_map_relocalization_eval_v1",
+    "scored": 625,
+    "success_rate": 1.0,
+    "successes": 625,
+    "translation_error_m": {
+      "max": 8.971637212021525,
+      "mean": 0.04223021847732881,
+      "median": 0.002832207252559967,
+      "p95": 0.03754911771779734
+    }
+  },
+  "caveats": [
+    "E2 is an approximate held-out split: landmark positions still come from the full model (only the map images/observations and descriptors are map-only). A fully clean variant would rebuild the map with the mapper on even frames only (E3).",
+    "Queries are cam1 only; the example takes a single --camera-id.",
+    "A handful of queries (5/625) localize to a wrong pose (max ~9-14 m / 86-161 deg), presumably perceptual aliasing in the corridor; median/p95 are unaffected.",
+    "The reference pose is the mapper's own pose, so this measures recovery of the map pose, not absolute GT accuracy."
+  ],
+  "date": "2026-09-17",
+  "map": {
+    "database": "/home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1/colmap-prefix-parity-v1/tier-2500/colmap/database.db",
+    "descriptors": "SIFT 128-dim uint8 from the COLMAP DB, one representative map observation per landmark",
+    "landmarks": 23276,
+    "source_model": "/home/sasaki/datasets/openloris/m9-learned-retrieval-models-v1/colmap-port-c2-v1/tier-2500-gauge6-v1/model/model/0"
+  },
+  "queries": {
+    "count": 625,
+    "reference": "the image's world_to_camera in the full tier-2500 mapper model (GT-free self-consistency)",
+    "selection": "cam1 images of odd frames of tier-2500 (held out under --held-out-parity even)"
+  },
+  "reproduction": "export landmark descriptors + even/odd split, build examples/localize_openloris_map, run scripts/eval_openloris_map_relocalization.py; see docs/openloris_map_relocalization_plan.md",
+  "schema": "visloc_openloris_map_relocalization_v1",
+  "summary": "Map-based single-image relocalization against a map built by the native COLMAP port (examples/colmap_incremental_mapper) works: 625/625 cam1 odd-frame queries localize with median ~3 mm / 0.07 deg error vs the mapper's own pose, 99.2% within 0.5 m / 2 deg, both when the map contains the query frame (E1 self) and when it does not (E2 held-out even-frame map).",
+  "tooling": [
+    "scripts/export_openloris_localization_map.py",
+    "examples/localize_openloris_map.rs",
+    "scripts/eval_openloris_map_relocalization.py",
+    "docs/openloris_map_relocalization_plan.md"
+  ]
+}
