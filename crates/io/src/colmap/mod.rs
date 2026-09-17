@@ -1139,6 +1139,13 @@ fn camera_model_to_colmap_name(model: &CameraModel) -> &str {
         CameraModel::SimpleRadial => "SIMPLE_RADIAL",
         CameraModel::Radial => "RADIAL",
         CameraModel::OpenCv => "OPENCV",
+        CameraModel::OpenCvFisheye => "OPENCV_FISHEYE",
+        CameraModel::SimpleRadialFisheye => "SIMPLE_RADIAL_FISHEYE",
+        CameraModel::RadialFisheye => "RADIAL_FISHEYE",
+        CameraModel::Fov => "FOV",
+        // Double Sphere is not a COLMAP model; the writers reject it through
+        // `colmap_id_from_camera_model` before this name is ever emitted.
+        CameraModel::DoubleSphere => "DOUBLE_SPHERE",
         CameraModel::Unknown(name) => name.as_str(),
     }
 }
@@ -1182,6 +1189,15 @@ fn colmap_id_from_camera_model(model: &CameraModel) -> Result<i32, ColmapError> 
         CameraModel::SimpleRadial => 2,
         CameraModel::Radial => 3,
         CameraModel::OpenCv => 4,
+        CameraModel::OpenCvFisheye => 5,
+        CameraModel::Fov => 7,
+        CameraModel::SimpleRadialFisheye => 8,
+        CameraModel::RadialFisheye => 9,
+        CameraModel::DoubleSphere => {
+            return Err(ColmapError::InvalidExportInput(
+                "Double Sphere is not a COLMAP camera model".to_owned(),
+            ));
+        }
         CameraModel::Unknown(name) => match name.as_str() {
             "OPENCV_FISHEYE" => 5,
             "FULL_OPENCV" => 6,
@@ -1205,11 +1221,11 @@ fn camera_model_from_colmap_id(model_id: i32) -> Result<(CameraModel, usize), Co
         2 => Ok((CameraModel::SimpleRadial, 4)),
         3 => Ok((CameraModel::Radial, 5)),
         4 => Ok((CameraModel::OpenCv, 8)),
-        5 => Ok((CameraModel::Unknown("OPENCV_FISHEYE".to_owned()), 8)),
+        5 => Ok((CameraModel::OpenCvFisheye, 8)),
         6 => Ok((CameraModel::Unknown("FULL_OPENCV".to_owned()), 12)),
-        7 => Ok((CameraModel::Unknown("FOV".to_owned()), 5)),
-        8 => Ok((CameraModel::Unknown("SIMPLE_RADIAL_FISHEYE".to_owned()), 4)),
-        9 => Ok((CameraModel::Unknown("RADIAL_FISHEYE".to_owned()), 5)),
+        7 => Ok((CameraModel::Fov, 5)),
+        8 => Ok((CameraModel::SimpleRadialFisheye, 4)),
+        9 => Ok((CameraModel::RadialFisheye, 5)),
         10 => Ok((CameraModel::Unknown("THIN_PRISM_FISHEYE".to_owned()), 12)),
         other => Err(ColmapError::InvalidBinary {
             file: "cameras.bin",
@@ -1222,6 +1238,27 @@ fn camera_model_from_colmap_id(model_id: i32) -> Result<(CameraModel, usize), Co
 #[allow(clippy::items_after_test_module)]
 mod multi_camera_writer_tests {
     use super::*;
+
+    #[test]
+    fn fisheye_camera_models_round_trip_through_colmap_ids() {
+        for (model, id, parameter_count) in [
+            (CameraModel::OpenCvFisheye, 5, 8),
+            (CameraModel::Fov, 7, 5),
+            (CameraModel::SimpleRadialFisheye, 8, 4),
+            (CameraModel::RadialFisheye, 9, 5),
+        ] {
+            assert_eq!(colmap_id_from_camera_model(&model).unwrap(), id);
+            let (decoded, count) = camera_model_from_colmap_id(id).unwrap();
+            assert_eq!(decoded, model);
+            assert_eq!(count, parameter_count);
+            assert_eq!(
+                camera_model_to_colmap_name(&model),
+                decoded.colmap_name().unwrap()
+            );
+        }
+        // Double Sphere is not a COLMAP model.
+        assert!(colmap_id_from_camera_model(&CameraModel::DoubleSphere).is_err());
+    }
 
     #[test]
     fn reconstruction_writer_preserves_per_image_camera_ids() {

@@ -1488,6 +1488,11 @@ fn camera_model_name(model: &CameraModel) -> Result<&'static str, String> {
         CameraModel::SimpleRadial => Ok("SIMPLE_RADIAL"),
         CameraModel::Radial => Ok("RADIAL"),
         CameraModel::OpenCv => Ok("OPENCV"),
+        CameraModel::OpenCvFisheye => Ok("OPENCV_FISHEYE"),
+        CameraModel::SimpleRadialFisheye => Ok("SIMPLE_RADIAL_FISHEYE"),
+        CameraModel::RadialFisheye => Ok("RADIAL_FISHEYE"),
+        CameraModel::Fov => Ok("FOV"),
+        CameraModel::DoubleSphere => Err("Double Sphere is not a COLMAP model".to_owned()),
         CameraModel::Unknown(name) => Err(format!(
             "oracle fixture cannot encode unknown camera model {name:?}"
         )),
