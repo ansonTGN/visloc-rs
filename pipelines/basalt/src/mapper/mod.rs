@@ -2884,56 +2884,11 @@ pub fn extract_nonlinear_factors(
     };
     let mut relative_pose = Vec::new();
     for other_id in kfs {
-        if other_id == kf_id {
-            continue;
+        if let Some(factor) = relative_pose_factor(
+            data, kf_id, kf_pose, kf_start, other_id, &cov_old, asize, &config,
+        )? {
+            relative_pose.push(factor);
         }
-        let Some(other_pose) = pose_for_id(data, other_id) else {
-            continue;
-        };
-        // The packet's `kfs_all` is the window's keyframe set, but its
-        // `aom_order` covers only the AOM problem, which is a subset of the
-        // window (observed once `vio_max_states`/`vio_max_kfs` grow past the
-        // upstream defaults: a recent keyframe can host no active landmark and
-        // therefore have no reduced-system columns here).  A keyframe with no
-        // AOM block cannot form a relative-pose factor, so skip it instead of
-        // aborting the whole recovery.
-        let Some(other_start) = data
-            .aom_order
-            .iter()
-            .find(|block| block.frame_id == other_id)
-            .map(|block| block.offset)
-        else {
-            continue;
-        };
-        if other_start + POSE_DOF > asize {
-            return Err(NfrExtractionError::InvalidMatrix);
-        }
-        let pose_o = pose_value(other_pose);
-        let measurement = pose_compose(pose_inverse(kf), pose_o);
-        let (_residual, d_i, d_j) = rel_pose_error(pose_array(measurement), kf_pose, other_pose);
-        let mut j = DMatrix::zeros(POSE_DOF, asize);
-        for row in 0..POSE_DOF {
-            for col in 0..POSE_DOF {
-                j[(row, kf_start + col)] = d_i[row][col];
-                j[(row, other_start + col)] = d_j[row][col];
-            }
-        }
-        let covariance = &j * &cov_old * j.transpose();
-        let information = covariance
-            .try_inverse()
-            .ok_or(NfrExtractionError::SingularCovariance)?;
-        if information.iter().any(|x| !x.is_finite()) {
-            return Err(NfrExtractionError::NonFinite);
-        }
-        let q = measurement.rotation.quaternion();
-        relative_pose.push(RelativePoseFactor {
-            from: kf_id,
-            to: other_id,
-            translation: measurement.translation.into(),
-            rotation: [q.w, q.i, q.j, q.k],
-            information: row_major_values(&information),
-            weight: config.relative_pose_weight,
-        });
     }
     Ok(MapperFactors {
         provenance_version: data.provenance_version.clone(),
@@ -2941,6 +2896,72 @@ pub fn extract_nonlinear_factors(
         roll_pitch,
         ba_covisibility: Vec::new(),
     })
+}
+
+/// Build the relative-pose factor between the marginalization keyframe
+/// `kf_id` and `other_id` from the reduced covariance `cov_old`.
+///
+/// Returns `Ok(None)` when `other_id` cannot contribute a factor: it is the
+/// keyframe itself, has no pose, or has no block in the packet's `aom_order`.
+/// The last case is the one a larger VIO window exposes -- the AOM problem is
+/// a strict subset of the window (`kfs_all`), so a recent keyframe can host no
+/// active landmark and have no reduced-system columns.  Skipping it keeps the
+/// rest of the recovery alive instead of aborting with `MissingAomBlock`.
+#[allow(clippy::too_many_arguments)]
+fn relative_pose_factor(
+    data: &MargData,
+    kf_id: u64,
+    kf_pose: [f64; 7],
+    kf_start: usize,
+    other_id: u64,
+    cov_old: &DMatrix<f64>,
+    asize: usize,
+    config: &MapperConfig,
+) -> Result<Option<RelativePoseFactor>, NfrExtractionError> {
+    if other_id == kf_id {
+        return Ok(None);
+    }
+    let Some(other_pose) = pose_for_id(data, other_id) else {
+        return Ok(None);
+    };
+    let Some(other_start) = data
+        .aom_order
+        .iter()
+        .find(|block| block.frame_id == other_id)
+        .map(|block| block.offset)
+    else {
+        return Ok(None);
+    };
+    if other_start + POSE_DOF > asize {
+        return Err(NfrExtractionError::InvalidMatrix);
+    }
+    let kf = pose_value(kf_pose);
+    let pose_o = pose_value(other_pose);
+    let measurement = pose_compose(pose_inverse(kf), pose_o);
+    let (_residual, d_i, d_j) = rel_pose_error(pose_array(measurement), kf_pose, other_pose);
+    let mut j = DMatrix::zeros(POSE_DOF, asize);
+    for row in 0..POSE_DOF {
+        for col in 0..POSE_DOF {
+            j[(row, kf_start + col)] = d_i[row][col];
+            j[(row, other_start + col)] = d_j[row][col];
+        }
+    }
+    let covariance = &j * cov_old * j.transpose();
+    let information = covariance
+        .try_inverse()
+        .ok_or(NfrExtractionError::SingularCovariance)?;
+    if information.iter().any(|x| !x.is_finite()) {
+        return Err(NfrExtractionError::NonFinite);
+    }
+    let q = measurement.rotation.quaternion();
+    Ok(Some(RelativePoseFactor {
+        from: kf_id,
+        to: other_id,
+        translation: measurement.translation.into(),
+        rotation: [q.w, q.i, q.j, q.k],
+        information: row_major_values(&information),
+        weight: config.relative_pose_weight,
+    }))
 }
 
 /// Process a clone of input MargData and recover factors in one operation.
