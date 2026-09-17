@@ -1,0 +1,20 @@
+{
+  "artifacts": {
+    "forced_init_attempt": "colmap-port-c2-v1/tier-10000-forced-init-colmap-v1",
+    "snapshot": "colmap-port-c2-v1/tier-10000-boundary-snapshot-v1/boundary-snapshot"
+  },
+  "conclusion": "The 10k one-model outcome is a global growth/initialization divergence, not a boundary triangulation issue: the port's initial pair and subsequent registration order differ fundamentally from COLMAP's, producing one connected component. This supersedes the boundary-specific triangulation hypothesis (PR #164/#165/#171).",
+  "date": "2026-09-17",
+  "findings": [
+    "The port's registration order diverges drastically from COLMAP's: the port registers frame 4497 at num_reg_frames=4995 (near the end; snapshot points3d=134711), whereas COLMAP's model0 registers image #9497 at num_reg_frames=4493.",
+    "At num_reg_frames ~4488-4491 the port's boundary frames 4493-4505 all report num_visible_points3d=0, exactly like COLMAP's model0 end state. So the port's local frontier also stalls at the boundary; it then continues registering other (far-side) frames and eventually covers all 5000 frames in a single component.",
+    "The port's initial pair is frames 388/420 (cam1) after an earlier trial pair 3181/3213; COLMAP's model0 initial pair is image #5446/#5463 = rig/camera2 names at t=18.390/18.923 = flat cam2_000893/cam2_000925 = frames 446/462 (cam2). Forcing the port to use the COLMAP pair (port image ids 5446/5462 or cam1 446/462) is rejected: initialize_reconstruction returns NoInitialPair and the run keeps 0 models."
+  ],
+  "method": "Added an env-gated boundary snapshot (VISLOC_SNAPSHOT_AFTER_FRAME=4497 + VISLOC_SNAPSHOT_DIR) and reran 10k with VISLOC_DEBUG_BOUNDARY_FRAMES=4493..4505, MIN_REG=4488.",
+  "next": [
+    "Compare FindGoodInitialPair auto selection (order, gates, relaxation) against COLMAP.",
+    "Investigate why COLMAP's own model0 initial pair (frames 446/462 cam2) is rejected by the port.",
+    "Compare the candidate ranking/order after the local frontier stalls (why the port can still reach far-side frames in the same model)."
+  ],
+  "schema": "visloc_colmap_port_10k_growth_order_v1"
+}
