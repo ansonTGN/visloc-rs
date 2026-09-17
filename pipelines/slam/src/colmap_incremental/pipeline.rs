@@ -46,7 +46,7 @@ use super::database_cache::DatabaseCache;
 use super::incremental_triangulator::Options as TriangulatorOptions;
 use super::mapper::{IncrementalMapper, Options as MapperOptions};
 use super::reconstruction::Reconstruction;
-use super::types::ImageT;
+use super::types::{FrameT, ImageT};
 
 /// Port of `IncrementalPipelineOptions`' control-relevant subset (`.h:47-215`).
 #[derive(Debug, Clone, PartialEq)]
@@ -322,6 +322,32 @@ fn reconstruct_sub_model(
                 iterative_global_refinement(options, mapper_options, mapper, db, recon);
                 ba_prev_num_points = recon.num_points3d();
                 ba_prev_num_reg_frames = recon.num_reg_frames();
+            }
+
+            // Diagnostic hook (10k boundary investigation): writing the
+            // reconstruction immediately after a chosen frame is registered
+            // lets us diff the frontier model state against COLMAP's control
+            // model without rerunning COLMAP.
+            if let (Some(target), Some(dir)) = (
+                std::env::var("VISLOC_SNAPSHOT_AFTER_FRAME")
+                    .ok()
+                    .and_then(|spec| spec.parse::<FrameT>().ok()),
+                std::env::var_os("VISLOC_SNAPSHOT_DIR"),
+            ) {
+                let image_id = registered_image_id.unwrap();
+                if recon.image(image_id).frame_id == target {
+                    let dir = std::path::PathBuf::from(dir);
+                    let _ = std::fs::create_dir_all(&dir);
+                    let _ = recon.export_colmap_text(&dir);
+                    eprintln!(
+                        "SNAPSHOT frame={} n_reg_frames={} points3d={} dir={}",
+                        target,
+                        recon.num_reg_frames(),
+                        recon.num_points3d(),
+                        dir.display()
+                    );
+                    std::process::exit(0);
+                }
             }
         }
 

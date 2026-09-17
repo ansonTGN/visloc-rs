@@ -81,6 +81,25 @@ inlier>2でmulti-view LO（≤10反復、residual_sumタイブレーク）、`mi
   累積model状態をCOLMAP制御ログの`=> Image sees X / Y points`と突き合わせる。
 - 証跡 `benchmarks/electro/m9-openloris-colmap-port-faithful-triangulation-v1.json`。
 
+### 2026-09-17 追記: 10kの真因は初期ペア/登録順（境界triangulationではない）
+
+`VISLOC_SNAPSHOT_AFTER_FRAME`（指定frame登録直後にCOLMAP text modelを書き出して停止）＋
+`VISLOC_DEBUG_BOUNDARY_FRAMES`で再実行し判明:
+- **移植版はframe 4497をn_reg=4995（ほぼ最後）で登録**（snapshot: 134711点）。COLMAP model0は
+  #9497をn_reg=4493で登録。登録順が根本的に違う。
+- n_reg≈4488–4491で境界frames 4493–4505の`num_visible_points3d`は**すべて0**（COLMAP model0の
+  終端と一致）。移植版の局所frontierも境界で一旦停止するが、その後**別領域のframeを登録し続けて
+  全5000 frameを1成分に統合**する。
+- **初期ペアが違う**: 移植版はframes 388/420（cam1、先行試行3181/3213の後）。COLMAP model0は
+  image #5446/#5463 = `rig/camera2` t=18.390/18.923 = flat cam2_000893/cam2_000925 =
+  **frames 446/462（cam2）**。COLMAPのペアを移植版に強制（image 5446/5462 or cam1 446/462）すると
+  **NoInitialPairで0モデル**（移植版はCOLMAPの初期ペアで初期化できない）。
+- → 10kの1モデルは**初期化・成長順の大域的乖離**であり、境界triangulationではない
+  （PR #164/#165/#171の境界仮説を上位から置換）。
+- 次: `FindGoodInitialPair`の自動選択（順序・ゲート・緩和）をCOLMAPと比較、COLMAPの初期ペアが
+  移植版で拒否される理由、frontier停止後の候補ranking。
+- 証跡 `benchmarks/electro/m9-openloris-colmap-port-10k-growth-order-v1.json`。
+
 ### 2026-09-17 追記: 自作map × 地図ベースrelocalization（branch `feat/openloris-map-relocalization`）
 
 COLMAP port（`examples/colmap_incremental_mapper`）が出力した地図を、既存の
