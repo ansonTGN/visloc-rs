@@ -43,16 +43,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let map = read_colmap_text_model(&map_dir)?;
     let descriptor_store = read_landmark_descriptors_txt(&descriptors_path)?;
 
-    let camera_id: u64 = flags
+    let mut camera_ids: Vec<u64> = map.cameras.keys().copied().collect();
+    camera_ids.sort_unstable();
+    let camera_cam1: u64 = flags
         .get("camera-id")
         .and_then(|v| v.parse::<u64>().ok())
-        .or_else(|| map.cameras.keys().copied().min())
+        .or_else(|| camera_ids.first().copied())
         .ok_or("map contains no cameras")?;
-    let camera = map
-        .cameras
-        .get(&camera_id)
-        .ok_or_else(|| format!("map has no camera id {camera_id}"))?
-        .clone();
+    // Default the second sensor to the largest camera id different from cam1
+    // (OpenLORIS rig camera 2); a query whose flat name starts with `cam2`
+    // uses it. `--camera-id` still sets the cam1 camera explicitly.
+    let camera_cam2: u64 = flags
+        .get("camera-id-cam2")
+        .and_then(|v| v.parse::<u64>().ok())
+        .or_else(|| {
+            camera_ids
+                .iter()
+                .rev()
+                .copied()
+                .find(|id| *id != camera_cam1)
+        })
+        .unwrap_or(camera_cam1);
+    let camera_for = |name: &str| {
+        let id = if name.starts_with("cam2") {
+            camera_cam2
+        } else {
+            camera_cam1
+        };
+        map.cameras
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| format!("map has no camera id {id}"))
+    };
 
     let mut query_paths: Vec<PathBuf> = Vec::new();
     if let Some(single) = flags.get("query-features") {
@@ -70,8 +92,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("provide --query-features or --query-features-dir".into());
     }
 
-    let pipeline =
+    let mut pipeline =
         LocalizationPipeline::<BruteForceMatcher, AllLandmarksSelector, PnPRansac>::default();
+    // `LocalizationConfig::min_inliers` defaults to 0, so a degenerate pose
+    // with no inliers is reported as success; require a real floor unless the
+    // caller overrides it.
+    pipeline.config.min_inliers = flags
+        .get("min-inliers")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(8);
     let prefix = query_paths.len() > 1;
     for path in query_paths {
         let name = path
@@ -79,8 +108,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
         let features = read_query_features_txt(&path)?;
+        let camera = camera_for(&name)?;
         let query = QueryImage {
-            camera: camera.clone(),
+            camera,
             keypoints: features.keypoints,
             descriptors: features.descriptors,
         };

@@ -53,6 +53,13 @@ COLMAP port（`examples/colmap_incremental_mapper`）が出力した地図を、
   （exampleは単一`--camera-id`）。
 - 証跡 `benchmarks/electro/m9-openloris-map-relocalization-2500-v1.json`。
   ツールテスト `scripts/tests/test_openloris_map_relocalization.py`（6 test）。
+- 2026-09-17 追記（branch `feat/openloris-map-relocalization-cam2`）: **両カメラ対応＋
+  quality gate**。exampleがクエリのflat名prefix(cam1/cam2)でcameraを選択し、
+  `LocalizationConfig::min_inliers`（既定0）を`--min-inliers`（既定8）で設定。
+  これで0-inlierの退化poseが`success`扱いされる問題を解消。1250クエリ（両カメラ）:
+  E1成功99.12%（11 QualityGateFailed）、E2 98.96%（13）。成功例はE1 median 3.0mm/
+  max 0.16m・2.32°、E2 median 2.9mm/max 0.39m・2.28°。失敗は対応不足のクエリ。
+  証跡 `benchmarks/electro/m9-openloris-map-relocalization-2500-v2.json`。
 
 ### 2026-09-16 追記: web(WASM+WebGPU) in-browser SfM は park（設計・実証のみ）
 
