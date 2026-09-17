@@ -2,6 +2,25 @@
 
 ## 現在の状態（以下の過去ログより優先）
 
+### 2026-09-17 追記: 10k境界の1-model統合の根本原因をtriangulation差に特定
+
+A案（COLMAP同点計装＋snapshot）は**snapshotが出力されず**（`--Mapper.snapshot_frames_freq`は
+初期2 frame後に評価されるためfreq=4494はNumRegFrames>=4496が必要でmodel0=4494に届かない
+＝off-by-2。次回はfreq≤model0_frames-2）。ただし**既存controlのmodel0
+(`corridor1-1-m8-colmap/tier-10000-rig-v3/models-text/0`)が同じmodel0最終状態**なので再実行
+不要で比較できた。
+
+- COLMAP model0（4494 frame/8988 image/103532点）の境界画像の可視点は
+  **frames 4495–4498の全image（cam1/cam2）で0**（frame 4493の2 imageのみ11/10）。
+- 移植版はn_reg=4494で唯一の候補image 9497（frame 4497）をvisible≥8で登録し4495+を開く。
+- 境界を跨ぐ検証ペアは10本（各8–12 matches、COLMAPと同一グラフ）、triangulatorオプション・
+  候補ゲート・可視点カウント・model分割ロジックはすべてCOLMAPと一致。
+- → **移植版がCOLMAPの作らない境界の弱い対応をtriangulateしている**のが直接原因。
+  残る謎はtriangulator/track管理のアルゴリズム差（2-view/低パララックスの境界対応を点化
+  するかどうか）。次は境界の10ペアで移植版がどの点を作るか（角度条件）を計装しCOLMAPと
+  比較する。
+- 証跡 `benchmarks/electro/m9-openloris-colmap-port-10k-boundary-rootcause-v1.json`。
+
 ### 2026-09-17 追記: 自作map × 地図ベースrelocalization（branch `feat/openloris-map-relocalization`）
 
 COLMAP port（`examples/colmap_incremental_mapper`）が出力した地図を、既存の
