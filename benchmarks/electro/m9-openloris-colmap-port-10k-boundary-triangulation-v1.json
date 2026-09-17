@@ -1,0 +1,24 @@
+{
+  "artifacts": {
+    "colmap_model0": "corridor1-1-m8-colmap/tier-10000-rig-v3/models-text/0",
+    "port_model": "colmap-port-c2-v1/tier-10000-ceres-gauge6-v1/model/model/0"
+  },
+  "conclusion": "The 10k one-model merge is caused by the port's non-faithful EstimateTriangulation producing cross-boundary points COLMAP does not. Graph, triangulator Options, candidate gates, visible-point bookkeeping and split logic are all identical. Next: port COLMAP's TriangulateTrack/EstimateTriangulation (LORANSAC + CombinationSampler + TriangulationEstimator semantics) faithfully, gate on 2.5k non-regression, then 10k.",
+  "date": "2026-09-17",
+  "findings": {
+    "boundary_verified_pairs": "10 weak pairs, 8-12 matches, identical graph",
+    "colmap_model0_cross_boundary_points": 0,
+    "example": "point 106194 track frames 4476..4502 (incl. 4495,4496,4497,4498,4500); point 106598 frames {4497,4495,4496,4499,4500,4498,4502,4505,4493,4489,4501,4494,4492}",
+    "observed_pair_angles_deg": "0.63, 0.65, 1.10, 1.11, 1.26, 1.83, 1.93, 2.19, 2.23, 2.25, 2.40, 4.75, 4.90, 5.17, 5.90 (several below the 1.5 deg min_angle at the final point)",
+    "port_cross_boundary_points": 21
+  },
+  "method": "Extracted, from the port's existing 10k model (tier-10000-ceres-gauge6-v1/model/model/0), the points whose track spans frames <=4493 and >=4495, and compared with COLMAP's model0 (0 such points). No rerun.",
+  "schema": "visloc_colmap_mapper_10k_boundary_triangulation_v1",
+  "status": "bridging_points_extracted_root_cause_is_triangulator",
+  "tier": 10000,
+  "triangulator_deviation": {
+    "colmap": "Create -> TriangulateTrack -> EstimateTriangulation = LORANSAC over TriangulationEstimator with a CombinationSampler (exhaustive pair combinations for <=15 views) and iterative local optimization (estimators/triangulation.cc).",
+    "effect": "The port turns weak cross-boundary correspondences into long tracks (via create/continue/complete) that COLMAP's model0 never forms, so image 9497 reaches >=8 visible points and frame 4497 registers inside model 0, merging the two components that COLMAP keeps separate.",
+    "port": "estimate_triangulation = deterministic best-pair by inlier count over an evenly-strided, <=40-correspondence hypothesis subset, with a single refit; documented in incremental_triangulator.rs as a non-faithful replacement (no LORANSAC/CombinationSampler)."
+  }
+}

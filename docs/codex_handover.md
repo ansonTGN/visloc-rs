@@ -16,10 +16,20 @@ A案（COLMAP同点計装＋snapshot）は**snapshotが出力されず**（`--Ma
 - 境界を跨ぐ検証ペアは10本（各8–12 matches、COLMAPと同一グラフ）、triangulatorオプション・
   候補ゲート・可視点カウント・model分割ロジックはすべてCOLMAPと一致。
 - → **移植版がCOLMAPの作らない境界の弱い対応をtriangulateしている**のが直接原因。
-  残る謎はtriangulator/track管理のアルゴリズム差（2-view/低パララックスの境界対応を点化
-  するかどうか）。次は境界の10ペアで移植版がどの点を作るか（角度条件）を計装しCOLMAPと
-  比較する。
-- 証跡 `benchmarks/electro/m9-openloris-colmap-port-10k-boundary-rootcause-v1.json`。
+- **既存modelから橋渡し点を直接抽出（再実行不要）**: 移植版10k modelにはframes≤4493と
+  ≥4495を跨ぐ点が**21個**（COLMAP model0は**0**）。trackは13–27 imageの長trackで、
+  例 point 106194 = frames 4476–4502（4495–4498,4500含む）。最終点での先頭2画像間角度は
+  0.63°/0.65°/1.10°/1.11°/1.26°/1.83°…と**1.5°未満も多い**（=弱い対応が点化）。
+- **原因はtriangulatorの非忠実実装**: COLMAPの`Create`→`TriangulateTrack`→
+  `EstimateTriangulation`は**LORANSAC（`CombinationSampler`で≤15 viewは全ペア組合せ）
+  ＋`TriangulationEstimator`の反復LO**。移植版`estimate_triangulation`は
+  **決定的best-pair（inlier数最大）＋≤40点の等間隔strided部分集合＋1回refit**（コード内に
+  非忠実と明記）で、弱い境界対応を長track化して9497を可視≥8にしframe 4497をmodel0内で
+  登録する。
+- 次は`TriangulateTrack`/`EstimateTriangulation`（LORANSAC+CombinationSampler+
+  TriangulationEstimator）を忠実移植→2.5k非回帰ゲート→10k。
+- 証跡 `benchmarks/electro/m9-openloris-colmap-port-10k-boundary-rootcause-v1.json`、
+  `...-10k-boundary-triangulation-v1.json`。
 
 ### 2026-09-17 追記: 自作map × 地図ベースrelocalization（branch `feat/openloris-map-relocalization`）
 
