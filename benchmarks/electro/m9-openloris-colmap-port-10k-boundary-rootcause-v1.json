@@ -1,0 +1,41 @@
+{
+  "artifacts": {
+    "colmap_control_model0": "/home/sasaki/datasets/openloris/corridor1-1-m8-colmap/tier-10000-rig-v3/models-text/0",
+    "port_boundary_log": "colmap-port-c2-v1/tier-10000-boundary-debug-v1/stderr.log",
+    "stopped_run": "colmap/tier-10000-colmap-snapshot-v1 (2 models produced, no snapshot)"
+  },
+  "boundary_graph": {
+    "identical_to_colmap": true,
+    "matches_per_pair": "8-12",
+    "verified_pairs_crossing_frames_le_4493_and_ge_4495": 10
+  },
+  "colmap_model0": {
+    "points": 103532,
+    "registered_frames": 4494,
+    "registered_images": 8988,
+    "visible_points_on_boundary_images": "0 for every image of frames 4495-4498 (cam1 and cam2); frame 4493's two images carry 11 and 10"
+  },
+  "conclusion": "COLMAP's model0 has zero visible points on the boundary frames while the port's model0 has >=8, so the port triangulates the weak cross-boundary correspondences that COLMAP does not. With the graph, triangulator options and visible-point bookkeeping all identical, the divergence is in the triangulation / track-management algorithm (which two-view or low-parallax boundary correspondences get turned into 3D points), not in the model-split logic or configuration.",
+  "config_parity": {
+    "abs_pose_min_inlier_ratio": 0.25,
+    "abs_pose_min_num_inliers": 8,
+    "image_selection_method": "MIN_UNCERTAINTY",
+    "incremental_triangulator_options": "all defaults identical (max_transitivity=1, create/continue angle 2.0, merge/complete reproj 4.0, min_angle 1.5, ignore_two_view_tracks=true)",
+    "max_reg_trials": 3,
+    "observation_manager_NumVisiblePoints3D": "identical to COLMAP Increment/DecrementCorrespondenceHasPoint3D"
+  },
+  "date": "2026-09-17",
+  "method": "Compare the port's boundary registration state (from VISLOC_DEBUG_BOUNDARY instrumentation) with COLMAP's model0 final state. The intended fresh COLMAP snapshot run did not trigger (snapshot_frames_freq is evaluated after the 2 initial frames, so freq=4494 needs NumRegFrames>=4496 and model0 has 4494); the equivalently final COLMAP model0 from the control (corridor1-1-m8-colmap/tier-10000-rig-v3/models-text/0) was used instead, so no rerun was needed.",
+  "next": "Diff the port's IncrementalTriangulator (TriangulateImage/Retriangulate/Track completion) against COLMAP 64805cb on the boundary pairs, e.g. instrument which of the 10 cross-boundary pairs produce points and at what triangulation angle; the port likely accepts near-degenerate/few-match boundary triangulations COLMAP rejects.",
+  "port_model0": {
+    "boundary_event": "at n_reg=4494 the only candidate is image 9497 (frame 4497), which is registered with visible>=8; frame 4495/4496/4498 then become candidates (visible 9/8/8) and the 4495-4999 region opens",
+    "frame_4494": "registered last at rank 4997",
+    "models": 1,
+    "registered_images": 10000
+  },
+  "question": "Why does the port merge COLMAP's two 10k components into one model (causing the 10k ATE collapse)?",
+  "schema": "visloc_colmap_mapper_10k_boundary_rootcause_v1",
+  "side_note": "To get a COLMAP frontier snapshot in future, pass --Mapper.snapshot_frames_freq <= model0_frames - 2 (initial pair counts toward snapshot_prev_num_reg_frames).",
+  "status": "root_cause_localized_to_triangulation_algorithm",
+  "tier": 10000
+}
