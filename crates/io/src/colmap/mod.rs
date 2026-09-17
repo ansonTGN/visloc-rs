@@ -1139,6 +1139,7 @@ fn camera_model_to_colmap_name(model: &CameraModel) -> &str {
         CameraModel::SimpleRadial => "SIMPLE_RADIAL",
         CameraModel::Radial => "RADIAL",
         CameraModel::OpenCv => "OPENCV",
+        CameraModel::FullOpenCv => "FULL_OPENCV",
         CameraModel::OpenCvFisheye => "OPENCV_FISHEYE",
         CameraModel::SimpleRadialFisheye => "SIMPLE_RADIAL_FISHEYE",
         CameraModel::RadialFisheye => "RADIAL_FISHEYE",
@@ -1189,6 +1190,7 @@ fn colmap_id_from_camera_model(model: &CameraModel) -> Result<i32, ColmapError> 
         CameraModel::SimpleRadial => 2,
         CameraModel::Radial => 3,
         CameraModel::OpenCv => 4,
+        CameraModel::FullOpenCv => 6,
         CameraModel::OpenCvFisheye => 5,
         CameraModel::Fov => 7,
         CameraModel::SimpleRadialFisheye => 8,
@@ -1222,7 +1224,7 @@ fn camera_model_from_colmap_id(model_id: i32) -> Result<(CameraModel, usize), Co
         3 => Ok((CameraModel::Radial, 5)),
         4 => Ok((CameraModel::OpenCv, 8)),
         5 => Ok((CameraModel::OpenCvFisheye, 8)),
-        6 => Ok((CameraModel::Unknown("FULL_OPENCV".to_owned()), 12)),
+        6 => Ok((CameraModel::FullOpenCv, 12)),
         7 => Ok((CameraModel::Fov, 5)),
         8 => Ok((CameraModel::SimpleRadialFisheye, 4)),
         9 => Ok((CameraModel::RadialFisheye, 5)),
@@ -1243,6 +1245,7 @@ mod multi_camera_writer_tests {
     fn fisheye_camera_models_round_trip_through_colmap_ids() {
         for (model, id, parameter_count) in [
             (CameraModel::OpenCvFisheye, 5, 8),
+            (CameraModel::FullOpenCv, 6, 12),
             (CameraModel::Fov, 7, 5),
             (CameraModel::SimpleRadialFisheye, 8, 4),
             (CameraModel::RadialFisheye, 9, 5),

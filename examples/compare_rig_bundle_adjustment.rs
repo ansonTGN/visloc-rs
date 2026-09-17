@@ -1488,6 +1488,7 @@ fn camera_model_name(model: &CameraModel) -> Result<&'static str, String> {
         CameraModel::SimpleRadial => Ok("SIMPLE_RADIAL"),
         CameraModel::Radial => Ok("RADIAL"),
         CameraModel::OpenCv => Ok("OPENCV"),
+        CameraModel::FullOpenCv => Ok("FULL_OPENCV"),
         CameraModel::OpenCvFisheye => Ok("OPENCV_FISHEYE"),
         CameraModel::SimpleRadialFisheye => Ok("SIMPLE_RADIAL_FISHEYE"),
         CameraModel::RadialFisheye => Ok("RADIAL_FISHEYE"),

@@ -18,6 +18,8 @@ pub enum CameraModel {
     SimpleRadial,
     Radial,
     OpenCv,
+    /// OpenCV rational model: `[fx, fy, cx, cy, k1, k2, p1, p2, k3, k4, k5, k6]`.
+    FullOpenCv,
     /// OpenCV fisheye / Kannala-Brandt equidistant: `[fx, fy, cx, cy, k1, k2, k3, k4]`.
     OpenCvFisheye,
     /// Equidistant with one radial coefficient: `[f, cx, cy, k1]`.
@@ -39,6 +41,7 @@ impl CameraModel {
             "SIMPLE_RADIAL" => Self::SimpleRadial,
             "RADIAL" => Self::Radial,
             "OPENCV" => Self::OpenCv,
+            "FULL_OPENCV" => Self::FullOpenCv,
             "OPENCV_FISHEYE" => Self::OpenCvFisheye,
             "SIMPLE_RADIAL_FISHEYE" => Self::SimpleRadialFisheye,
             "RADIAL_FISHEYE" => Self::RadialFisheye,
@@ -56,6 +59,7 @@ impl CameraModel {
             Self::SimpleRadial => "SIMPLE_RADIAL",
             Self::Radial => "RADIAL",
             Self::OpenCv => "OPENCV",
+            Self::FullOpenCv => "FULL_OPENCV",
             Self::OpenCvFisheye => "OPENCV_FISHEYE",
             Self::SimpleRadialFisheye => "SIMPLE_RADIAL_FISHEYE",
             Self::RadialFisheye => "RADIAL_FISHEYE",
@@ -195,7 +199,7 @@ impl Camera {
 
     pub fn intrinsics(&self) -> Option<(f64, f64, f64, f64)> {
         match self.model {
-            CameraModel::Pinhole | CameraModel::OpenCv => Some((
+            CameraModel::Pinhole | CameraModel::OpenCv | CameraModel::FullOpenCv => Some((
                 *self.params.first()?,
                 *self.params.get(1)?,
                 *self.params.get(2)?,
@@ -242,6 +246,16 @@ impl Camera {
                 return None;
             }
             return Some(Point2::new(ray.x / ray.z, ray.y / ray.z));
+        }
+        if self.model == CameraModel::FullOpenCv {
+            let (fx, fy, cx, cy) = self.intrinsics()?;
+            let xd = (point.x - cx) / fx;
+            let yd = (point.y - cy) / fy;
+            return Some(normalize_full_opencv(
+                xd,
+                yd,
+                full_opencv_coeffs(&self.params),
+            ));
         }
         let (fx, fy, cx, cy) = self.intrinsics()?;
         let xd = (point.x - cx) / fx;
@@ -290,6 +304,17 @@ impl Camera {
                 let [fx, fy, cx, cy] = params4(&self.params)?;
                 let omega = *self.params.get(4)?;
                 project_fov(fx, fy, cx, cy, omega, point_camera)
+            }
+            CameraModel::FullOpenCv => {
+                let [fx, fy, cx, cy] = params4(&self.params)?;
+                project_full_opencv(
+                    fx,
+                    fy,
+                    cx,
+                    cy,
+                    full_opencv_coeffs(&self.params),
+                    point_camera,
+                )
             }
             _ => {
                 if point_camera.z <= 0.0 {
@@ -580,6 +605,67 @@ fn unproject_fov(
     normalize_ray(Vector3::new(scale * xd, scale * yd, 1.0))
 }
 
+/// `[k1, k2, p1, p2, k3, k4, k5, k6]` for the OpenCV rational model.
+fn full_opencv_coeffs(params: &[f64]) -> [f64; 8] {
+    let mut coeffs = [0.0_f64; 8];
+    for (slot, value) in coeffs.iter_mut().zip(params.iter().skip(4)) {
+        *slot = *value;
+    }
+    coeffs
+}
+
+fn project_full_opencv(
+    fx: f64,
+    fy: f64,
+    cx: f64,
+    cy: f64,
+    k: [f64; 8],
+    point: &Point3<f64>,
+) -> Option<Point2<f64>> {
+    if point.z <= EPS {
+        return None;
+    }
+    let x = point.x / point.z;
+    let y = point.y / point.z;
+    let r2 = x * x + y * y;
+    let r2_2 = r2 * r2;
+    let r2_3 = r2_2 * r2;
+    let numerator = 1.0 + k[0] * r2 + k[1] * r2_2 + k[4] * r2_3;
+    let denominator = 1.0 + k[5] * r2 + k[6] * r2_2 + k[7] * r2_3;
+    if denominator.abs() <= EPS {
+        return None;
+    }
+    let radial = numerator / denominator;
+    let xd = x * radial + 2.0 * k[2] * x * y + k[3] * (r2 + 2.0 * x * x);
+    let yd = y * radial + k[2] * (r2 + 2.0 * y * y) + 2.0 * k[3] * x * y;
+    finite_point(Point2::new(fx * xd + cx, fy * yd + cy))
+}
+
+fn normalize_full_opencv(xd: f64, yd: f64, k: [f64; 8]) -> Point2<f64> {
+    let (mut x, mut y) = (xd, yd);
+    for _ in 0..30 {
+        let r2 = x * x + y * y;
+        let r2_2 = r2 * r2;
+        let r2_3 = r2_2 * r2;
+        let numerator = 1.0 + k[0] * r2 + k[1] * r2_2 + k[4] * r2_3;
+        let denominator = 1.0 + k[5] * r2 + k[6] * r2_2 + k[7] * r2_3;
+        if denominator.abs() <= EPS {
+            break;
+        }
+        let radial = numerator / denominator;
+        let dx = 2.0 * k[2] * x * y + k[3] * (r2 + 2.0 * x * x);
+        let dy = k[2] * (r2 + 2.0 * y * y) + 2.0 * k[3] * x * y;
+        let nx = (xd - dx) / radial;
+        let ny = (yd - dy) / radial;
+        if (nx - x).abs() + (ny - y).abs() < 1.0e-13 {
+            return Point2::new(nx, ny);
+        }
+        x = nx;
+        y = ny;
+    }
+    Point2::new(x, y)
+}
+
 /// Fixed-point inverse of the radial-distortion map `(x, y) ↦ (x, y)·(1 + k1·r²
 /// + k2·r⁴)` on normalized coordinates. Converges in well under 20 steps for
 /// realistic lens distortion; mirrors `visloc_vision::distortion` (kept here so
@@ -691,6 +777,24 @@ mod tests {
         // though `normalize_pixel` cannot express them.
         let wide = camera.project(&Point3::new(1.5, -0.5, 0.2)).unwrap();
         assert!(camera.unit_ray_from_pixel(&wide).is_some());
+    }
+
+    #[test]
+    fn full_opencv_round_trips_and_names() {
+        let camera = Camera {
+            id: 5,
+            model: CameraModel::FullOpenCv,
+            width: 640,
+            height: 480,
+            params: vec![
+                500.0, 500.0, 320.0, 240.0, 0.05, -0.02, 0.001, -0.001, 0.01, 0.0, 0.0, 0.0,
+            ],
+        };
+        for point in [Point3::new(0.2, -0.1, 1.0), Point3::new(-0.4, 0.3, 1.5)] {
+            round_trip(&camera, point);
+        }
+        assert_eq!(camera.model.colmap_name(), Some("FULL_OPENCV"));
+        assert!(!camera.model.is_fisheye());
     }
 
     #[test]

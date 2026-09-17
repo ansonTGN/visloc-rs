@@ -28,14 +28,14 @@
 
 Text parsing maps the COLMAP camera model name to a `CameraModel`:
 
-- Pinhole family: `SIMPLE_PINHOLE`, `PINHOLE`, `SIMPLE_RADIAL`, `RADIAL`, `OPENCV`
+- Pinhole family: `SIMPLE_PINHOLE`, `PINHOLE`, `SIMPLE_RADIAL`, `RADIAL`, `OPENCV`, `FULL_OPENCV`
 - Fisheye family: `OPENCV_FISHEYE`, `SIMPLE_RADIAL_FISHEYE`, `RADIAL_FISHEYE`, `FOV`
-- `Unknown(String)` for other text model names (e.g. `FULL_OPENCV`, `THIN_PRISM_FISHEYE`)
+- `Unknown(String)` for other text model names (e.g. `THIN_PRISM_FISHEYE`)
 
 Binary parsing recognizes COLMAP camera model ids 0 through 10; ids 5
-(`OPENCV_FISHEYE`), 7 (`FOV`), 8 (`SIMPLE_RADIAL_FISHEYE`) and 9
-(`RADIAL_FISHEYE`) decode to their real `CameraModel` variants, and ids 6 and
-10 remain `Unknown`.
+(`OPENCV_FISHEYE`), 6 (`FULL_OPENCV`), 7 (`FOV`), 8 (`SIMPLE_RADIAL_FISHEYE`)
+and 9 (`RADIAL_FISHEYE`) decode to their real `CameraModel` variants, and id 10
+(`THIN_PRISM_FISHEYE`) remains `Unknown`.
 
 `Camera::intrinsics` reads the shared `[fx, fy, cx, cy]` layout (pinhole family,
 `OPENCV_FISHEYE`, `FOV`, `DoubleSphere`) or `[f, cx, cy]` (the radial-fisheye
