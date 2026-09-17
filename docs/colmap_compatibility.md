@@ -26,23 +26,32 @@
 
 ## Camera Models
 
-Text parsing preserves the COLMAP camera model name as one of:
+Text parsing maps the COLMAP camera model name to a `CameraModel`:
 
-- `SIMPLE_PINHOLE`
-- `PINHOLE`
-- `SIMPLE_RADIAL`
-- `RADIAL`
-- `OPENCV`
-- `Unknown(String)` for other text model names
+- Pinhole family: `SIMPLE_PINHOLE`, `PINHOLE`, `SIMPLE_RADIAL`, `RADIAL`, `OPENCV`, `FULL_OPENCV`
+- Fisheye family: `OPENCV_FISHEYE`, `SIMPLE_RADIAL_FISHEYE`, `RADIAL_FISHEYE`, `FOV`
+- `Unknown(String)` for other text model names (e.g. `THIN_PRISM_FISHEYE`)
 
-Binary parsing recognizes COLMAP camera model ids 0 through 10. Models that are not directly represented in `CameraModel` are stored as `Unknown(String)` with the corresponding COLMAP name.
+Binary parsing recognizes COLMAP camera model ids 0 through 10; ids 5
+(`OPENCV_FISHEYE`), 6 (`FULL_OPENCV`), 7 (`FOV`), 8 (`SIMPLE_RADIAL_FISHEYE`)
+and 9 (`RADIAL_FISHEYE`) decode to their real `CameraModel` variants, and id 10
+(`THIN_PRISM_FISHEYE`) remains `Unknown`.
 
-Current projection and normalization use the pinhole intrinsics subset:
+`Camera::intrinsics` reads the shared `[fx, fy, cx, cy]` layout (pinhole family,
+`OPENCV_FISHEYE`, `FOV`, `DoubleSphere`) or `[f, cx, cy]` (the radial-fisheye
+family). `Camera::project` / `normalize_pixel` / `unit_ray_from_pixel` dispatch
+on the model:
 
-- `PINHOLE` and `OPENCV`: `fx, fy, cx, cy`
-- `SIMPLE_PINHOLE`, `SIMPLE_RADIAL`, and `RADIAL`: `f, cx, cy`
+- pinhole family: pinhole projection plus the optional radial `(k1, k2)` term
+- `OPENCV_FISHEYE` / `SIMPLE_RADIAL_FISHEYE` / `RADIAL_FISHEYE`: Kannala-Brandt
+  equidistant, `theta_d = theta · (1 + k1·θ² + k2·θ⁴ + k3·θ⁶ + k4·θ⁸)`
+- `FOV`: Devernay's FOV model
+- `DoubleSphere`: the Double Sphere model (shared with the Basalt VI-SLAM path)
 
-Distortion parameters are preserved in `Camera.params`, but projection currently ignores distortion. For high-distortion cameras, callers should undistort features/images before localization or provide a custom camera/projection path in a future extension.
+`normalize_pixel` returns the `(x, y, 1)` form of the recovered ray, so it is
+only defined while the ray points forward; `unit_ray_from_pixel` returns the
+full unit ray and is the robust entry point for fisheye fields of view wider
+than 90°.
 
 ## Map Semantics
 
