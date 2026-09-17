@@ -1,0 +1,49 @@
+{
+  "change": "Faithful port of TriangulateTrack + EstimateTriangulation (LORANSAC + CombinationSampler + TriangulationEstimator multi-view LO) replacing the non-faithful estimate_triangulation (deterministic exhaustive-pair + single DLT refit + min_tri_angle*0.5 fallback).",
+  "conclusion": "The faithful triangulator does NOT resolve the 10k one-model merge: the port still registers all 5000 frames in a single component and the single-model scale collapse worsens (sim3 1.408 -> 1.536, ATE 3.33 -> 5.32). This refutes the boundary-rootcause triangulator hypothesis (PR #164/#165). At 2.5k the result remains non-regressed vs COLMAP (0.0712 vs COLMAP 0.0718, slightly above the previous non-faithful 0.0695), so the estimator itself is numerically sane.",
+  "date": "2026-09-17",
+  "next": [
+    "The frontier divergence is not the triangulator; investigate the port's FindNextImages / registration order and its accumulated model state at frame ~4497 vs COLMAP.",
+    "Consider instrumenting the port's find_next_images visible-point counts for the boundary frames against the COLMAP control log's 'Image sees X / Y points' trace."
+  ],
+  "references": {
+    "colmap_10000": {
+      "models": 2,
+      "rmse_m": 0.3843
+    },
+    "colmap_2500": {
+      "models": 1,
+      "rmse_m": 0.07183921961099571,
+      "sim3_scale": 1.026344318016754
+    },
+    "previous_10000_gauge6": {
+      "models": 1,
+      "rmse_m": 3.3300609637560945,
+      "sim3_scale": 1.4083244811067313
+    },
+    "previous_2500_gauge6": {
+      "models": 1,
+      "rmse_m": 0.06947800579466007,
+      "sim3_scale": 1.0250867923219216
+    }
+  },
+  "results": {
+    "10000": {
+      "max_m": 10.424834947386602,
+      "models": 1,
+      "p95_m": 8.82104174070323,
+      "points3d": 134084,
+      "registered_images": 10000,
+      "rmse_m": 5.324322193628789,
+      "sim3_scale": 1.5358217762536188
+    },
+    "2500": {
+      "models": 1,
+      "p95_m": 0.14763923266448714,
+      "registered_images": 2500,
+      "rmse_m": 0.07124944717967145,
+      "sim3_scale": 1.03227723867398
+    }
+  },
+  "schema": "visloc_colmap_port_faithful_triangulation_v1"
+}

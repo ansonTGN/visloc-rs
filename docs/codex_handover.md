@@ -65,6 +65,22 @@ A案（COLMAP同点計装＋snapshot）は**snapshotが出力されず**（`--Ma
 - 次はこの忠実移植→2.5k非回帰ゲート→10k。証跡
   `benchmarks/electro/m9-openloris-colmap-port-10k-boundary-frontier-v1.json`。
 
+### 2026-09-17 追記: 忠実triangulatorを実装 → 10kは未改善（triangulator仮説も棄却）
+
+`estimate_triangulation`をCOLMAPの`TriangulateTrack`/`EstimateTriangulation`へ忠実移植:
+`LORANSAC<TriangulationEstimator, TriangulationEstimator, InlierSupportMeasurer,
+CombinationSampler>`、`confidence=0.9999`/`min_inlier_ratio=0.02`/`max_num_trials=10000`/
+`dyn_num_trials_multiplier=3.0`、n≤15で`min_num_trials=C(n,2)`（lex順全ペア）、
+inlier>2でmulti-view LO（≤10反復、residual_sumタイブレーク）、`min_tri_angle`フル要件、
+非COLMAPの`min_tri_angle*0.5`フォールバック削除。
+- **2.5k: models=1, ATE 0.0712**（COLMAP 0.0718、旧非忠実0.0695）→ 非回帰（COLMAP同等）。
+- **10k: models=1, ATE 5.32, sim3 1.536, 134084点**（旧 3.33/1.408、COLMAP 0.384/2モデル）
+  → **未改善・悪化**。
+- → **triangulator非忠実は10k mergeの原因ではない**（PR #164/#165の結論を棄却）。
+- 次: 移植版`find_next_images`の境界可視点カウントと登録順、およびframe~4497での
+  累積model状態をCOLMAP制御ログの`=> Image sees X / Y points`と突き合わせる。
+- 証跡 `benchmarks/electro/m9-openloris-colmap-port-faithful-triangulation-v1.json`。
+
 ### 2026-09-17 追記: 自作map × 地図ベースrelocalization（branch `feat/openloris-map-relocalization`）
 
 COLMAP port（`examples/colmap_incremental_mapper`）が出力した地図を、既存の
