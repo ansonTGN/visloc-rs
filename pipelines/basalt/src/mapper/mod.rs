@@ -2890,13 +2890,20 @@ pub fn extract_nonlinear_factors(
         let Some(other_pose) = pose_for_id(data, other_id) else {
             continue;
         };
+        // The packet's `kfs_all` is the window's keyframe set, but its
+        // `aom_order` covers only the AOM problem, which is a subset of the
+        // window (observed once `vio_max_states`/`vio_max_kfs` grow past the
+        // upstream defaults: a recent keyframe can host no active landmark and
+        // therefore have no reduced-system columns here).  A keyframe with no
+        // AOM block cannot form a relative-pose factor, so skip it instead of
+        // aborting the whole recovery.
         let Some(other_start) = data
             .aom_order
             .iter()
             .find(|block| block.frame_id == other_id)
             .map(|block| block.offset)
         else {
-            return Err(NfrExtractionError::MissingAomBlock);
+            continue;
         };
         if other_start + POSE_DOF > asize {
             return Err(NfrExtractionError::InvalidMatrix);
