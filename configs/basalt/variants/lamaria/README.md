@@ -29,16 +29,23 @@ LaMAria VIO-only scores **49.65** on `R_11_5cp` and **12.75** on the 1.5 km
 `sequence_1_19` (18,352 frames). Enlarging the window is a config-only,
 parity-safe change:
 
-| sequence | default 3/7 | **10/30** |
-|---|---:|---:|
-| R_11_5cp CP Score | 49.65 (CP@1m 20 %) | **63.19** (CP@1m 60 %) |
-| R_11_5cp pGT R@1m | 16 % | **51.8 %** |
-| sequence_1_19 CP Score | 12.75 (CP@1m 7.1 %) | **27.09** (CP@1m 14.3 %) |
-| sequence_1_19 pGT R@5m | 5.4 % | **30.0 %** |
+| sequence (frames) | metric | default 3/7 | **10/30** |
+|---|---|---:|---:|
+| R_11_5cp (9.5k) | CP Score | 49.65 (CP@1m 20 %) | **63.19** (CP@1m 60 %) |
+| R_11_5cp | pGT R@1m / R@5m | 16 % / 100 % | **51.8 %** / 100 % |
+| sequence_1_19 (18k) | CP Score | 12.75 (CP@1m 7.1 %) | **27.09** (CP@1m 14.3 %) |
+| sequence_1_19 | pGT R@1m / R@5m | 0 % / 5.4 % | 4.6 % / **30.0 %** |
+| R_12_10cp (20k) | CP Score | **30.00** (CP@1m 0 %) | 28.55 (CP@1m 10 %) |
+| R_12_10cp | pGT R@1m / R@5m | 4.4 % / **66.9 %** | **7.6 %** / 62.7 % |
 
-On `R_11_5cp` the larger-window VIO alone beats the default-window offline
-mapper (57.66) and approaches microSLAM (mono, 64.5); the best published
-academic baseline is 27.7.
+The window helps strongly on `R_11_5cp` and `sequence_1_19` but is **neutral to
+slightly negative on `R_12_10cp`** (mean CP Score 30.80 → 39.61 over the three),
+and the per-sequence spread is dominated by the 5–15-control-point piecewise
+Score's high variance: a single control point moving from <5 cm to >10 m swings
+the Score by ~14 points, so configs must be ranked over several sequences (or
+with CP@1m / pGT recall alongside) rather than one. On `R_11_5cp` the
+larger-window VIO alone beats the default-window offline mapper (57.66) and
+approaches microSLAM (mono, 64.5); the best published academic baseline is 27.7.
 
 Global ATE keeps improving further at `vio_max_states = 15` / `vio_max_kfs =
 45` (sequence_1_19 SE3 13.60 → 11.91 m) but the official 14-control-point
