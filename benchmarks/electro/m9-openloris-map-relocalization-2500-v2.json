@@ -1,0 +1,85 @@
+{
+  "E1_self_full_map": {
+    "failures": {
+      "Some(QualityGateFailed)": 11
+    },
+    "inliers": {
+      "median": 123.0,
+      "min": 15
+    },
+    "localization_rate_0p5m_2deg": 0.9904,
+    "map_dir": "/tmp/opencode/loc-export-2500-none/map",
+    "missing_reference": 0,
+    "queries": 1250,
+    "query_dir": "/tmp/opencode/loc-export-2500-even/query_features",
+    "reprojection_px": {
+      "median": 1.079068161135582,
+      "p95": 1.986677190934029
+    },
+    "rotation_error_deg": {
+      "max": 2.3172553522121073,
+      "mean": 0.13217427210522875,
+      "median": 0.07211188007538924,
+      "p95": 0.4176813469487075
+    },
+    "schema": "visloc_openloris_map_relocalization_eval_v1",
+    "scored": 1239,
+    "success_rate": 0.9912,
+    "successes": 1239,
+    "translation_error_m": {
+      "max": 0.1604577279782227,
+      "mean": 0.008258631037372935,
+      "median": 0.002999641774003667,
+      "p95": 0.03144570195569086
+    }
+  },
+  "E2_heldout_even_map": {
+    "failures": {
+      "Some(QualityGateFailed)": 13
+    },
+    "inliers": {
+      "median": 130.0,
+      "min": 10
+    },
+    "localization_rate_0p5m_2deg": 0.988,
+    "map_dir": "/tmp/opencode/loc-export-2500-even/map",
+    "missing_reference": 0,
+    "queries": 1250,
+    "query_dir": "/tmp/opencode/loc-export-2500-even/query_features",
+    "reprojection_px": {
+      "median": 1.060113850254557,
+      "p95": 1.9064366287730943
+    },
+    "rotation_error_deg": {
+      "max": 2.277248575079765,
+      "mean": 0.13040578579718604,
+      "median": 0.06948036843898542,
+      "p95": 0.44213533787956405
+    },
+    "schema": "visloc_openloris_map_relocalization_eval_v1",
+    "scored": 1237,
+    "success_rate": 0.9896,
+    "successes": 1237,
+    "translation_error_m": {
+      "max": 0.39049061363928544,
+      "mean": 0.00921325790480045,
+      "median": 0.002864419493215734,
+      "p95": 0.035340674953906484
+    }
+  },
+  "artifacts": {
+    "eval": "scripts/eval_openloris_map_relocalization.py",
+    "example": "examples/localize_openloris_map.rs",
+    "export": "scripts/export_openloris_localization_map.py",
+    "plan": "docs/openloris_map_relocalization_plan.md"
+  },
+  "caveats": [
+    "E2 remains an approximate held-out split (landmark positions from the full model); a clean variant would rebuild the map on even frames only.",
+    "The reference pose is the mapper's own pose (GT-free self-consistency)."
+  ],
+  "change": "examples/localize_openloris_map.rs: per-query camera selection by flat-name prefix (cam1/cam2), and LocalizationConfig::min_inliers (default 0) set from --min-inliers (default 8).",
+  "date": "2026-09-17",
+  "schema": "visloc_openloris_map_relocalization_v2",
+  "summary": "Both rig cameras (cam1 and cam2) are now relocalized against the native COLMAP-port map, and a min-inlier quality gate makes 'success' meaningful. 1250 queries (all images of the held-out odd frames) each: E1 self 99.12% success (11 QualityGateFailed), E2 held-out even-frame map 98.96% (13). Every successful localization is accurate (E1 median 3.0 mm, max 0.16 m / 2.32 deg; E2 median 2.9 mm, max 0.39 m / 2.28 deg); the ~1% failures are queries with too few matches, previously mis-reported as success with 0 inliers.",
+  "tier": 2500
+}
