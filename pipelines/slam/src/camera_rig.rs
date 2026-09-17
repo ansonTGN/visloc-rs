@@ -612,4 +612,51 @@ mod tests {
             Err(PerImageCameraError::UnsupportedModel { .. })
         ));
     }
+
+    #[test]
+    fn fisheye_cameras_triangulate() {
+        let left = Camera::opencv_fisheye(
+            1,
+            640,
+            480,
+            300.0,
+            300.0,
+            320.0,
+            240.0,
+            [-0.02, 0.01, 0.0, 0.0],
+        );
+        let right = Camera::opencv_fisheye(
+            2,
+            640,
+            480,
+            310.0,
+            310.0,
+            320.0,
+            240.0,
+            [-0.02, 0.01, 0.0, 0.0],
+        );
+        let left_to_right = SE3::new(UnitQuaternion::identity(), Vector3::new(-0.2, 0.0, 0.0));
+        for point in [
+            Point3::new(-0.5, -0.3, 3.0),
+            Point3::new(0.6, 0.4, 4.0),
+            Point3::new(0.1, -0.6, 5.0),
+        ] {
+            let left_pixel = left.project(&point).unwrap();
+            let right_pixel = right
+                .project(&left_to_right.transform_point(&point))
+                .unwrap();
+            let triangulated = triangulate_two_view_left_frame(
+                &left,
+                &right,
+                &left_to_right,
+                &left_pixel,
+                &right_pixel,
+            )
+            .unwrap();
+            assert!(
+                (triangulated - point).norm() < 1e-6,
+                "{triangulated:?} vs {point:?}"
+            );
+        }
+    }
 }
