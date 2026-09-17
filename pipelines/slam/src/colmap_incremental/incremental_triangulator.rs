@@ -12,27 +12,22 @@
 //!   `Create` (`.cc:481-540`), `Continue` (`.cc:542-586`), `Merge`
 //!   (`.cc:588-682`), `Complete` (`.cc:684-770`).
 //!
-//! ## Deviation: `estimate_triangulation` is a from-scratch robust
-//! triangulator, not a port of `estimators/triangulation.cc`
+//! ## `TriangulateTrack` / `EstimateTriangulation`
 //!
-//! `estimators/triangulation.cc` (COLMAP's `EstimateTriangulation` /
-//! `TriangulationEstimator`, a `RANSAC<TriangulationEstimator>` instance)
-//! was **not** in this task's pinned reading list (only
-//! `incremental_triangulator.{h,cc}`, `observation_manager.{h,cc}`,
-//! `visibility_pyramid.{h,cc}` were asked for beyond the C1 set). This
-//! module implements [`estimate_triangulation`] as a from-first-principles
-//! robust multi-view triangulator with the same *contract* COLMAP's
-//! `TriangulateTrack` helper (`.cc:39-66`) relies on — exhaustive pairwise
-//! hypotheses (COLMAP forces `min_num_trials = C(n,2)` for track length
-//! `<=15`, which every track in this port's usage is, so an exhaustive
-//! search is a faithful, not merely convenient, substitute for RANSAC
-//! here), a linear DLT triangulation from each pair, inlier scoring by
-//! [`ResidualType`] (angular error for `Create`, reprojection error in
-//! pixels for `CompleteImage`), and a final linear refit over the full
-//! inlier set — but the DLT and scoring math themselves are new code, not
-//! transcribed from `triangulation.cc`. Flagged here and in the C2 report
-//! as the one estimator in this module that is a principled approximation
-//! rather than a line-for-line port.
+//! [`estimate_triangulation`] is a faithful port of `TriangulateTrack`
+//! (`.cc:39-66`) and `estimators/triangulation.cc`'s `EstimateTriangulation`:
+//! a `LORANSAC<TriangulationEstimator, TriangulationEstimator,
+//! InlierSupportMeasurer, CombinationSampler>` with COLMAP's
+//! `EstimateTriangulationOptions` defaults (`min_angle`, angular vs
+//! reprojection residual, `max_error = 2°` / `complete_max_reproj_error`,
+//! `confidence = 0.9999`, `min_inlier_ratio = 0.02`, `max_num_trials =
+//! 10000`, `dyn_num_trials_multiplier = 3.0`). `TriangulateTrack` forces
+//! `min_num_trials = C(n,2)` for tracks of at most
+//! [`EXHAUSTIVE_SAMPLING_THRESHOLD`] views, which the size-2
+//! `CombinationSampler` turns into an exhaustive, lexicographic enumeration
+//! of every view pair. Local optimization refits the model on the current
+//! inlier set (`TriangulationEstimator::Estimate` on the inlier views) and
+//! keeps expanding while the inlier support strictly improves.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -826,10 +821,224 @@ fn angular_reprojection_error(
     predicted_ray.dot(&observed_ray).clamp(-1.0, 1.0).acos()
 }
 
-/// See module doc: a from-scratch exhaustive-pairwise robust triangulator
-/// standing in for COLMAP's `EstimateTriangulation`. `max_error` is in
-/// radians for [`ResidualType::Angular`], pixels for
+/// `TriangulationEstimator::kMinNumSamples` (`estimators/triangulation.h`).
+const TRIANGULATION_MIN_NUM_SAMPLES: usize = 2;
+/// `EstimateTriangulationOptions` defaults (`estimators/triangulation.h:100-110`).
+const TRIANGULATION_CONFIDENCE: f64 = 0.9999;
+const TRIANGULATION_MIN_INLIER_RATIO: f64 = 0.02;
+const TRIANGULATION_MAX_NUM_TRIALS: usize = 10_000;
+/// `RANSACOptions::dyn_num_trials_multiplier` default (`optim/ransac.h:65`).
+const RANSAC_DYN_NUM_TRIALS_MULTIPLIER: f64 = 3.0;
+/// `TriangulateTrack`'s `kExhaustiveSamplingThreshold`
+/// (`sfm/incremental_triangulator.cc:59`).
+const EXHAUSTIVE_SAMPLING_THRESHOLD: usize = 15;
+/// `LORANSAC`'s `kMaxNumLocalTrials` (`optim/loransac.h:261`).
+const MAX_NUM_LOCAL_TRIALS: usize = 10;
+
+/// `InlierSupportMeasurer::Support` (`optim/support_measurement.h:42-48`).
+#[derive(Clone, Copy)]
+struct RansacSupport {
+    num_inliers: usize,
+    residual_sum: f64,
+}
+
+impl RansacSupport {
+    fn empty() -> Self {
+        Self {
+            num_inliers: 0,
+            residual_sum: f64::MAX,
+        }
+    }
+
+    /// `InlierSupportMeasurer::IsLeftBetter` (`support_measurement.cc`):
+    /// more inliers wins; ties are broken by the lower residual sum.
+    fn is_left_better(&self, other: &Self) -> bool {
+        self.num_inliers > other.num_inliers
+            || (self.num_inliers == other.num_inliers && self.residual_sum < other.residual_sum)
+    }
+}
+
+fn support_from_residuals(residuals: &[f64], max_residual: f64) -> RansacSupport {
+    let mut support = RansacSupport {
+        num_inliers: 0,
+        residual_sum: 0.0,
+    };
+    for &residual in residuals {
+        if residual <= max_residual {
+            support.num_inliers += 1;
+            support.residual_sum += residual;
+        }
+    }
+    support
+}
+
+/// `NChooseK(n, 2)` (`math/math.h`).
+fn n_choose_2(n: usize) -> usize {
+    n * (n - 1) / 2
+}
+
+/// Port of `RANSAC::ComputeNumTrials` (`optim/ransac.h:178-210`) with
+/// `kMinNumSamples = 2`: the trials needed for at least one outlier-free
+/// minimal sample with the given confidence.
+fn compute_num_trials(
+    num_inliers: usize,
+    num_samples: usize,
+    confidence: f64,
+    num_trials_multiplier: f64,
+) -> usize {
+    let prob_failure = 1.0 - confidence;
+    if prob_failure <= 0.0 {
+        return usize::MAX;
+    }
+    let mut prob_inlier = 1.0;
+    for i in 0..TRIANGULATION_MIN_NUM_SAMPLES {
+        if num_inliers < i || num_samples < i {
+            return usize::MAX;
+        }
+        prob_inlier *= (num_inliers - i) as f64 / (num_samples - i) as f64;
+    }
+    let prob_outlier = 1.0 - prob_inlier;
+    if prob_outlier <= 0.0 {
+        return 1;
+    }
+    if prob_outlier >= 1.0 {
+        return usize::MAX;
+    }
+    ((prob_failure.ln() / prob_outlier.ln()) * num_trials_multiplier).ceil() as usize
+}
+
+/// Squared residual of one observation against `xyz`, in the units COLMAP's
+/// `TriangulationEstimator::Residuals` uses: squared angular error (radians)
+/// for [`ResidualType::Angular`], squared reprojection error (pixels) for
 /// [`ResidualType::Reprojection`].
+fn triangulation_residual_sq(
+    residual_type: ResidualType,
+    xyz: Point3<f64>,
+    corr: &CorrData,
+) -> f64 {
+    match residual_type {
+        ResidualType::Angular => {
+            let error =
+                angular_reprojection_error(corr.xy, xyz, &corr.cam_from_world, &corr.camera);
+            error * error
+        }
+        ResidualType::Reprojection => {
+            calculate_squared_reprojection_error(corr.xy, xyz, &corr.cam_from_world, &corr.camera)
+        }
+    }
+}
+
+/// `TriangulationEstimator::Estimate` on a two-view sample
+/// (`estimators/triangulation.cc`): two-view DLT, cheirality for both views,
+/// and a seed-pair triangulation angle `>= min_tri_angle`.
+fn estimate_minimal_triangulation(
+    first: &CorrData,
+    second: &CorrData,
+    min_tri_angle_rad: f64,
+) -> Option<Point3<f64>> {
+    let xyz = triangulate_dlt(&[
+        (&first.cam_from_world, first.xy, &first.camera),
+        (&second.cam_from_world, second.xy, &second.camera),
+    ])?;
+    if !positive_depth(&first.cam_from_world, xyz) || !positive_depth(&second.cam_from_world, xyz) {
+        return None;
+    }
+    let angle = calculate_triangulation_angle(
+        cam_center(&first.cam_from_world),
+        cam_center(&second.cam_from_world),
+        xyz,
+    );
+    (angle >= min_tri_angle_rad).then_some(xyz)
+}
+
+/// `TriangulationEstimator::Estimate` on the local-optimization inlier set
+/// (`estimators/triangulation.cc`): multi-view DLT, cheirality for every view,
+/// and at least one view pair with angle `>= min_tri_angle`.
+fn estimate_multiview_triangulation(
+    corrs: &[CorrData],
+    inlier_indices: &[usize],
+    min_tri_angle_rad: f64,
+) -> Option<Point3<f64>> {
+    let views: Vec<(&SE3, Point2<f64>, &Camera)> = inlier_indices
+        .iter()
+        .map(|&i| (&corrs[i].cam_from_world, corrs[i].xy, &corrs[i].camera))
+        .collect();
+    let xyz = triangulate_dlt(&views)?;
+    for &i in inlier_indices {
+        if !positive_depth(&corrs[i].cam_from_world, xyz) {
+            return None;
+        }
+    }
+    for (position, &i) in inlier_indices.iter().enumerate() {
+        for &j in &inlier_indices[..position] {
+            let angle = calculate_triangulation_angle(
+                cam_center(&corrs[i].cam_from_world),
+                cam_center(&corrs[j].cam_from_world),
+                xyz,
+            );
+            if angle >= min_tri_angle_rad {
+                return Some(xyz);
+            }
+        }
+    }
+    None
+}
+
+/// Port of `LORANSAC`'s recursive local optimization (`optim/loransac.h:257-319`):
+/// refit the model on the current inlier set, rescan the support, and keep
+/// expanding while the support strictly improves (at most
+/// [`MAX_NUM_LOCAL_TRIALS`] iterations). `COLMAP`'s local and global
+/// estimators are the same class, so the winning model's inlier mask is
+/// recomputed identically either way.
+fn local_optimize_triangulation(
+    corrs: &[CorrData],
+    residual_type: ResidualType,
+    sample_residuals: &[f64],
+    sample_model: Point3<f64>,
+    max_residual: f64,
+    min_tri_angle_rad: f64,
+) -> (RansacSupport, Point3<f64>) {
+    let mut local_best_support = support_from_residuals(sample_residuals, max_residual);
+    let mut local_best_model = sample_model;
+    let mut current_residuals = sample_residuals.to_vec();
+    if local_best_support.num_inliers > TRIANGULATION_MIN_NUM_SAMPLES {
+        for _ in 0..MAX_NUM_LOCAL_TRIALS {
+            let inlier_indices: Vec<usize> = current_residuals
+                .iter()
+                .enumerate()
+                .filter(|(_, &residual)| residual <= max_residual)
+                .map(|(index, _)| index)
+                .collect();
+            let Some(local_model) =
+                estimate_multiview_triangulation(corrs, &inlier_indices, min_tri_angle_rad)
+            else {
+                break;
+            };
+            let local_residuals: Vec<f64> = corrs
+                .iter()
+                .map(|corr| triangulation_residual_sq(residual_type, local_model, corr))
+                .collect();
+            let local_support = support_from_residuals(&local_residuals, max_residual);
+            if local_support.is_left_better(&local_best_support) {
+                local_best_support = local_support;
+                local_best_model = local_model;
+                current_residuals = local_residuals;
+            } else {
+                break;
+            }
+        }
+    }
+    (local_best_support, local_best_model)
+}
+
+/// Faithful port of `TriangulateTrack` (`sfm/incremental_triangulator.cc:39-66`)
+/// and `EstimateTriangulation` (`estimators/triangulation.cc`):
+/// `LORANSAC<TriangulationEstimator, TriangulationEstimator,
+/// InlierSupportMeasurer, CombinationSampler>`. `max_error` is the
+/// *unsquared* threshold in radians for [`ResidualType::Angular`] and in
+/// pixels for [`ResidualType::Reprojection`]; residuals are compared against
+/// `max_error^2` (`optim/ransac.h:146`). Returns the best model and its
+/// inlier mask, or `None` if fewer than two inliers support any model.
 fn estimate_triangulation(
     corrs: &[CorrData],
     residual_type: ResidualType,
@@ -837,129 +1046,91 @@ fn estimate_triangulation(
     min_tri_angle_rad: f64,
 ) -> Option<(Point3<f64>, Vec<bool>)> {
     let n = corrs.len();
-    if n < 2 {
+    if n < TRIANGULATION_MIN_NUM_SAMPLES {
         return None;
     }
+    let max_residual = max_error * max_error;
 
-    let residual = |xyz: Point3<f64>, corr: &CorrData| -> f64 {
-        match residual_type {
-            ResidualType::Angular => {
-                angular_reprojection_error(corr.xy, xyz, &corr.cam_from_world, &corr.camera)
-            }
-            ResidualType::Reprojection => calculate_squared_reprojection_error(
-                corr.xy,
-                xyz,
-                &corr.cam_from_world,
-                &corr.camera,
-            )
-            .sqrt(),
-        }
-    };
-
-    let mut best_score = 0usize;
-    let mut best_pair: Option<(usize, usize)> = None;
-    let mut best_xyz = Point3::origin();
-
-    // Cap hypothesis-pair *generation* to a bounded subset of `corrs`
-    // (scoring below still runs against the *full* `corrs` slice, so no
-    // legitimate inlier is ever missed). Real correspondence graphs built
-    // from retrieval-based candidate generation (not just sequential
-    // neighbors) can give one point2D observation a correspondence-list
-    // length in the hundreds (e.g. a frequently-revisited OpenLORIS
-    // corridor location) — an exhaustive O(n^2) pair enumeration with O(n)
-    // scoring per pair is then O(n^3), which was observed to exhaust
-    // system memory/CPU on a real tier-1000 run during this port's
-    // development (see the C2 report). COLMAP's own `EstimateTriangulation`
-    // is itself a *bounded*-iteration RANSAC for any track length beyond
-    // its `kExhaustiveSamplingThreshold=15` special case (`TriangulateTrack`,
-    // `incremental_triangulator.cc:39-66`); this cap reproduces that bound
-    // (a fixed hypothesis budget, not one growing with `n`) via a
-    // deterministic evenly-strided subset rather than RANSAC's random
-    // sampling, since determinism is otherwise free here (no threading of
-    // `random_seed` into this free function would be needed).
-    const MAX_HYPOTHESIS_CORRS: usize = 40;
-    let hypothesis_indices: Vec<usize> = if n <= MAX_HYPOTHESIS_CORRS {
-        (0..n).collect()
-    } else {
-        let stride = ((n as f64) / (MAX_HYPOTHESIS_CORRS as f64)).ceil() as usize;
-        (0..n).step_by(stride.max(1)).collect()
-    };
-
-    for &i in &hypothesis_indices {
-        for &j in hypothesis_indices.iter().filter(|&&j| j > i) {
-            let Some(xyz) = triangulate_dlt(&[
-                (&corrs[i].cam_from_world, corrs[i].xy, &corrs[i].camera),
-                (&corrs[j].cam_from_world, corrs[j].xy, &corrs[j].camera),
-            ]) else {
-                continue;
-            };
-            if !positive_depth(&corrs[i].cam_from_world, xyz)
-                || !positive_depth(&corrs[j].cam_from_world, xyz)
-            {
-                continue;
-            }
-            let angle = calculate_triangulation_angle(
-                cam_center(&corrs[i].cam_from_world),
-                cam_center(&corrs[j].cam_from_world),
-                xyz,
-            );
-            if angle < min_tri_angle_rad {
-                continue;
-            }
-            let score = corrs
-                .iter()
-                .filter(|c| residual(xyz, c) <= max_error)
-                .count();
-            if score > best_score {
-                best_score = score;
-                best_pair = Some((i, j));
-                best_xyz = xyz;
-            }
-        }
-    }
-
-    let (i0, j0) = best_pair?;
-    if best_score < 2 {
-        return None;
-    }
-
-    // Final refit over the full inlier set (linear DLT), then recompute the
-    // inlier mask against the refit point.
-    let inlier_views: Vec<(&SE3, Point2<f64>, &Camera)> = corrs
-        .iter()
-        .filter(|c| residual(best_xyz, c) <= max_error)
-        .map(|c| (&c.cam_from_world, c.xy, &c.camera))
-        .collect();
-    let refit_xyz = if inlier_views.len() >= 2 {
-        triangulate_dlt(&inlier_views).unwrap_or(best_xyz)
-    } else {
-        best_xyz
-    };
-
-    let inlier_mask: Vec<bool> = corrs
-        .iter()
-        .map(|c| residual(refit_xyz, c) <= max_error)
-        .collect();
-    // The min_tri_angle check must still hold for at least the seed pair at
-    // the refit point (mirrors the pre-refit gate above staying valid).
-    let seed_angle = calculate_triangulation_angle(
-        cam_center(&corrs[i0].cam_from_world),
-        cam_center(&corrs[j0].cam_from_world),
-        refit_xyz,
+    // `RANSAC`'s constructor clamps the requested trial budget by the count
+    // implied by the a-priori `min_inlier_ratio` (`optim/ransac.h:167-176`);
+    // `LORANSAC` then clamps it by the sampler's maximum number of samples
+    // (`optim/loransac.h:150-151`), which for the size-2 `CombinationSampler`
+    // is `C(n, 2)`.
+    let ctor_max_num_trials = compute_num_trials(
+        (TRIANGULATION_MIN_INLIER_RATIO * 100_000.0) as usize,
+        100_000,
+        TRIANGULATION_CONFIDENCE,
+        RANSAC_DYN_NUM_TRIALS_MULTIPLIER,
     );
-    if seed_angle < min_tri_angle_rad * 0.5 {
-        // Refit drifted the point far enough that the seed pair's angle
-        // collapsed; fall back to the pre-refit estimate instead of failing
-        // outright (COLMAP's own estimator similarly tolerates a final
-        // linear-refit step without re-deriving the RANSAC-stage gate).
-        let inlier_mask: Vec<bool> = corrs
-            .iter()
-            .map(|c| residual(best_xyz, c) <= max_error)
-            .collect();
-        return Some((best_xyz, inlier_mask));
+    let max_num_trials = TRIANGULATION_MAX_NUM_TRIALS
+        .min(ctor_max_num_trials)
+        .min(n_choose_2(n));
+    // `TriangulateTrack` forces exhaustive sampling for short tracks.
+    let min_num_trials = if n <= EXHAUSTIVE_SAMPLING_THRESHOLD {
+        n_choose_2(n)
+    } else {
+        0
+    };
+
+    let mut best = RansacSupport::empty();
+    let mut best_model: Option<Point3<f64>> = None;
+    let mut dyn_max_num_trials = max_num_trials;
+
+    // `CombinationSampler` enumerates the size-2 combinations of `0..n` in
+    // lexicographic order starting at `(0, 1)` (`optim/combination_sampler.cc`).
+    let mut sample = (0usize, 1usize);
+    let mut curr = 0usize;
+    while curr < max_num_trials {
+        if let Some(model) =
+            estimate_minimal_triangulation(&corrs[sample.0], &corrs[sample.1], min_tri_angle_rad)
+        {
+            let residuals: Vec<f64> = corrs
+                .iter()
+                .map(|corr| triangulation_residual_sq(residual_type, model, corr))
+                .collect();
+            let support = support_from_residuals(&residuals, max_residual);
+            if support.is_left_better(&best) {
+                let (local_support, local_model) = local_optimize_triangulation(
+                    corrs,
+                    residual_type,
+                    &residuals,
+                    model,
+                    max_residual,
+                    min_tri_angle_rad,
+                );
+                if local_support.is_left_better(&best) {
+                    best = local_support;
+                    best_model = Some(local_model);
+                    dyn_max_num_trials = compute_num_trials(
+                        best.num_inliers,
+                        n,
+                        TRIANGULATION_CONFIDENCE,
+                        RANSAC_DYN_NUM_TRIALS_MULTIPLIER,
+                    );
+                }
+            }
+        }
+        if curr >= dyn_max_num_trials && curr >= min_num_trials {
+            break;
+        }
+        if sample.1 + 1 < n {
+            sample.1 += 1;
+        } else {
+            sample.0 += 1;
+            sample.1 = sample.0 + 1;
+        }
+        curr += 1;
     }
 
-    Some((refit_xyz, inlier_mask))
+    let model = best_model?;
+    if best.num_inliers < TRIANGULATION_MIN_NUM_SAMPLES {
+        return None;
+    }
+    let inlier_mask = corrs
+        .iter()
+        .map(|corr| triangulation_residual_sq(residual_type, model, corr) <= max_residual)
+        .collect();
+    Some((model, inlier_mask))
 }
 
 /// No `ExtractMatchesBetweenImages` exists on this port's
