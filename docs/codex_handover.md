@@ -2,6 +2,29 @@
 
 ## 現在の状態（以下の過去ログより優先）
 
+### 2026-09-17 追記: 自作map × 地図ベースrelocalization（branch `feat/openloris-map-relocalization`）
+
+COLMAP port（`examples/colmap_incremental_mapper`）が出力した地図を、既存の
+`pipelines/localization`（`LocalizationPipeline`/`localize_with_descriptor_store`）で
+使い、単一クエリ画像をrelocalizeする経路を新規実装。既存demoはSouth Building/7-Scenesの
+外部COLMAP地図のみだった。
+
+- 追加: `docs/openloris_map_relocalization_plan.md`（設計）、
+  `scripts/export_openloris_localization_map.py`（COLMAP DBのSIFT記述子から
+  `landmark_descriptors.txt`（landmark単位の代表観測）とクエリ特徴`x y d...`、
+  およびparityでフィルタした地図modelを生成）、
+  `examples/localize_openloris_map.rs`（バッチ対応、`--query-features[-dir]`）、
+  `scripts/eval_openloris_map_relocalization.py`（フルmodelのposeと比較、GTフリー）。
+- 結果（tier-2500 gauge6地図=23276 landmarks、cam1奇数frame 625クエリ、失敗0）:
+  E1自己（フル地図）median t_err 3.1mm / p95 36mm / median R 0.072°、
+  E2 held-out（偶数frame地図）2.8mm / 38mm / 0.073°、<0.5m&2°率ともに99.2%。
+  5/625は誤localize（central aliasing疑い、max ~9-14m）。
+- 注意: E2は近似held-out（landmark位置はフルmodel由来。地図画像/観測と記述子のみ
+  map-only）。厳密版は偶数frameのみでmapper再走（E3）が必要。クエリはcam1のみ
+  （exampleは単一`--camera-id`）。
+- 証跡 `benchmarks/electro/m9-openloris-map-relocalization-2500-v1.json`。
+  ツールテスト `scripts/tests/test_openloris_map_relocalization.py`（6 test）。
+
 ### 2026-09-16 追記: web(WASM+WebGPU) in-browser SfM は park（設計・実証のみ）
 
 - 設計と実証記録は `docs/web-wasm-sfm_plan.md`。spike結果: `visloc-core`/
