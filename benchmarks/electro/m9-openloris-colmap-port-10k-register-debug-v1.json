@@ -1,0 +1,67 @@
+{
+  "artifacts": {
+    "debug_log": "colmap-port-c2-v1/tier-10000-register-debug-v1/stderr.log (stopped after the boundary)",
+    "instrumentation": "pipelines/slam/src/colmap_incremental/mapper.rs register_next_general_frame"
+  },
+  "boundary_registrations": [
+    {
+      "frame": 4497,
+      "gcorrs": 9,
+      "max_reproj_px": 9.216,
+      "raw_inliers": 9,
+      "refinement_applied": true,
+      "unique_point3d": 9
+    },
+    {
+      "frame": 4505,
+      "gcorrs": 14,
+      "max_reproj_px": 10.725,
+      "raw_inliers": 12,
+      "refinement_applied": true,
+      "unique_point3d": 12
+    },
+    {
+      "frame": 4495,
+      "gcorrs": 21,
+      "max_reproj_px": 3.963,
+      "raw_inliers": 20,
+      "refinement_applied": true,
+      "unique_point3d": 20
+    },
+    {
+      "frame": 4496,
+      "gcorrs": 24,
+      "max_reproj_px": 4.607,
+      "raw_inliers": 24,
+      "refinement_applied": true,
+      "unique_point3d": 24
+    },
+    {
+      "frame": 4498,
+      "gcorrs": 40,
+      "max_reproj_px": 7.442,
+      "raw_inliers": 40,
+      "refinement_applied": true,
+      "unique_point3d": 39
+    },
+    {
+      "frame": 4500,
+      "gcorrs": 32,
+      "max_reproj_px": 11.9,
+      "raw_inliers": 30,
+      "refinement_applied": true,
+      "unique_point3d": 30
+    }
+  ],
+  "conclusion": "The port registers the boundary frame 4497 with gcorrs=9, raw inliers=9 and unique 3D points=9 (no rig FoV duplicates), max reprojection 9.22 px <= 12 px. The unique-3D-point support equals the raw count, so COLMAP's UniqueInlierSupportMeasurer would also count 9 and accept at abs_pose_min_num_inliers=8. The earlier unique-support hypothesis is therefore rejected, and this matches the direct experiment (implementing unique support changed neither the merge nor improved 10k; it regressed 10k to ATE 12.70). Since COLMAP's model0 stops after frame 4493 with the same ~8 visible points visible in image 9497, the divergence is in the generalized absolute-pose estimator/refinement itself: COLMAP's EstimateGeneralizedAbsolutePose (RANSAC) + RefineGeneralizedAbsolutePose (Ceres) must fail for this near-degenerate 9-correspondence pose (or its correspondence set differs) where the port's GeneralizedPnPRansac + Gauss-Newton refiner succeeds.",
+  "date": "2026-09-17",
+  "method": "Env-gated VSLOC_DEBUG_REGISTER_FRAMES logging added to IncrementalMapper::register_next_general_frame; ran the 10k COLMAP-verified graph and captured the boundary registrations.",
+  "next": [
+    "Port COLMAP's ComputeMaxErrorInCamera threshold scaling and RANSAC semantics for EstimateGeneralizedAbsolutePose.",
+    "Port/emulate RefineGeneralizedAbsolutePose failure behaviour.",
+    "Or instrument COLMAP (generalized_pose.cc) to log why frame 4497 is rejected at its frontier."
+  ],
+  "schema": "visloc_colmap_mapper_10k_register_debug_v1",
+  "status": "unique_support_hypothesis_rejected_root_cause_is_absolute_pose_estimation",
+  "tier": 10000
+}

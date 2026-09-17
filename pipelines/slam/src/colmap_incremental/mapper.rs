@@ -659,6 +659,32 @@ impl IncrementalMapper {
             return false;
         }
 
+        // Env-gated registration diagnostic (10k boundary investigation):
+        // `VISLOC_DEBUG_REGISTER_FRAMES=4497,...` logs the correspondence and
+        // inlier counts (raw and unique-3D-point) for those frames.
+        if let Some(spec) = std::env::var_os("VISLOC_DEBUG_REGISTER_FRAMES") {
+            let wanted: BTreeSet<FrameT> = spec
+                .to_string_lossy()
+                .split(',')
+                .filter_map(|s| s.trim().parse::<FrameT>().ok())
+                .collect();
+            if wanted.contains(&frame_id) {
+                let mut unique = BTreeSet::new();
+                for &idx in &report.inliers {
+                    unique.insert(tri_corrs[idx].2);
+                }
+                eprintln!(
+                    "REGISTER_DBG frame={} gcorrs={} raw_inliers={} unique_point3d={} reproj={:?} refinement_applied={}",
+                    frame_id,
+                    gcorrs.len(),
+                    report.inliers.len(),
+                    unique.len(),
+                    report.max_reprojection_error,
+                    report.refinement_applied,
+                );
+            }
+        }
+
         self.path_b_registered += 1;
         let rig_from_world = report.pose.world_to_camera;
         recon.frame_mut(frame_id).set_rig_from_world(rig_from_world);
