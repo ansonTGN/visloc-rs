@@ -1619,9 +1619,13 @@ mod tests {
             "incremental match graph must equal the batch match graph"
         );
         assert_eq!(
-            batch.feature_corners.len(),
-            online.mapper.feature_corners.len(),
-            "incremental detection must produce the same key count as batch"
+            batch.feature_corners, online.mapper.feature_corners,
+            "incremental detection must produce exactly the batch features (same keys, same pixels, same descriptors), \
+             not merely the same key count"
+        );
+        assert_eq!(
+            batch.feature_match_data, online.mapper.feature_match_data,
+            "incremental per-pair match data must equal the batch match data"
         );
     }
 
