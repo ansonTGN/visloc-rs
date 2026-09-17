@@ -100,6 +100,22 @@ inlier>2でmulti-view LO（≤10反復、residual_sumタイブレーク）、`mi
   移植版で拒否される理由、frontier停止後の候補ranking。
 - 証跡 `benchmarks/electro/m9-openloris-colmap-port-10k-growth-order-v1.json`。
 
+### 2026-09-17 追記: 初期化緩和をCOLMAPの5段階に修正（＋ray角度の知見）
+
+- 移植版のinit緩和は**3段階**（100/16,50/16,50/8）だった。COLMAP `Run`（`.cc:418-445`）は
+  `kNumInitRelaxations=2`で各回num_inliers→tri_angleを半減し**5段階**
+  （100/16,50/16,50/8,25/8,25/4）。**修正**（2.5kはstage1でモデル確定のため無影響、0.0712維持）。
+- さらに移植版のinit tri_angleは**DLT triangulation経由**だったが、COLMAPは**2視線の直接角度**
+  （`two_view_geometry.cc:790-805`、ray1 vs `cam1_from_cam2*ray2`の中央値）。忠実なray角度にすると
+  COLMAP model0の初期ペア（image 5446/cam2 t=18.390 × 5462）で**1.85°**（COLMAP model0の
+  post-BA中央値1.79°と一致）。
+- ただしray角度変更は**2.5kを0.0794に悪化**（COLMAP 0.0718超）。5段階＋ray角度の10kは
+  **1モデルのまま ATE 2.91/sim3 1.314**（従来3.33/1.408から改善）。
+- → **5段階緩和のみ採用**（安全な忠実化）。初期ペア選択/ inlier集合は依然COLMAPのE-matrix経路と
+  乖離（COLMAPは1.8°/59matchesのペアを緩和後に受理、移植版は拒否）。次は初期two-view estimatorの
+  inlier集合をCOLMAPへ合わせる。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-init-relaxation-v1.json`。
+
 ### 2026-09-17 追記: 自作map × 地図ベースrelocalization（branch `feat/openloris-map-relocalization`）
 
 COLMAP port（`examples/colmap_incremental_mapper`）が出力した地図を、既存の

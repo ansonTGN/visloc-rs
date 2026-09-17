@@ -402,9 +402,15 @@ pub fn run(options: &PipelineOptions, db: &DatabaseCache) -> RunResult {
     relax1.init_min_num_inliers = (relax1.init_min_num_inliers / 2).max(1);
     let mut relax2 = relax1.clone();
     relax2.init_min_tri_angle_deg /= 2.0;
-    // `Run()`'s outer loop (`.cc:418-445`): original options, then up to
-    // `kNumInitRelaxations=2` progressively relaxed passes.
-    let variants = [relax0, relax1, relax2];
+    let mut relax3 = relax2.clone();
+    relax3.init_min_num_inliers = (relax3.init_min_num_inliers / 2).max(1);
+    let mut relax4 = relax3.clone();
+    relax4.init_min_tri_angle_deg /= 2.0;
+    // `Run()`'s outer loop (`.cc:418-445`): the original options, then
+    // `kNumInitRelaxations=2` passes that each halve `init_min_num_inliers`
+    // and then `init_min_tri_angle` — five stages in total:
+    // (100,16), (50,16), (50,8), (25,8), (25,4).
+    let variants = [relax0, relax1, relax2, relax3, relax4];
 
     'relax: for mapper_options in &variants {
         if std::env::var_os("VISLOC_DEBUG_INIT").is_some() {
