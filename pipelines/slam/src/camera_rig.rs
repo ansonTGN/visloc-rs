@@ -1,12 +1,13 @@
-//! Per-image pinhole calibration support for the SfM frontends.
+//! Per-image camera calibration support for the SfM frontends.
 //!
 //! The historical incremental/global APIs take one [`Camera`].  A camera rig
 //! lets callers retain one calibration per image while using those APIs: the
 //! feature pixels are converted to the rig's first-camera pixel convention,
 //! so the existing normalized-ray, PnP, triangulation, and BA code sees the
-//! exact same rays.  The conversion is lossless for pinhole cameras and does
-//! not touch descriptor rows or feature indices.  The legacy single-camera
-//! APIs remain unchanged.
+//! exact same rays.  The conversion goes through the camera's own
+//! `normalize_pixel`/`project`, so pinhole and fisheye models (including
+//! Double Sphere) are all accepted; it does not touch descriptor rows or
+//! feature indices.  The legacy single-camera APIs remain unchanged.
 
 use nalgebra::{Point2, Point3};
 use thiserror::Error;
@@ -35,9 +36,9 @@ pub struct PerImageCameras {
 pub enum PerImageCameraError {
     #[error("per-image calibration contains no cameras")]
     Empty,
-    #[error("camera {index} uses unsupported model {model}; only PINHOLE is supported")]
+    #[error("camera {index} uses unsupported model {model}")]
     UnsupportedModel { index: usize, model: String },
-    #[error("camera {index} has {actual} parameters; PINHOLE requires exactly 4 [fx, fy, cx, cy]")]
+    #[error("camera {index} has {actual} parameters; not enough for the model's intrinsics")]
     ParameterCount { index: usize, actual: usize },
     #[error("camera {index} has invalid parameter {name}={value}")]
     InvalidParameter {
@@ -103,18 +104,18 @@ impl PerImageCameras {
             return Err(PerImageCameraError::Empty);
         }
         for (index, camera) in cameras.iter().enumerate() {
-            if camera.model != CameraModel::Pinhole {
+            if matches!(camera.model, CameraModel::Unknown(_)) {
                 return Err(PerImageCameraError::UnsupportedModel {
                     index,
                     model: format!("{:?}", camera.model),
                 });
             }
-            if camera.params.len() != 4 {
+            let Some((fx, fy, cx, cy)) = camera.intrinsics() else {
                 return Err(PerImageCameraError::ParameterCount {
                     index,
                     actual: camera.params.len(),
                 });
-            }
+            };
             if camera.width == 0 {
                 return Err(PerImageCameraError::InvalidParameter {
                     index,
@@ -129,11 +130,17 @@ impl PerImageCameras {
                     value: camera.height as f64,
                 });
             }
-            let names = ["fx", "fy", "cx", "cy"];
-            for (name, value) in names.into_iter().zip(camera.params.iter().copied()) {
+            for (name, value) in [("fx", fx), ("fy", fy), ("cx", cx), ("cy", cy)] {
                 if !value.is_finite() || ((name == "fx" || name == "fy") && value <= 0.0) {
                     return Err(PerImageCameraError::InvalidParameter { index, name, value });
                 }
+            }
+            if let Some(&value) = camera.params.iter().find(|value| !value.is_finite()) {
+                return Err(PerImageCameraError::InvalidParameter {
+                    index,
+                    name: "params",
+                    value,
+                });
             }
         }
         Ok(Self {
@@ -565,5 +572,44 @@ mod tests {
             "PnP translation drifted: {:?}",
             report.pose.world_to_camera.translation
         );
+    }
+
+    #[test]
+    fn fisheye_cameras_are_accepted_and_preserve_rays() {
+        let fisheye = Camera::opencv_fisheye(
+            1,
+            640,
+            480,
+            300.0,
+            300.0,
+            320.0,
+            240.0,
+            [-0.02, 0.01, 0.0, 0.0],
+        );
+        let pinhole = camera(2, 640, 480, 500.0, 500.0);
+        let rig = PerImageCameras::new(vec![pinhole, fisheye.clone()]).unwrap();
+
+        for point in [Point3::new(0.4, -0.2, 1.0), Point3::new(-0.6, 0.3, 1.2)] {
+            let fisheye_pixel = fisheye.project(&point).unwrap();
+            let canonical = rig.to_reference_pixel(1, &fisheye_pixel).unwrap();
+            let recovered = rig.from_reference_pixel(1, &canonical).unwrap();
+            let expected = fisheye.unit_ray_from_pixel(&fisheye_pixel).unwrap();
+            let actual = fisheye.unit_ray_from_pixel(&recovered).unwrap();
+            assert!(
+                (actual - expected).norm() < 1e-9,
+                "{actual:?} vs {expected:?}"
+            );
+        }
+
+        assert!(matches!(
+            PerImageCameras::new(vec![Camera {
+                id: 3,
+                model: CameraModel::Unknown("BOGUS".to_owned()),
+                width: 10,
+                height: 10,
+                params: vec![1.0; 4],
+            }]),
+            Err(PerImageCameraError::UnsupportedModel { .. })
+        ));
     }
 }
