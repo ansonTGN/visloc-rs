@@ -2884,49 +2884,11 @@ pub fn extract_nonlinear_factors(
     };
     let mut relative_pose = Vec::new();
     for other_id in kfs {
-        if other_id == kf_id {
-            continue;
+        if let Some(factor) = relative_pose_factor(
+            data, kf_id, kf_pose, kf_start, other_id, &cov_old, asize, &config,
+        )? {
+            relative_pose.push(factor);
         }
-        let Some(other_pose) = pose_for_id(data, other_id) else {
-            continue;
-        };
-        let Some(other_start) = data
-            .aom_order
-            .iter()
-            .find(|block| block.frame_id == other_id)
-            .map(|block| block.offset)
-        else {
-            return Err(NfrExtractionError::MissingAomBlock);
-        };
-        if other_start + POSE_DOF > asize {
-            return Err(NfrExtractionError::InvalidMatrix);
-        }
-        let pose_o = pose_value(other_pose);
-        let measurement = pose_compose(pose_inverse(kf), pose_o);
-        let (_residual, d_i, d_j) = rel_pose_error(pose_array(measurement), kf_pose, other_pose);
-        let mut j = DMatrix::zeros(POSE_DOF, asize);
-        for row in 0..POSE_DOF {
-            for col in 0..POSE_DOF {
-                j[(row, kf_start + col)] = d_i[row][col];
-                j[(row, other_start + col)] = d_j[row][col];
-            }
-        }
-        let covariance = &j * &cov_old * j.transpose();
-        let information = covariance
-            .try_inverse()
-            .ok_or(NfrExtractionError::SingularCovariance)?;
-        if information.iter().any(|x| !x.is_finite()) {
-            return Err(NfrExtractionError::NonFinite);
-        }
-        let q = measurement.rotation.quaternion();
-        relative_pose.push(RelativePoseFactor {
-            from: kf_id,
-            to: other_id,
-            translation: measurement.translation.into(),
-            rotation: [q.w, q.i, q.j, q.k],
-            information: row_major_values(&information),
-            weight: config.relative_pose_weight,
-        });
     }
     Ok(MapperFactors {
         provenance_version: data.provenance_version.clone(),
@@ -2934,6 +2896,72 @@ pub fn extract_nonlinear_factors(
         roll_pitch,
         ba_covisibility: Vec::new(),
     })
+}
+
+/// Build the relative-pose factor between the marginalization keyframe
+/// `kf_id` and `other_id` from the reduced covariance `cov_old`.
+///
+/// Returns `Ok(None)` when `other_id` cannot contribute a factor: it is the
+/// keyframe itself, has no pose, or has no block in the packet's `aom_order`.
+/// The last case is the one a larger VIO window exposes -- the AOM problem is
+/// a strict subset of the window (`kfs_all`), so a recent keyframe can host no
+/// active landmark and have no reduced-system columns.  Skipping it keeps the
+/// rest of the recovery alive instead of aborting with `MissingAomBlock`.
+#[allow(clippy::too_many_arguments)]
+fn relative_pose_factor(
+    data: &MargData,
+    kf_id: u64,
+    kf_pose: [f64; 7],
+    kf_start: usize,
+    other_id: u64,
+    cov_old: &DMatrix<f64>,
+    asize: usize,
+    config: &MapperConfig,
+) -> Result<Option<RelativePoseFactor>, NfrExtractionError> {
+    if other_id == kf_id {
+        return Ok(None);
+    }
+    let Some(other_pose) = pose_for_id(data, other_id) else {
+        return Ok(None);
+    };
+    let Some(other_start) = data
+        .aom_order
+        .iter()
+        .find(|block| block.frame_id == other_id)
+        .map(|block| block.offset)
+    else {
+        return Ok(None);
+    };
+    if other_start + POSE_DOF > asize {
+        return Err(NfrExtractionError::InvalidMatrix);
+    }
+    let kf = pose_value(kf_pose);
+    let pose_o = pose_value(other_pose);
+    let measurement = pose_compose(pose_inverse(kf), pose_o);
+    let (_residual, d_i, d_j) = rel_pose_error(pose_array(measurement), kf_pose, other_pose);
+    let mut j = DMatrix::zeros(POSE_DOF, asize);
+    for row in 0..POSE_DOF {
+        for col in 0..POSE_DOF {
+            j[(row, kf_start + col)] = d_i[row][col];
+            j[(row, other_start + col)] = d_j[row][col];
+        }
+    }
+    let covariance = &j * cov_old * j.transpose();
+    let information = covariance
+        .try_inverse()
+        .ok_or(NfrExtractionError::SingularCovariance)?;
+    if information.iter().any(|x| !x.is_finite()) {
+        return Err(NfrExtractionError::NonFinite);
+    }
+    let q = measurement.rotation.quaternion();
+    Ok(Some(RelativePoseFactor {
+        from: kf_id,
+        to: other_id,
+        translation: measurement.translation.into(),
+        rotation: [q.w, q.i, q.j, q.k],
+        information: row_major_values(&information),
+        weight: config.relative_pose_weight,
+    }))
 }
 
 /// Process a clone of input MargData and recover factors in one operation.
@@ -3709,6 +3737,45 @@ mod m8_fixture_tests {
         assert_eq!(factors.roll_pitch.len(), 1);
         assert_eq!(factors.relative_pose.len(), 7);
         assert_eq!(data, before);
+    }
+
+    #[test]
+    fn m8b_skips_keyframes_absent_from_aom_order() {
+        // A window keyframe can be missing from the packet's AOM order because
+        // the AOM problem is a strict subset of the window (observed on
+        // LaMAria once `vio_max_states`/`vio_max_kfs` grow past the upstream
+        // defaults).  Such a keyframe has a pose but no reduced-system
+        // columns, so recovery must skip it rather than abort with
+        // `MissingAomBlock`.
+        let (mut data, _root) = fixture();
+        process_marg_data(&mut data).expect("M8a process");
+        let present = data.frame_poses[0].frame_id;
+        assert!(
+            !data
+                .aom_order
+                .iter()
+                .any(|block| block.frame_id == u64::MAX),
+            "fixture precondition: stray id must not be in the AOM order"
+        );
+        let mut stray = data
+            .frame_poses
+            .iter()
+            .find(|pose| pose.frame_id == present)
+            .unwrap()
+            .clone();
+        stray.frame_id = u64::MAX;
+        data.frame_poses.push(stray);
+        data.keyframes.push(u64::MAX);
+        data.kfs_all.push(u64::MAX);
+
+        let factors = extract_nonlinear_factors(&data, MapperConfig::default())
+            .expect("stray keyframe must be skipped, not abort recovery");
+        assert_eq!(factors.roll_pitch.len(), 1);
+        assert_eq!(
+            factors.relative_pose.len(),
+            7,
+            "the stray keyframe must not add a relative-pose factor"
+        );
     }
 
     /// Opt-in integration check for the queue-facing MH01 max800 stream.
