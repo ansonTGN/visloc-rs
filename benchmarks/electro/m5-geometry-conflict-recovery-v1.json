@@ -1,0 +1,38 @@
+{
+  "date": "2026-09-18",
+  "finding": "The geometry-supported conflict recovery (--geometry-guided-conflict-recovery, recover_conflict_tracks_geometry) improves the connected-run mapper over the union-find default when the candidate/matching stages are held fixed: it registers more images at 1k/5k/10k, roughly neutral at 2.5k, and consistently lowers mean reprojection and raises track count. The 10k registration rises 199 -> 213, but the scale collapse (1.2k plateau) is not resolved by this change alone.",
+  "change": {
+    "file": "scripts/benchmark_electro.py",
+    "detail": "Expose --geometric-confidence-tracks, --cycle-supported-tracks and --geometry-guided-conflict-recovery and pass them into build_mapper_command. Previously only --confidence-ordered-tracks was reachable from the runner; the example already implemented the other track strategies."
+  },
+  "method": "Mapping-only A/B on the frozen M5 verified-pair snapshots (candidate generation and matching held fixed), so the comparison isolates the mapper/track-builder. Command template is the frozen tier mapping command with --geometry-guided-conflict-recovery appended for the treatment arm.",
+  "results": [
+    {
+      "tier": "tier-1000",
+      "baseline": {"registered": 989, "total": 1000, "tracks": 2586, "mean_reprojection_px": 1.574, "wall_s": 96.66},
+      "geometry_guided_conflict_recovery": {"registered": 997, "total": 1000, "tracks": 2917, "mean_reprojection_px": 1.404, "wall_s": 107.25},
+      "delta_registered": 8
+    },
+    {
+      "tier": "tier-2500",
+      "baseline": {"registered": 1223, "total": 2500, "tracks": 4226, "mean_reprojection_px": 1.766},
+      "geometry_guided_conflict_recovery": {"registered": 1220, "total": 2500, "tracks": 4676, "mean_reprojection_px": 1.421},
+      "delta_registered": -3
+    },
+    {
+      "tier": "tier-5000",
+      "baseline": {"registered": 1215, "total": 5000, "tracks": 3549, "mean_reprojection_px": 1.285, "wall_s": 1814.71},
+      "geometry_guided_conflict_recovery": {"registered": 1225, "total": 5000, "tracks": 4345, "mean_reprojection_px": 1.093, "wall_s": 1689.28},
+      "delta_registered": 10
+    },
+    {
+      "tier": "tier-10000",
+      "baseline": {"registered": 199, "total": 10000, "tracks": 873, "mean_reprojection_px": 1.301, "wall_s": 206.44},
+      "geometry_guided_conflict_recovery": {"registered": 213, "total": 10000, "tracks": 973, "mean_reprojection_px": 1.251, "wall_s": 213.99},
+      "delta_registered": 14
+    }
+  ],
+  "caveat": "The frozen M5 mapping wall figures (tier-5000: 2:53) no longer hold for current main, whose mapper is roughly 10x slower on the same snapshot (tier-5000 baseline 30:14). The registered-fraction and reprojection deltas above are current-code vs current-code and are therefore valid A/B; absolute walls are not comparable to the M5 report.",
+  "decision": "Adopt --geometry-guided-conflict-recovery for the connected-run mapper: it is neutral-to-positive on registration and consistently improves reprojection/track support. The 10k registration remains far below the 1.2k plateau, so the scale problem persists and is not solved by this switch alone.",
+  "schema": "visloc_m5_geometry_conflict_recovery_v1"
+}
