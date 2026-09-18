@@ -10832,8 +10832,10 @@ fn candidate_pairs_vlad_scored(
         // Fall back to exhaustive if the vocabulary cannot be built.
         return all_pairs(n).into_iter().map(|pair| (pair, 0.0)).collect();
     };
+    // VLAD aggregation is a pure per-image function; the indexed parallel
+    // map preserves image order, so the resulting globals are identical.
     let globals: Vec<Vec<f32>> = features
-        .iter()
+        .par_iter()
         .map(|f| vlad(&f.descriptors, &vocab))
         .collect();
 
@@ -10847,30 +10849,38 @@ fn candidate_pairs_vlad_scored_from_globals(
 ) -> Vec<((usize, usize), f32)> {
     let n = globals.len();
 
+    // Each image's exact top-k is independent of every other image's, and
+    // `exact_topk_similar_images` is deterministic.  Computing the per-image
+    // neighbourhoods in parallel therefore leaves the admitted pair set and
+    // its max scores byte-identical while removing the single-core O(N^2 * D)
+    // similarity scan from the critical path.
+    let per_query: Vec<Vec<(usize, f32)>> = (0..n)
+        .into_par_iter()
+        .map(|i| exact_topk_similar_images(i, globals, topk))
+        .collect();
+
     let mut scores = std::collections::BTreeMap::<(usize, usize), f32>::new();
-    let mut neighbors = vec![HashSet::<usize>::new(); n];
-    for i in 0..n {
-        for (j, score) in exact_topk_similar_images(i, globals, topk) {
-            neighbors[i].insert(j);
-            let pair = (i.min(j), i.max(j));
-            if !mutual || neighbors[j].contains(&i) {
-                scores
-                    .entry(pair)
-                    .and_modify(|best| *best = best.max(score))
-                    .or_insert(score);
+    if mutual {
+        let neighbors: Vec<HashSet<usize>> = per_query
+            .iter()
+            .map(|top| top.iter().map(|&(j, _)| j).collect())
+            .collect();
+        // Admission is exactly symmetric and independent of image traversal
+        // order: both directions of the pair must appear in the top-k.
+        for (i, top) in per_query.iter().enumerate() {
+            for &(j, score) in top {
+                if neighbors[i].contains(&j) && neighbors[j].contains(&i) {
+                    let pair = (i.min(j), i.max(j));
+                    scores
+                        .entry(pair)
+                        .and_modify(|best| *best = best.max(score))
+                        .or_insert(score);
+                }
             }
         }
-    }
-    if mutual {
-        // The first pass can see only one side of a pair.  Rebuild the score
-        // map from the completed neighbour sets so pair admission is exactly
-        // symmetric and independent of image traversal order.
-        scores.clear();
-        for i in 0..n {
-            for (j, score) in exact_topk_similar_images(i, globals, topk)
-                .into_iter()
-                .filter(|(j, _)| neighbors[i].contains(j) && neighbors[*j].contains(&i))
-            {
+    } else {
+        for (i, top) in per_query.iter().enumerate() {
+            for &(j, score) in top {
                 let pair = (i.min(j), i.max(j));
                 scores
                     .entry(pair)
