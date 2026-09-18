@@ -1208,6 +1208,9 @@ def build_mapping_command(
     final_iterative_refinement: bool = False,
     global_ba_max_refinements: int | None = None,
     confidence_ordered_tracks: bool = False,
+    geometric_confidence_tracks: bool = False,
+    cycle_supported_tracks: bool = False,
+    geometry_guided_conflict_recovery: bool = False,
     final_ba: bool = True,
 ) -> list[str]:
     command = [
@@ -1286,6 +1289,12 @@ def build_mapping_command(
         command.extend(["--global-ba-max-refinements", str(global_ba_max_refinements)])
     if confidence_ordered_tracks:
         command.append("--confidence-ordered-tracks")
+    if geometric_confidence_tracks:
+        command.append("--geometric-confidence-tracks")
+    if cycle_supported_tracks:
+        command.append("--cycle-supported-tracks")
+    if geometry_guided_conflict_recovery:
+        command.append("--geometry-guided-conflict-recovery")
     if not final_ba:
         command.append("--no-final-ba")
     return command
@@ -2289,6 +2298,21 @@ def _parser() -> argparse.ArgumentParser:
         help="reject only conflict-forming edges in descending verified-pair confidence",
     )
     parser.add_argument(
+        "--geometric-confidence-tracks",
+        action="store_true",
+        help="weight E-supported Calibrated correspondences by normalized Sampson confidence",
+    )
+    parser.add_argument(
+        "--cycle-supported-tracks",
+        action="store_true",
+        help="use the cycle-supported track strategy instead of union-find",
+    )
+    parser.add_argument(
+        "--geometry-guided-conflict-recovery",
+        action="store_true",
+        help="recover geometrically consistent tracks from same-image conflicts",
+    )
+    parser.add_argument(
         "--no-final-ba",
         action="store_true",
         help="skip the mapper's final bundle adjustment (for a phase-isolated baseline)",
@@ -2535,6 +2559,9 @@ def main(argv: list[str] | None = None) -> int:
                     final_iterative_refinement=args.final_iterative_refinement,
                     global_ba_max_refinements=args.global_ba_max_refinements,
                     confidence_ordered_tracks=args.confidence_ordered_tracks,
+                    geometric_confidence_tracks=args.geometric_confidence_tracks,
+                    cycle_supported_tracks=args.cycle_supported_tracks,
+                    geometry_guided_conflict_recovery=args.geometry_guided_conflict_recovery,
                     final_ba=not args.no_final_ba,
                 ),
                 artifact_root / "mapping.log",

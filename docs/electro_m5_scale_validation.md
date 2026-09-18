@@ -170,3 +170,48 @@ Note that the frozen tier-10000 `candidates.txt` predates two current manifest
 metadata policies and differs by roughly 10k of 70k pairs, so the historical
 `candidate_wall_s=2989.03` is not the current-code sequential baseline; the
 speedups above are measured against the current code's own 1-thread run.
+
+## Follow-up: candidate descriptor streaming (2026-09-18)
+
+The second item above — streaming descriptor-to-global aggregation instead of
+loading the file-backed feature bank — was already implemented as
+`--stream-candidate-features`
+(`stream_vlad_globals_from_feature_files`: row-count prepass, bounded training
+sample pass, then one-image-at-a-time parallel VLAD aggregation). It was
+validated against the batch path:
+
+| tier | batch peak RSS | streamed peak RSS | wall (batch -> streamed) | manifest |
+| --- | ---: | ---: | ---: | --- |
+| 1,000 | 188 MiB | 48 MiB | 39.4 s -> 41.8 s | identical SHA-256 |
+| 10,000 | 1.15 GiB | 354 MiB (3.33x lower) | 1017.6 s -> 967.3 s | identical SHA-256 |
+
+The connected-run policy should therefore pass `--stream-candidate-features`
+(it requires `--input-colmap-calibration`). Evidence:
+`benchmarks/electro/m5-candidate-streaming-v1.json`.
+
+## Follow-up: geometry-supported conflict recovery A/B (2026-09-18)
+
+The third item above — preserving geometrically consistent alternatives
+instead of collapsing long sequence evidence through same-image union-find
+conflicts — is implemented as `--geometry-guided-conflict-recovery`
+(`recover_conflict_tracks_geometry`) and `--geometric-confidence-tracks`. The
+benchmark runner now exposes all three track strategies (`--geometric-
+confidence-tracks`, `--cycle-supported-tracks`, `--geometry-guided-conflict-
+recovery`) through `build_mapper_command`.
+
+Mapping-only A/B on the frozen M5 verified-pair snapshots (candidate and
+matching held fixed):
+
+| tier | baseline registered / tracks / reproj | conflict recovery | delta |
+| --- | --- | --- | ---: |
+| 1,000 | 989 / 2586 / 1.574 px | 997 / 2917 / 1.404 px | +8 |
+| 2,500 | 1223 / 4226 / 1.766 px | 1220 / 4676 / 1.421 px | -3 |
+| 5,000 | 1215 / 3549 / 1.285 px | 1225 / 4345 / 1.093 px | +10 |
+| 10,000 | 199 / 873 / 1.301 px | 213 / 973 / 1.251 px | +14 |
+
+Registration is neutral-to-positive and reprojection/track support improve at
+every tier. The 10k registration rises 199 -> 213 but stays far below the 1.2k
+plateau, so the scale collapse is not resolved by this switch alone. The
+current-code mapper is also roughly 10x slower than the frozen M5 wall on the
+same snapshot, so only the current-vs-current deltas are meaningful. Evidence:
+`benchmarks/electro/m5-geometry-conflict-recovery-v1.json`.

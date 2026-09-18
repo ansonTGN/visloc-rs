@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-18",
+  "finding": "The streamed candidate path (--stream-candidate-features, stream_vlad_globals_from_feature_files) already implements the intended two-pass descriptor streaming: a row-count prepass fixes the global stride, a second pass collects the bounded training sample, and a third pass aggregates one image's VLAD at a time under rayon. It never retains the local descriptor bank. It was validated to produce a byte-identical candidate manifest to the batch path at every tier while cutting candidate peak RSS by ~3.3-4x.",
+  "implementation": {
+    "batch": "candidate_pairs_vlad_scored loads every FeatureSet into a Vec<FeatureSet> (the descriptor bank), then computes globals and the exact top-k.",
+    "streamed": "stream_vlad_globals_from_feature_files streams feature files; only one FeatureSet per rayon worker plus the N x D globals are resident.",
+    "runner": "scripts/benchmark_electro.py exposes --stream-candidate-features (build_candidate_command); LSH retrieval already requires it.",
+    "history": "streamed path added in acaef39 'perf(sfm): stream descriptors with scale-aware ANN retrieval'."
+  },
+  "measurements": {
+    "command": "unordered_sfm_demo --pair-source temporal-pyramid --retrieval-topk 32 --temporal-pyramid-max-offset 32 --candidate-budget <7N> (--stream-candidate-features for the streamed arm)",
+    "tier_1000": {
+      "batch_peak_rss_kib": 192356,
+      "streamed_peak_rss_kib": 49028,
+      "streamed_wall_s": 41.79,
+      "manifest_identical": true,
+      "manifest_sha256": "268f88d2b6e4822b96af3c2b049038cfaa6bf662d2d6e0a368b93d04956c2c88"
+    },
+    "tier_10000": {
+      "batch_peak_rss_kib": 1206856,
+      "streamed_peak_rss_kib": 362332,
+      "rss_reduction": 3.33,
+      "batch_wall_s": 1017.61,
+      "streamed_wall_s": 967.27,
+      "manifest_identical": true,
+      "candidate_pairs": 70000,
+      "manifest_sha256": "6a060d5d148d39fe4378f7fedebf6420ae827d17e82774d13ba1a5da3269a28a",
+      "local_descriptors": 1427634,
+      "vocabulary_samples": 40790
+    }
+  },
+  "decision": "Adopt --stream-candidate-features as the connected-run candidate policy: byte-identical output, ~3.3x lower candidate-phase peak RSS at 10k (1.15 GiB -> 354 MiB), and equal-or-better wall. The batch path remains the default for callers without a calibration root (streaming requires --input-colmap-calibration).",
+  "schema": "visloc_m5_candidate_streaming_v1"
+}
