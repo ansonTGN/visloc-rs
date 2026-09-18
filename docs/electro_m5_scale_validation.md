@@ -200,18 +200,26 @@ confidence-tracks`, `--cycle-supported-tracks`, `--geometry-guided-conflict-
 recovery`) through `build_mapper_command`.
 
 Mapping-only A/B on the frozen M5 verified-pair snapshots (candidate and
-matching held fixed):
+matching held fixed), each tier using the frozen periodic-BA threshold
+`images + 1` (1001/2501/5001/10001) so the periodic BA schedule is disabled:
 
 | tier | baseline registered / tracks / reproj | conflict recovery | delta |
 | --- | --- | --- | ---: |
 | 1,000 | 989 / 2586 / 1.574 px | 997 / 2917 / 1.404 px | +8 |
 | 2,500 | 1223 / 4226 / 1.766 px | 1220 / 4676 / 1.421 px | -3 |
-| 5,000 | 1215 / 3549 / 1.285 px | 1225 / 4345 / 1.093 px | +10 |
+| 5,000 | 1212 / 3318 / 1.072 px | 1221 / 4110 / 0.868 px | +9 |
 | 10,000 | 199 / 873 / 1.301 px | 213 / 973 / 1.251 px | +14 |
 
 Registration is neutral-to-positive and reprojection/track support improve at
-every tier. The 10k registration rises 199 -> 213 but stays far below the 1.2k
-plateau, so the scale collapse is not resolved by this switch alone. The
-current-code mapper is also roughly 10x slower than the frozen M5 wall on the
-same snapshot, so only the current-vs-current deltas are meaningful. Evidence:
+every tier. The tier-5000 baseline exactly reproduces the frozen M5 model
+(1212 / 3318 / 1.072 px). The 10k registration rises 199 -> 213 but stays far
+below the 1.2k plateau, so the scale collapse is not resolved by this switch
+alone.
+
+**Correction.** An initial pass used `--periodic-ba-min-registered-images 1001`
+for every tier (the tier-1000 value) instead of the per-tier `images + 1`. That
+made the tier-5000 mapper run a global BA every five registrations after 1001
+(about 40 s each) and was briefly misread as a ~10x mapper regression. With the
+correct 5001 value the current code matches the frozen model exactly, so there
+is no such regression. Evidence:
 `benchmarks/electro/m5-geometry-conflict-recovery-v1.json`.
