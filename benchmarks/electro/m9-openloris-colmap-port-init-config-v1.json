@@ -1,0 +1,15 @@
+{
+  "date": "2026-09-17",
+  "finding": "COLMAP accepts its model0 initial pair #5446/#5463 because the two-view geometry selects the UNCALIBRATED configuration (config=3), whose tri_angle is 9.18 deg; the port selects CALIBRATED and gets 1.16 deg, below the relaxed 4 deg gate.",
+  "mechanism": {
+    "colmap": "E/F inlier ratio <= min_E_F_inlier_ratio (0.95) so the calibrated branch is skipped; config=UNCALIBRATED (F). EstimateTwoViewGeometryPoseFromCamRays recovers E=EssentialFromFundamentalMatrix(K2,F,K1) and PoseFromEssentialMatrix, giving tri_angle=9.18 deg > 4 deg (final relaxation stage) -> accepted.",
+    "port": "The init path uses RelativePoseEstimator (EightPointEssentialMatrixEstimator, E only). The port's TwoViewGeometryVerifier (used here only for diagnosis) reports config=Calibrated with e=56, f=58 -> E/F=0.966 > 0.95; its E-only tri_angle is 1.16 deg (DLT) / 1.85 deg (ray) <= 4 deg -> rejected."
+  },
+  "method": "Patched the pinned 64805cb EstimateInitialTwoViewGeometry VLOG(3) line to LOG(INFO) with image ids, rebuilt, and re-ran the 10k init. Captured: 'INIT2V images 5446/5463 config 3, 59 inlier matches, 0.00598414 z translation, 9.18349 deg triangulation angle'.",
+  "next": [
+    "Port COLMAP's EssentialMatrixFivePointEstimator (Nister), use the E/F/H classification (colmap_verification) in the initial two-view geometry, and compute tri_angle per COLMAP (E ray-angle for CALIBRATED, F->E for UNCALIBRATED, homography 3D for PLANAR).",
+    "2.5k non-regression, then 10k."
+  ],
+  "root_cause": "The E-matrix estimator differs: COLMAP uses EssentialMatrixFivePointEstimator (5-point), the port's init uses EightPointEssentialMatrixEstimator. The resulting E inlier count moves the E/F ratio across 0.95, flipping the configuration (UNCALIBRATED vs CALIBRATED) and the tri_angle computation.",
+  "schema": "visloc_colmap_port_init_config_v1"
+}
