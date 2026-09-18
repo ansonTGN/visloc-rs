@@ -48,7 +48,9 @@ categories = ["computer-vision", "science::robotics"]
 nalgebra = "0.33"
 rand = { version = "0.8", features = ["small_rng"] }
 rayon = "1"
-sha2 = "0.11"
+# sha2 0.11 pulls const-oid 0.10 (edition2024, needs Cargo 1.85+) via digest
+# 0.11, which breaks MSRV 1.83. Hold at 0.10 until the MSRV is bumped.
+sha2 = "0.10"
 thiserror = "2"
 
 [features]
