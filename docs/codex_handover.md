@@ -133,6 +133,21 @@ inlier>2でmulti-view LO（≤10反復、residual_sumタイブレーク）、`mi
   `colmap/colmap:latest`側に合わせる。証跡
   `benchmarks/electro/m9-openloris-colmap-port-control-version-v1.json`。
 
+### 2026-09-17 追記: ピン留めCOLMAPビルドで初期ペア一致 → 真因はE推定器(8点vs5点)
+
+- ピン留め`64805cb`をCPUビルド（`--network host`コンテナ、CUDA/GUI off、`libopenimageio-dev`＋
+  `openimageio-tools`、`/usr/include/opencv4`を作成）し、10k mapperを再実行。
+- **ピン留め版も制御と同じ初期ペア #5446/#5463 を選択** → 制御は有効なparity目標で、
+  **版不一致説は後退**（制御とピン留め版は初期ペア選択で一致）。
+- H/PLANAR仮説は**棄却**: 移植版`TwoViewGeometryVerifier`で当該ペアは`config=Calibrated`
+  （e=56, f=58, h=43、H/E=0.77 < max_H_inlier_ratio=0.8）。
+- **真因はE行列推定器**: COLMAPは`EssentialMatrixFivePointEstimator`（5点）、移植版initは
+  `RelativePoseEstimator`既定の**8点法**。低パララックスでの回転推定差がinit tri_angleを
+  動かす（移植版1.16°/1.85° vs COLMAPは受理に>4°必要）。
+- 次: COLMAPの5点法E推定器（Nister, LORANSAC最小サンプル）を移植し、初期two-view
+  geometry（および`colmap_verification`）で使用→2.5k非回帰→10k。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-init-estimator-v1.json`。
+
 ### 2026-09-17 追記: 自作map × 地図ベースrelocalization（branch `feat/openloris-map-relocalization`）
 
 COLMAP port（`examples/colmap_incremental_mapper`）が出力した地図を、既存の
