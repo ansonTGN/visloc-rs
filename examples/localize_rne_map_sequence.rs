@@ -20,6 +20,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use nalgebra::{Quaternion, UnitQuaternion, Vector3};
 use visloc_rs::core::geometry::Pose;
 use visloc_rs::core::types::{LandmarkDescriptorStore, LocalizationResult, QueryImage, VisualMap};
 use visloc_rs::io::colmap::ColmapMapProvider;
@@ -63,6 +64,54 @@ fn query_timestamp_seconds(path: &Path, fallback_index: usize) -> f64 {
         })
 }
 
+/// Load a TUM trajectory as (timestamp_ns, Pose) priors. The TUM quaternion is
+/// interpreted as camera-to-world; the Pose stores world-to-camera.
+fn load_prior_tum(path: &Path) -> Result<Vec<(i64, Pose)>, Box<dyn std::error::Error>> {
+    let mut priors = Vec::new();
+    let text = fs::read_to_string(path)?;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 8 {
+            continue;
+        }
+        let timestamp_ns = (parts[0].parse::<f64>()? * 1.0e9).round() as i64;
+        let center = Vector3::new(parts[1].parse()?, parts[2].parse()?, parts[3].parse()?);
+        let rotation_cw = UnitQuaternion::from_quaternion(Quaternion::new(
+            parts[7].parse()?,
+            parts[4].parse()?,
+            parts[5].parse()?,
+            parts[6].parse()?,
+        ));
+        let rotation_wc = rotation_cw.inverse();
+        let translation_wc = -(rotation_wc * center);
+        priors.push((
+            timestamp_ns,
+            Pose::from_world_to_camera(rotation_wc, translation_wc),
+        ));
+    }
+    priors.sort_by_key(|(timestamp_ns, _)| *timestamp_ns);
+    Ok(priors)
+}
+
+fn nearest_prior(priors: &[(i64, Pose)], timestamp_ns: i64, tolerance_ns: i64) -> Option<Pose> {
+    let mut best: Option<(i64, Pose)> = None;
+    for (candidate_ns, pose) in priors {
+        let gap = (candidate_ns - timestamp_ns).abs();
+        if gap <= tolerance_ns
+            && best
+                .as_ref()
+                .is_none_or(|(best_ns, _)| gap < (*best_ns - timestamp_ns).abs())
+        {
+            best = Some((*candidate_ns, pose.clone()));
+        }
+    }
+    best.map(|(_, pose)| pose)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     let out_dir = parse_flag(&mut args, "--out-dir").map(PathBuf::from);
@@ -74,13 +123,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|value| value.parse())
         .transpose()?
         .unwrap_or(6);
+    let prior_tum: Option<Vec<(i64, Pose)>> = parse_flag(&mut args, "--prior-tum")
+        .map(|path| load_prior_tum(Path::new(&path)))
+        .transpose()?;
+    if let Some(priors) = &prior_tum {
+        println!("loaded {} trajectory priors", priors.len());
+    }
     let (map_dir, descriptor_path, camera_id, query_paths) = match args.as_slice() {
-        [map_dir, descriptor_path, camera_id, queries @ ..] if !queries.is_empty() => (
-            PathBuf::from(map_dir),
-            PathBuf::from(descriptor_path),
-            camera_id.parse::<u64>()?,
-            queries.iter().map(PathBuf::from).collect::<Vec<_>>(),
-        ),
+        [map_dir, descriptor_path, camera_id, queries @ ..] if !queries.is_empty() => {
+            // Process in timestamp order (filenames are <ns>.txt); lexicographic
+            // order is NOT temporal and breaks the feed-forward prior.
+            let mut query_paths: Vec<PathBuf> = queries.iter().map(PathBuf::from).collect();
+            query_paths.sort_by_cached_key(|p| {
+                p.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .and_then(|stem| stem.parse::<i64>().ok())
+                    .unwrap_or(i64::MAX)
+            });
+            (
+                PathBuf::from(map_dir),
+                PathBuf::from(descriptor_path),
+                camera_id.parse::<u64>()?,
+                query_paths,
+            )
+        }
         _ => {
             eprintln!(
                 "usage: localize_rne_map_sequence --out-dir <dir> [--radius-m F] [--min-inliers N] \
@@ -124,7 +190,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut consecutive_failures = 0_usize;
     let mut tum = String::new();
     let mut stats =
-        String::from("frame,query,success,inliers,inlier_ratio,latency_ms,used_prior\n");
+        String::from("frame,query,success,inliers,inlier_ratio,latency_ms,used_prior,fallback\n");
     let mut localized = 0_usize;
 
     for (index, query_path) in query_paths.iter().enumerate() {
@@ -135,11 +201,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             descriptors: features.descriptors,
         };
         let timestamp = query_timestamp_seconds(query_path, index);
-        let used_prior = prior.is_some();
+        let timestamp_ns = (timestamp * 1.0e9).round() as i64;
+        // Prefer an external trajectory prior (e.g. VIO) when provided;
+        // otherwise fall back to the feed-forward prior.
+        let external = prior_tum
+            .as_ref()
+            .and_then(|priors| nearest_prior(priors, timestamp_ns, 100_000_000));
+        let active: Option<Pose> = external.or_else(|| prior.clone());
+        let used_prior = active.is_some();
         let start = Instant::now();
-        let result = match &prior {
-            Some(pose) => localize_with_prior(&pipeline, &query, map, store, pose, radius_m),
-            None => pipeline.localize_with_descriptor_store(&query, map, store),
+        let prior_result = active
+            .as_ref()
+            .map(|pose| localize_with_prior(&pipeline, &query, map, store, pose, radius_m));
+        let prior_accepted = prior_result.as_ref().is_some_and(|result| {
+            result.success && result.inlier_count >= min_inliers && result.pose.is_some()
+        });
+        // Two-stage: prior first; on failure fall back to global matching so a
+        // stale prior cannot poison the track and loss is recovered immediately.
+        let (result, used_fallback) = if prior_accepted {
+            (prior_result.expect("prior accepted"), false)
+        } else {
+            (
+                pipeline.localize_with_descriptor_store(&query, map, store),
+                used_prior,
+            )
         };
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
 
@@ -170,7 +255,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         stats.push_str(&format!(
-            "{index},{},{},{},{:.4},{:.2},{used_prior}\n",
+            "{index},{},{},{},{:.4},{:.2},{used_prior},{used_fallback}\n",
             query_path.display(),
             result.success,
             result.inlier_count,
