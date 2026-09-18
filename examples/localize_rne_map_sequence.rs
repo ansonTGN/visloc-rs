@@ -17,7 +17,7 @@
 //! carried into `localization.tum` (seconds).
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use visloc_rs::core::geometry::Pose;
@@ -54,7 +54,7 @@ fn localize_with_prior(
     )
 }
 
-fn query_timestamp_seconds(path: &PathBuf, fallback_index: usize) -> f64 {
+fn query_timestamp_seconds(path: &Path, fallback_index: usize) -> f64 {
     path.file_stem()
         .and_then(|stem| stem.to_str())
         .and_then(|stem| stem.parse::<f64>().ok())
@@ -147,7 +147,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if accepted {
             let pose = result.pose.clone().expect("accepted pose exists");
             let center = pose.camera_center_world();
-            let quaternion = pose.camera_to_world().rotation.quaternion().clone();
+            let quaternion = *pose.camera_to_world().rotation.quaternion();
             tum.push_str(&format!(
                 "{timestamp:.9} {:.9} {:.9} {:.9} {:.9} {:.9} {:.9} {:.9}\n",
                 center.x,
