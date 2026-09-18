@@ -3141,3 +3141,25 @@ candidateだけで49:49かかる。dense 1kは23,157 verifiedでもUnionFind con
 3. same-image conflictでsupportを捨てるUnionFind track builderを、geometry-supported
    alternativeを保持するbounded component builderへ置換。1k/2.5k/5k/10kの凍結
    manifestをすべて再実行し、resourceだけでなくregistered fractionをgateにする。
+
+## 2026-09-18: Nister 5点法の移植と10k初期ペア結論
+
+- `crates/vision/src/two_view/five_point.rs` にPoseLib `relpose_5pt`＋Sturm根分離を移植。
+  固定サンプルでPoseLib参照4解と一致（単体test）。
+- `EssentialMatrixEstimator::estimate_all` を追加し、`FivePointEssentialMatrixEstimator` を実装。
+  `TwoViewGeometryVerifier` のE推定器を5点法へ切替（COLMAPの
+  `LORANSAC<EssentialMatrixFivePointEstimator,...>` に対応）。
+- `two_view_pose_and_triangulation_angle` で `EstimateTwoViewGeometryPoseFromCamRays` の
+  tri_angle（CALIBRATED/UNCALIBRATEDはray角度、UNCALIBRATEDはE=K2^T F K1、PLANARはHの3D点）を移植。
+- 退化サンプルで全NaNのEが生成されnalgebraのSVDが停止する問題を、非有限Eの除外で修正。
+- **2.5k非回帰**: 旧init＋5点法検証器で `0.0712`（初期ペア776/840=frame388/420、1 model、2500 registered）。
+  init経路を検証器へ書き換えると初期ペア1125/1157になり **2.78 m** へ回帰するため、init書き換えは撤回。
+- **10k初期ペアは安定なparity targetではない**:
+  - 制御(`colmap:latest`)は #5446/#5463（内部ID 893/925）を初期ペアに選択。
+  - portは同ペアを `config=Calibrated e=59 f=59` と分類。制御の `two_view_geometries` も
+    config=2 (CALIBRATED) 59 inliersで、portと一致。
+  - COLMAPのinit logのみ config 3 (UNCALIBRATED)。これは `min_num_trials=30` での
+    再計算artifact。
+  - ピン留め64805cbビルドは同一databaseで #7584/#7553 を選択し、#5463を評価しない。
+  - よって10kの2モデル分割はCOLMAP内部の非決定性に由来し、再現可能な検証対象ではない。
+- 証跡: `benchmarks/electro/m9-openloris-five-point-essential-v1.json`。

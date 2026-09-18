@@ -50,12 +50,14 @@ use visloc_core::types::Camera;
 
 pub mod colmap_verification;
 pub mod correspondence_graph;
+pub mod five_point;
 pub mod fundamental;
 pub mod homography;
 pub mod rescue;
 
 pub use colmap_verification::{
-    ConfigurationType, TwoViewGeometryOptions, TwoViewGeometryReport, TwoViewGeometryVerifier,
+    two_view_pose_and_triangulation_angle, two_view_triangulation_angle, ConfigurationType,
+    TwoViewGeometryOptions, TwoViewGeometryReport, TwoViewGeometryVerifier,
 };
 pub use correspondence_graph::{
     Correspondence, CorrespondenceGraph, CorrespondenceGraphError, EdgeMetadata, IngestStats,
@@ -123,6 +125,19 @@ pub trait EssentialMatrixEstimator {
         camera: &Camera,
     ) -> Option<Matrix3<f64>>;
     fn minimum_correspondences(&self) -> usize;
+
+    /// All model hypotheses for the given sample. Linear estimators admit a
+    /// single solution and inherit the default (forwarding to
+    /// [`Self::estimate`]); minimal solvers with several algebraic solutions
+    /// (the five-point essential solver) override this so RANSAC can score
+    /// every hypothesis from one sample.
+    fn estimate_all(
+        &self,
+        correspondences: &[TwoViewCorrespondence],
+        camera: &Camera,
+    ) -> Vec<Matrix3<f64>> {
+        self.estimate(correspondences, camera).into_iter().collect()
+    }
 }
 
 /// Hartley-normalized 8-point essential-matrix estimator.
@@ -198,6 +213,97 @@ impl EssentialMatrixEstimator for EightPointEssentialMatrixEstimator {
         let essential_calibrated: Matrix3<f64> =
             current_normalization.transpose() * essential_normalized * previous_normalization;
         Some(essential_calibrated)
+    }
+}
+
+/// Nister five-point essential-matrix estimator (PoseLib `relpose_5pt`,
+/// `docs` in [`five_point`]).
+///
+/// Unlike the eight-point estimator this is a minimal solver: RANSAC draws
+/// five correspondences per hypothesis, matching COLMAP's
+/// `EssentialMatrixFivePointEstimator`. The resulting E inlier count is what
+/// drives COLMAP's calibrated-vs-uncalibrated E/F-ratio test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FivePointEssentialMatrixEstimator {
+    pub min_correspondences: usize,
+}
+
+impl Default for FivePointEssentialMatrixEstimator {
+    fn default() -> Self {
+        Self {
+            min_correspondences: 5,
+        }
+    }
+}
+
+impl EssentialMatrixEstimator for FivePointEssentialMatrixEstimator {
+    fn minimum_correspondences(&self) -> usize {
+        self.min_correspondences
+    }
+
+    fn estimate(
+        &self,
+        correspondences: &[TwoViewCorrespondence],
+        camera: &Camera,
+    ) -> Option<Matrix3<f64>> {
+        self.estimate_all(correspondences, camera)
+            .into_iter()
+            .next()
+    }
+
+    fn estimate_all(
+        &self,
+        correspondences: &[TwoViewCorrespondence],
+        camera: &Camera,
+    ) -> Vec<Matrix3<f64>> {
+        if correspondences.len() < self.min_correspondences {
+            return Vec::new();
+        }
+        let rays1: Option<Vec<Vector3<f64>>> = correspondences
+            .iter()
+            .map(|c| {
+                camera
+                    .normalize_pixel(&c.previous_xy)
+                    .map(|p| Vector3::new(p.x, p.y, 1.0))
+            })
+            .collect();
+        let rays2: Option<Vec<Vector3<f64>>> = correspondences
+            .iter()
+            .map(|c| {
+                camera
+                    .normalize_pixel(&c.current_xy)
+                    .map(|p| Vector3::new(p.x, p.y, 1.0))
+            })
+            .collect();
+        let (Some(rays1), Some(rays2)) = (rays1, rays2) else {
+            return Vec::new();
+        };
+
+        let models = five_point::relpose_5pt(&rays1, &rays2);
+
+        // COLMAP's minimal path keeps only hypotheses whose minimal sample
+        // triangulates in front of both cameras. The over-determined path
+        // (used for the inlier refit) returns every root.
+        if correspondences.len() == self.min_correspondences {
+            let mut out: Vec<Matrix3<f64>> = Vec::new();
+            for essential in models {
+                let inliers: Vec<usize> = (0..correspondences.len()).collect();
+                if recover_relative_pose_with_options(
+                    &essential,
+                    correspondences,
+                    camera,
+                    &inliers,
+                    &CheiralityOptions::default(),
+                )
+                .is_some_and(|recovery| recovery.best_score as usize == correspondences.len())
+                {
+                    out.push(essential);
+                }
+            }
+            out
+        } else {
+            models
+        }
     }
 }
 
@@ -319,22 +425,20 @@ where
                 .map(|&i| correspondences[i])
                 .collect();
 
-            let Some(candidate) = self.estimator.estimate(&sample, camera) else {
-                continue;
-            };
-
-            let Some(inliers) = score_inliers_if_competitive(
-                &candidate,
-                correspondences,
-                camera,
-                threshold_sq,
-                best_inliers.len(),
-            ) else {
-                continue;
-            };
-            if inliers.len() > best_inliers.len() {
-                best_inliers = inliers;
-                best_essential = Some(candidate);
+            for candidate in self.estimator.estimate_all(&sample, camera) {
+                let Some(inliers) = score_inliers_if_competitive(
+                    &candidate,
+                    correspondences,
+                    camera,
+                    threshold_sq,
+                    best_inliers.len(),
+                ) else {
+                    continue;
+                };
+                if inliers.len() > best_inliers.len() {
+                    best_inliers = inliers;
+                    best_essential = Some(candidate);
+                }
             }
         }
 
@@ -347,7 +451,11 @@ where
             best_inliers.iter().map(|&i| correspondences[i]).collect();
         let refined = self
             .estimator
-            .estimate(&inlier_correspondences, camera)
+            .estimate_all(&inlier_correspondences, camera)
+            .into_iter()
+            .max_by_key(|candidate| {
+                score_inliers(candidate, correspondences, camera, threshold_sq).len()
+            })
             .unwrap_or(essential);
         let final_inliers = score_inliers(&refined, correspondences, camera, threshold_sq);
         let final_inliers = if final_inliers.len() >= best_inliers.len() {
