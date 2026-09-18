@@ -567,8 +567,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(path) = &args.ba_per_pose_gravity_prior_observations {
         let n = per_pose_gravity_prior
             .as_ref()
-            .map(|p| p.observations.len())
-            .unwrap_or(0);
+            .map_or(0, |p| p.observations.len());
         println!(
             "BA per-pose gravity prior enabled: observations={} weight={} g_world=({:.3},{:.3},{:.3}) source={}",
             n,
@@ -679,7 +678,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if args.enable_ba {
-        let imu_input = imu_windows.clone().map(build_imu_input);
+        let imu_input = imu_windows.map(build_imu_input);
         let ba_config = StereoVoBaConfig {
             min_track_length: args.ba_min_track_length,
             max_initial_depth_m: args.ba_max_initial_depth_m,
@@ -802,9 +801,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             min_track_count: args.ba_min_track_count,
             landmark_init: args.ba_landmark_init,
             window_size: None,
-            gravity_prior: gravity_prior.clone(),
-            position_prior: position_prior.clone(),
-            per_pose_gravity_prior: per_pose_gravity_prior.clone(),
+            gravity_prior,
+            position_prior,
+            per_pose_gravity_prior,
             imu_input: None,
             fix_pose_prefix: 1,
             ba_config: BaConfig {
@@ -899,7 +898,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "loaded {} learned global descriptors (dim {}) from {}",
                     globals.len(),
-                    globals.first().map(|g| g.len()).unwrap_or(0),
+                    globals.first().map_or(0, |g| g.len()),
                     path.display(),
                 );
                 Some(globals)
@@ -2625,7 +2624,7 @@ fn optional_f32(value: Option<f32>) -> String {
         .unwrap_or_default()
 }
 
-fn stereo_depth_gate_label(gate: &StereoDepthGate) -> &'static str {
+const fn stereo_depth_gate_label(gate: &StereoDepthGate) -> &'static str {
     match gate {
         StereoDepthGate::Fixed => "fixed",
         StereoDepthGate::Adaptive(_) => "adaptive",

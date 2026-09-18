@@ -138,7 +138,7 @@ struct WindowLayout {
 }
 
 impl WindowLayout {
-    fn new(pose_count: usize, state_count: usize) -> Self {
+    const fn new(pose_count: usize, state_count: usize) -> Self {
         Self {
             pose_count,
             state_count,
@@ -153,7 +153,7 @@ impl WindowLayout {
         (index < self.state_count).then_some(self.pose_count * POSE_DOF + index * NAV_STATE_DOF)
     }
 
-    fn state_dof(self) -> usize {
+    const fn state_dof(self) -> usize {
         self.pose_count * POSE_DOF + self.state_count * NAV_STATE_DOF
     }
 }
@@ -178,7 +178,7 @@ pub struct WindowLandmark {
 }
 
 impl WindowLandmark {
-    fn parameter(&self, anchor_frame_id: u64) -> InverseDistanceLandmark {
+    const fn parameter(&self, anchor_frame_id: u64) -> InverseDistanceLandmark {
         InverseDistanceLandmark {
             anchor_pose: anchor_frame_id,
             anchor_camera_id: self.anchor_camera_id,
@@ -2586,23 +2586,23 @@ const LM_TOKEN_FNV_OFFSET: u64 = 14_695_981_039_346_656_037;
 const LM_TOKEN_FNV_PRIME: u64 = 1_099_511_628_211;
 
 #[inline]
-fn lm_token_hash_u64(hash: &mut u64, value: u64) {
+const fn lm_token_hash_u64(hash: &mut u64, value: u64) {
     *hash ^= value;
     *hash = hash.wrapping_mul(LM_TOKEN_FNV_PRIME);
 }
 
 #[inline]
-fn lm_token_hash_usize(hash: &mut u64, value: usize) {
+const fn lm_token_hash_usize(hash: &mut u64, value: usize) {
     lm_token_hash_u64(hash, value as u64);
 }
 
 #[inline]
-fn lm_token_hash_bool(hash: &mut u64, value: bool) {
+const fn lm_token_hash_bool(hash: &mut u64, value: bool) {
     lm_token_hash_u64(hash, value as u64);
 }
 
 #[inline]
-fn lm_token_hash_f64(hash: &mut u64, value: f64) {
+const fn lm_token_hash_f64(hash: &mut u64, value: f64) {
     lm_token_hash_u64(hash, value.to_bits());
 }
 
@@ -4227,9 +4227,9 @@ impl WindowProblem {
         }
         let landmark_before = retain_diagnostics.then(|| self.landmarks.clone());
         let first = match if retain_diagnostics {
-            solve_lm_with_timing(self, initial.clone(), config, true, true, timing)
+            solve_lm_with_timing(self, initial, config, true, true, timing)
         } else {
-            solve_lm_with_timing(self, initial.clone(), config, false, false, timing)
+            solve_lm_with_timing(self, initial, config, false, false, timing)
         } {
             Ok(result) => result,
             Err(error) => {
@@ -6236,7 +6236,7 @@ fn vector3_array(value: Vector3<f64>) -> [f64; 3] {
 const IMU_F64_ATAN_SMALL_MAX_RATIO: f64 = f64::from_bits(0x3eb0_0000_0000_0000);
 const IMU_F64_ATAN_SMALL_NORMALIZE_X_FLOOR_EXP: i32 = -500;
 
-fn imu_f64_atan_small_floor_exponent(value: f64) -> i32 {
+const fn imu_f64_atan_small_floor_exponent(value: f64) -> i32 {
     let bits = value.to_bits() & 0x7fff_ffff_ffff_ffff;
     let exponent = ((bits >> 52) & 0x7ff) as i32;
     if exponent != 0 {
@@ -6514,7 +6514,7 @@ impl WindowTrialView<'_, '_> {
     }
 }
 
-fn checked_lm_linearization_cost(linearization: &LmLinearization) -> Result<f64, LmFailure> {
+const fn checked_lm_linearization_cost(linearization: &LmLinearization) -> Result<f64, LmFailure> {
     if linearization.cost.is_finite() {
         Ok(linearization.cost)
     } else {
@@ -7468,7 +7468,7 @@ pub fn local_pose_difference(current: &SE3, reference: &SE3) -> DVector<f64> {
     )
 }
 
-fn block_dof(kind: WindowBlockKind) -> usize {
+const fn block_dof(kind: WindowBlockKind) -> usize {
     match kind {
         WindowBlockKind::Pose => POSE_DOF,
         WindowBlockKind::StatePose => POSE_DOF,
@@ -11161,7 +11161,7 @@ mod tests {
         );
         assert_window_dynamic_eq(&candidate, &before);
 
-        let mut duplicate_problem = problem.clone();
+        let mut duplicate_problem = problem;
         duplicate_problem
             .landmarks
             .push(duplicate_problem.landmarks[0].clone());
@@ -11367,7 +11367,7 @@ mod tests {
         fallback
             .accept_step_with_token(&state, &step, LmTrialToken::default())
             .unwrap();
-        let mut legacy = problem.clone();
+        let mut legacy = problem;
         legacy.accept_step(&state, &step).unwrap();
         assert_window_dynamic_eq(&fallback, &legacy);
     }
@@ -12116,8 +12116,8 @@ mod tests {
                 .unwrap(),
             cameras: Vec::new(),
             t_imu_cam: Vec::new(),
-            poses: poses.clone(),
-            states: states.clone(),
+            poses,
+            states,
             landmarks: Vec::new(),
             imu_links: Vec::new(),
             imu_noise: ImuNoiseModel {
@@ -12279,7 +12279,7 @@ mod tests {
         let (updated, _) = problem.apply_step_full(&problem.initial_state(), &second_increment);
         let actual = &updated[0];
 
-        let mut accumulated = first_increment.clone();
+        let mut accumulated = first_increment;
         for (lhs, rhs) in accumulated.iter_mut().zip(second_increment.iter()) {
             *lhs = ((*lhs as f32) + (*rhs as f32)) as f64;
         }
@@ -13607,7 +13607,7 @@ mod tests {
             .iter()
             .all(|value| (*value as f32).to_bits() == 0));
 
-        let mut without_hole = problem.clone();
+        let mut without_hole = problem;
         without_hole.landmarks[0].observations.remove(1);
         let compact_factor = without_hole
             .linearize(&without_hole.initial_state())

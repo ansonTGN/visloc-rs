@@ -332,7 +332,7 @@ pub struct CrossCheckMatcher<M = BruteForceMatcher> {
 }
 
 impl<M> CrossCheckMatcher<M> {
-    pub fn new(inner: M) -> Self {
+    pub const fn new(inner: M) -> Self {
         Self { inner }
     }
 }

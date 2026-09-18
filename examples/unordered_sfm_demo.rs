@@ -1624,7 +1624,7 @@ fn colmap_guided_geometry(report: &TwoViewGeometryReport) -> Option<ColmapGuided
     }
 }
 
-fn colmap_guided_geometry_name(geometry: Option<ColmapGuidedGeometry>) -> &'static str {
+const fn colmap_guided_geometry_name(geometry: Option<ColmapGuidedGeometry>) -> &'static str {
     match geometry {
         Some(ColmapGuidedGeometry::Essential(_)) => "E",
         Some(ColmapGuidedGeometry::Fundamental(_)) => "F",
@@ -2723,22 +2723,18 @@ fn physical_edge_order_key(
     let point_j = features
         .get(image_j)
         .and_then(|set| set.keypoints.get(keypoint_j));
-    let (x_i, y_i) = point_i
-        .map(|point| {
-            (
-                quantized_physical_coordinate(point.x),
-                quantized_physical_coordinate(point.y),
-            )
-        })
-        .unwrap_or((i64::MIN, i64::MIN));
-    let (x_j, y_j) = point_j
-        .map(|point| {
-            (
-                quantized_physical_coordinate(point.x),
-                quantized_physical_coordinate(point.y),
-            )
-        })
-        .unwrap_or((i64::MIN, i64::MIN));
+    let (x_i, y_i) = point_i.map_or((i64::MIN, i64::MIN), |point| {
+        (
+            quantized_physical_coordinate(point.x),
+            quantized_physical_coordinate(point.y),
+        )
+    });
+    let (x_j, y_j) = point_j.map_or((i64::MIN, i64::MIN), |point| {
+        (
+            quantized_physical_coordinate(point.x),
+            quantized_physical_coordinate(point.y),
+        )
+    });
     let mut hash = 0xcbf29ce484222325u64 ^ seed;
     for value in [
         image_i as u64,
@@ -4417,8 +4413,7 @@ fn parse_persistent_match_worker_plan(path: &Path) -> Result<PersistentMatchWork
     }
     let root = path
         .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
     Ok(PersistentMatchWorkerPlan {
         root,
         image_names,
@@ -7569,9 +7564,8 @@ fn export_features_to_dir_impl(
             .and_then(|s| s.to_str())
             .unwrap_or(name);
         let path = dir.join(format!("{stem}_features.txt"));
-        let keypoints = native_keypoints
-            .map(|all| all[image_index].as_slice())
-            .unwrap_or(feat.keypoints.as_slice());
+        let keypoints =
+            native_keypoints.map_or(feat.keypoints.as_slice(), |all| all[image_index].as_slice());
         std::fs::write(
             &path,
             feature_export_text_with_keypoints(keypoints, &feat.descriptors),
@@ -8292,7 +8286,7 @@ struct SnapshotPairMetadata {
     relative_pose: Option<(Matrix3<f64>, Vector3<f64>)>,
 }
 
-fn configuration_code(config: Option<ConfigurationType>) -> u8 {
+const fn configuration_code(config: Option<ConfigurationType>) -> u8 {
     match config {
         None => 255,
         Some(ConfigurationType::Undefined) => 0,
@@ -8743,20 +8737,21 @@ fn snapshot_for_export(
     args: &Args,
     feature_validation: Option<&SnapshotFeatureValidation>,
 ) -> Result<VerifiedPairSnapshot, String> {
-    let feature_counts: Vec<u64> = feature_validation
-        .map(|validation| {
+    let feature_counts: Vec<u64> = feature_validation.map_or_else(
+        || {
+            features
+                .iter()
+                .map(|features| features.keypoints.len() as u64)
+                .collect()
+        },
+        |validation| {
             validation
                 .feature_counts
                 .iter()
                 .map(|&count| count as u64)
                 .collect()
-        })
-        .unwrap_or_else(|| {
-            features
-                .iter()
-                .map(|features| features.keypoints.len() as u64)
-                .collect()
-        });
+        },
+    );
     let records: Vec<SnapshotPairRecord> = pairwise
         .iter()
         .map(|pair| {
@@ -9374,8 +9369,9 @@ fn validate_snapshot_for_run(
     }
     let computed_feature_counts: Vec<usize> = features.iter().map(|f| f.keypoints.len()).collect();
     let feature_counts = precomputed_feature_validation
-        .map(|validation| validation.feature_counts.as_slice())
-        .unwrap_or(computed_feature_counts.as_slice());
+        .map_or(computed_feature_counts.as_slice(), |validation| {
+            validation.feature_counts.as_slice()
+        });
     let snapshot_counts: Vec<usize> = snapshot
         .feature_counts
         .iter()
@@ -10347,7 +10343,7 @@ struct LocusCanonicalizationStats {
     changed_pairs: usize,
 }
 
-fn finite_order(value: f64) -> (u8, f64) {
+const fn finite_order(value: f64) -> (u8, f64) {
     if value.is_finite() {
         (0, value)
     } else if value.is_nan() {
@@ -10714,7 +10710,7 @@ fn insert_exact_topk_row(best: &mut Vec<(usize, f32)>, row: (usize, f32), topk: 
     }
 }
 
-fn splitmix64(mut value: u64) -> u64 {
+const fn splitmix64(mut value: u64) -> u64 {
     value = value.wrapping_add(0x9e3779b97f4a7c15);
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94d049bb133111eb);
@@ -11310,7 +11306,7 @@ struct VerificationStats {
 }
 
 impl VerificationStats {
-    fn record(&mut self, config: ConfigurationType) {
+    const fn record(&mut self, config: ConfigurationType) {
         match config {
             ConfigurationType::Calibrated => self.calibrated += 1,
             ConfigurationType::Uncalibrated => self.uncalibrated += 1,
@@ -11324,7 +11320,7 @@ impl VerificationStats {
         }
     }
 
-    fn merge(&mut self, other: &VerificationStats) {
+    const fn merge(&mut self, other: &VerificationStats) {
         self.calibrated += other.calibrated;
         self.uncalibrated += other.uncalibrated;
         self.planar += other.planar;
@@ -11344,7 +11340,7 @@ impl VerificationStats {
             other.calibrated_essential_primary_promotions;
     }
 
-    fn total(&self) -> usize {
+    const fn total(&self) -> usize {
         self.calibrated
             + self.uncalibrated
             + self.planar
@@ -11830,8 +11826,8 @@ fn rematch_stem_pairs(
             .iter_mut()
             .find(|p| (p.image_i.min(p.image_j), p.image_i.max(p.image_j)) == key)
         {
-            let old_e = old.essential_matches.as_ref().map(|e| e.len()).unwrap_or(0);
-            let new_e = new.essential_matches.as_ref().map(|e| e.len()).unwrap_or(0);
+            let old_e = old.essential_matches.as_ref().map_or(0, |e| e.len());
+            let new_e = new.essential_matches.as_ref().map_or(0, |e| e.len());
             if new_e > old_e || (old_e == 0 && new_e >= min_matches) {
                 let name = |idx: usize| {
                     Path::new(&image_names[idx])
@@ -12173,7 +12169,7 @@ fn rematch_free_against_priors(
     }
     for new in fresh {
         let key = (new.image_i.min(new.image_j), new.image_i.max(new.image_j));
-        let new_e = new.essential_matches.as_ref().map(|e| e.len()).unwrap_or(0);
+        let new_e = new.essential_matches.as_ref().map_or(0, |e| e.len());
         let name = |idx: usize| stem_of(idx);
         let mut new = new;
         if tracks_use_essential {
@@ -12260,7 +12256,7 @@ fn rematch_free_against_priors(
         }
         if let Some(&idx) = existing.get(&key) {
             let old = &pairwise[idx];
-            let old_e = old.essential_matches.as_ref().map(|e| e.len()).unwrap_or(0);
+            let old_e = old.essential_matches.as_ref().map_or(0, |e| e.len());
             // Prior↔hub unlock needs *essential* support; F-only densification
             // (E=0) poisons tracks without a calibrated bridge.
             if new_e > old_e {
@@ -12485,7 +12481,7 @@ fn rematch_pose_guided_free_vs_priors(
     }
     for new in results.into_iter().flatten() {
         let key = (new.image_i.min(new.image_j), new.image_i.max(new.image_j));
-        let new_e = new.essential_matches.as_ref().map(|e| e.len()).unwrap_or(0);
+        let new_e = new.essential_matches.as_ref().map_or(0, |e| e.len());
         let mut new = new;
         if tracks_use_essential {
             if let Some(ess) = new.essential_matches.clone() {
@@ -12496,7 +12492,7 @@ fn rematch_pose_guided_free_vs_priors(
         }
         if let Some(&idx) = existing.get(&key) {
             let old = &pairwise[idx];
-            let old_e = old.essential_matches.as_ref().map(|e| e.len()).unwrap_or(0);
+            let old_e = old.essential_matches.as_ref().map_or(0, |e| e.len());
             if new_e > old_e {
                 eprintln!(
                     "rematch-pose-guided: improved {}-{} E {} -> {} (inliers {} -> {})",
@@ -13041,17 +13037,17 @@ fn verify_pairs(
                 // order-only replay.  The verified E is diagnostics
                 // output only; ordinary reconstruction never serializes
                 // or consumes this line.
-                let e_values = essential_matrix
-                    .as_ref()
-                    .map(|matrix| {
+                let e_values = essential_matrix.as_ref().map_or_else(
+                    || "0 0 0 0 0 0 0 0 0".to_string(),
+                    |matrix| {
                         matrix
                             .as_slice()
                             .iter()
                             .map(|value| format!("{value:.17e}"))
                             .collect::<Vec<_>>()
                             .join(" ")
-                    })
-                    .unwrap_or_else(|| "0 0 0 0 0 0 0 0 0".to_string());
+                    },
+                );
                 eprintln!("sfm-debug-essential-matrix: {i} {j} values={e_values}");
             }
             if dump_match_indices {
@@ -13378,7 +13374,7 @@ fn rescue_bridging(
     );
 
     if !admitted.is_empty() {
-        let mut all_edges = edges.clone();
+        let mut all_edges = edges;
         all_edges.extend(admitted.iter().map(|p| (p.image_i, p.image_j)));
         let components_after = connected_components(n, &all_edges);
         println!(
@@ -13545,8 +13541,7 @@ fn essential_pair_quality_for_inliers_with_options(
         .transform_vector(&recovery.translation_unit);
     let center_direction = center
         .try_normalize(1.0e-12)
-        .map(|value| [value.x, value.y, value.z])
-        .unwrap_or([f64::NAN; 3]);
+        .map_or([f64::NAN; 3], |value| [value.x, value.y, value.z]);
     let rotation_quaternion = [q.w, q.i, q.j, q.k];
 
     const MAX_TRIANGULATION_SAMPLES: usize = 256;
@@ -14239,24 +14234,19 @@ fn score_model_against_verified_pairs(
             translation_disagreement_deg,
             reference_cheirality_margin: reference_quality
                 .as_ref()
-                .map(|reference| reference.cheirality_margin)
-                .unwrap_or(f64::NAN),
+                .map_or(f64::NAN, |reference| reference.cheirality_margin),
             reference_angle_p25_deg: reference_quality
                 .as_ref()
-                .map(|reference| reference.angle_p25_deg)
-                .unwrap_or(f64::NAN),
+                .map_or(f64::NAN, |reference| reference.angle_p25_deg),
             reference_stable_refits: reference_quality
                 .as_ref()
-                .map(|reference| reference.stable_refits)
-                .unwrap_or(0),
+                .map_or(0, |reference| reference.stable_refits),
             reference_rotation_spread_deg: reference_quality
                 .as_ref()
-                .map(|reference| reference.rotation_spread_deg)
-                .unwrap_or(f64::NAN),
+                .map_or(f64::NAN, |reference| reference.rotation_spread_deg),
             reference_translation_spread_deg: reference_quality
                 .as_ref()
-                .map(|reference| reference.translation_spread_deg)
-                .unwrap_or(f64::NAN),
+                .map_or(f64::NAN, |reference| reference.translation_spread_deg),
             all,
             held_out,
         });
@@ -14412,12 +14402,10 @@ fn print_model_cross_validation_summary(
             pair.image_j,
             image_names
                 .get(pair.image_i)
-                .map(String::as_str)
-                .unwrap_or("<unknown>"),
+                .map_or("<unknown>", String::as_str),
             image_names
                 .get(pair.image_j)
-                .map(String::as_str)
-                .unwrap_or("<unknown>"),
+                .map_or("<unknown>", String::as_str),
             pair.config,
             pair.verified_inliers,
             pair.rotation_disagreement_deg,
@@ -15251,8 +15239,7 @@ fn f_to_e_candidate_diagnostics(
         essential_pair_quality_for_inliers(&essential, &ef_inliers, correspondences, camera);
     let ef_angle_p25_deg = quality
         .as_ref()
-        .map(|quality| quality.angle_p25_deg)
-        .unwrap_or(f64::NAN);
+        .map_or(f64::NAN, |quality| quality.angle_p25_deg);
     let (cheirality_ratio, cheirality_margin) = if let Some(quality) = quality.as_ref() {
         let ratio = if ef_inliers.is_empty() {
             f64::NAN
@@ -15371,18 +15358,9 @@ fn fundamental_to_essential_quality(
         f_inliers: f_inliers.len(),
         ef_inliers: ef_inliers.len(),
         f_mean_sampson_px,
-        direct_mean_sampson_on_f: report
-            .essential
-            .as_ref()
-            .map(|essential| {
-                mean_normalized_essential_sampson_error(
-                    essential,
-                    correspondences,
-                    camera,
-                    &f_inliers,
-                )
-            })
-            .unwrap_or(f64::NAN),
+        direct_mean_sampson_on_f: report.essential.as_ref().map_or(f64::NAN, |essential| {
+            mean_normalized_essential_sampson_error(essential, correspondences, camera, &f_inliers)
+        }),
         ef_mean_sampson_on_f: mean_normalized_essential_sampson_error(
             &essential,
             correspondences,
@@ -15450,17 +15428,16 @@ fn format_fundamental_to_essential_quality(
     let Some(q) = quality else {
         return " f2e_f_inliers=NA f2e_ef_inliers=NA f2e_f_mean_sampson_px=NA f2e_direct_mean_sampson_on_f=NA f2e_ef_mean_sampson_on_f=NA f2e_ef_mean_sampson_on_direct=NA f2e_ef_mean_sampson=NA f2e_ef_cheirality_best=NA f2e_ef_cheirality_second=NA f2e_ef_cheirality_ratio=NA f2e_ef_pose_q=NA f2e_ef_center_dir=NA f2e_ef_angle_p10_deg=NA f2e_ef_angle_p25_deg=NA f2e_ef_angle_median_deg=NA f2e_ef_depth_ratio_p10=NA f2e_ef_sampson_quality=NA".to_owned();
     };
-    let (best, second, ratio) = q
-        .ef_quality
-        .as_ref()
-        .map(|value| {
+    let (best, second, ratio) = q.ef_quality.as_ref().map_or_else(
+        || ("NA".to_owned(), "NA".to_owned(), "NA".to_owned()),
+        |value| {
             (
                 value.best_cheirality.to_string(),
                 value.second_cheirality.to_string(),
                 format!("{:.6}", value.cheirality_ratio),
             )
-        })
-        .unwrap_or_else(|| ("NA".to_owned(), "NA".to_owned(), "NA".to_owned()));
+        },
+    );
     format!(
         " f2e_f_inliers={} f2e_ef_inliers={} f2e_f_mean_sampson_px={:.6} f2e_direct_mean_sampson_on_f={:.8} f2e_ef_mean_sampson_on_f={:.8} f2e_ef_mean_sampson_on_direct={:.8} f2e_ef_mean_sampson={:.8} f2e_ef_cheirality_best={} f2e_ef_cheirality_second={} f2e_ef_cheirality_ratio={} f2e_ef_pose_q={:.9},{:.9},{:.9},{:.9} f2e_ef_center_dir={:.9},{:.9},{:.9} f2e_ef_angle_p10_deg={:.6} f2e_ef_angle_p25_deg={:.6} f2e_ef_angle_median_deg={:.6} f2e_ef_depth_ratio_p10={:.6} f2e_ef_sampson_quality={}",
         q.f_inliers,
@@ -15475,48 +15452,37 @@ fn format_fundamental_to_essential_quality(
         ratio,
         q.ef_quality
             .as_ref()
-            .map(|value| value.rotation_quaternion[0])
-            .unwrap_or(f64::NAN),
+            .map_or(f64::NAN, |value| value.rotation_quaternion[0]),
         q.ef_quality
             .as_ref()
-            .map(|value| value.rotation_quaternion[1])
-            .unwrap_or(f64::NAN),
+            .map_or(f64::NAN, |value| value.rotation_quaternion[1]),
         q.ef_quality
             .as_ref()
-            .map(|value| value.rotation_quaternion[2])
-            .unwrap_or(f64::NAN),
+            .map_or(f64::NAN, |value| value.rotation_quaternion[2]),
         q.ef_quality
             .as_ref()
-            .map(|value| value.rotation_quaternion[3])
-            .unwrap_or(f64::NAN),
+            .map_or(f64::NAN, |value| value.rotation_quaternion[3]),
         q.ef_quality
             .as_ref()
-            .map(|value| value.center_direction[0])
-            .unwrap_or(f64::NAN),
+            .map_or(f64::NAN, |value| value.center_direction[0]),
         q.ef_quality
             .as_ref()
-            .map(|value| value.center_direction[1])
-            .unwrap_or(f64::NAN),
+            .map_or(f64::NAN, |value| value.center_direction[1]),
         q.ef_quality
             .as_ref()
-            .map(|value| value.center_direction[2])
-            .unwrap_or(f64::NAN),
+            .map_or(f64::NAN, |value| value.center_direction[2]),
         q.ef_quality
             .as_ref()
-            .map(|value| value.angle_p10_deg)
-            .unwrap_or(f64::NAN),
+            .map_or(f64::NAN, |value| value.angle_p10_deg),
         q.ef_quality
             .as_ref()
-            .map(|value| value.angle_p25_deg)
-            .unwrap_or(f64::NAN),
+            .map_or(f64::NAN, |value| value.angle_p25_deg),
         q.ef_quality
             .as_ref()
-            .map(|value| value.angle_median_deg)
-            .unwrap_or(f64::NAN),
+            .map_or(f64::NAN, |value| value.angle_median_deg),
         q.ef_quality
             .as_ref()
-            .map(|value| value.depth_ratio_p10)
-            .unwrap_or(f64::NAN),
+            .map_or(f64::NAN, |value| value.depth_ratio_p10),
         q.ef_quality.is_some(),
     )
 }
@@ -15578,7 +15544,7 @@ struct DiagnosePairRow {
     imported_accepted_index_overlap: usize,
 }
 
-fn configuration_name(config: ConfigurationType) -> &'static str {
+const fn configuration_name(config: ConfigurationType) -> &'static str {
     match config {
         ConfigurationType::Undefined => "UNDEFINED",
         ConfigurationType::Degenerate => "DEGENERATE",
@@ -15618,7 +15584,7 @@ fn diagnose_pair_row(
     let (config, accepted_inliers, e_inliers, f_inliers, h_inliers) = profile
         .report
         .as_ref()
-        .map(|report| {
+        .map_or((ConfigurationType::Undefined, 0, 0, 0, 0), |report| {
             (
                 report.config,
                 report.inliers.len(),
@@ -15626,8 +15592,7 @@ fn diagnose_pair_row(
                 report.f_inlier_count,
                 report.h_inlier_count,
             )
-        })
-        .unwrap_or((ConfigurationType::Undefined, 0, 0, 0, 0));
+        });
 
     let colmap = colmap_matches.and_then(|matches| matches.get(&(i, j)));
     let colmap_set: HashSet<(usize, usize)> = colmap
@@ -15649,7 +15614,7 @@ fn diagnose_pair_row(
         imported_h_inliers,
     ) = imported_raw
         .and_then(|raw| raw.report.as_ref())
-        .map(|report| {
+        .map_or((None, 0, 0, 0, 0), |report| {
             (
                 Some(report.config),
                 report.inliers.len(),
@@ -15657,8 +15622,7 @@ fn diagnose_pair_row(
                 report.f_inlier_count,
                 report.h_inlier_count,
             )
-        })
-        .unwrap_or((None, 0, 0, 0, 0));
+        });
     let profile_accepted_set: HashSet<(usize, usize)> = profile
         .report
         .as_ref()
@@ -15805,11 +15769,9 @@ fn write_diagnose_pairs_csv(
                 if row.colmap_verified_present { 1 } else { 0 },
                 row.colmap_verified_inliers,
                 row.colmap_verified_config
-                    .map(configuration_name)
-                    .unwrap_or("NONE"),
+                    .map_or("NONE", configuration_name),
                 row.imported_config
-                    .map(configuration_name)
-                    .unwrap_or("NONE"),
+                    .map_or("NONE", configuration_name),
                 row.imported_accepted_inliers,
                 row.imported_e_inliers,
                 row.imported_f_inliers,
@@ -15924,11 +15886,7 @@ fn diagnose_bearing_vs_gt(
         {
             continue;
         }
-        let e_count = pair
-            .essential_matches
-            .as_ref()
-            .map(|e| e.len())
-            .unwrap_or(0);
+        let e_count = pair.essential_matches.as_ref().map_or(0, |e| e.len());
         // Some verifier winners keep an essential matrix for diagnostics but
         // do not retain an E-inlier index list when F/H won the accepted
         // configuration.  In that case use the accepted correspondence list
@@ -16603,7 +16561,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(native_keypoints) = native_keypoints_for_export.as_mut() {
                 remap_feature_keypoints_by_old_to_new(native_keypoints, &map)?;
             }
-            remap_locus_metadata(&mut locus_metadata, &map).map_err(|error| error.to_string())?;
+            remap_locus_metadata(&mut locus_metadata, &map)?;
             println!(
                 "feature order: canonical physical key ({} image(s){})",
                 map.len(),
@@ -16710,7 +16668,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .ok_or("--diagnose-model-score requires --import-verified-pairs-file")?;
         let mut imported = parse_imported_verified_pairs_file(verified_path, &image_names)?;
         if let Some(map) = canonical_feature_index_map.as_ref() {
-            remap_imported_verified_pairs(&mut imported, map).map_err(|error| error.to_string())?;
+            remap_imported_verified_pairs(&mut imported, map)?;
         }
         imported = filter_imported_verified_pairs_by_stem_window(
             imported,
@@ -16874,7 +16832,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let imported_matches = if let Some(import_path) = &args.import_matches_file {
             let mut matches = parse_imported_matches_file(import_path, &image_names)?;
             if let Some(map) = canonical_feature_index_map.as_ref() {
-                remap_imported_matches(&mut matches, map).map_err(|error| error.to_string())?;
+                remap_imported_matches(&mut matches, map)?;
             }
             println!(
                 "diagnose CSV: COLMAP raw matches {} pair(s) from {}",
@@ -16885,7 +16843,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else if let Some(import_path) = &args.import_matches_supplement_file {
             let mut matches = parse_imported_matches_file(import_path, &image_names)?;
             if let Some(map) = canonical_feature_index_map.as_ref() {
-                remap_imported_matches(&mut matches, map).map_err(|error| error.to_string())?;
+                remap_imported_matches(&mut matches, map)?;
             }
             println!(
                 "diagnose CSV: COLMAP raw matches {} pair(s) from {}",
@@ -16899,8 +16857,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let imported_verified = if let Some(import_path) = &args.import_verified_pairs_file {
             let mut imported = parse_imported_verified_pairs_file(import_path, &image_names)?;
             if let Some(map) = canonical_feature_index_map.as_ref() {
-                remap_imported_verified_pairs(&mut imported, map)
-                    .map_err(|error| error.to_string())?;
+                remap_imported_verified_pairs(&mut imported, map)?;
             }
             let imported_before_window = imported.len();
             imported = filter_imported_verified_pairs_by_stem_window(
@@ -17009,12 +16966,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         drop(imported_snapshot);
         trim_process_allocator();
         let feature_validation =
-            snapshot_feature_validation
-                .clone()
-                .unwrap_or_else(|| SnapshotFeatureValidation {
-                    feature_counts: features.iter().map(FeatureSet::len).collect(),
-                    feature_manifest_hash: snapshot_feature_manifest_hash(&features),
-                });
+            snapshot_feature_validation.unwrap_or_else(|| SnapshotFeatureValidation {
+                feature_counts: features.iter().map(FeatureSet::len).collect(),
+                feature_manifest_hash: snapshot_feature_manifest_hash(&features),
+            });
         let stream_sources = if args.stream_match_features {
             Some((
                 snapshot_feature_paths
@@ -17137,7 +17092,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         let mut imported = parse_imported_verified_pairs_file(path, &image_names)?;
         if let Some(map) = canonical_feature_index_map.as_ref() {
-            remap_imported_verified_pairs(&mut imported, map).map_err(|error| error.to_string())?;
+            remap_imported_verified_pairs(&mut imported, map)?;
         }
         let imported_before_window = imported.len();
         imported = filter_imported_verified_pairs_by_stem_window(
@@ -17173,7 +17128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let imported_matches = if let Some(path) = &args.import_matches_file {
             let mut imp = parse_imported_matches_file(path, &image_names)?;
             if let Some(map) = canonical_feature_index_map.as_ref() {
-                remap_imported_matches(&mut imp, map).map_err(|error| error.to_string())?;
+                remap_imported_matches(&mut imp, map)?;
             }
             println!(
                 "import matches: {} pairs from {}",
@@ -17187,7 +17142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let imported_supplement = if let Some(path) = &args.import_matches_supplement_file {
             let mut imp = parse_imported_matches_file(path, &image_names)?;
             if let Some(map) = canonical_feature_index_map.as_ref() {
-                remap_imported_matches(&mut imp, map).map_err(|error| error.to_string())?;
+                remap_imported_matches(&mut imp, map)?;
             }
             println!(
                 "import matches supplement: {} pairs from {} (NN fallback elsewhere)",

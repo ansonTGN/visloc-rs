@@ -273,7 +273,7 @@ impl RawU16Pyramid {
     }
 }
 
-fn border101(x: usize, height: usize) -> usize {
+const fn border101(x: usize, height: usize) -> usize {
     height - 1 - (height - 1).abs_diff(x)
 }
 

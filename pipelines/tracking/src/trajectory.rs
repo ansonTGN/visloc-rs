@@ -924,7 +924,7 @@ impl TrajectoryEvaluationConfig {
 }
 
 impl TrajectoryEvaluationFailure {
-    pub fn reason(&self) -> &'static str {
+    pub const fn reason(&self) -> &'static str {
         match self {
             Self::MeanTranslationErrorTooHigh { .. } => "mean_translation_error_too_high",
             Self::RmseTranslationErrorTooHigh { .. } => "rmse_translation_error_too_high",

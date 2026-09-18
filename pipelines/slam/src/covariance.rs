@@ -370,7 +370,7 @@ mod tests {
             ) < 1e-12
         );
         // Joint covariance must itself be symmetric positive-definite.
-        assert!(joint.clone().cholesky().is_some());
+        assert!(joint.cholesky().is_some());
     }
 
     #[test]

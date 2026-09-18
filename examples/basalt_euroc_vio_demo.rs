@@ -386,7 +386,7 @@ enum AdapterProcessMode {
 /// A trace-only suppression cannot use the lean estimator path because that
 /// path also suppresses MargData.  In that quadrant the adapter keeps the
 /// existing full processing contract while the demo omits the trace file.
-fn adapter_process_mode(no_trace: bool, no_marg_data: bool) -> AdapterProcessMode {
+const fn adapter_process_mode(no_trace: bool, no_marg_data: bool) -> AdapterProcessMode {
     match (no_marg_data, no_trace) {
         (false, _) => AdapterProcessMode::Full,
         (true, false) => AdapterProcessMode::WithoutMargData,
@@ -510,21 +510,15 @@ fn state_trace_json(trace: &visloc_basalt::vio::EstimatorStateTrace) -> String {
         "{{\"state_from\":{},\"initialization_output\":{},\"predicted_state\":{},\"post_opt_state\":{},\"imu_propagation\":{},\"imu_integration_fallback\":{}}}",
         trace
             .state_from
-            .as_ref()
-            .map(nav_state_json)
-            .unwrap_or_else(|| "null".into()),
+            .as_ref().map_or_else(|| "null".into(), nav_state_json),
         trace
             .initialization_output
-            .as_ref()
-            .map(nav_state_json)
-            .unwrap_or_else(|| "null".into()),
+            .as_ref().map_or_else(|| "null".into(), nav_state_json),
         nav_state_json(&trace.predicted_state),
         nav_state_json(&trace.post_opt_state),
         trace
             .imu_propagation
-            .as_ref()
-            .map(imu_propagation_json)
-            .unwrap_or_else(|| "null".into()),
+            .as_ref().map_or_else(|| "null".into(), imu_propagation_json),
         trace.imu_integration_fallback,
     )
 }
@@ -617,9 +611,7 @@ fn window_json(diagnostics: &WindowDiagnostics) -> String {
         json_string(&diagnostics.status),
         diagnostics
             .failure
-            .as_deref()
-            .map(json_string)
-            .unwrap_or_else(|| "null".into()),
+            .as_deref().map_or_else(|| "null".into(), json_string),
         diagnostics.state_writeback,
         diagnostics.landmark_writeback,
         diagnostics.prior_carry,
@@ -677,9 +669,7 @@ fn lm_run_json(run: &LmRunDiagnostics) -> String {
         run.accepted,
         run.rejected,
         run.failure
-            .as_deref()
-            .map(json_string)
-            .unwrap_or_else(|| "null".into()),
+            .as_deref().map_or_else(|| "null".into(), json_string),
         trace,
     )
 }

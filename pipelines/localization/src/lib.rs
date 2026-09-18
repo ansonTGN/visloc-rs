@@ -85,15 +85,15 @@ where
     P: MapProvider + DescriptorProvider,
 {
     let map = provider.visual_map();
-    let descriptor_count = provider
-        .landmark_descriptor_store()
-        .map(LandmarkDescriptorStore::len)
-        .unwrap_or_else(|| {
+    let descriptor_count = provider.landmark_descriptor_store().map_or_else(
+        || {
             map.landmarks
                 .values()
                 .filter(|landmark| landmark.descriptor.is_some())
                 .count()
-        });
+        },
+        LandmarkDescriptorStore::len,
+    );
 
     MapProviderStats {
         camera_count: map.cameras.len(),
@@ -111,7 +111,7 @@ pub struct LocalizationPrior {
 }
 
 impl LocalizationPrior {
-    pub fn none() -> Self {
+    pub const fn none() -> Self {
         Self {
             pose: None,
             position_world: None,
@@ -119,7 +119,7 @@ impl LocalizationPrior {
         }
     }
 
-    pub fn from_pose(pose: Pose, radius: f64) -> Self {
+    pub const fn from_pose(pose: Pose, radius: f64) -> Self {
         Self {
             pose: Some(pose),
             position_world: None,
@@ -127,7 +127,7 @@ impl LocalizationPrior {
         }
     }
 
-    pub fn from_position(position_world: Point3<f64>, radius: f64) -> Self {
+    pub const fn from_position(position_world: Point3<f64>, radius: f64) -> Self {
         Self {
             pose: None,
             position_world: Some(position_world),
@@ -212,7 +212,7 @@ pub struct RadiusSubmapSelector {
 }
 
 impl RadiusSubmapSelector {
-    pub fn new(center_world: Point3<f64>, radius: f64) -> Self {
+    pub const fn new(center_world: Point3<f64>, radius: f64) -> Self {
         Self {
             center_world,
             radius,
@@ -235,7 +235,7 @@ pub struct PriorSubmapSelector {
 }
 
 impl PriorSubmapSelector {
-    pub fn new(prior: LocalizationPrior) -> Self {
+    pub const fn new(prior: LocalizationPrior) -> Self {
         Self { prior }
     }
 }
@@ -282,7 +282,7 @@ where
         self.selected_provider = self.selector.select_submap(&self.base_provider);
     }
 
-    pub fn selected_provider(&self) -> &InMemoryMapProvider {
+    pub const fn selected_provider(&self) -> &InMemoryMapProvider {
         &self.selected_provider
     }
 }
@@ -314,14 +314,14 @@ pub struct InMemoryMapProvider {
 }
 
 impl InMemoryMapProvider {
-    pub fn new(map: VisualMap) -> Self {
+    pub const fn new(map: VisualMap) -> Self {
         Self {
             map,
             descriptor_store: None,
         }
     }
 
-    pub fn with_descriptor_store(
+    pub const fn with_descriptor_store(
         map: VisualMap,
         descriptor_store: LandmarkDescriptorStore,
     ) -> Self {
@@ -463,7 +463,7 @@ impl<X, P> ImageLocalizer<X, P>
 where
     X: FeatureExtractor,
 {
-    pub fn with_pipeline(extractor: X, pipeline: P) -> Self {
+    pub const fn with_pipeline(extractor: X, pipeline: P) -> Self {
         Self {
             extractor,
             pipeline,
@@ -547,7 +547,7 @@ where
     S: CandidateSelector + Clone,
     E: RobustPoseEstimator + Clone,
 {
-    pub fn with_pose_estimator(
+    pub const fn with_pose_estimator(
         matcher: M,
         candidate_selector: S,
         pose_estimator: E,
@@ -1500,7 +1500,7 @@ fn query_from_features(camera: Camera, features: FeatureSet) -> QueryImage {
     }
 }
 
-fn result_from_correspondence_error(error: CorrespondenceBuildError) -> LocalizationResult {
+const fn result_from_correspondence_error(error: CorrespondenceBuildError) -> LocalizationResult {
     match error {
         CorrespondenceBuildError::QueryFeatureShapeMismatch {
             keypoint_count,

@@ -15,21 +15,15 @@ pub(crate) fn push_metric_card(output: &mut String, label: &str, value: &str) {
 }
 
 pub(crate) fn format_optional_metric(value: Option<f64>, unit: &str) -> String {
-    value
-        .map(|value| format!("{value:.4} {unit}"))
-        .unwrap_or_else(|| "n/a".to_string())
+    value.map_or_else(|| "n/a".to_string(), |value| format!("{value:.4} {unit}"))
 }
 
 pub(crate) fn format_optional_count(value: Option<f64>) -> String {
-    value
-        .map(|value| format!("{value:.1}"))
-        .unwrap_or_else(|| "n/a".to_string())
+    value.map_or_else(|| "n/a".to_string(), |value| format!("{value:.1}"))
 }
 
 pub(crate) fn format_optional_frame_id(value: Option<FrameId>) -> String {
-    value
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "n/a".to_string())
+    value.map_or_else(|| "n/a".to_string(), |value| value.to_string())
 }
 
 pub(crate) fn trajectory_svg(trajectory: &PoseTrajectory) -> String {
@@ -250,15 +244,11 @@ pub(crate) fn export_f64(value: f64) -> String {
 }
 
 pub(crate) fn optional_f64_json(value: Option<f64>) -> String {
-    value
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "null".to_string())
+    value.map_or_else(|| "null".to_string(), |value| value.to_string())
 }
 
 pub(crate) fn optional_usize_json(value: Option<usize>) -> String {
-    value
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "null".to_string())
+    value.map_or_else(|| "null".to_string(), |value| value.to_string())
 }
 
 pub(crate) fn relative_pose_error_statistics_json(
@@ -274,15 +264,14 @@ pub(crate) fn relative_pose_error_statistics_json(
 }
 
 pub(crate) fn optional_frame_id_json(value: Option<FrameId>) -> String {
-    value
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "null".to_string())
+    value.map_or_else(|| "null".to_string(), |value| value.to_string())
 }
 
 pub(crate) fn optional_vec3_json(value: Option<[f64; 3]>) -> String {
-    value
-        .map(|value| format!("[{}, {}, {}]", value[0], value[1], value[2]))
-        .unwrap_or_else(|| "null".to_string())
+    value.map_or_else(
+        || "null".to_string(),
+        |value| format!("[{}, {}, {}]", value[0], value[1], value[2]),
+    )
 }
 
 pub(crate) fn trajectory_evaluation_failures_json(
@@ -518,7 +507,7 @@ fn tracking_timeline_svg(results: &[TrackingResult]) -> String {
     output
 }
 
-fn tracking_event_color(result: &TrackingResult) -> &'static str {
+const fn tracking_event_color(result: &TrackingResult) -> &'static str {
     match result.event {
         TrackingEvent::Initialized => "#2676c9",
         TrackingEvent::Tracked => "#198754",

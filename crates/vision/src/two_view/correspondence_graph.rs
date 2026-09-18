@@ -133,7 +133,7 @@ pub struct Correspondence {
 }
 
 impl Correspondence {
-    pub fn new(image_id: usize, point2d_idx: usize) -> Self {
+    pub const fn new(image_id: usize, point2d_idx: usize) -> Self {
         Self {
             image_id,
             point2d_idx,
@@ -181,7 +181,7 @@ pub struct IngestStats {
 impl IngestStats {
     /// Total matches presented to `add_two_view_geometry`, i.e.
     /// `added + out_of_bounds + duplicate`.
-    pub fn total(&self) -> usize {
+    pub const fn total(&self) -> usize {
         self.added + self.out_of_bounds + self.duplicate
     }
 }

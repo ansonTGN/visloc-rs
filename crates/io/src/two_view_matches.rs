@@ -20,7 +20,7 @@ pub struct TwoViewMatchSet {
 }
 
 impl TwoViewMatchSet {
-    pub fn new(matches: Vec<TwoViewFeatureMatch>) -> Self {
+    pub const fn new(matches: Vec<TwoViewFeatureMatch>) -> Self {
         Self { matches }
     }
 

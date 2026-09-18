@@ -624,7 +624,7 @@ mod tests {
         batch.edges.push(edge(
             N - 1,
             0,
-            loop_meas.clone(),
+            loop_meas,
             PoseGraphEdgeKind::LoopClosure,
             10.0,
         ));

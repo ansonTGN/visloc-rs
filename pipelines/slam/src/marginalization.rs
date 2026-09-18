@@ -137,7 +137,7 @@ mod tests {
 
         let (lambda_prime, _eta_prime) = marginalize(&lambda, &eta, &keep).unwrap();
         // Reference: full covariance, then pull the kept block.
-        let full_cov = lambda.clone().cholesky().unwrap().inverse();
+        let full_cov = lambda.cholesky().unwrap().inverse();
         let cov_block =
             DMatrix::from_fn(keep.len(), keep.len(), |r, c| full_cov[(keep[r], keep[c])]);
         let marg_cov = lambda_prime.clone().cholesky().unwrap().inverse();
@@ -160,7 +160,7 @@ mod tests {
         let keep = [1usize, 3, 4];
 
         let (lambda_prime, eta_prime) = marginalize(&lambda, &eta, &keep).unwrap();
-        let full_mean = lambda.clone().cholesky().unwrap().solve(&eta);
+        let full_mean = lambda.cholesky().unwrap().solve(&eta);
         let marg_mean = lambda_prime.cholesky().unwrap().solve(&eta_prime);
         for (r, &i) in keep.iter().enumerate() {
             assert!(

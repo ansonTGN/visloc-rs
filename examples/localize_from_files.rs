@@ -49,8 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let descriptor_count = provider
         .landmark_descriptor_store()
-        .map(|store| store.len())
-        .unwrap_or(0);
+        .map_or(0, |store| store.len());
     println!(
         "loaded map: cameras={} keyframes={} landmarks={} descriptors={}",
         map.cameras.len(),

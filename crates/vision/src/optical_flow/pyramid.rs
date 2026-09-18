@@ -67,13 +67,13 @@ impl GrayImage {
 /// Basalt `ManagedImagePyr::setFromImage(img, num_levels)` builds levels
 /// `0..=num_levels` (inclusive), so `optical_flow_levels = 3` → 4 layers.
 #[inline]
-pub fn pyramid_layer_count(optical_flow_levels: usize) -> usize {
+pub const fn pyramid_layer_count(optical_flow_levels: usize) -> usize {
     optical_flow_levels + 1
 }
 
 /// Basalt `ManagedImagePyr::border101` (used on the far side of a tap).
 #[inline]
-fn border101(x: i32, size: i32) -> i32 {
+const fn border101(x: i32, size: i32) -> i32 {
     size - 1 - (size - 1 - x).abs()
 }
 

@@ -152,11 +152,11 @@ impl GrayscaleImage {
         Self::new(width, height, pixels)
     }
 
-    pub fn width(&self) -> usize {
+    pub const fn width(&self) -> usize {
         self.width
     }
 
-    pub fn height(&self) -> usize {
+    pub const fn height(&self) -> usize {
         self.height
     }
 
@@ -229,7 +229,7 @@ pub struct CornerFeatureExtractor {
 }
 
 impl CornerFeatureExtractor {
-    pub fn new(config: CornerFeatureConfig) -> Self {
+    pub const fn new(config: CornerFeatureConfig) -> Self {
         Self { config }
     }
 
@@ -385,7 +385,7 @@ pub struct ProvidedFeatureExtractor {
 }
 
 impl ProvidedFeatureExtractor {
-    pub fn new(features: FeatureSet) -> Self {
+    pub const fn new(features: FeatureSet) -> Self {
         Self { features }
     }
 }

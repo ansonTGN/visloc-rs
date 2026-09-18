@@ -66,7 +66,7 @@ impl OpticalFlowFeatureExtractor {
         Self::new(BasaltOpticalFlowConfig::default())
     }
 
-    pub fn config(&self) -> &BasaltOpticalFlowConfig {
+    pub const fn config(&self) -> &BasaltOpticalFlowConfig {
         &self.config
     }
 

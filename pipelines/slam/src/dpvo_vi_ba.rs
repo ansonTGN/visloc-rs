@@ -1920,7 +1920,7 @@ mod tests {
         }
 
         let problem = DpvoBaProblem {
-            poses: guess_poses.clone(),
+            poses: guess_poses,
             patches: guess_patches,
             intrinsics: vec![intr; n_frames],
             edges,

@@ -583,9 +583,9 @@ impl GeneralizedPnPRansac {
         }
 
         let mut best_pose = pose_prior.cloned();
-        let mut best_score = pose_prior
-            .map(|pose| score_pose(rig, pose, correspondences, self.reprojection_threshold))
-            .unwrap_or_else(GeneralizedScore::empty);
+        let mut best_score = pose_prior.map_or_else(GeneralizedScore::empty, |pose| {
+            score_pose(rig, pose, correspondences, self.reprojection_threshold)
+        });
         let mut rng = SmallRng::seed_from_u64(self.seed);
         let mut indices = (0..correspondences.len()).collect::<Vec<_>>();
         let mut required_iterations = self.iterations;
@@ -796,7 +796,7 @@ struct GeneralizedScore {
 }
 
 impl GeneralizedScore {
-    fn empty() -> Self {
+    const fn empty() -> Self {
         Self {
             inliers: Vec::new(),
             errors: Vec::new(),
@@ -838,7 +838,7 @@ fn score_pose(
     let mean_error = errors.iter().sum::<f64>() / errors.len() as f64;
     indexed_errors.sort_by(|left, right| left.1.total_cmp(&right.1));
     let median_error = indexed_errors[indexed_errors.len() / 2].1;
-    let max_error = indexed_errors.last().map(|entry| entry.1).unwrap_or(0.0);
+    let max_error = indexed_errors.last().map_or(0.0, |entry| entry.1);
     GeneralizedScore {
         inliers,
         errors,

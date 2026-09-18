@@ -268,7 +268,7 @@ pub struct GrayImage<'a> {
 }
 
 impl<'a> GrayImage<'a> {
-    pub fn new(width: usize, height: usize, pixels: &'a [f32]) -> Result<Self, SiftError> {
+    pub const fn new(width: usize, height: usize, pixels: &'a [f32]) -> Result<Self, SiftError> {
         if width < 16 || height < 16 || pixels.len() < width * height {
             return Err(SiftError::ImageTooSmall { width, height });
         }
@@ -3119,11 +3119,11 @@ mod tests {
         let legacy = SiftConfig::default();
         let explicit_legacy = SiftConfig {
             scale_adaptive_gradients: false,
-            ..legacy.clone()
+            ..legacy
         };
         let adaptive = SiftConfig {
             scale_adaptive_gradients: true,
-            ..legacy.clone()
+            ..legacy
         };
         let legacy_descriptor = describe_sift_keypoints(&image, &keypoints, &legacy);
         assert_eq!(
@@ -3337,11 +3337,11 @@ mod tests {
         let explicit_legacy = SiftConfig {
             vlfeat_compatible_descriptor: false,
             vlfeat_compatible_detector: false,
-            ..legacy.clone()
+            ..legacy
         };
         let vlfeat = SiftConfig {
             vlfeat_compatible_descriptor: true,
-            ..legacy.clone()
+            ..legacy
         };
         assert_eq!(
             extract_sift(&image, &legacy).unwrap(),
@@ -3386,7 +3386,7 @@ mod tests {
         };
         let explicit_legacy = SiftConfig {
             vlfeat_compatible_detector: false,
-            ..legacy.clone()
+            ..legacy
         };
         assert_eq!(
             extract_sift(&image, &legacy).unwrap(),
@@ -3660,7 +3660,7 @@ mod tests {
         };
         let explicit = SiftConfig {
             vlfeat_compatible_output_order: true,
-            ..baseline.clone()
+            ..baseline
         };
         assert_eq!(
             extract_sift(&image, &baseline).unwrap(),
@@ -3737,7 +3737,7 @@ mod tests {
         assert!(!legacy.standard_orientation_peaks);
         let explicit_legacy = SiftConfig {
             standard_orientation_peaks: false,
-            ..legacy.clone()
+            ..legacy
         };
         assert_eq!(
             extract_sift(&image, &legacy).unwrap(),
@@ -3811,7 +3811,7 @@ mod tests {
         let dsp = SiftConfig {
             domain_size_pooling: true,
             dsp_num_scales: 5,
-            ..plain.clone()
+            ..plain
         };
         let (kp_p, d_p) = extract_sift(&image, &plain).unwrap();
         let (kp_d, d_d) = extract_sift(&image, &dsp).unwrap();
@@ -3831,7 +3831,7 @@ mod tests {
         let default = SiftConfig::default();
         let scales = dsp_domain_scale_factors(&SiftConfig {
             domain_size_pooling: true,
-            ..default.clone()
+            ..default
         });
         assert_eq!(scales.len(), DSP_PAPER_NUM_SCALES);
         assert!((scales[0] - DSP_PAPER_MIN_SCALE).abs() < 1e-12);
@@ -3856,7 +3856,7 @@ mod tests {
         let one_scale = SiftConfig {
             domain_size_pooling: true,
             dsp_num_scales: 1,
-            ..compatible.clone()
+            ..compatible
         };
         assert_eq!(
             describe_sift_keypoints(&image, &keypoints, &compatible),
@@ -3925,7 +3925,7 @@ mod tests {
         let dsp = SiftConfig {
             domain_size_pooling: true,
             vlfeat_compatible_descriptor: true,
-            ..plain.clone()
+            ..plain
         };
         let d_plain_a = describe_sift_keypoints(&first, &kp_first, &plain)[0].clone();
         let d_plain_b = describe_sift_keypoints(&second, &kp_second, &plain)[0].clone();
@@ -3957,7 +3957,7 @@ mod tests {
         };
         let l1 = SiftConfig {
             normalization: SiftNormalization::L1Root,
-            ..l2.clone()
+            ..l2
         };
         let (kp_a, d_a) = extract_sift(&image, &l2).unwrap();
         let (kp_b, d_b) = extract_sift(&image, &l1).unwrap();
@@ -3981,11 +3981,11 @@ mod tests {
         };
         let explicit_legacy = SiftConfig {
             descriptor_magnification: 8.0,
-            ..legacy.clone()
+            ..legacy
         };
         let narrow = SiftConfig {
             descriptor_magnification: 3.0,
-            ..legacy.clone()
+            ..legacy
         };
         let (kp_a, d_a) = extract_sift(&image, &legacy).unwrap();
         let (kp_b, d_b) = extract_sift(&image, &explicit_legacy).unwrap();
@@ -4020,7 +4020,7 @@ mod tests {
             &keypoints,
             &SiftConfig {
                 descriptor_magnification: 3.0,
-                ..config.clone()
+                ..config
             },
         );
         assert_eq!(alternate.len(), keypoints.len());
@@ -4253,7 +4253,7 @@ mod affine_tests {
         };
         let multi = SiftConfig {
             multi_anisotropy: true,
-            ..base.clone()
+            ..base
         };
         let (k_base, _) = extract_sift(&image, &base).unwrap();
         let (k_multi, _) = extract_sift(&image, &multi).unwrap();

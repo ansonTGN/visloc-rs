@@ -89,7 +89,7 @@ pub enum PoseEstimationFailureReason {
 }
 
 impl LocalizationResult {
-    pub fn failure(
+    pub const fn failure(
         failure_reason: LocalizationFailureReason,
         candidate_landmark_count: usize,
         match_count: usize,
@@ -158,12 +158,15 @@ impl LocalizationResult {
         }
     }
 
-    pub fn with_estimator_diagnostics(mut self, diagnostics: PoseEstimatorDiagnostics) -> Self {
+    pub const fn with_estimator_diagnostics(
+        mut self,
+        diagnostics: PoseEstimatorDiagnostics,
+    ) -> Self {
         self.estimator_diagnostics = Some(diagnostics);
         self
     }
 
-    pub fn with_pose_failure_diagnostics(
+    pub const fn with_pose_failure_diagnostics(
         mut self,
         diagnostics: PoseEstimationFailureDiagnostics,
     ) -> Self {
@@ -171,7 +174,7 @@ impl LocalizationResult {
         self
     }
 
-    pub fn rejected_by_quality_gate(mut self) -> Self {
+    pub const fn rejected_by_quality_gate(mut self) -> Self {
         self.success = false;
         self.failure_reason = Some(LocalizationFailureReason::QualityGateFailed);
         self

@@ -12,7 +12,7 @@ impl SO3 {
         }
     }
 
-    pub fn from_quaternion(rotation: UnitQuaternion<f64>) -> Self {
+    pub const fn from_quaternion(rotation: UnitQuaternion<f64>) -> Self {
         Self { rotation }
     }
 
@@ -36,7 +36,7 @@ impl SO3 {
         self.rotation.to_rotation_matrix().into_inner()
     }
 
-    pub fn quaternion(&self) -> &UnitQuaternion<f64> {
+    pub const fn quaternion(&self) -> &UnitQuaternion<f64> {
         &self.rotation
     }
 }

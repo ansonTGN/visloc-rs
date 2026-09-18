@@ -120,12 +120,13 @@ fn parse_input(
 }
 
 fn required_path(name: &str, description: &str) -> PathBuf {
-    env::var_os(name)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| panic!("set {name} to {description} for this ignored gate"))
+    env::var_os(name).map_or_else(
+        || panic!("set {name} to {description} for this ignored gate"),
+        PathBuf::from,
+    )
 }
 
-fn expected_rejection_name(reason: SetupOptRejectReason) -> &'static str {
+const fn expected_rejection_name(reason: SetupOptRejectReason) -> &'static str {
     match reason {
         SetupOptRejectReason::InvalidMinimumDistance => "invalid_minimum_distance",
         SetupOptRejectReason::TrackTooShort => "track_too_short",

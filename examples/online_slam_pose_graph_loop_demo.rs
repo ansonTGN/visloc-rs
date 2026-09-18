@@ -107,9 +107,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         for candidate in &result.loop_closure_candidates {
             let verification = candidate.verification.as_ref();
-            let verified = verification
-                .map(|v| v.verified.to_string())
-                .unwrap_or_else(|| "n/a".to_string());
+            let verified =
+                verification.map_or_else(|| "n/a".to_string(), |v| v.verified.to_string());
             println!(
                 "  candidate query={} matched_keyframe={} shared={} ratio={:.3} verified={}",
                 candidate.query_frame_id,

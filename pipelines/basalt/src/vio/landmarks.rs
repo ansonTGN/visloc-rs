@@ -297,7 +297,7 @@ impl Default for LibstdcxxUnorderedOrder {
 
 impl LibstdcxxUnorderedOrder {
     #[inline]
-    fn bucket_for(hash: u64, bucket_count: usize) -> usize {
+    const fn bucket_for(hash: u64, bucket_count: usize) -> usize {
         // std::hash<int64_t> is the identity hash on the pinned libstdc++
         // target.  Casting before modulo preserves its size_t conversion for
         // signed IDs as well (the VIO IDs used here are non-negative).
@@ -810,7 +810,7 @@ impl LibstdcxxUnorderedOrder {
         }
     }
 
-    fn iter(&self) -> UnorderedOrderIter<'_> {
+    const fn iter(&self) -> UnorderedOrderIter<'_> {
         UnorderedOrderIter {
             order: self,
             next: self.head,
@@ -863,7 +863,7 @@ impl LibstdcxxUnorderedSet {
         self.order.insert(key)
     }
 
-    pub(crate) fn iter(&self) -> UnorderedOrderIter<'_> {
+    pub(crate) const fn iter(&self) -> UnorderedOrderIter<'_> {
         self.order.iter()
     }
 }

@@ -95,7 +95,7 @@ impl HierarchicalSubmapGraph {
         }
     }
 
-    pub fn root_submap_id(&self) -> HierarchicalSubmapId {
+    pub const fn root_submap_id(&self) -> HierarchicalSubmapId {
         self.root_submap_id
     }
 

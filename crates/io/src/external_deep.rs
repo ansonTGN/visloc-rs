@@ -20,7 +20,7 @@ pub struct ExternalDeepFeatureSet {
 }
 
 impl ExternalDeepFeatureSet {
-    pub fn new(features: Vec<ExternalDeepFeature>) -> Self {
+    pub const fn new(features: Vec<ExternalDeepFeature>) -> Self {
         Self { features }
     }
 
@@ -97,7 +97,7 @@ pub struct ExternalDeepMatchSet {
 }
 
 impl ExternalDeepMatchSet {
-    pub fn new(matches: Vec<ExternalDeepMatch>) -> Self {
+    pub const fn new(matches: Vec<ExternalDeepMatch>) -> Self {
         Self { matches }
     }
 

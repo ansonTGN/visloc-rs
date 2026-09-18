@@ -505,7 +505,7 @@ impl DpvoPatchGraph {
     /// existing entries — kept simple since the one real caller,
     /// `crate::dpvo_vo::DpvoOdometry::new`, only ever calls this once, at
     /// construction).
-    pub fn enable_inactive_edge_retention(&mut self, cap: usize) {
+    pub const fn enable_inactive_edge_retention(&mut self, cap: usize) {
         self.inactive_edge_cap = cap;
     }
 
@@ -516,7 +516,7 @@ impl DpvoPatchGraph {
 
     /// Every folded-away frame's retained intrinsics + patch geometry — see
     /// [`RetainedFoldedFrame`]'s own doc.
-    pub fn retained_folded_frames(&self) -> &BTreeMap<usize, RetainedFoldedFrame> {
+    pub const fn retained_folded_frames(&self) -> &BTreeMap<usize, RetainedFoldedFrame> {
         &self.retained_folded_frames
     }
 
@@ -524,7 +524,9 @@ impl DpvoPatchGraph {
     /// solved inverse depth back into an already-folded frame's patches — the
     /// folded-frame counterpart of [`Self::patches_mut`] (the live one) and
     /// [`Self::set_retained_pose_override`] (the folded-pose one).
-    pub fn retained_folded_frames_mut(&mut self) -> &mut BTreeMap<usize, RetainedFoldedFrame> {
+    pub const fn retained_folded_frames_mut(
+        &mut self,
+    ) -> &mut BTreeMap<usize, RetainedFoldedFrame> {
         &mut self.retained_folded_frames
     }
 
@@ -536,7 +538,7 @@ impl DpvoPatchGraph {
 
     /// Milestone M9: every folded-away frame's retained pose, keyed by
     /// `arrival_index` — see [`Self::retained_poses`]'s own field doc.
-    pub fn retained_poses(&self) -> &BTreeMap<usize, SE3> {
+    pub const fn retained_poses(&self) -> &BTreeMap<usize, SE3> {
         &self.retained_poses
     }
 
@@ -548,7 +550,7 @@ impl DpvoPatchGraph {
         self.retained_pose_overrides.insert(arrival_index);
     }
 
-    pub fn config(&self) -> &DpvoVoConfig {
+    pub const fn config(&self) -> &DpvoVoConfig {
         &self.config
     }
 
@@ -556,15 +558,15 @@ impl DpvoPatchGraph {
         self.frames.len()
     }
 
-    pub fn is_initialized(&self) -> bool {
+    pub const fn is_initialized(&self) -> bool {
         self.is_initialized
     }
 
-    pub fn set_initialized(&mut self, value: bool) {
+    pub const fn set_initialized(&mut self, value: bool) {
         self.is_initialized = value;
     }
 
-    pub fn counter(&self) -> usize {
+    pub const fn counter(&self) -> usize {
         self.counter
     }
 
@@ -603,12 +605,12 @@ impl DpvoPatchGraph {
     /// derivation of why this holds at all times, including after
     /// [`Self::keyframe`] removals (upstream's own `self.ix[kk]` is the same
     /// tautology, `patchgraph.py:34`/`107-108`).
-    pub fn owner_frame(&self, patch_id: usize) -> usize {
+    pub const fn owner_frame(&self, patch_id: usize) -> usize {
         patch_id / self.config.patches_per_frame
     }
 
     /// Every patch id owned by `frame`.
-    pub fn patch_ids_of_frame(&self, frame: usize) -> std::ops::Range<usize> {
+    pub const fn patch_ids_of_frame(&self, frame: usize) -> std::ops::Range<usize> {
         let m = self.config.patches_per_frame;
         frame * m..(frame + 1) * m
     }

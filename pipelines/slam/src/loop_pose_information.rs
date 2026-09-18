@@ -76,7 +76,7 @@ pub struct LoopPoseInformationFailureCounts {
 }
 
 impl LoopPoseInformationFailureCounts {
-    pub fn record(&mut self, failure: LoopPoseInformationFailure) {
+    pub const fn record(&mut self, failure: LoopPoseInformationFailure) {
         match failure {
             LoopPoseInformationFailure::InvalidConfiguration => self.invalid_configuration += 1,
             LoopPoseInformationFailure::MissingFromKeyframe => self.missing_from_keyframe += 1,
@@ -90,7 +90,7 @@ impl LoopPoseInformationFailureCounts {
         }
     }
 
-    pub fn merge(&mut self, other: Self) {
+    pub const fn merge(&mut self, other: Self) {
         self.invalid_configuration += other.invalid_configuration;
         self.missing_from_keyframe += other.missing_from_keyframe;
         self.missing_from_pose += other.missing_from_pose;

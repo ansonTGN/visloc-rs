@@ -728,8 +728,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .cam0_images
             .iter()
             .find(|f| f.timestamp_nanoseconds >= seed.timestamp_nanoseconds)
-            .map(|f| f.timestamp_nanoseconds)
-            .unwrap_or(seed.timestamp_nanoseconds);
+            .map_or(seed.timestamp_nanoseconds, |f| f.timestamp_nanoseconds);
         let last = prev_ts;
         (last - first) as f64 * 1.0e-9
     } else {

@@ -704,8 +704,7 @@ mod tests {
             scores
                 .iter()
                 .find(|s| s.image_id == id)
-                .map(|s| s.score)
-                .unwrap_or(0.0)
+                .map_or(0.0, |s| s.score)
         };
         let (s_dup, s_b) = (score_of(1), score_of(2));
         assert!(

@@ -225,7 +225,7 @@ fn incremental_smoother_run(
 struct Lcg(u64);
 
 impl Lcg {
-    fn next_u64(&mut self) -> u64 {
+    const fn next_u64(&mut self) -> u64 {
         self.0 = self
             .0
             .wrapping_mul(6364136223846793005)
@@ -477,8 +477,9 @@ fn make_wrong_loops(n: usize, n_kf: usize, seed: u64) -> Vec<LoopClosureConstrai
             rng.range(-1.0, 1.0),
         );
         let rotation = nalgebra::Unit::try_new(axis, 1e-9)
-            .map(|a| UnitQuaternion::from_axis_angle(&a, rng.range(0.0, 0.2)))
-            .unwrap_or_else(UnitQuaternion::identity);
+            .map_or_else(UnitQuaternion::identity, |a| {
+                UnitQuaternion::from_axis_angle(&a, rng.range(0.0, 0.2))
+            });
         wrong.push(LoopClosureConstraint {
             from_keyframe_id: i as u64,
             to_keyframe_id: j as u64,

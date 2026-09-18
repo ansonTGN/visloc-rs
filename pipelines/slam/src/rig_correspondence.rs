@@ -121,7 +121,7 @@ pub struct RigCorrespondencePreviewStats {
 impl RigCorrespondencePreviewStats {
     /// Alias with an explicit name for callers that keep multiple digests in a
     /// diagnostic record.
-    pub fn deterministic_digest(self) -> u64 {
+    pub const fn deterministic_digest(self) -> u64 {
         self.digest
     }
 }
@@ -314,7 +314,7 @@ impl RigCorrespondenceCsrBuilder {
     }
 
     /// Number of flattened observations in this rig-local domain.
-    pub fn total_observations(&self) -> usize {
+    pub const fn total_observations(&self) -> usize {
         self.total_observations
     }
 

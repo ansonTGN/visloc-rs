@@ -289,7 +289,7 @@ pub fn maximum_consistent_set(
                 Some(n) => pairwise_mahalanobis(ka, kb, odometry, n),
                 None => pairwise_residual(ka, kb, odometry),
             };
-            let consistent = residual.map(|r| r <= config.threshold).unwrap_or(false);
+            let consistent = residual.is_some_and(|r| r <= config.threshold);
             adj[a][b] = consistent;
             adj[b][a] = consistent;
         }

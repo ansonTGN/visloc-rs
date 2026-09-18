@@ -143,7 +143,7 @@ impl GlobalSfmEdge {
     }
 
     /// Swap primary ↔ alternate in place. No-op when no alternate is stored.
-    fn swap_primary_alternate(&mut self) {
+    const fn swap_primary_alternate(&mut self) {
         let Some(r_alt) = self.rotation_alt.take() else {
             return;
         };
@@ -300,7 +300,7 @@ fn solve_global_sfm_with_options(
         eprintln!(
             "global-sfm debug: post-average rotation err median={:.4} deg max={:.4} deg kept={}/{}",
             med.to_degrees(),
-            errs.last().map(|e| e.to_degrees()).unwrap_or(f64::NAN),
+            errs.last().map_or(f64::NAN, |e| e.to_degrees()),
             kept,
             edges.len()
         );
@@ -745,7 +745,7 @@ fn average_rotations_with_priors(
             n_fixed
         );
     }
-    let mut ordered_members = members.clone();
+    let mut ordered_members = members;
     ordered_members.sort_unstable();
     for _ in 0..sweeps {
         // Gauss-Seidel style: consume this sweep's own updates immediately
@@ -1481,24 +1481,20 @@ pub fn average_positions_with_independent_edge_scales(
         let mut scale_magnitudes = Vec::with_capacity(bearings.len());
         let mut residuals = Vec::with_capacity(bearings.len());
         for edge in &bearings {
-            let ci = center_offset[edge.i]
-                .map(|offset| {
-                    Vector3::new(
-                        solution[offset * 3],
-                        solution[offset * 3 + 1],
-                        solution[offset * 3 + 2],
-                    )
-                })
-                .unwrap_or_else(Vector3::zeros);
-            let cj = center_offset[edge.j]
-                .map(|offset| {
-                    Vector3::new(
-                        solution[offset * 3],
-                        solution[offset * 3 + 1],
-                        solution[offset * 3 + 2],
-                    )
-                })
-                .unwrap_or_else(Vector3::zeros);
+            let ci = center_offset[edge.i].map_or_else(Vector3::zeros, |offset| {
+                Vector3::new(
+                    solution[offset * 3],
+                    solution[offset * 3 + 1],
+                    solution[offset * 3 + 2],
+                )
+            });
+            let cj = center_offset[edge.j].map_or_else(Vector3::zeros, |offset| {
+                Vector3::new(
+                    solution[offset * 3],
+                    solution[offset * 3 + 1],
+                    solution[offset * 3 + 2],
+                )
+            });
             let displacement = cj - ci;
             let scale = displacement.dot(&edge.direction);
             let perpendicular = displacement - edge.direction * scale;
@@ -1566,7 +1562,7 @@ pub fn average_positions_with_independent_edge_scales(
     }
     if std::env::var_os("VISLOC_GLOBAL_DEBUG").is_some() {
         let median = {
-            let mut values = final_residuals.clone();
+            let mut values = final_residuals;
             values.sort_by(f64::total_cmp);
             values[values.len() / 2]
         };
@@ -2080,11 +2076,7 @@ pub fn rematch_essential_admission_ok(
         if other.essential_matrix.is_none() {
             continue;
         }
-        let e_count = other
-            .essential_matches
-            .as_ref()
-            .map(|e| e.len())
-            .unwrap_or(0);
+        let e_count = other.essential_matches.as_ref().map_or(0, |e| e.len());
         if e_count < min_anchor_e_inliers {
             continue;
         }
@@ -2249,11 +2241,7 @@ pub fn estimate_free_centres_from_prior_rays(
         } else {
             (pair.image_j, pair.image_i)
         };
-        let e_count = pair
-            .essential_matches
-            .as_ref()
-            .map(|e| e.len())
-            .unwrap_or(0);
+        let e_count = pair.essential_matches.as_ref().map_or(0, |e| e.len());
         if e_count < min_e_inliers {
             continue;
         }
@@ -2322,11 +2310,7 @@ pub fn estimate_free_poses_from_prior_rays(
             if other != free_idx {
                 continue;
             }
-            let e_count = pair
-                .essential_matches
-                .as_ref()
-                .map(|e| e.len())
-                .unwrap_or(0);
+            let e_count = pair.essential_matches.as_ref().map_or(0, |e| e.len());
             if e_count < min_anchor_e_inliers {
                 continue;
             }
@@ -2408,7 +2392,7 @@ pub fn prior_free_essential_gt_bearing_error_deg(
 }
 
 /// Bearing from `image_i` toward `image_j` in `image_i`'s frame.
-pub fn edge_bearing_i_to_j(
+pub const fn edge_bearing_i_to_j(
     _r_ij: &UnitQuaternion<f64>,
     direction_ij: &Vector3<f64>,
 ) -> Vector3<f64> {
@@ -3783,10 +3767,7 @@ pub fn reconstruct_global_sfm_with_priors(
                     "global-sfm debug: essential-edge {}-{} ({} E inliers)",
                     pair.image_i,
                     pair.image_j,
-                    pair.essential_matches
-                        .as_ref()
-                        .map(|e| e.len())
-                        .unwrap_or(0)
+                    pair.essential_matches.as_ref().map_or(0, |e| e.len())
                 );
             }
         }
@@ -5050,7 +5031,7 @@ mod tests {
         let camera = Camera::pinhole(1, 640, 480, 500.0, 500.0, 320.0, 240.0);
         let pose_a = Pose::from_world_to_camera(UnitQuaternion::identity(), Vector3::zeros());
         let pose_b = Pose::from_world_to_camera(UnitQuaternion::identity(), Vector3::x());
-        let priors = vec![Some(pose_a.clone()), Some(pose_b.clone())];
+        let priors = vec![Some(pose_a), Some(pose_b)];
         let tracks = vec![
             SfmTrack {
                 position: Point3::new(0.0, 0.0, 5.0),

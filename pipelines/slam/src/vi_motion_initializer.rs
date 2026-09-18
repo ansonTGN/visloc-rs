@@ -488,7 +488,7 @@ pub struct MotionBasedViInitializer {
 
 impl MotionBasedViInitializer {
     /// Construct with the given config; carries no keyframes yet.
-    pub fn new(config: MotionBasedViInitializerConfig) -> Self {
+    pub const fn new(config: MotionBasedViInitializerConfig) -> Self {
         Self {
             config,
             keyframes: Vec::new(),
@@ -503,7 +503,7 @@ impl MotionBasedViInitializer {
     }
 
     /// Borrow the active configuration.
-    pub fn config(&self) -> &MotionBasedViInitializerConfig {
+    pub const fn config(&self) -> &MotionBasedViInitializerConfig {
         &self.config
     }
 
@@ -515,7 +515,7 @@ impl MotionBasedViInitializer {
     /// `reset_sequence_state`) starts from the corrected assumption instead
     /// of the original (possibly wrong) config value. Does not touch any
     /// cached result or registered keyframe/translation state.
-    pub fn set_gravity_world(&mut self, gravity_world: Vector3<f64>) {
+    pub const fn set_gravity_world(&mut self, gravity_world: Vector3<f64>) {
         self.config.gravity_world = gravity_world;
     }
 
@@ -540,7 +540,7 @@ impl MotionBasedViInitializer {
 
     /// Cumulative camera-centre translation (m) along the registered
     /// keyframe chain.
-    pub fn cumulative_translation_meters(&self) -> f64 {
+    pub const fn cumulative_translation_meters(&self) -> f64 {
         self.cumulative_translation
     }
 
@@ -580,7 +580,7 @@ impl MotionBasedViInitializer {
     }
 
     /// Returns the cached result if VIBA1 has already fired.
-    pub fn result(&self) -> Option<&MotionBasedViInitializationResult> {
+    pub const fn result(&self) -> Option<&MotionBasedViInitializationResult> {
         self.completed.as_ref()
     }
 
@@ -590,7 +590,7 @@ impl MotionBasedViInitializer {
     /// reached the terminal `Initialised` state (Stage A's cache is not
     /// cleared on Stage B success, but callers should prefer
     /// [`Self::result`] at that point).
-    pub fn velocity_stage_result(&self) -> Option<&MotionBasedViInitializationResult> {
+    pub const fn velocity_stage_result(&self) -> Option<&MotionBasedViInitializationResult> {
         self.velocity_stage.as_ref()
     }
 
@@ -617,7 +617,7 @@ impl MotionBasedViInitializer {
     /// attempt has run yet, or after [`Self::reset`]. See the field-level
     /// doc comment on `last_gravity_alignment` for why this exists
     /// separately from the terminal [`Self::result`].
-    pub fn last_gravity_alignment(&self) -> Option<&GravityVelocityAlignment> {
+    pub const fn last_gravity_alignment(&self) -> Option<&GravityVelocityAlignment> {
         self.last_gravity_alignment.as_ref()
     }
 
@@ -628,7 +628,7 @@ impl MotionBasedViInitializer {
     /// attempt has run yet, or after [`Self::reset`]. See the field-level
     /// doc comment on `last_gyro_bias_alignment` for why this exists
     /// separately from the terminal [`Self::result`].
-    pub fn last_gyro_bias_alignment(&self) -> Option<&GyroBiasAlignment> {
+    pub const fn last_gyro_bias_alignment(&self) -> Option<&GyroBiasAlignment> {
         self.last_gyro_bias_alignment.as_ref()
     }
 
@@ -1482,7 +1482,7 @@ pub fn estimate_gravity_and_velocities(
     // produces a non-finite update.
     let mag = expected_gravity_magnitude;
     let mut g_hat = raw_gravity / raw_gravity_norm;
-    let mut velocities_final = raw_velocities.clone();
+    let mut velocities_final = raw_velocities;
     let mut refined = false;
     for _ in 0..REFINEMENT_ITERATIONS {
         let (b1, b2) = tangent_basis(&g_hat);

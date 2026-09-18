@@ -37,8 +37,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(PathBuf::from)
             .ok_or_else(|| format!("missing required --{key}"))
     };
-    let map_dir = get("map-dir").map_err(|e| e.to_string())?;
-    let descriptors_path = get("landmark-descriptors").map_err(|e| e.to_string())?;
+    let map_dir = get("map-dir")?;
+    let descriptors_path = get("landmark-descriptors")?;
 
     let map = read_colmap_text_model(&map_dir)?;
     let descriptor_store = read_landmark_descriptors_txt(&descriptors_path)?;

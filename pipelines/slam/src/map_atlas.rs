@@ -385,7 +385,7 @@ impl MapAtlas {
         Ok(id)
     }
 
-    pub fn root_submap_id(&self) -> Option<SubmapId> {
+    pub const fn root_submap_id(&self) -> Option<SubmapId> {
         self.root_submap_id
     }
 
@@ -671,8 +671,7 @@ impl MapAtlas {
         };
         let boundary_radius_px = config
             .projection_search_radius_px
-            .map(|radius| 3.0 * radius)
-            .unwrap_or(f64::INFINITY);
+            .map_or(f64::INFINITY, |radius| 3.0 * radius);
         let mut candidate_pairs = Vec::new();
         for (source_index, (_, _, source_xy, _)) in source_observed.iter().enumerate() {
             let Some((target_index, distance)) = target_observed

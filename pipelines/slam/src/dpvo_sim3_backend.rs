@@ -360,12 +360,12 @@ struct PreparedLoopEdge {
 /// Embed a rigid `SE(3)` pose as a `Sim(3)` value at scale `1.0` — the same
 /// convention `crate::online_slam::sim3_at_unit_scale` (private there) uses
 /// to seed its own `Sim3PoseGraph` mirror.
-fn sim3_at_unit_scale(pose: &SE3) -> Sim3 {
+const fn sim3_at_unit_scale(pose: &SE3) -> Sim3 {
     Sim3::new(pose.rotation, pose.translation, 1.0)
 }
 
 impl VerifiedDpvoLoopFactor {
-    fn anchors(&self) -> (&DpvoSubmapAnchor, &DpvoSubmapAnchor) {
+    const fn anchors(&self) -> (&DpvoSubmapAnchor, &DpvoSubmapAnchor) {
         match self {
             Self::RotationOnly {
                 source_anchor,
@@ -380,7 +380,7 @@ impl VerifiedDpvoLoopFactor {
         }
     }
 
-    fn validate(&self) -> Result<(), VerifiedDpvoLoopFactorError> {
+    const fn validate(&self) -> Result<(), VerifiedDpvoLoopFactorError> {
         let (source_anchor, target_anchor) = self.anchors();
         if source_anchor.arrival_index == target_anchor.arrival_index {
             return Err(VerifiedDpvoLoopFactorError::SameArrival);

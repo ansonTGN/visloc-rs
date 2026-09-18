@@ -23,7 +23,7 @@ use visloc_basalt::mapper::{
 const LEFT_FRAME: u64 = 1_403_636_580_113_555_456;
 const RIGHT_FRAME: u64 = 1_403_636_579_763_555_584;
 
-fn bits(value: f64) -> u64 {
+const fn bits(value: f64) -> u64 {
     value.to_bits()
 }
 

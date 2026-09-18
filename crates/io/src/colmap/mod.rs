@@ -336,8 +336,10 @@ where
             let landmark_id = by_kp
                 .iter()
                 .find(|(observed, _)| *observed == kp_idx)
-                .map(|(_, landmark_id)| landmark_id.to_string())
-                .unwrap_or_else(|| "-1".to_owned());
+                .map_or_else(
+                    || "-1".to_owned(),
+                    |(_, landmark_id)| landmark_id.to_string(),
+                );
             tokens.push(format!(
                 "{} {} {}",
                 format_f64(kp.x),
@@ -492,8 +494,7 @@ where
             let landmark_id = by_kp
                 .iter()
                 .find(|(observed, _)| *observed == kp_idx)
-                .map(|(_, lid)| *lid as i64)
-                .unwrap_or(-1);
+                .map_or(-1, |(_, lid)| *lid as i64);
             images_bytes.extend_from_slice(&landmark_id.to_le_bytes());
         }
     }
@@ -618,8 +619,7 @@ where
         for (kp_idx, kp) in features.keypoints.iter().enumerate() {
             let point_id = kp_to_point
                 .get(&kp_idx)
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| "-1".to_owned());
+                .map_or_else(|| "-1".to_owned(), |id| id.to_string());
             tokens.push(format!(
                 "{} {} {}",
                 format_f64(kp.x),
@@ -847,8 +847,10 @@ pub fn format_images_txt(map: &VisualMap) -> String {
                 let landmark_id = observation_by_keypoint
                     .iter()
                     .find(|(observed_index, _)| *observed_index == keypoint_index)
-                    .map(|(_, landmark_id)| landmark_id.to_string())
-                    .unwrap_or_else(|| "-1".to_owned());
+                    .map_or_else(
+                        || "-1".to_owned(),
+                        |(_, landmark_id)| landmark_id.to_string(),
+                    );
                 format!("{} {} {}", format_f64(xy.x), format_f64(xy.y), landmark_id)
             })
             .collect::<Vec<_>>();
@@ -1330,7 +1332,7 @@ struct BinaryReader<'a> {
 }
 
 impl<'a> BinaryReader<'a> {
-    fn new(file: &'static str, contents: &'a [u8]) -> Self {
+    const fn new(file: &'static str, contents: &'a [u8]) -> Self {
         Self {
             file,
             contents,

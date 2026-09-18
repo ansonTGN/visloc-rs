@@ -48,7 +48,7 @@ use visloc_slam::{
 struct Lcg(u64);
 
 impl Lcg {
-    fn next_u64(&mut self) -> u64 {
+    const fn next_u64(&mut self) -> u64 {
         // PCG/MMIX-style constants.
         self.0 = self
             .0
@@ -123,8 +123,9 @@ fn inject_outliers(graph: &mut PoseGraph, n: usize, seed: u64) -> Vec<usize> {
             rng.range(-1.0, 1.0),
         );
         let rotation = nalgebra::Unit::try_new(axis, 1e-9)
-            .map(|a| UnitQuaternion::from_axis_angle(&a, rng.range(0.5, std::f64::consts::PI)))
-            .unwrap_or_else(UnitQuaternion::identity);
+            .map_or_else(UnitQuaternion::identity, |a| {
+                UnitQuaternion::from_axis_angle(&a, rng.range(0.5, std::f64::consts::PI))
+            });
         graph.add_edge_with_information(
             i,
             j,
@@ -250,7 +251,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // Corrupt the graph once, then run every back-end on a clone of it.
-    let mut corrupted = clean.clone();
+    let mut corrupted = clean;
     let injected = inject_outliers(&mut corrupted, inject, seed);
     let injected_set: std::collections::HashSet<usize> = injected.iter().copied().collect();
 

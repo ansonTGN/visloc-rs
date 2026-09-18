@@ -210,7 +210,7 @@ impl TimingBreakdown {
 
     /// Whether the collector will take timestamps and retain counters.
     #[cfg(any(feature = "basalt-timing-breakdown", test))]
-    pub fn enabled(&self) -> bool {
+    pub const fn enabled(&self) -> bool {
         self.enabled
     }
 
@@ -233,7 +233,7 @@ impl TimingBreakdown {
     /// clock, branch, or bucket dispatch.
     #[cfg(all(not(feature = "basalt-timing-breakdown"), not(test)))]
     #[inline(always)]
-    pub(crate) fn start(&self) -> Option<TimingStart> {
+    pub(crate) const fn start(&self) -> Option<TimingStart> {
         None
     }
 
@@ -253,7 +253,7 @@ impl TimingBreakdown {
     /// Compile-time no-op for canonical builds.
     #[cfg(all(not(feature = "basalt-timing-breakdown"), not(test)))]
     #[inline(always)]
-    pub(crate) fn finish(&mut self, _bucket: TimingBucket, _started: Option<TimingStart>) {}
+    pub(crate) const fn finish(&mut self, _bucket: TimingBucket, _started: Option<TimingStart>) {}
 
     /// Measures one external region, preserving the disabled fast path.
     #[cfg(any(feature = "basalt-timing-breakdown", test))]
@@ -399,14 +399,14 @@ impl TimingBreakdown {
     /// Compile-time no-op for canonical builds.
     #[cfg(all(not(feature = "basalt-timing-breakdown"), not(test)))]
     #[inline(always)]
-    pub fn merge_from(&mut self, _other: &Self) {}
+    pub const fn merge_from(&mut self, _other: &Self) {}
 
     /// Sum of the four eager trial-construction sub-buckets.  These samples
     /// are nested inside `lm_trial_construct_step`, so callers must not add
     /// this value to the disjoint LM component sum used by
     /// [`Self::lm_remainder_ns`].
     #[cfg(any(feature = "basalt-timing-breakdown", test))]
-    pub fn lm_trial_construct_subbuckets_ns(&self) -> u64 {
+    pub const fn lm_trial_construct_subbuckets_ns(&self) -> u64 {
         self.lm_trial_landmark_recovery
             .total_ns
             .saturating_add(self.lm_trial_apply_step_full.total_ns)
@@ -429,7 +429,7 @@ impl TimingBreakdown {
     /// attempt because its regions intentionally exclude the timed accept
     /// callback.
     #[cfg(any(feature = "basalt-timing-breakdown", test))]
-    pub fn lm_remainder_ns(&self) -> u64 {
+    pub const fn lm_remainder_ns(&self) -> u64 {
         let accounted = self
             .lm_linearize
             .total_ns
@@ -538,7 +538,7 @@ impl TimingBreakdown {
     }
 
     #[cfg(any(feature = "basalt-timing-breakdown", test))]
-    fn stat_mut(&mut self, bucket: TimingBucket) -> &mut TimingStat {
+    const fn stat_mut(&mut self, bucket: TimingBucket) -> &mut TimingStat {
         match bucket {
             TimingBucket::DatasetOpen => &mut self.dataset_open,
             TimingBucket::DatasetCsvParsing => &mut self.dataset_csv_parsing,

@@ -75,7 +75,7 @@ pub struct FrameStateData {
     pub is_latest: bool,
 }
 
-fn zero_vec3() -> [f64; 3] {
+const fn zero_vec3() -> [f64; 3] {
     [0.0; 3]
 }
 
@@ -134,19 +134,19 @@ pub struct PoseStateWithLinData {
     pub linearized: bool,
 }
 
-fn zero_vec6() -> [f64; 6] {
+const fn zero_vec6() -> [f64; 6] {
     [0.0; 6]
 }
 
-fn zero_vec7() -> [f64; 7] {
+const fn zero_vec7() -> [f64; 7] {
     [0.0; 7]
 }
 
-fn zero_vec15() -> [f64; 15] {
+const fn zero_vec15() -> [f64; 15] {
     [0.0; 15]
 }
 
-fn is_false(value: &bool) -> bool {
+const fn is_false(value: &bool) -> bool {
     !*value
 }
 
@@ -568,7 +568,7 @@ fn finite_nav(value: &NavStateData) -> bool {
 }
 
 impl MargData {
-    fn mapper_packet_ref(&self) -> MapperPacketRef<'_> {
+    const fn mapper_packet_ref(&self) -> MapperPacketRef<'_> {
         MapperPacketRef {
             schema_version: self.schema_version,
             aom_sqrt_jacobian: &self.aom_sqrt_jacobian,

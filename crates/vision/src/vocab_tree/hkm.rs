@@ -166,13 +166,13 @@ impl HierarchicalVocabulary {
     }
 
     /// Local-descriptor dimension.
-    pub fn dim(&self) -> usize {
+    pub const fn dim(&self) -> usize {
         self.dim
     }
 
     /// The requested tree shape this vocabulary was built with (for
     /// reporting; the realized leaf count is [`Self::num_words`]).
-    pub fn shape(&self) -> (usize, usize) {
+    pub const fn shape(&self) -> (usize, usize) {
         (self.branching_factor, self.depth)
     }
 

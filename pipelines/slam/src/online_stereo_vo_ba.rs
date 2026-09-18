@@ -154,7 +154,7 @@ where
     E::Error: std::error::Error + Send + Sync + 'static,
     M: Matcher,
 {
-    pub fn new(frontend: StereoVoFrontend<E, M>, config: OnlineStereoVoBaConfig) -> Self {
+    pub const fn new(frontend: StereoVoFrontend<E, M>, config: OnlineStereoVoBaConfig) -> Self {
         Self {
             frontend,
             config,

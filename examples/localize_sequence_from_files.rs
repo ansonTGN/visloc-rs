@@ -21,11 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 example_dir.join("data").join("colmap_text"),
                 example_dir.join("data").join("landmark_descriptors.txt"),
                 1_u64,
-                vec![
-                    default_query.clone(),
-                    default_query.clone(),
-                    default_query.clone(),
-                ],
+                vec![default_query.clone(), default_query.clone(), default_query],
             )
         }
         [map_dir, descriptor_path, camera_id, query_feature_paths @ ..]
@@ -69,8 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let descriptor_count = provider
         .landmark_descriptor_store()
-        .map(|store| store.len())
-        .unwrap_or(0);
+        .map_or(0, |store| store.len());
     println!(
         "loaded map: cameras={} keyframes={} landmarks={} descriptors={} frames={}",
         map.cameras.len(),

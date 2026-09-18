@@ -95,7 +95,7 @@ impl BasaltVioEstimatorAdapter {
     }
 
     /// Returns the optional cumulative timing breakdown for this adapter.
-    pub fn timing_breakdown(&self) -> &TimingBreakdown {
+    pub const fn timing_breakdown(&self) -> &TimingBreakdown {
         &self.timing
     }
 

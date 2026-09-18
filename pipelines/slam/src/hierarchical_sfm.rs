@@ -644,7 +644,7 @@ pub fn hierarchical_sfm(
 ///   performed any applicable bounded same-window multi-seed retry before
 ///   returning this error; widening then uses the existing merge cap and
 ///   overlap-safety budget without relaxing a quality threshold.
-fn is_build_error_widenable(error: &HierarchicalSfmError) -> bool {
+const fn is_build_error_widenable(error: &HierarchicalSfmError) -> bool {
     matches!(
         error,
         HierarchicalSfmError::LocalBuild {
@@ -660,7 +660,7 @@ fn is_build_error_widenable(error: &HierarchicalSfmError) -> bool {
     )
 }
 
-fn is_no_seed_pair_build_error(error: &HierarchicalSfmError) -> bool {
+const fn is_no_seed_pair_build_error(error: &HierarchicalSfmError) -> bool {
     matches!(
         error,
         HierarchicalSfmError::LocalBuild {
@@ -677,7 +677,7 @@ fn is_no_seed_pair_build_error(error: &HierarchicalSfmError) -> bool {
 /// (`LOWINLIERRATIO_DIAGNOSIS.md`); every other reason (too few
 /// correspondences, scale out of bounds, rotation inconsistent, ...) is left
 /// fail-fast regardless of what the diagnostic says.
-fn is_seam_rejection_reason_drift_eligible(reason: SubmapSim3RejectionReason) -> bool {
+const fn is_seam_rejection_reason_drift_eligible(reason: SubmapSim3RejectionReason) -> bool {
     matches!(
         reason,
         SubmapSim3RejectionReason::LowInlierRatio | SubmapSim3RejectionReason::NoRobustFit
@@ -721,11 +721,11 @@ enum SeamMergeRoute {
 }
 
 impl SeamMergeRoute {
-    fn is_last_resort(self) -> bool {
+    const fn is_last_resort(self) -> bool {
         matches!(self, Self::LastResort(_))
     }
 
-    fn log_family(self) -> &'static str {
+    const fn log_family(self) -> &'static str {
         match self {
             Self::Degenerate => "hierarchical-seam-merge",
             Self::Residual(_) => "hierarchical-seam-residual-merge",
@@ -748,7 +748,7 @@ struct SeamMergeCandidate {
 /// `TooFewCorrespondences` is eligible even with no correspondence evidence:
 /// such a seam cannot be aligned, so a correspondence-free component rebuild
 /// is its only possible remediation.
-fn is_last_resort_seam_rejection_eligible(rejection: &SubmapSim3Rejection) -> bool {
+const fn is_last_resort_seam_rejection_eligible(rejection: &SubmapSim3Rejection) -> bool {
     !matches!(
         rejection.reason,
         SubmapSim3RejectionReason::NonFinitePoint

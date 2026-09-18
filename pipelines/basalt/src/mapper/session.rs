@@ -643,7 +643,7 @@ impl NfrMapper {
     /// Sets the pinned M8c feature configuration used by subsequent frontend
     /// calls.  Existing feature products are intentionally retained, matching
     /// the upstream mapper's persistent `feature_corners` map.
-    pub fn set_feature_config(&mut self, config: OfflineMapperConfig) {
+    pub const fn set_feature_config(&mut self, config: OfflineMapperConfig) {
         self.feature_config = config;
     }
 
@@ -651,7 +651,7 @@ impl NfrMapper {
     /// state.  The pinned constructor starts `lambda` at the configured
     /// minimum and `lambda_vee` at two, so changing bounds is a new mapper
     /// configuration rather than a continuation of the old schedule.
-    pub fn set_optimize_config(&mut self, config: GlobalBaConfig) {
+    pub const fn set_optimize_config(&mut self, config: GlobalBaConfig) {
         self.optimize_config = config;
         self.optimizer_state = GlobalBaOptimizerState::new(config.lambda_min, config.lambda_max);
     }
@@ -1524,19 +1524,19 @@ impl NfrMapper {
     /// Return the installed pose map, matching the mutable C++
     /// `NfrMapper::getFramePoses()` accessor without exposing a second copy of
     /// the optimizer state.
-    pub fn get_frame_poses(&self) -> &BTreeMap<u64, SE3> {
+    pub const fn get_frame_poses(&self) -> &BTreeMap<u64, SE3> {
         &self.frame_poses
     }
 
     /// Mutable pose-map accessor for callers that follow the upstream helper's
     /// non-const return type.  BA itself updates this same map in place.
-    pub fn get_frame_poses_mut(&mut self) -> &mut BTreeMap<u64, SE3> {
+    pub const fn get_frame_poses_mut(&mut self) -> &mut BTreeMap<u64, SE3> {
         &mut self.frame_poses
     }
 
     /// Source-compatible spelling for `NfrMapper::getFramePoses()`.
     #[allow(non_snake_case)]
-    pub fn getFramePoses(&mut self) -> &mut BTreeMap<u64, SE3> {
+    pub const fn getFramePoses(&mut self) -> &mut BTreeMap<u64, SE3> {
         self.get_frame_poses_mut()
     }
 
@@ -2055,7 +2055,7 @@ fn pose_array_from_se3(pose: &SE3) -> [f64; 7] {
     ]
 }
 
-fn empty_mapper_features() -> MapperImageFeatures {
+const fn empty_mapper_features() -> MapperImageFeatures {
     MapperImageFeatures {
         corners: Vec::new(),
         corner_angles: Vec::new(),

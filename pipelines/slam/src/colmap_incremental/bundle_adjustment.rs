@@ -173,7 +173,7 @@ impl BundleAdjustmentConfig {
         }
     }
 
-    pub fn images(&self) -> &BTreeSet<ImageT> {
+    pub const fn images(&self) -> &BTreeSet<ImageT> {
         &self.image_ids
     }
 
@@ -194,7 +194,7 @@ impl BundleAdjustmentConfig {
         self.constant_point3d_ids.insert(point3d_id);
     }
 
-    pub fn fix_gauge(&mut self, gauge: Gauge) {
+    pub const fn fix_gauge(&mut self, gauge: Gauge) {
         self.gauge = gauge;
     }
 }

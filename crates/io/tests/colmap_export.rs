@@ -40,7 +40,11 @@ fn synthetic_camera() -> Camera {
     Camera::pinhole(7, 640, 480, 500.0, 500.0, 320.0, 240.0)
 }
 
-fn stereo_feature(left_index: usize, right_index: usize, point_cam: Point3<f64>) -> StereoFeature {
+const fn stereo_feature(
+    left_index: usize,
+    right_index: usize,
+    point_cam: Point3<f64>,
+) -> StereoFeature {
     StereoFeature {
         left_index,
         right_index,

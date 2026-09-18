@@ -843,7 +843,7 @@ struct RansacSupport {
 }
 
 impl RansacSupport {
-    fn empty() -> Self {
+    const fn empty() -> Self {
         Self {
             num_inliers: 0,
             residual_sum: f64::MAX,
@@ -873,7 +873,7 @@ fn support_from_residuals(residuals: &[f64], max_residual: f64) -> RansacSupport
 }
 
 /// `NChooseK(n, 2)` (`math/math.h`).
-fn n_choose_2(n: usize) -> usize {
+const fn n_choose_2(n: usize) -> usize {
     n * (n - 1) / 2
 }
 

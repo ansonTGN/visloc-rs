@@ -622,7 +622,7 @@ impl OnlineSlamRelocalizationState {
         }
     }
 
-    fn reset(&mut self) {
+    const fn reset(&mut self) {
         self.trigger_count = 0;
         self.success_count = 0;
         self.consecutive_failed_attempts = 0;
@@ -2901,11 +2901,11 @@ impl<T, M> OnlineSlamPipeline<T, M> {
             .and_then(|s| s.pending_factor.take())
     }
 
-    pub fn map(&self) -> &VisualMap {
+    pub const fn map(&self) -> &VisualMap {
         &self.map
     }
 
-    pub fn map_mut(&mut self) -> &mut VisualMap {
+    pub const fn map_mut(&mut self) -> &mut VisualMap {
         &mut self.map
     }
 
@@ -3091,8 +3091,7 @@ where
             .config
             .local_vi_ba
             .as_ref()
-            .map(|c| c.run_at_vi_init_promotion)
-            .unwrap_or(false);
+            .is_some_and(|c| c.run_at_vi_init_promotion);
         if just_promoted_vi_init && run_at_promotion && local_vi_ba.is_none() {
             if let Some(state) = self.local_vi_ba_state.as_mut() {
                 local_vi_ba = crate::online_slam_vi_ba::run_local_vi_ba(&mut self.map, state);
@@ -3479,14 +3478,16 @@ where
                     .config
                     .appearance_retrieval_map
                     .as_ref()
-                    .map(|config| config.broader_store_retry_interval_frames.max(1))
-                    .unwrap_or(1),
+                    .map_or(1, |config| {
+                        config.broader_store_retry_interval_frames.max(1)
+                    }),
                 RelocalizationDescriptorStoreKind::CovisibilityLocal => state
                     .config
                     .covisibility_local_map
                     .as_ref()
-                    .map(|config| config.broader_store_retry_interval_frames.max(1))
-                    .unwrap_or(1),
+                    .map_or(1, |config| {
+                        config.broader_store_retry_interval_frames.max(1)
+                    }),
                 RelocalizationDescriptorStoreKind::Broader => 1,
             };
             let broader_retry_interval_allows = state
@@ -3557,7 +3558,7 @@ where
                     appearance_candidate_keyframe_count,
                     appearance_best_similarity,
                     appearance_best_keyframe_id,
-                    appearance_candidates.clone(),
+                    appearance_candidates,
                 );
                 stats.tried_broader_descriptor_store_fallback = true;
                 stats.broader_descriptor_store_landmark_count = Some(broader_store_len);
@@ -3842,19 +3843,17 @@ where
             state.config.appearance_candidates.clone()
         {
             stats.appearance_ranked_candidate_count =
-                relocalization_mean_descriptor(&frame.descriptors)
-                    .map(|descriptor| {
-                        rank_appearance_loop_candidate_keyframes(
-                            &state.appearance_descriptor_cache,
-                            frame.id,
-                            &descriptor,
-                            appearance_config.min_similarity,
-                            appearance_config.min_keyframe_id_gap,
-                        )
-                        .len()
-                        .min(appearance_config.max_candidates_per_frame.max(1))
-                    })
-                    .unwrap_or(0);
+                relocalization_mean_descriptor(&frame.descriptors).map_or(0, |descriptor| {
+                    rank_appearance_loop_candidate_keyframes(
+                        &state.appearance_descriptor_cache,
+                        frame.id,
+                        &descriptor,
+                        appearance_config.min_similarity,
+                        appearance_config.min_keyframe_id_gap,
+                    )
+                    .len()
+                    .min(appearance_config.max_candidates_per_frame.max(1))
+                });
             let mut builder_config = appearance_config.clone();
             // ORB-SLAM3 first obtains one strong current-vs-region pose,
             // then carries that region into later keyframes. Do not make
@@ -4431,8 +4430,9 @@ where
                     .config
                     .appearance_candidates
                     .as_ref()
-                    .map(|config| config.pnp_verifier.max_mean_reprojection_error_px)
-                    .unwrap_or(4.0);
+                    .map_or(4.0, |config| {
+                        config.pnp_verifier.max_mean_reprojection_error_px
+                    });
                 for pending in std::mem::take(&mut state.pending_loop_observation_fusions) {
                     let edge_is_still_admitted = state
                         .graph
@@ -4502,13 +4502,12 @@ where
                             .config
                             .appearance_candidates
                             .as_ref()
-                            .map(|config| {
+                            .map_or((0.5, 0.2), |config| {
                                 (
                                     config.max_covisibility_translation_disagreement_meters,
                                     config.max_covisibility_rotation_disagreement_radians,
                                 )
-                            })
-                            .unwrap_or((0.5, 0.2));
+                            });
                         if correction.translation_meters > max_welding_translation
                             || correction.rotation_radians > max_welding_rotation
                         {
@@ -4856,9 +4855,7 @@ where
         applied_update: Option<&AppliedMapUpdate>,
     ) -> Option<OnlineSlamCovisibilityLocalBaStats> {
         let config = self.config.covisibility_local_ba.clone()?;
-        let added_new_keyframe = applied_update
-            .map(|a| a.keyframe_count > 0)
-            .unwrap_or(false);
+        let added_new_keyframe = applied_update.is_some_and(|a| a.keyframe_count > 0);
         if !added_new_keyframe {
             return None;
         }
@@ -5118,9 +5115,7 @@ where
         applied_update: Option<&AppliedMapUpdate>,
     ) -> Option<ImuPreintegrationFactor> {
         let state = self.imu_state.as_mut()?;
-        let added_new_keyframe = applied_update
-            .map(|a| a.keyframe_count > 0)
-            .unwrap_or(false);
+        let added_new_keyframe = applied_update.is_some_and(|a| a.keyframe_count > 0);
         if !added_new_keyframe {
             return None;
         }
@@ -5184,22 +5179,14 @@ where
     ) -> Option<ViInitializationEvent> {
         // Cheap pre-checks that don't need to borrow `vi_init_state`
         // mutably yet.
-        if self
-            .vi_init_state
-            .as_ref()
-            .map(|s| !s.is_active())
-            .unwrap_or(true)
-        {
+        if self.vi_init_state.as_ref().is_none_or(|s| !s.is_active()) {
             return None;
         }
-        let added_new_keyframe = applied_update
-            .map(|a| a.keyframe_count > 0)
-            .unwrap_or(false);
+        let added_new_keyframe = applied_update.is_some_and(|a| a.keyframe_count > 0);
         let try_on_every_frame = self
             .vi_init_state
             .as_ref()
-            .map(|s| s.config.try_initialize_on_every_frame)
-            .unwrap_or(false);
+            .is_some_and(|s| s.config.try_initialize_on_every_frame);
         if !added_new_keyframe && !try_on_every_frame {
             return None;
         }
@@ -5281,13 +5268,11 @@ where
         let seed_first_keyframe_rotation = self
             .vi_init_state
             .as_ref()
-            .map(|s| s.config.seed_first_keyframe_rotation)
-            .unwrap_or(false);
+            .is_some_and(|s| s.config.seed_first_keyframe_rotation);
         let body_to_camera = self
             .vi_init_state
             .as_ref()
-            .map(|s| s.config.body_to_camera.clone())
-            .unwrap_or_else(SE3::identity);
+            .map_or_else(SE3::identity, |s| s.config.body_to_camera.clone());
         if seed_first_keyframe_rotation {
             if let Some(first_keyframe_id) = binding_keyframe_id {
                 if let Some(keyframe) = self.map.keyframes.get_mut(&first_keyframe_id) {
@@ -5352,8 +5337,9 @@ where
         let fallback = self
             .vi_init_state
             .as_ref()
-            .map(|s| s.config.on_persistent_rejection)
-            .unwrap_or(ViInitFallback::KeepExistingSeed);
+            .map_or(ViInitFallback::KeepExistingSeed, |s| {
+                s.config.on_persistent_rejection
+            });
         match fallback {
             ViInitFallback::KeepExistingSeed => {
                 // Stale gate is lifted by clearing `vi_init_state.gave_up`
@@ -5402,17 +5388,14 @@ where
         applied_update: Option<&AppliedMapUpdate>,
         new_imu_factor: Option<&ImuPreintegrationFactor>,
     ) -> Option<MotionViInitializationEvent> {
-        let added_new_keyframe = applied_update
-            .map(|a| a.keyframe_count > 0)
-            .unwrap_or(false);
+        let added_new_keyframe = applied_update.is_some_and(|a| a.keyframe_count > 0);
         if !added_new_keyframe {
             return None;
         }
         if self
             .vi_motion_init_state
             .as_ref()
-            .map(|s| !s.is_active())
-            .unwrap_or(true)
+            .is_none_or(|s| !s.is_active())
         {
             return None;
         }
@@ -5429,13 +5412,11 @@ where
         let allow_after_give_up = self
             .vi_motion_init_state
             .as_ref()
-            .map(|state| state.config.allow_after_static_give_up)
-            .unwrap_or(false);
+            .is_some_and(|state| state.config.allow_after_static_give_up);
         let allow_from_configured_bias_before_static = self
             .vi_motion_init_state
             .as_ref()
-            .map(|state| state.config.allow_from_configured_bias_before_static)
-            .unwrap_or(false);
+            .is_some_and(|state| state.config.allow_from_configured_bias_before_static);
         let static_gave_up = self
             .vi_init_state
             .as_ref()
@@ -5516,13 +5497,11 @@ where
         let mirror_local = self
             .vi_motion_init_state
             .as_ref()
-            .map(|s| s.config.mirror_into_local_vi_ba)
-            .unwrap_or(true);
+            .is_none_or(|s| s.config.mirror_into_local_vi_ba);
         let mirror_imu = self
             .vi_motion_init_state
             .as_ref()
-            .map(|s| s.config.mirror_into_imu_state)
-            .unwrap_or(true);
+            .is_none_or(|s| s.config.mirror_into_imu_state);
 
         // Step 1: mirror refined per-keyframe states into local VI-BA.
         if mirror_local {
@@ -6262,11 +6241,11 @@ pub struct OnlineSlamResult {
 }
 
 impl OnlineSlamResult {
-    pub fn tracking_succeeded(&self) -> bool {
+    pub const fn tracking_succeeded(&self) -> bool {
         self.tracking.localization.success
     }
 
-    pub fn map_was_updated(&self) -> bool {
+    pub const fn map_was_updated(&self) -> bool {
         self.applied_update.is_some()
     }
 
@@ -6362,7 +6341,7 @@ fn propagate_pose_graph_corrections(
 /// (metric) poses and relative measurements the `Se3` path uses, and to
 /// re-embed a keyframe's PRE-solve pose when computing its Sim3
 /// correction (see [`LoopRefinementSolver::Sim3`]'s doc comment).
-fn sim3_at_unit_scale(se3: &SE3) -> Sim3 {
+const fn sim3_at_unit_scale(se3: &SE3) -> Sim3 {
     Sim3::new(se3.rotation, se3.translation, 1.0)
 }
 

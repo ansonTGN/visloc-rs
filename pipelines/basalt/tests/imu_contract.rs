@@ -1,7 +1,7 @@
 use nalgebra::{UnitQuaternion, Vector3};
 use visloc_basalt::imu::{integrate_between, interpolate_at, SamplingError, TimestampedImu};
 
-fn sample(t: i64, gyro: Vector3<f64>, accel: Vector3<f64>) -> TimestampedImu {
+const fn sample(t: i64, gyro: Vector3<f64>, accel: Vector3<f64>) -> TimestampedImu {
     TimestampedImu::new(t, gyro, accel)
 }
 

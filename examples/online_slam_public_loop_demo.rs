@@ -305,7 +305,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // to do, then run `BundleAdjustment::optimize` with the first two
     // keyframes fixed (gauge anchor) and report per-landmark recovery.
     if !truth_landmarks.is_empty() && truth_observations.len() >= 4 {
-        let mut ba = BundleAdjustment::new(camera.clone());
+        let mut ba = BundleAdjustment::new(camera);
         for (id, pose) in &truth_poses {
             // Use the post-PGO pose as the BA initialization. After SE(3) GN
             // these should be very close to truth, so BA's job here is the

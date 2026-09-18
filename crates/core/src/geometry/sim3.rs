@@ -27,7 +27,7 @@ impl Sim3 {
         }
     }
 
-    pub fn new(rotation: UnitQuaternion<f64>, translation: Vector3<f64>, scale: f64) -> Self {
+    pub const fn new(rotation: UnitQuaternion<f64>, translation: Vector3<f64>, scale: f64) -> Self {
         Self {
             rotation,
             translation,
@@ -97,8 +97,7 @@ impl Sim3 {
         let w = sim3_w_matrix(&omega, sigma);
         let rho = w
             .try_inverse()
-            .map(|w_inv| w_inv * self.translation)
-            .unwrap_or(self.translation);
+            .map_or(self.translation, |w_inv| w_inv * self.translation);
         let mut tangent = Sim3Tangent::zeros();
         tangent[0] = rho.x;
         tangent[1] = rho.y;

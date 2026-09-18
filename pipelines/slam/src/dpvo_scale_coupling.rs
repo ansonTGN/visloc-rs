@@ -419,7 +419,7 @@ pub struct RecursiveScaleEstimator {
 }
 
 impl RecursiveScaleEstimator {
-    pub fn new(cfg: ScaleCouplingConfig) -> Self {
+    pub const fn new(cfg: ScaleCouplingConfig) -> Self {
         Self {
             posterior: None,
             recent_raw: VecDeque::new(),
@@ -427,11 +427,11 @@ impl RecursiveScaleEstimator {
         }
     }
 
-    pub fn posterior(&self) -> Option<LogScalePosterior> {
+    pub const fn posterior(&self) -> Option<LogScalePosterior> {
         self.posterior
     }
 
-    pub fn config(&self) -> ScaleCouplingConfig {
+    pub const fn config(&self) -> ScaleCouplingConfig {
         self.cfg
     }
 
@@ -574,14 +574,14 @@ pub struct RecursiveGyroBiasEstimator {
 }
 
 impl RecursiveGyroBiasEstimator {
-    pub fn new(cfg: ScaleCouplingConfig) -> Self {
+    pub const fn new(cfg: ScaleCouplingConfig) -> Self {
         Self {
             posterior: None,
             cfg,
         }
     }
 
-    pub fn posterior(&self) -> Option<Vector3Posterior> {
+    pub const fn posterior(&self) -> Option<Vector3Posterior> {
         self.posterior
     }
 
@@ -593,9 +593,7 @@ impl RecursiveGyroBiasEstimator {
     /// least one measurement has always already arrived — see
     /// `crate::dpvo_vo::DpvoOdometry::scale_coupling_step`).
     pub fn mean(&self) -> Vector3<f64> {
-        self.posterior
-            .map(|p| p.mean)
-            .unwrap_or_else(Vector3::zeros)
+        self.posterior.map_or_else(Vector3::zeros, |p| p.mean)
     }
 
     pub fn update(
@@ -634,7 +632,7 @@ impl RecursiveGyroBiasEstimator {
 
     /// See [`RecursiveScaleEstimator::soft_reset`] — identical reasoning,
     /// applied to this estimator's own posterior.
-    pub fn soft_reset(&mut self) {
+    pub const fn soft_reset(&mut self) {
         if let Some(posterior) = &mut self.posterior {
             posterior.variance = self.cfg.prior_variance;
         }

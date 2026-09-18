@@ -459,10 +459,7 @@ pub fn refine_stereo_vo_with_ba(
             matches
                 .iter()
                 .filter(|m| match config.min_temporal_confidence {
-                    Some(min) => m
-                        .confidence
-                        .map(|c| c.is_finite() && c >= min)
-                        .unwrap_or(false),
+                    Some(min) => m.confidence.is_some_and(|c| c.is_finite() && c >= min),
                     None => true,
                 })
                 .map(|m| (m.query_index, m.train_index))
@@ -841,10 +838,7 @@ pub fn reconstruct_stereo_vo_with_ba(
             matches
                 .iter()
                 .filter(|m| match config.min_temporal_confidence {
-                    Some(min) => m
-                        .confidence
-                        .map(|c| c.is_finite() && c >= min)
-                        .unwrap_or(false),
+                    Some(min) => m.confidence.is_some_and(|c| c.is_finite() && c >= min),
                     None => true,
                 })
                 .map(|m| (m.query_index, m.train_index))
@@ -2030,7 +2024,7 @@ mod tests {
         let pitch = 0.05_f64;
         let r2 = UnitQuaternion::from_axis_angle(&Vector3::x_axis(), pitch);
         let truth_center_2 = -correct_poses[2].world_to_camera.translation;
-        let mut drifted = correct_poses.clone();
+        let mut drifted = correct_poses;
         drifted[2].world_to_camera = SE3::new(r2, -(r2.transform_vector(&truth_center_2)));
 
         // Baseline: BA without gravity prior.

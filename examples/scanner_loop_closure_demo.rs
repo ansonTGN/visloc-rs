@@ -67,7 +67,7 @@ impl FrontendChoice {
         }
     }
 
-    fn label(&self) -> &'static str {
+    const fn label(&self) -> &'static str {
         match self {
             FrontendChoice::Classical => "classical",
             FrontendChoice::Deep => "deep",

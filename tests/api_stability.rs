@@ -54,18 +54,18 @@ use visloc_rs::vision::stereo_vo::{
     StereoDepthGateState, StereoFeatureConfig, StereoVoFrontendConfig,
 };
 
-fn assert_feature_extractor<T: FeatureExtractor>() {}
-fn assert_matcher<T: Matcher>() {}
-fn assert_pose_estimator<T: PoseEstimator>() {}
-fn assert_pose_refiner<T: PoseRefiner>() {}
-fn assert_robust_pose_estimator<T: RobustPoseEstimator>() {}
-fn assert_candidate_selector<T: CandidateSelector>() {}
-fn assert_map_provider<T: MapProvider>() {}
-fn assert_descriptor_provider<T: DescriptorProvider>() {}
-fn assert_submap_selector<T: SubmapSelector<InMemoryMapProvider>>() {}
-fn assert_motion_model<T: MotionModel>() {}
-fn assert_triangulator<T: Triangulator>() {}
-fn assert_local_refiner<T: LocalRefiner>() {}
+const fn assert_feature_extractor<T: FeatureExtractor>() {}
+const fn assert_matcher<T: Matcher>() {}
+const fn assert_pose_estimator<T: PoseEstimator>() {}
+const fn assert_pose_refiner<T: PoseRefiner>() {}
+const fn assert_robust_pose_estimator<T: RobustPoseEstimator>() {}
+const fn assert_candidate_selector<T: CandidateSelector>() {}
+const fn assert_map_provider<T: MapProvider>() {}
+const fn assert_descriptor_provider<T: DescriptorProvider>() {}
+const fn assert_submap_selector<T: SubmapSelector<InMemoryMapProvider>>() {}
+const fn assert_motion_model<T: MotionModel>() {}
+const fn assert_triangulator<T: Triangulator>() {}
+const fn assert_local_refiner<T: LocalRefiner>() {}
 
 #[test]
 fn core_stable_candidate_paths_are_usable() {
@@ -80,7 +80,7 @@ fn core_stable_candidate_paths_are_usable() {
 
     let frame = Frame::new(frame_id, camera_id);
     let keyframe = Keyframe {
-        frame: frame.clone(),
+        frame,
         observations: Vec::new(),
     };
     let observation = Observation {

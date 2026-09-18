@@ -218,8 +218,7 @@ fn estimate_initial_generalized_two_view_geometry(
     let avg_focal = recon
         .camera(image1.camera_id)
         .intrinsics()
-        .map(|(fx, fy, _, _)| 0.5 * (fx + fy))
-        .unwrap_or(500.0);
+        .map_or(500.0, |(fx, fy, _, _)| 0.5 * (fx + fy));
     let cfg = GeneralizedRelativePoseRansacConfig {
         seed: options.random_seed,
         inlier_angular_threshold: (options.init_max_error / avg_focal).max(1.0e-4),
@@ -295,8 +294,7 @@ pub fn estimate_initial_two_view_geometry(
     estimator.ransac.config.seed = options.random_seed;
     let avg_focal = camera1
         .intrinsics()
-        .map(|(fx, fy, _, _)| 0.5 * (fx + fy))
-        .unwrap_or(500.0);
+        .map_or(500.0, |(fx, fy, _, _)| 0.5 * (fx + fy));
     estimator.ransac.config.sampson_threshold = options.init_max_error / avg_focal;
 
     let Some(recovered) = estimator.estimate_with_cameras(&correspondences, &camera1, &camera2)

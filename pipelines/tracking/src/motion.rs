@@ -89,7 +89,7 @@ pub struct VisualOdometryEstimate {
 }
 
 impl VisualOdometryEstimate {
-    pub fn new(
+    pub const fn new(
         previous_frame_id: FrameId,
         current_frame_id: FrameId,
         previous_to_current: SE3,
@@ -125,15 +125,15 @@ pub struct VisualOdometryPriorProvider<F> {
 }
 
 impl<F> VisualOdometryPriorProvider<F> {
-    pub fn new(frontend: F) -> Self {
+    pub const fn new(frontend: F) -> Self {
         Self { frontend }
     }
 
-    pub fn frontend(&self) -> &F {
+    pub const fn frontend(&self) -> &F {
         &self.frontend
     }
 
-    pub fn frontend_mut(&mut self) -> &mut F {
+    pub const fn frontend_mut(&mut self) -> &mut F {
         &mut self.frontend
     }
 
@@ -338,7 +338,7 @@ impl ImuPredictiveMotionModel {
     /// `predict_pose`. Call this after a downstream solver (e.g., the
     /// `OnlineSlamPipeline` local VI-BA) refines the velocity at the
     /// most recent keyframe.
-    pub fn set_velocity_world(&mut self, velocity_world: nalgebra::Vector3<f64>) {
+    pub const fn set_velocity_world(&mut self, velocity_world: nalgebra::Vector3<f64>) {
         self.velocity_world = velocity_world;
     }
 
@@ -397,7 +397,7 @@ impl ImuPredictiveMotionModel {
     }
 
     /// Overwrite the gyro / accel bias linearisation points.
-    pub fn set_biases(
+    pub const fn set_biases(
         &mut self,
         bias_gyro: nalgebra::Vector3<f64>,
         bias_acc: nalgebra::Vector3<f64>,
@@ -423,7 +423,7 @@ impl ImuPredictiveMotionModel {
     }
 
     /// Read-only access to the current world-frame velocity.
-    pub fn velocity_world(&self) -> nalgebra::Vector3<f64> {
+    pub const fn velocity_world(&self) -> nalgebra::Vector3<f64> {
         self.velocity_world
     }
 }
@@ -783,7 +783,7 @@ pub struct AdaptiveImuPoseMotionModel {
 }
 
 impl AdaptiveImuPoseMotionModel {
-    pub fn new(
+    pub const fn new(
         imu: ImuPredictiveMotionModel,
         pose: ConstantPoseMotionModel,
         config: AdaptiveImuPoseMotionModelConfig,
@@ -817,7 +817,7 @@ impl AdaptiveImuPoseMotionModel {
         )
     }
 
-    pub fn imu(&self) -> &ImuPredictiveMotionModel {
+    pub const fn imu(&self) -> &ImuPredictiveMotionModel {
         &self.imu
     }
 
@@ -825,27 +825,27 @@ impl AdaptiveImuPoseMotionModel {
     /// forward raw IMU samples via
     /// [`ImuPredictiveMotionModel::push_imu_measurement`] and to
     /// mirror VI-BA-refined velocity / biases into the IMU state.
-    pub fn imu_mut(&mut self) -> &mut ImuPredictiveMotionModel {
+    pub const fn imu_mut(&mut self) -> &mut ImuPredictiveMotionModel {
         &mut self.imu
     }
 
-    pub fn config(&self) -> &AdaptiveImuPoseMotionModelConfig {
+    pub const fn config(&self) -> &AdaptiveImuPoseMotionModelConfig {
         &self.config
     }
 
-    pub fn mode(&self) -> AdaptiveMotionMode {
+    pub const fn mode(&self) -> AdaptiveMotionMode {
         self.mode
     }
 
     /// Cumulative number of times the wrapper has switched from
     /// IMU → ConstantPose since construction (or last `reset`).
-    pub fn switches_to_pose(&self) -> u64 {
+    pub const fn switches_to_pose(&self) -> u64 {
         self.switches_to_pose
     }
 
     /// Cumulative number of times the wrapper has switched from
     /// ConstantPose → IMU since construction (or last `reset`).
-    pub fn switches_to_imu(&self) -> u64 {
+    pub const fn switches_to_imu(&self) -> u64 {
         self.switches_to_imu
     }
 
@@ -856,7 +856,7 @@ impl AdaptiveImuPoseMotionModel {
     /// previous + latest visual poses were available AND
     /// `dt_between_latest_two_observations > 0`). Less than or equal
     /// to [`Self::switches_to_imu`].
-    pub fn velocity_refreshes_on_switch_to_imu(&self) -> u64 {
+    pub const fn velocity_refreshes_on_switch_to_imu(&self) -> u64 {
         self.velocity_refreshes_on_switch_to_imu
     }
 }
@@ -1061,8 +1061,7 @@ impl AdaptiveImuPoseMotionModel {
                             prev,
                             self.dt_between_previous_two_observations,
                         )
-                        .map(|v_prev| (v_prev + v_latest) * 0.5)
-                        .unwrap_or(v_latest),
+                        .map_or(v_latest, |v_prev| (v_prev + v_latest) * 0.5),
                     None => v_latest,
                 };
                 self.imu.set_velocity_world(v_write);
@@ -1366,7 +1365,7 @@ mod imu_predictive_motion_tests {
         // First observe: populate last_successful_pose. No samples yet.
         model.observe(&TrackingResult {
             localization: localization_zero,
-            ..make_result(pose_zero.clone())
+            ..make_result(pose_zero)
         });
         // Second window: push 1.0 s of accel (2,0,0) samples, then observe.
         for _ in 0..10 {
@@ -1399,7 +1398,7 @@ mod imu_predictive_motion_tests {
         let mut model = ImuPredictiveMotionModel::new(config);
         let pose = Pose::from_world_to_camera(UnitQuaternion::identity(), Vector3::zeros());
         let localization = LocalizationResult::success(LocalizationSuccess {
-            pose: pose.clone(),
+            pose,
             candidate_landmark_count: 4,
             match_count: 4,
             correspondence_count: 4,
@@ -1453,7 +1452,7 @@ mod imu_predictive_motion_tests {
         let body_to_sensor = SE3::new(UnitQuaternion::identity(), Vector3::new(0.1, 0.0, 0.0));
         let config = ImuPredictiveMotionModelConfig {
             gravity_world: Vector3::zeros(),
-            body_to_sensor: body_to_sensor.clone(),
+            body_to_sensor,
             ..ImuPredictiveMotionModelConfig::default()
         };
         let mut model = ImuPredictiveMotionModel::new(config);
@@ -1549,7 +1548,7 @@ mod imu_predictive_motion_tests {
         let body_to_sensor = SE3::new(UnitQuaternion::identity(), Vector3::new(0.1, 0.0, 0.0));
         let config = ImuPredictiveMotionModelConfig {
             gravity_world: Vector3::zeros(),
-            body_to_sensor: body_to_sensor.clone(),
+            body_to_sensor,
             ..ImuPredictiveMotionModelConfig::default()
         };
         let mut model = ImuPredictiveMotionModel::new(config);

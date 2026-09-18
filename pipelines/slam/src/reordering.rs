@@ -855,7 +855,7 @@ mod tests {
         );
 
         let order = Reordering::fill_reducing(100, 1, &triplets);
-        let chosen_blocks: Vec<usize> = order.old_of_new.clone();
+        let chosen_blocks: Vec<usize> = order.old_of_new;
         assert_eq!(
             symbolic_cholesky_nnz(&adjacency, &chosen_blocks),
             best_geometric,

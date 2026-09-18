@@ -882,10 +882,7 @@ fn rank_keyframes_by_shared_landmarks(
         if keyframe_id == active_keyframe_id {
             continue;
         }
-        if excluded
-            .map(|set| set.contains(&keyframe_id))
-            .unwrap_or(false)
-        {
+        if excluded.is_some_and(|set| set.contains(&keyframe_id)) {
             continue;
         }
         let Some(keyframe) = map.keyframes.get(&keyframe_id) else {
@@ -1142,8 +1139,7 @@ fn selected_outlier_keys(
             };
             let mut residual = camera
                 .project(&pose.transform_world_point(&landmark.position))
-                .map(|predicted| (predicted - obs.xy).norm())
-                .unwrap_or(f64::INFINITY);
+                .map_or(f64::INFINITY, |predicted| (predicted - obs.xy).norm());
             if let Some((stereo, right_camera)) = use_general_stereo_observations
                 .then(|| {
                     map.stereo_observations
@@ -1162,8 +1158,9 @@ fn selected_outlier_keys(
                 let point_left = pose.transform_world_point(&landmark.position);
                 let right_residual = right_camera
                     .project(&stereo.left_to_right.transform_point(&point_left))
-                    .map(|predicted| (predicted - stereo.xy_right).norm())
-                    .unwrap_or(f64::INFINITY);
+                    .map_or(f64::INFINITY, |predicted| {
+                        (predicted - stereo.xy_right).norm()
+                    });
                 residual = residual.max(right_residual);
             }
             if !residual.is_finite() || residual > threshold_px {
@@ -1730,7 +1727,7 @@ mod tests {
         let mut unanchored_map = map.clone();
         let unanchored_config = CovisibilityLocalBaConfig {
             pose_anchor_prior_weight: None,
-            ..base_config.clone()
+            ..base_config
         };
         let unanchored_result =
             refine_visual_map_with_covisibility_ba(&mut unanchored_map, 2, &unanchored_config)
@@ -1740,7 +1737,7 @@ mod tests {
             &unanchored_result.selection.optimized_keyframe_ids,
         );
 
-        let mut anchored_map = map.clone();
+        let mut anchored_map = map;
         let anchored_config = CovisibilityLocalBaConfig {
             pose_anchor_prior_weight: Some(1.0e6),
             ..base_config

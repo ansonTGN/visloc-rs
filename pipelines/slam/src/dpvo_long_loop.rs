@@ -987,7 +987,7 @@ impl DpvoLongLoopIndex {
         }
     }
 
-    pub fn config(&self) -> &DpvoLongLoopConfig {
+    pub const fn config(&self) -> &DpvoLongLoopConfig {
         &self.config
     }
 
@@ -3017,11 +3017,11 @@ mod tests {
         // NEW frame below (appearance base_seed `1` on both sides, matched
         // 1:1 by construction so cross-check matching succeeds deterministically).
         let old_descriptors = frame_descriptors(1, 30, 16);
-        index.ingest_frame(20, old_keypoints.clone(), old_descriptors.clone());
+        index.ingest_frame(20, old_keypoints, old_descriptors.clone());
         // The NEW/current frame (arrival 300 — gap 280 >> min_temporal_gap,
         // and >> the proximity mechanism's own ~30-49-frame reach).
-        let new_descriptors = old_descriptors.clone(); // identical appearance => a perfect cross-check match per index.
-        index.ingest_frame(300, new_keypoints.clone(), new_descriptors);
+        let new_descriptors = old_descriptors; // identical appearance => a perfect cross-check match per index.
+        index.ingest_frame(300, new_keypoints, new_descriptors);
 
         let resolve_old = |arrival: usize| -> Option<(SE3, DpvoIntrinsics, Vec<DpvoPatch>)> {
             if arrival == 20 {

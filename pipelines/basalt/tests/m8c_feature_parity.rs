@@ -186,9 +186,10 @@ fn push_canonical_float(bytes: &mut Vec<u8>, value: f64) {
 }
 
 fn required_path(name: &str, description: &str) -> PathBuf {
-    env::var_os(name)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| panic!("set {name} to {description} for this ignored gate"))
+    env::var_os(name).map_or_else(
+        || panic!("set {name} to {description} for this ignored gate"),
+        PathBuf::from,
+    )
 }
 
 fn diagnostics_enabled() -> bool {

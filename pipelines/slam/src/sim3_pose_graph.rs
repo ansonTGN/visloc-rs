@@ -130,7 +130,7 @@ impl Sim3PoseGraph {
     }
 
     /// Hold `keyframe_id` fixed during optimization.
-    pub fn anchor(&mut self, keyframe_id: u64) {
+    pub const fn anchor(&mut self, keyframe_id: u64) {
         self.anchor = Some(keyframe_id);
     }
 

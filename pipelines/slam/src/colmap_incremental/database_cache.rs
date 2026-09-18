@@ -120,7 +120,7 @@ impl DatabaseCache {
     /// Build a `DatabaseCache` directly from its constituent parts (e.g. a
     /// synthetic scene, or a future non-file-based loader) rather than the
     /// `generalized-rig-manifest-v1`/features/pairs-export file triple.
-    pub fn from_parts(
+    pub const fn from_parts(
         rigs: BTreeMap<RigT, Rig>,
         cameras: BTreeMap<CameraT, Camera>,
         frames: BTreeMap<FrameT, Frame>,
@@ -191,16 +191,16 @@ impl DatabaseCache {
             .unwrap_or_else(|| panic!("image {image_id} does not exist"))
     }
 
-    pub fn rigs(&self) -> &BTreeMap<RigT, Rig> {
+    pub const fn rigs(&self) -> &BTreeMap<RigT, Rig> {
         &self.rigs
     }
-    pub fn cameras(&self) -> &BTreeMap<CameraT, Camera> {
+    pub const fn cameras(&self) -> &BTreeMap<CameraT, Camera> {
         &self.cameras
     }
-    pub fn frames(&self) -> &BTreeMap<FrameT, Frame> {
+    pub const fn frames(&self) -> &BTreeMap<FrameT, Frame> {
         &self.frames
     }
-    pub fn images(&self) -> &BTreeMap<ImageT, Image> {
+    pub const fn images(&self) -> &BTreeMap<ImageT, Image> {
         &self.images
     }
 
@@ -218,10 +218,10 @@ impl DatabaseCache {
     }
 
     /// Port of `CorrespondenceGraph()` (`.h:123-125`).
-    pub fn correspondence_graph(&self) -> &CorrespondenceGraph {
+    pub const fn correspondence_graph(&self) -> &CorrespondenceGraph {
         &self.correspondence_graph
     }
-    pub fn correspondence_graph_mut(&mut self) -> &mut CorrespondenceGraph {
+    pub const fn correspondence_graph_mut(&mut self) -> &mut CorrespondenceGraph {
         &mut self.correspondence_graph
     }
 

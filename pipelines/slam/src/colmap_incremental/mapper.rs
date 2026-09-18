@@ -140,7 +140,7 @@ impl Default for Options {
 }
 
 impl Options {
-    fn init_gate(&self) -> InitGateOptions {
+    const fn init_gate(&self) -> InitGateOptions {
         InitGateOptions {
             init_min_num_inliers: self.init_min_num_inliers,
             init_max_error: self.init_max_error,
@@ -213,13 +213,13 @@ impl IncrementalMapper {
         self.log.push(msg);
     }
 
-    pub fn num_total_reg_images(&self) -> usize {
+    pub const fn num_total_reg_images(&self) -> usize {
         self.num_total_reg_images
     }
-    pub fn num_shared_reg_images(&self) -> usize {
+    pub const fn num_shared_reg_images(&self) -> usize {
         self.num_shared_reg_images
     }
-    pub fn filtered_frames(&self) -> &BTreeSet<FrameT> {
+    pub const fn filtered_frames(&self) -> &BTreeSet<FrameT> {
         &self.filtered_frames
     }
     pub fn reset_initialization_stats(&mut self) {
