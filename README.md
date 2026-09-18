@@ -102,11 +102,6 @@ of the scalar intrinsics. The complete option set, the courtyard control
 commands, and the connected-component export mode are in the
 [SfM benchmark details](docs/sfm_benchmarks.md#run-the-sfm-demo).
 
-<p align="center">
-  <img src="docs/assets/hero_euroc_mh01_slam.gif" alt="Online stereo SLAM on EuRoC MH_01: onboard camera footage beside the live map — estimated trajectory vs ground truth as stereo landmark replenishment grows the landmark map" width="820"><br>
-  <sub>Online stereo SLAM on EuRoC MH_01 — onboard camera and the live map growing in real time: uninterrupted tracking throughout the shown 583-frame measured segment (100% coverage, 0.344 m rigid ATE RMSE), with the landmark map grown by stereo landmark replenishment. Still version: <a href="docs/assets/hero_euroc_mh01_light.png">light</a> · <a href="docs/assets/hero_euroc_mh01_dark.png">dark</a>.</sub>
-</p>
-
 ## Visual-Inertial SLAM (Basalt Rust port)
 
 A separate, faithful Rust port of upstream
