@@ -24,9 +24,7 @@ use visloc_rs::core::geometry::Pose;
 use visloc_rs::core::types::QueryImage;
 use visloc_rs::io::colmap::ColmapMapProvider;
 use visloc_rs::io::query_features::read_query_features_txt;
-use visloc_rs::{
-    DescriptorProvider, LocalizationPipeline, MapProvider, RadiusLandmarkSelector,
-};
+use visloc_rs::{DescriptorProvider, LocalizationPipeline, MapProvider, RadiusLandmarkSelector};
 
 fn parse_flag(args: &mut Vec<String>, name: &str) -> Option<String> {
     let index = args.iter().position(|arg| arg == name)?;
@@ -106,7 +104,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("seed prior: {}", prior.is_some());
     let mut consecutive_failures = 0_usize;
     let mut tum = String::new();
-    let mut stats = String::from("frame,query,success,inliers,inlier_ratio,latency_ms,used_prior\n");
+    let mut stats =
+        String::from("frame,query,success,inliers,inlier_ratio,latency_ms,used_prior\n");
     let mut localized = 0_usize;
 
     for (index, query_path) in query_paths.iter().enumerate() {
@@ -121,16 +120,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let start = Instant::now();
         let result = match &prior {
             Some(pose) => {
-                let selector =
-                    RadiusLandmarkSelector::new(pose.camera_center_world(), radius_m);
-                pipeline
-                    .localize_with_candidate_selector_and_descriptor_store_and_pose_prior(
-                        &query,
-                        map,
-                        store,
-                        selector,
-                        Some(pose),
-                    )
+                let selector = RadiusLandmarkSelector::new(pose.camera_center_world(), radius_m);
+                pipeline.localize_with_candidate_selector_and_descriptor_store_and_pose_prior(
+                    &query,
+                    map,
+                    store,
+                    selector,
+                    Some(pose),
+                )
             }
             None => pipeline.localize_with_descriptor_store(&query, map, store),
         };
