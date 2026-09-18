@@ -43,9 +43,13 @@ def read_blob(conn, table, image_id):
     if row is None:
         return None
     rows, cols, data = row
-    return np.frombuffer(data, dtype=np.uint8 if table == "descriptors" else np.float32).reshape(
-        rows, cols
-    )
+    if data is None:
+        return None
+    dtype = np.uint8 if table == "descriptors" else np.float32
+    arr = np.frombuffer(data, dtype=dtype)
+    if arr.size != rows * cols:
+        return None
+    return arr.reshape(rows, cols)
 
 
 def parse_points3d(path):
