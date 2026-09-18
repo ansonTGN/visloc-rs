@@ -116,6 +116,23 @@ inlier>2でmulti-view LO（≤10反復、residual_sumタイブレーク）、`mi
   inlier集合をCOLMAPへ合わせる。証跡
   `benchmarks/electro/m9-openloris-colmap-port-init-relaxation-v1.json`。
 
+### 2026-09-17 追記: 制御COLMAPはピン留め64805cbではない（版不一致）
+
+- `plan.json:docker`により制御は**`colmap/colmap:latest`**
+  （`sha256:b809882552887b6471094dcadd2f2eb01656b010663564c43a5e7f04c0a08f2f`、
+  コンテナ報告4.2.0.dev0）で生成。移植版が対象とする**ピン留め64805cbではない**。
+- `plan.json:commands.mapper`は素の`colmap mapper`（init閾値の上書きなし）。未指定の閾値は
+  ピン留め既定（init_min_num_inliers=100, init_min_tri_angle=16, init_num_trials=200）と一致し、
+  移植版も同じ。multiple_models=1/max_num_models=50/min_model_size=10等も移植版と一致。
+- 制御logの`Relaxing the initialization constraints`は`incremental_pipeline.cc:399/412`だが、
+  ピン留めソースは`:424/:437`（他の`:435/:459/:582/:733/:742`は一致）→ **別ビルド**を裏付け。
+- → 制御はCOLMAP model0初期ペア（frames 446/462 cam2、59 matches、parallax約1.8°）を受理するが、
+  ピン留め既定の最終ゲート(25,4)なら拒否。移植版はピン留め通り拒否。**10kの残差は移植版の欠陥
+  ではなく制御ビルドの版不一致の可能性**。
+- 推奨: ピン留め64805cbで制御を再生成（少なくともmodel0）して真のparity目標を作るか、移植版を
+  `colmap/colmap:latest`側に合わせる。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-control-version-v1.json`。
+
 ### 2026-09-17 追記: 自作map × 地図ベースrelocalization（branch `feat/openloris-map-relocalization`）
 
 COLMAP port（`examples/colmap_incremental_mapper`）が出力した地図を、既存の
