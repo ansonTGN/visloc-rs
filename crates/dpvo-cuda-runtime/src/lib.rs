@@ -106,6 +106,10 @@ impl NativeCudaCorrelation {
         // C ABI declared by native/dpvo_cuda/dpvo_corr.cu. The Library is
         // retained for at least as long as every copied function pointer.
         let library = unsafe { Library::new(path) }.map_err(|e| load_error(e.to_string()))?;
+        // SAFETY: every symbol is requested under the exact versioned name
+        // declared by `native/dpvo_cuda/dpvo_corr.cu`, and the copied function
+        // pointers are only ever called while `library` is still owned by the
+        // struct (`_library`), so the resolved code stays mapped.
         let (abi_version, create, destroy, last_error, run): (
             AbiVersionFn,
             CreateFn,
@@ -131,10 +135,15 @@ impl NativeCudaCorrelation {
                     .map_err(|e| load_error(e.to_string()))?,
             )
         };
+        // SAFETY: `abi_version` was resolved from the ABI-checked library and
+        // takes no arguments, so the call cannot observe invalid state.
         let version = unsafe { abi_version() };
         if version != Self::ABI_VERSION {
             return Err(NativeCudaCorrelationError::AbiVersion(version));
         }
+        // SAFETY: `create` was resolved from the ABI-checked library. A null
+        // return is rejected immediately, and the non-null context is owned by
+        // `self` and released exactly once through the matching `destroy`.
         let context =
             NonNull::new(unsafe { create() }).ok_or(NativeCudaCorrelationError::NullContext)?;
         Ok(Self {
@@ -147,7 +156,7 @@ impl NativeCudaCorrelation {
         })
     }
 
-    pub fn abi_version(&self) -> u32 {
+    pub const fn abi_version(&self) -> u32 {
         Self::ABI_VERSION
     }
 
@@ -327,6 +336,12 @@ impl NativeCudaCorrelation {
             0
         };
         let frame_ids_pointer = frame_ids.map_or(std::ptr::null(), <[u64]>::as_ptr);
+        // SAFETY: every pointer argument is derived from a live, contiguous
+        // buffer whose shape and length were validated above; the output is an
+        // `edges * CORR_DIM` contiguous `f32` buffer, the target and frame-ID
+        // arrays match `edges` and `frames`, and each dimension was checked to
+        // fit `c_int`. The native side only reads these inputs and writes
+        // `output` and `device_elapsed_ms`.
         let code = unsafe {
             (self.run)(
                 self.context.as_ptr(),
@@ -354,10 +369,16 @@ impl NativeCudaCorrelation {
             )
         };
         if code != 0 {
+            // SAFETY: `last_error` was resolved from the ABI-checked library
+            // and is passed the same live context as the failed call.
             let pointer = unsafe { (self.last_error)(self.context.as_ptr()) };
             let message = if pointer.is_null() {
                 "no native error string".to_string()
             } else {
+                // SAFETY: the native contract returns either null or a
+                // NUL-terminated string that is valid until the next native
+                // call. It is copied into an owned string immediately and never
+                // retained past this scope.
                 unsafe { CStr::from_ptr(pointer) }
                     .to_string_lossy()
                     .into_owned()
@@ -375,6 +396,9 @@ impl NativeCudaCorrelation {
 
 impl Drop for NativeCudaCorrelation {
     fn drop(&mut self) {
+        // SAFETY: `context` is the non-null pointer returned by `create` and
+        // has not been destroyed yet; it is released exactly once here, after
+        // which no other method can observe it.
         unsafe { (self.destroy)(self.context.as_ptr()) };
     }
 }
