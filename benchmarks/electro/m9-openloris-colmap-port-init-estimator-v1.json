@@ -1,0 +1,17 @@
+{
+  "date": "2026-09-17",
+  "evidence": [
+    "Pinned 64805cb build (CPU) re-run of the 10k mapper selects the SAME initial pair #5446/#5463 as the colmap/colmap:latest control, so the control is a valid parity target and the control/pinned builds agree at init.",
+    "The port rejects #5446/#5462: direct_matches=59, then median tri angle 1.16 deg (DLT) / 1.85 deg (ray angle) <= the relaxed 4 deg final stage. For COLMAP to accept it at (25,4) its init tri_angle must exceed 4 deg.",
+    "COLMAP computes tri_angle as the median ray parallax after the E-matrix rotation (two_view_geometry.cc:790-805); with a low-parallax pair the 5-point vs 8-point rotation estimate difference is enough to move this across the 4 deg gate."
+  ],
+  "finding": "The residual 10k initial-pair divergence reduces to the essential-matrix estimator used for the initial two-view geometry. COLMAP's EstimateTwoViewGeometry uses EssentialMatrixFivePointEstimator (5-point) in LORANSAC; the port's estimate_initial_two_view_geometry uses RelativePoseEstimator, whose default estimator is EightPointEssentialMatrixEstimator (8-point).",
+  "hypothesis_tested_and_refuted": {
+    "planar_homography_path": "COLMAP's calibrated path also estimates H and classifies PLANAR_OR_PANORAMIC when H_E_inlier_ratio > max_H_inlier_ratio=0.8 (two_view_geometry.cc:948-969), computing tri_angle from PoseFromHomographyMatrix 3D points. Instrumenting the port's TwoViewGeometryVerifier on COLMAP's model0 pair (port images 5446/5462) reports config=Calibrated with e=56 f=58 h=43, i.e. H/E=0.77 < 0.8, so the H/PLANAR path is NOT the cause."
+  },
+  "next": [
+    "Port COLMAP's EssentialMatrixFivePointEstimator (Nister 5-point, LORANSAC minimal) and use it in the initial two-view geometry path (and colmap_verification).",
+    "Then 2.5k non-regression and 10k."
+  ],
+  "schema": "visloc_colmap_port_init_estimator_v1"
+}
