@@ -64,7 +64,8 @@ def track_sequences(tracks):
 
 def run(cmd, **kwargs):
     log("run: " + " ".join(str(c) for c in cmd))
-    return subprocess.run([str(c) for c in cmd], check=False, **kwargs)
+    kwargs.setdefault("check", True)
+    return subprocess.run([str(c) for c in cmd], **kwargs)
 
 
 def download(url: str, dest: Path) -> None:
@@ -186,11 +187,13 @@ def main() -> int:
                 log(f"{seq}: DONE ({sum(1 for _ in estimate.open())} poses)")
             else:
                 log(f"{seq}: FAIL estimate conversion")
-
-            if not args.keep_data:
-                shutil.rmtree(work, ignore_errors=True)
         except Exception as error:  # keep the loop going across sequences
             log(f"{seq}: EXCEPTION {error!r}")
+        finally:
+            # Always reclaim the sequence's download/extract work so a failure
+            # cannot accumulate disk across the whole track.
+            if not args.keep_data:
+                shutil.rmtree(work, ignore_errors=True)
 
     submission = args.slam_dir.parent / "submission.zip"
     with zipfile.ZipFile(submission, "w", zipfile.ZIP_DEFLATED) as archive:
