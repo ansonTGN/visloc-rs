@@ -2897,3 +2897,45 @@ Honest reading: the classical path now runs end-to-end in pure Rust (~4 min
 for extraction+matching+mapping), but matching quality (NN+ratio, no
 LightGlue model on this machine) remains the binding constraint; detection
 density alone did not close the gap (2048→4096 kp moved registration 11→12).
+
+## Parity scope decision (2026-09-18)
+
+**Scope.** The rig-aware incremental-mapper port is validated against the frozen
+OpenLORIS corridor1-1 ladder (`tier-2500` / `tier-5000` / `tier-10000`) on the
+two properties COLMAP itself defines a reconstruction by: **component structure**
+(number and membership of models) and **Sim(3)-aligned trajectory accuracy**
+(per-component image-weighted ATE, `scripts/score_openloris_model.py`,
+`schema: visloc_openloris_model_score_v1`). Ground truth and extrinsics are used
+only for post-mapping scoring, never as input.
+
+**Acceptance gate = `tier-2500` and `tier-5000`.**
+
+| tier | port (after five-point verifier) | COLMAP control | verdict |
+|---|---:|---:|---|
+| 2,500 | 0.0712 m RMSE, 1 model, 2,500 registered | 0.0718 m | pass |
+| 5,000 | 0.1361 m vs 0.1227 m (1.11x) | 0.1227 m | pass (within noise) |
+
+**`tier-10000` is a reference value, not a gate.** The control was produced by
+`colmap/colmap:latest`, and its initial-pair selection is not reproducible even
+across COLMAP builds on the **identical** database:
+
+- `colmap:latest` control selects initial pair `#5446/#5463`
+  (`tier-10000-rig-v3/logs/mapper.log:90`).
+- A pinned `64805cb` build selects `#7584/#7553` on the same DB and never
+  evaluates `#5463` (`/build/work4/mapper.log`).
+- The control's own `two_view_geometries` table classifies `#5446/#5463` as
+  **`CALIBRATED` (config 2, 59 inliers)** — which is what the port also gets. The
+  `UNCALIBRATED` (config 3) result in COLMAP's init log is a `min_num_trials=30`
+  recomputation artifact, not a stable property of the pair.
+
+Because COLMAP's `FindInitialImagePair` — and therefore the 10k two-model split —
+is a nondeterministic function of the build, the 10k component structure cannot
+serve as a pass/fail target. The port's five-point essential estimator, the
+E/F/H classification, and the `EstimateTwoViewGeometryPoseFromCamRays` ray-angle
+`tri_angle` are ported faithfully (PoseLib reference test), but matching
+COLMAP's specific 10k seed would require bit-exact `RandomSampler` /
+LORANSAC RNG parity, which the port does not claim.
+
+Evidence: `benchmarks/electro/m9-openloris-five-point-essential-v1.json`,
+`benchmarks/electro/m9-openloris-colmap-port-init-config-v1.json`,
+`docs/codex_handover.md` (2026-09-18 checkpoint).
