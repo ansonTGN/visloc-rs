@@ -79,11 +79,7 @@ fn load_prior_tum(path: &Path) -> Result<Vec<(i64, Pose)>, Box<dyn std::error::E
             continue;
         }
         let timestamp_ns = (parts[0].parse::<f64>()? * 1.0e9).round() as i64;
-        let center = Vector3::new(
-            parts[1].parse()?,
-            parts[2].parse()?,
-            parts[3].parse()?,
-        );
+        let center = Vector3::new(parts[1].parse()?, parts[2].parse()?, parts[3].parse()?);
         let rotation_cw = UnitQuaternion::from_quaternion(Quaternion::new(
             parts[7].parse()?,
             parts[4].parse()?,
@@ -106,9 +102,9 @@ fn nearest_prior(priors: &[(i64, Pose)], timestamp_ns: i64, tolerance_ns: i64) -
     for (candidate_ns, pose) in priors {
         let gap = (candidate_ns - timestamp_ns).abs();
         if gap <= tolerance_ns
-            && best.as_ref().map_or(true, |(best_ns, _)| {
-                gap < (*best_ns - timestamp_ns).abs()
-            })
+            && best
+                .as_ref()
+                .is_none_or(|(best_ns, _)| gap < (*best_ns - timestamp_ns).abs())
         {
             best = Some((*candidate_ns, pose.clone()));
         }
@@ -137,8 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         [map_dir, descriptor_path, camera_id, queries @ ..] if !queries.is_empty() => {
             // Process in timestamp order (filenames are <ns>.txt); lexicographic
             // order is NOT temporal and breaks the feed-forward prior.
-            let mut query_paths: Vec<PathBuf> =
-                queries.iter().map(PathBuf::from).collect();
+            let mut query_paths: Vec<PathBuf> = queries.iter().map(PathBuf::from).collect();
             query_paths.sort_by_cached_key(|p| {
                 p.file_stem()
                     .and_then(|stem| stem.to_str())
@@ -215,10 +210,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let active: Option<Pose> = external.or_else(|| prior.clone());
         let used_prior = active.is_some();
         let start = Instant::now();
-        let prior_result = active.as_ref().map(|pose| {
-            localize_with_prior(&pipeline, &query, map, store, pose, radius_m)
-        });
-        let prior_accepted = prior_result.as_ref().map_or(false, |result| {
+        let prior_result = active
+            .as_ref()
+            .map(|pose| localize_with_prior(&pipeline, &query, map, store, pose, radius_m));
+        let prior_accepted = prior_result.as_ref().is_some_and(|result| {
             result.success && result.inlier_count >= min_inliers && result.pose.is_some()
         });
         // Two-stage: prior first; on failure fall back to global matching so a
