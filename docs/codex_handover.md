@@ -148,6 +148,21 @@ inlier>2でmulti-view LO（≤10反復、residual_sumタイブレーク）、`mi
   geometry（および`colmap_verification`）で使用→2.5k非回帰→10k。証跡
   `benchmarks/electro/m9-openloris-colmap-port-init-estimator-v1.json`。
 
+### 2026-09-17 追記: init configの差（UNCALIBRATED vs CALIBRATED）を実測で確定
+
+ピン留めソースの`EstimateInitialTwoViewGeometry`のVLOG(3)をID付き`LOG(INFO)`に変えてビルドし、
+10k初期化を実測:
+- **COLMAP #5446/#5463: `config 3`（UNCALIBRATED）, 59 inliers, tri_angle 9.18°** → (25,4)で受理。
+- 移植版（診断でverifier実行）: **config=Calibrated**, e=56/f=58（E/F=0.966 > min_E_F_inlier_ratio=0.95）,
+  E-only tri_angle 1.16° → 拒否。
+- 機構: COLMAPはE/F比≤0.95でcalibrated分岐を飛ばし**F（UNCALIBRATED）**を選択。
+  `PoseFromEssentialMatrix(EssentialFromFundamentalMatrix(K2,F,K1))`のray角度が9.18°。
+- 真因: **E推定器の差（COLMAP=5点法 / 移植版init=8点法）**でE inlier数が変わり、E/F比が0.95を
+  跨いでconfigとtri_angle算出法が反転。
+- 次: Nister 5点法の移植＋`colmap_verification`(E/F/H分類)をinitへ適用＋COLMAP式tri_angle
+  （CALIBRATED=E ray角、UNCALIBRATED=F→E、PLANAR=H由来3D）→2.5k非回帰→10k。証跡
+  `benchmarks/electro/m9-openloris-colmap-port-init-config-v1.json`。
+
 ### 2026-09-17 追記: 自作map × 地図ベースrelocalization（branch `feat/openloris-map-relocalization`）
 
 COLMAP port（`examples/colmap_incremental_mapper`）が出力した地図を、既存の
