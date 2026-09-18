@@ -3977,7 +3977,11 @@ fn candidate_image_manifest_sha256(image_names: &[String]) -> String {
     for (index, name) in image_names.iter().enumerate() {
         digest.update(format!("image {index} {name}\n").as_bytes());
     }
-    digest.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
+    digest
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>()
 }
 
 /// Hash a candidate shard without retaining its text.  The plan already
@@ -3999,7 +4003,11 @@ fn candidate_file_sha256(path: &Path) -> Result<String, String> {
         }
         digest.update(&buffer[..read]);
     }
-    Ok(digest.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>())
+    Ok(digest
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>())
 }
 
 /// Parse a compact v2 candidate shard and bind it to the canonical plan.

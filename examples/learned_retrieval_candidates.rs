@@ -787,7 +787,11 @@ fn hash_file(path: &Path) -> Result<String, Box<dyn Error>> {
         }
         hasher.update(&buffer[..count]);
     }
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>())
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>())
 }
 
 fn hex(hash: &[u8; 32]) -> String {
