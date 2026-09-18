@@ -1260,13 +1260,13 @@ fn hash_file(path: &Path) -> Result<String, String> {
         }
         hasher.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>())
 }
 
 fn hash_bytes(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
+    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
 }
 
 fn is_lower_sha256(value: &str) -> bool {
@@ -1436,7 +1436,7 @@ fn hash_source_inputs(model_dir: &Path, rig_manifest: &Path) -> Result<SourceHas
         images,
         points,
         manifest,
-        combined: format!("{:x}", combined_hasher.finalize()),
+        combined: combined_hasher.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>(),
     })
 }
 

@@ -487,7 +487,7 @@ fn parse_rig(path: &Path, image_names: &[String]) -> Result<(Vec<Vec<usize>>, St
             image_names.len()
         ));
     }
-    Ok((frames, format!("{:x}", digest.finalize())))
+    Ok((frames, digest.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()))
 }
 
 #[derive(Debug)]
@@ -546,7 +546,7 @@ fn hash_file(path: &Path) -> Result<String, Box<dyn Error>> {
         }
         digest.update(&buffer[..count]);
     }
-    Ok(format!("{:x}", digest.finalize()))
+    Ok(digest.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>())
 }
 
 fn write_synced(path: &Path, contents: &str) -> Result<(), Box<dyn Error>> {
