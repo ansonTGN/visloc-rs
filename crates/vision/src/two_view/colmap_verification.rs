@@ -33,7 +33,7 @@ use visloc_core::types::Camera;
 use super::fundamental::{fundamental_ransac, FundamentalRansacConfig};
 use super::homography::{homography_ransac, pose_from_homography_matrix, HomographyRansacConfig};
 use super::{
-    EightPointEssentialMatrixEstimator, EssentialRansac, EssentialRansacConfig,
+    EssentialRansac, EssentialRansacConfig, FivePointEssentialMatrixEstimator,
     TwoViewCorrespondence,
 };
 
@@ -263,7 +263,7 @@ impl TwoViewGeometryVerifier {
         }
 
         let essential_ransac = EssentialRansac {
-            estimator: EightPointEssentialMatrixEstimator::default(),
+            estimator: FivePointEssentialMatrixEstimator::default(),
             config: EssentialRansacConfig {
                 iterations: opts.ransac_iterations,
                 sampson_threshold: opts.essential_sampson_threshold,
@@ -597,6 +597,205 @@ fn detect_watermark(
     }
     let translation_inlier_ratio = best_count as f64 / n as f64;
     translation_inlier_ratio >= opts.watermark_min_inlier_ratio
+}
+
+/// Median triangulation angle (radians) for a classified pair, port of the
+/// angle half of `EstimateTwoViewGeometryPoseFromCamRays`
+/// (`src/colmap/estimators/two_view_geometry.cc:710-815`).
+///
+/// For the essential paths (`CALIBRATED` / `UNCALIBRATED`) the angle is the
+/// parallax between the surviving unit camera rays, which needs no explicit
+/// triangulation; for the homography path (`PLANAR` / `PANORAMIC`) it is taken
+/// over the three-dimensional points recovered from the homography. Returns
+/// `None` when no pose can be recovered.
+pub fn two_view_triangulation_angle(
+    report: &TwoViewGeometryReport,
+    correspondences: &[TwoViewCorrespondence],
+    camera: &Camera,
+) -> Option<f64> {
+    two_view_pose_and_triangulation_angle(report, correspondences, camera)
+        .map(|(_, _, angle)| angle)
+}
+
+/// Like [`two_view_triangulation_angle`] but also returns the recovered
+/// `cam2_from_cam1` rotation and unit translation, so the initial-pair gate can
+/// apply COLMAP's forward-motion test on the same pose the angle came from.
+pub fn two_view_pose_and_triangulation_angle(
+    report: &TwoViewGeometryReport,
+    correspondences: &[TwoViewCorrespondence],
+    camera: &Camera,
+) -> Option<(Matrix3<f64>, Vector3<f64>, f64)> {
+    match report.config {
+        ConfigurationType::Calibrated => {
+            let essential = report.essential?;
+            essential_pose_and_angle(&essential, report, correspondences, camera)
+        }
+        ConfigurationType::Uncalibrated => {
+            let fundamental = report.fundamental?;
+            let (fx, fy, cx, cy) = camera.intrinsics()?;
+            let k = Matrix3::new(fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0);
+            let essential = k.transpose() * fundamental * k;
+            essential_pose_and_angle(&essential, report, correspondences, camera)
+        }
+        ConfigurationType::Planar
+        | ConfigurationType::Panoramic
+        | ConfigurationType::PlanarOrPanoramic => {
+            planar_pose_and_angle(report, correspondences, camera)
+        }
+        _ => None,
+    }
+}
+
+fn median(values: &mut [f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    Some(values[values.len() / 2])
+}
+
+fn essential_pose_and_angle(
+    essential: &Matrix3<f64>,
+    report: &TwoViewGeometryReport,
+    correspondences: &[TwoViewCorrespondence],
+    camera: &Camera,
+) -> Option<(Matrix3<f64>, Vector3<f64>, f64)> {
+    let mut rays1 = Vec::with_capacity(report.inliers.len());
+    let mut rays2 = Vec::with_capacity(report.inliers.len());
+    for &index in &report.inliers {
+        rays1.push(camera.unit_ray_from_pixel(&correspondences[index].previous_xy)?);
+        rays2.push(camera.unit_ray_from_pixel(&correspondences[index].current_xy)?);
+    }
+    let (rotation, translation, valid) = pose_from_essential_matrix(essential, &rays1, &rays2);
+    if valid.is_empty() {
+        return None;
+    }
+    let cam1_from_cam2_rotation = rotation.transpose();
+    let mut angles = Vec::with_capacity(valid.len());
+    for &index in &valid {
+        let ray1 = rays1[index];
+        let ray2 = cam1_from_cam2_rotation * rays2[index];
+        let denominator = ray1.norm() * ray2.norm();
+        if denominator < 1e-18 {
+            continue;
+        }
+        let angle = (ray1.dot(&ray2) / denominator).clamp(-1.0, 1.0).acos();
+        angles.push(angle.min(std::f64::consts::PI - angle));
+    }
+    Some((rotation, translation, median(&mut angles)?))
+}
+
+/// Port of `PoseFromEssentialMatrix` + `CheckCheirality`
+/// (`geometry/essential_matrix.cc:64-98`): decompose into the four (R, t)
+/// candidates and keep the one with the most positive-depth correspondences,
+/// returning those valid indices.
+fn pose_from_essential_matrix(
+    essential: &Matrix3<f64>,
+    rays1: &[Vector3<f64>],
+    rays2: &[Vector3<f64>],
+) -> (Matrix3<f64>, Vector3<f64>, Vec<usize>) {
+    let svd = essential.svd(true, true);
+    let (Some(u), Some(v_t)) = (svd.u, svd.v_t) else {
+        return (Matrix3::identity(), Vector3::zeros(), Vec::new());
+    };
+    let w = Matrix3::new(0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+    let mut r1 = u * w * v_t;
+    let mut r2 = u * w.transpose() * v_t;
+    if r1.determinant() < 0.0 {
+        r1 = -r1;
+    }
+    if r2.determinant() < 0.0 {
+        r2 = -r2;
+    }
+    let t = u.column(2).into_owned();
+
+    let candidates = [(r1, t), (r2, t), (r1, -t), (r2, -t)];
+    let mut best = (r1, t, Vec::new());
+    for (rotation, translation) in candidates {
+        let valid: Vec<usize> = (0..rays1.len())
+            .filter(|&index| {
+                let ray1_in_cam2 = rotation * rays1[index];
+                let a = -ray1_in_cam2.dot(&rays2[index]);
+                let b1 = -ray1_in_cam2.dot(&translation);
+                let b2 = rays2[index].dot(&translation);
+                b1 - a * b2 > 0.0 && b2 - a * b1 > 0.0
+            })
+            .collect();
+        if valid.len() >= best.2.len() {
+            best = (rotation, translation, valid);
+        }
+    }
+    best
+}
+
+fn planar_pose_and_angle(
+    report: &TwoViewGeometryReport,
+    correspondences: &[TwoViewCorrespondence],
+    camera: &Camera,
+) -> Option<(Matrix3<f64>, Vector3<f64>, f64)> {
+    if report.config == ConfigurationType::Panoramic {
+        let (rotation, translation) = report.relative_pose?;
+        return Some((rotation, translation, 0.0));
+    }
+    let homography = report.homography?;
+    let (fx, fy, cx, cy) = camera.intrinsics()?;
+    let k = Matrix3::new(fx, 0.0, cx, 0.0, fy, cy, 0.0, 0.0, 1.0);
+    let (rotation, translation, _normal) =
+        pose_from_homography_matrix(&homography, &k, &k, correspondences, camera)?;
+
+    let cam1_center = nalgebra::Point3::origin();
+    let cam2_center = nalgebra::Point3::from(-(rotation.transpose() * translation));
+    let mut angles = Vec::new();
+    for &index in &report.inliers {
+        let correspondence = &correspondences[index];
+        let previous = camera.normalize_pixel(&correspondence.previous_xy)?;
+        let current = camera.normalize_pixel(&correspondence.current_xy)?;
+        let Some(point3d) = triangulate_rays(&rotation, &translation, previous, current) else {
+            continue;
+        };
+        let ray1 = point3d - cam1_center;
+        let ray2 = point3d - cam2_center;
+        let denominator = ray1.norm() * ray2.norm();
+        if denominator < 1e-18 {
+            continue;
+        }
+        angles.push((ray1.dot(&ray2) / denominator).clamp(-1.0, 1.0).acos());
+    }
+    Some((rotation, translation, median(&mut angles).unwrap_or(0.0)))
+}
+
+/// Minimal DLT triangulation of a normalized (or unit) ray pair under
+/// `cam2_from_cam1 = (R, t)`.
+fn triangulate_rays(
+    rotation: &Matrix3<f64>,
+    translation: &Vector3<f64>,
+    previous: nalgebra::Point2<f64>,
+    current: nalgebra::Point2<f64>,
+) -> Option<nalgebra::Point3<f64>> {
+    let p1 = Matrix3::new(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0);
+    let mut a = nalgebra::DMatrix::<f64>::zeros(4, 4);
+    for column in 0..3 {
+        a[(0, column)] = previous.x * p1[(2, column)] - p1[(0, column)];
+        a[(1, column)] = previous.y * p1[(2, column)] - p1[(1, column)];
+    }
+    for column in 0..3 {
+        a[(2, column)] = current.x * rotation[(2, column)] - rotation[(0, column)];
+        a[(3, column)] = current.y * rotation[(2, column)] - rotation[(1, column)];
+    }
+    a[(2, 3)] = current.x * translation.z - translation.x;
+    a[(3, 3)] = current.y * translation.z - translation.y;
+    let svd = a.svd(true, true);
+    let v_t = svd.v_t?;
+    let solution = v_t.row(v_t.nrows() - 1);
+    let w = solution[3];
+    if w.abs() < 1e-12 {
+        return None;
+    }
+    Some(nalgebra::Point3::new(
+        solution[0] / w,
+        solution[1] / w,
+        solution[2] / w,
+    ))
 }
 
 #[cfg(test)]

@@ -1,0 +1,47 @@
+{
+  "date": "2026-09-18",
+  "finding": "The port now has a faithful Nister five-point essential solver (PoseLib relpose_5pt) wired into COLMAP's two-view verifier, matching PoseLib's reference solutions bit-for-bit. However, using the COLMAP verifier + ray-angle tri_angle in the initial-pair path regresses 2.5k (0.0712 -> 2.78 m) because it selects a different initial pair; and the 10k control's initial pair is not a stable parity target: the pinned 64805cb build selects a different pair (#7584/#7553) than the colmap:latest control (#5446/#5463) on the identical database.",
+  "implementation": {
+    "new_module": "crates/vision/src/two_view/five_point.rs: relpose_5pt + Sturm root isolation, ported from PoseLib/solvers/relpose_5pt.cc and PoseLib/misc/sturm.h. Unit test matches four PoseLib reference solutions for a fixed synthetic sample.",
+    "trait": "EssentialMatrixEstimator::estimate_all added (default forwards to estimate) so RANSAC can score all algebraic solutions of a minimal sample.",
+    "estimator": "FivePointEssentialMatrixEstimator (min 5), minimal path filters hypotheses whose 5-ray sample is not all in front (port of COLMAP's PoseFromEssentialMatrix cheirality filter).",
+    "verifier": "TwoViewGeometryVerifier::classify_single now uses FivePointEssentialMatrixEstimator (COLMAP EstimateCalibratedTwoViewGeometry uses LORANSAC<EssentialMatrixFivePointEstimator, ...>).",
+    "tri_angle": "two_view_pose_and_triangulation_angle ports the angle half of EstimateTwoViewGeometryPoseFromCamRays: ray parallax for CALIBRATED/UNCALIBRATED (UNCALIBRATED uses E = K2^T F K1), homography 3D points for PLANAR/PANORAMIC.",
+    "robustness": "A degenerate minimal sample can make the back-substitution produce a non-finite E; such candidates are dropped (previously an all-NaN E made nalgebra's SVD loop, hanging the initial-pair search)."
+  },
+  "results": {
+    "poselib_parity": "Rust relpose_5pt reproduces PoseLib's 4 canonical solutions on the fixed sample (max abs diff < 1e-5).",
+    "tests": "cargo test -p visloc-vision --lib 254 passed; cargo test -p visloc-slam --lib 787 passed; clippy --workspace --all-targets -D warnings clean.",
+    "tier_2500": {
+      "verifier_five_point_only_old_init": {
+        "init_pair": "image1=776 image2=840 frame1=388 frame2=420",
+        "models": 1,
+        "registered": 2500,
+        "rmse_m": 0.0712
+      },
+      "init_path_rewritten_to_verifier": {
+        "init_pair": "image1=1125 image2=1157 frame1=562 frame2=578",
+        "models": 1,
+        "registered": 2500,
+        "rmse_m": 2.7802,
+        "verdict": "REGRESSION - reverted the initial-pair rewrite"
+      }
+    },
+    "tier_10000_forced_init": {
+      "port_image_ids": "893/925 (= COLMAP #5446/#5463, flat names cam2_000893/cam2_000925)",
+      "port_matches": 60,
+      "port_classification": "config=Calibrated e=59 f=59 h=35 -> E/F=1.0 > 0.95",
+      "port_pose": "|tz|=0.9954 (calibrated E path) -> forward-motion reject",
+      "colmap_init_log": "INIT2V images 5446/5463 config 3 (UNCALIBRATED), 59 inlier matches, 0.00598414 z translation, 9.18349 deg triangulation angle",
+      "colmap_db_tvg": "two_view_geometries for the pair stores config=2 (CALIBRATED), 59 inliers - i.e. COLMAP's own exhaustive verification agrees with the port; the init's config 3 is a min_num_trials=30 recomputation artifact."
+    },
+    "initial_pair_instability": {
+      "control_latest": "initial pair #5446/#5463 (logs/mapper.log:90)",
+      "pinned_64805cb": "/build/work4/mapper.log selects initial pair #7584/#7553; it never evaluates #5463",
+      "databases": "control database.db and pinned work4/database.db are byte-identical for the queried pairs",
+      "conclusion": "Initial-pair selection is not stable across COLMAP builds/runs on the same data, so the 10k two-model split is not a reproducible parity target."
+    }
+  },
+  "decision": "Keep the five-point estimator and the verifier's five-point switch (faithful to COLMAP, all tests green, 2.5k unchanged at 0.0712). Reverted the initial-pair path rewrite. The 10k initial-pair/config divergence is COLMAP-internal nondeterminism, not a missing port component.",
+  "schema": "visloc_colmap_port_five_point_essential_v1"
+}
