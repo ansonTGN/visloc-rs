@@ -59,7 +59,7 @@ pub enum StereoDepthGate {
 }
 
 impl StereoDepthGate {
-    pub fn fixed() -> Self {
+    pub const fn fixed() -> Self {
         Self::Fixed
     }
 
@@ -127,11 +127,11 @@ pub struct StereoDepthGateState {
 }
 
 impl StereoDepthGateState {
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.effective_min_depth_m = None;
     }
 
-    pub fn effective_min_depth_m(&self) -> Option<f64> {
+    pub const fn effective_min_depth_m(&self) -> Option<f64> {
         self.effective_min_depth_m
     }
 }
@@ -381,7 +381,7 @@ struct StereoDepthGateOutcome {
     diagnostics: StereoDepthGateDiagnostics,
 }
 
-fn empty_stereo_depth_gate_outcome(config: &StereoFeatureConfig) -> StereoDepthGateOutcome {
+const fn empty_stereo_depth_gate_outcome(config: &StereoFeatureConfig) -> StereoDepthGateOutcome {
     StereoDepthGateOutcome {
         features: Vec::new(),
         diagnostics: StereoDepthGateDiagnostics {
@@ -679,7 +679,7 @@ pub fn estimate_relative_pose_kabsch_ransac(
             r.total_cmp(&l)
         });
     }
-    let mut indices = usable.clone();
+    let mut indices = usable;
     let mut best: Option<(Pose, Vec<usize>, f64)> = None;
     let threshold_sq = config.inlier_threshold_m * config.inlier_threshold_m;
     for iter in 0..config.iterations {
@@ -2422,8 +2422,7 @@ where
                 temporal_confidence_gate,
                 pnp_correspondence_count: pnp_report
                     .as_ref()
-                    .map(|report| report.correspondence_count)
-                    .unwrap_or_else(|| pnp_corrs_all.len()),
+                    .map_or_else(|| pnp_corrs_all.len(), |report| report.correspondence_count),
                 stereo_pair_correspondence_count: pair_corrs.len(),
                 inlier_count,
                 raw_translation_m,

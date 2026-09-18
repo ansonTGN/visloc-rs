@@ -234,7 +234,7 @@ fn lookup_bearing(
     Ok((pixel, bearing))
 }
 
-fn lookup_reason(error: LookupError) -> SetupOptRejectReason {
+const fn lookup_reason(error: LookupError) -> SetupOptRejectReason {
     match error {
         LookupError::MissingFeatureImage => SetupOptRejectReason::MissingFeatureImage,
         LookupError::FeatureIndexOutOfRange => SetupOptRejectReason::FeatureIndexOutOfRange,
@@ -301,7 +301,7 @@ pub fn triangulate_ba(
     point.iter().all(|value| value.is_finite()).then_some(point)
 }
 
-fn map_lookup_reason(error: LookupError) -> SetupOptRejectReason {
+const fn map_lookup_reason(error: LookupError) -> SetupOptRejectReason {
     lookup_reason(error)
 }
 

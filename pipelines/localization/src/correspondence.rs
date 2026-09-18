@@ -73,7 +73,7 @@ pub struct IntersectCandidateSelector<A, B> {
 }
 
 impl<A, B> IntersectCandidateSelector<A, B> {
-    pub fn new(first: A, second: B) -> Self {
+    pub const fn new(first: A, second: B) -> Self {
         Self { first, second }
     }
 }
@@ -108,7 +108,7 @@ pub struct RadiusLandmarkSelector {
 }
 
 impl RadiusLandmarkSelector {
-    pub fn new(center_world: Point3<f64>, radius: f64) -> Self {
+    pub const fn new(center_world: Point3<f64>, radius: f64) -> Self {
         Self {
             center_world,
             radius,
@@ -146,7 +146,7 @@ impl<M> CorrespondenceBuilder<M, AllLandmarksSelector>
 where
     M: Matcher,
 {
-    pub fn new(matcher: M) -> Self {
+    pub const fn new(matcher: M) -> Self {
         Self {
             matcher,
             candidate_selector: AllLandmarksSelector,
@@ -159,7 +159,7 @@ where
     M: Matcher,
     S: CandidateSelector,
 {
-    pub fn with_candidate_selector(matcher: M, candidate_selector: S) -> Self {
+    pub const fn with_candidate_selector(matcher: M, candidate_selector: S) -> Self {
         Self {
             matcher,
             candidate_selector,
@@ -260,7 +260,7 @@ impl<M> ProjectionCorrespondenceBuilder<M, AllLandmarksSelector>
 where
     M: Matcher,
 {
-    pub fn new(matcher: M) -> Self {
+    pub const fn new(matcher: M) -> Self {
         Self {
             matcher,
             candidate_selector: AllLandmarksSelector,
@@ -273,7 +273,7 @@ where
     M: Matcher,
     S: CandidateSelector,
 {
-    pub fn with_candidate_selector(matcher: M, candidate_selector: S) -> Self {
+    pub const fn with_candidate_selector(matcher: M, candidate_selector: S) -> Self {
         Self {
             matcher,
             candidate_selector,

@@ -15,7 +15,7 @@ pub struct Landmark {
 }
 
 impl Landmark {
-    pub fn new(id: LandmarkId, position: Point3<f64>) -> Self {
+    pub const fn new(id: LandmarkId, position: Point3<f64>) -> Self {
         Self {
             id,
             position,

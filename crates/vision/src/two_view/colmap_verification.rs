@@ -205,7 +205,7 @@ pub struct TwoViewGeometryReport {
     pub h_inlier_count: usize,
 }
 
-fn degenerate_report() -> TwoViewGeometryReport {
+const fn degenerate_report() -> TwoViewGeometryReport {
     TwoViewGeometryReport {
         config: ConfigurationType::Degenerate,
         inliers: Vec::new(),
@@ -230,7 +230,7 @@ pub struct TwoViewGeometryVerifier {
 }
 
 impl TwoViewGeometryVerifier {
-    pub fn new(options: TwoViewGeometryOptions) -> Self {
+    pub const fn new(options: TwoViewGeometryOptions) -> Self {
         Self { options }
     }
 
@@ -401,7 +401,7 @@ impl TwoViewGeometryVerifier {
             config = ConfigurationType::Watermark;
         }
 
-        let essential_inliers = e_inlier_indices.clone().unwrap_or_default();
+        let essential_inliers = e_inlier_indices.unwrap_or_default();
         let mut report = TwoViewGeometryReport {
             config,
             inliers: chosen_inliers,

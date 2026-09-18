@@ -56,7 +56,7 @@ impl TwoViewMatchVisualOdometryFrontend {
         }
     }
 
-    pub fn config(&self) -> TwoViewMatchVisualOdometryConfig {
+    pub const fn config(&self) -> TwoViewMatchVisualOdometryConfig {
         self.config
     }
 
@@ -253,15 +253,15 @@ impl EssentialMatrixVisualOdometryFrontend {
         }
     }
 
-    pub fn camera(&self) -> &Camera {
+    pub const fn camera(&self) -> &Camera {
         &self.camera
     }
 
-    pub fn min_inliers(&self) -> usize {
+    pub const fn min_inliers(&self) -> usize {
         self.min_inliers
     }
 
-    pub fn default_translation_scale(&self) -> f64 {
+    pub const fn default_translation_scale(&self) -> f64 {
         self.estimator.default_translation_scale
     }
 

@@ -24,7 +24,7 @@ fn words(value: &Value, field: &str) -> Vec<u32> {
         .collect()
 }
 
-fn ordered_bits(bits: u32) -> u32 {
+const fn ordered_bits(bits: u32) -> u32 {
     if bits & 0x8000_0000 != 0 {
         !bits
     } else {

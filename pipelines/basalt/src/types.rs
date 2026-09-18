@@ -53,7 +53,7 @@ pub struct ImuSample {
 }
 
 impl ImuSample {
-    pub fn new(
+    pub const fn new(
         timestamp_ns: TimestampNs,
         gyro_rad_s: Vector3<f64>,
         accel_m_s2: Vector3<f64>,

@@ -124,14 +124,14 @@ impl BasaltStream {
             StreamMessage::End => self.finish(),
         }
     }
-    pub fn finish(&mut self) -> Result<(), StreamError> {
+    pub const fn finish(&mut self) -> Result<(), StreamError> {
         if self.ended {
             return Err(StreamError::AlreadyEnded);
         }
         self.ended = true;
         Ok(())
     }
-    pub fn is_ended(&self) -> bool {
+    pub const fn is_ended(&self) -> bool {
         self.ended
     }
     pub fn process_pending(&mut self) -> usize {

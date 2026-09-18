@@ -284,11 +284,11 @@ impl MappedDescriptors {
         Ok(mapped)
     }
 
-    fn rows(&self) -> usize {
+    const fn rows(&self) -> usize {
         self.store.binding().row_count as usize
     }
 
-    fn dimension(&self) -> usize {
+    const fn dimension(&self) -> usize {
         self.store.binding().dimension as usize
     }
 
@@ -332,7 +332,7 @@ impl MappedDescriptors {
     }
 }
 
-fn splitmix64(mut value: u64) -> u64 {
+const fn splitmix64(mut value: u64) -> u64 {
     value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
@@ -728,7 +728,7 @@ struct Candidate {
     sequence_support: usize,
 }
 
-fn selected(row: &Candidate) -> bool {
+const fn selected(row: &Candidate) -> bool {
     row.mutual && row.sequence_support >= 2
 }
 
@@ -1095,7 +1095,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         descriptors.rows(), descriptors.dimension(), args.tables, bits, probes,
         args.probe_radius, args.topk,
         ann.mean_pool, ann.max_pool, pairs.len(), selected_count,
-        exact.map(|row| format!("{:.6}", row.0)).unwrap_or_else(|| "skipped".to_owned()),
+        exact.map_or_else(|| "skipped".to_owned(), |row| format!("{:.6}", row.0)),
         args.out.display()
     );
     Ok(())

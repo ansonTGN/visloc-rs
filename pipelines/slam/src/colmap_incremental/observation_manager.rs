@@ -93,7 +93,7 @@ impl VisibilityPyramid {
         }
     }
 
-    pub fn score(&self) -> u64 {
+    pub const fn score(&self) -> u64 {
         self.score
     }
 
@@ -173,7 +173,7 @@ pub struct ObservationManager {
     image_stats: BTreeMap<ImageT, ImageStat>,
 }
 
-fn pair_key(a: ImageT, b: ImageT) -> (ImageT, ImageT) {
+const fn pair_key(a: ImageT, b: ImageT) -> (ImageT, ImageT) {
     if a < b {
         (a, b)
     } else {
@@ -361,7 +361,7 @@ impl ObservationManager {
             .point3d_visibility_pyramid
             .score()
     }
-    pub fn image_stats(&self) -> &BTreeMap<ImageT, ImageStat> {
+    pub const fn image_stats(&self) -> &BTreeMap<ImageT, ImageStat> {
         &self.image_stats
     }
 

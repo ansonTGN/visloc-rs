@@ -344,15 +344,15 @@ impl OnlineNfrMapper {
         }
     }
 
-    pub fn total_optimize_triggers(&self) -> usize {
+    pub const fn total_optimize_triggers(&self) -> usize {
         self.total_optimize_triggers
     }
 
-    pub fn total_accepted_loops(&self) -> usize {
+    pub const fn total_accepted_loops(&self) -> usize {
         self.total_accepted_loops
     }
 
-    pub fn total_optimize_passes(&self) -> usize {
+    pub const fn total_optimize_passes(&self) -> usize {
         self.total_optimize_passes
     }
 
@@ -371,7 +371,7 @@ impl OnlineNfrMapper {
     /// Direct access to the wrapped mapper, e.g. for `trajectory_tum`/
     /// `result` mid-run diagnostics. Prefer [`Self::finalize`] for the
     /// end-of-sequence output.
-    pub fn inner(&self) -> &NfrMapper {
+    pub const fn inner(&self) -> &NfrMapper {
         &self.mapper
     }
 
@@ -1216,7 +1216,7 @@ fn evaluate_match_candidate(
     })
 }
 
-fn empty_mapper_features() -> MapperImageFeatures {
+const fn empty_mapper_features() -> MapperImageFeatures {
     MapperImageFeatures {
         corners: Vec::new(),
         corner_angles: Vec::new(),

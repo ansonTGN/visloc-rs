@@ -57,7 +57,7 @@ impl SeamConfigArm {
         }
     }
 
-    fn as_str(self) -> &'static str {
+    const fn as_str(self) -> &'static str {
         match self {
             Self::A => "A",
             Self::B => "B",
@@ -94,7 +94,7 @@ impl ForestPolicy {
         }
     }
 
-    fn as_str(self) -> &'static str {
+    const fn as_str(self) -> &'static str {
         match self {
             Self::Traversal => "traversal",
             Self::Quality => "quality",
@@ -121,7 +121,7 @@ impl FrameOwnerPolicy {
         }
     }
 
-    fn as_str(self) -> &'static str {
+    const fn as_str(self) -> &'static str {
         match self {
             Self::Newest => "newest",
             Self::Interior => "interior",

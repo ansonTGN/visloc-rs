@@ -111,7 +111,7 @@ impl ImuPreintegrator {
             None
         }
     }
-    pub fn delta(&self) -> &ImuPreintegratedDelta {
+    pub const fn delta(&self) -> &ImuPreintegratedDelta {
         &self.delta
     }
 

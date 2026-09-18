@@ -429,7 +429,7 @@ impl PartialEq for OnlineSlamLocalBaState {
 }
 
 impl OnlineSlamLocalBaState {
-    pub fn new(config: OnlineSlamLocalBaConfig) -> Self {
+    pub const fn new(config: OnlineSlamLocalBaConfig) -> Self {
         Self {
             config,
             keyframe_state: BTreeMap::new(),
@@ -926,8 +926,7 @@ fn next_navigation_prior(
     let constant_cost = information
         .clone()
         .cholesky()
-        .map(|chol| gradient.dot(&chol.solve(&gradient)))
-        .unwrap_or(0.0);
+        .map_or(0.0, |chol| gradient.dot(&chol.solve(&gradient)));
     let nav = state.keyframe_state.get(&next_id)?;
     let pose = map.keyframes.get(&next_id)?.frame.pose.clone()?;
     Some(NavigationStatePrior {
@@ -1162,7 +1161,7 @@ fn next_navigation_prior_sqrt(
     // Extra sqrt rows beyond the IMU + bias-walk rows already in `jac`/`resid`.
     // Carried marginal: map its [pose, vel, bias] columns (old block) into the build layout
     // (pose 0..6, vel 12..15, bias 18..24 of the 30-col stack).
-    let carried_rows = carried.map(|m| m.factor.nrows()).unwrap_or(0);
+    let carried_rows = carried.map_or(0, |m| m.factor.nrows());
     // First-window pseudo-fix + init priors (only when NOT carrying a prior).
     let fill_rows = if carried.is_some() { 0 } else { 6 + 9 };
 
@@ -1289,8 +1288,7 @@ fn next_navigation_prior_sqrt(
     let constant_cost = information
         .clone()
         .cholesky()
-        .map(|chol| gradient.dot(&chol.solve(&gradient)))
-        .unwrap_or(0.0);
+        .map_or(0.0, |chol| gradient.dot(&chol.solve(&gradient)));
     let nav = state.keyframe_state.get(&next_id)?;
     let pose = map.keyframes.get(&next_id)?.frame.pose.clone()?;
     let dense = NavigationStatePrior {
@@ -2125,15 +2123,15 @@ pub fn run_inertial_only_vi_ba_with_options(
         let strongest_factor_information = in_window_factors
             .iter()
             .map(|factor| {
-                factor
-                    .covariance_sqrt_information()
-                    .map(|whitener| whitener.norm_squared())
-                    .unwrap_or_else(|| {
+                factor.covariance_sqrt_information().map_or_else(
+                    || {
                         factor
                             .weight_rotation
                             .max(factor.weight_velocity)
                             .max(factor.weight_position)
-                    })
+                    },
+                    |whitener| whitener.norm_squared(),
+                )
             })
             .fold(1.0_f64, f64::max);
         // Preserve the original NaN handling of `max(...).min(...)`: unlike
@@ -2420,8 +2418,7 @@ pub fn estimate_scale_from_factors(
             .map(|pose| pose.camera_center_world())?;
         let v_i = states
             .get(&factor.keyframe_id_from)
-            .map(|s| s.velocity_world)
-            .unwrap_or_else(Vector3::zeros);
+            .map_or_else(Vector3::zeros, |s| s.velocity_world);
         let r_w_to_c = map
             .keyframes
             .get(&factor.keyframe_id_from)
@@ -2595,7 +2592,7 @@ mod tests {
             info_diff < 1e-6,
             "sqrt vs Schur prior info diff: {info_diff}"
         );
-        let grad_diff = (schur.gradient.clone() - sqrt.gradient.clone())
+        let grad_diff = (schur.gradient - sqrt.gradient)
             .iter()
             .fold(0.0_f64, |acc, v| acc.max(v.abs()));
         assert!(
@@ -2668,7 +2665,7 @@ mod tests {
         assert_eq!(sqrt_carried.factor.nrows(), sqrt_carried.rhs.len());
         // square-root consistency: factorᵀ·factor reproduces the produced dense prior exactly.
         let recon = sqrt_carried.factor.transpose() * &sqrt_carried.factor;
-        let recon_diff = (recon.clone() - sqrt_dense.information.clone())
+        let recon_diff = (recon - sqrt_dense.information)
             .iter()
             .fold(0.0_f64, |acc, v| acc.max(v.abs()));
         assert!(
@@ -2717,11 +2714,11 @@ mod tests {
             next_navigation_prior_sqrt(&map, &mut state, &[10, 20], std::slice::from_ref(&f_10_20))
                 .expect("sqrt first prior");
         assert_eq!(sqrt_dense_1.keyframe_ids, dense_1.keyframe_ids);
-        assert!(sqrt_dense_1.information.clone().cholesky().is_some());
+        assert!(sqrt_dense_1.information.cholesky().is_some());
 
         // Feed the carried sqrt (and its dense counterpart) into the state, exactly as
         // `run_local_vi_ba` does, then slide the window.
-        state.navigation_prior = Some(dense_1.clone());
+        state.navigation_prior = Some(dense_1);
         state.sqrt_nav_marginal = Some(sqrt_carried_1);
 
         // Second window: the sqrt route must consume `sqrt_nav_marginal` (matching the dense
@@ -2741,7 +2738,7 @@ mod tests {
             info_diff < 1e-6,
             "carried sqrt prior info != dense propagated prior: {info_diff}"
         );
-        let grad_diff = (dense_2.gradient.clone() - sqrt_dense_2.gradient.clone())
+        let grad_diff = (dense_2.gradient - sqrt_dense_2.gradient)
             .iter()
             .fold(0.0_f64, |acc, v| acc.max(v.abs()));
         assert!(

@@ -164,7 +164,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
 struct Lcg(u64);
 
 impl Lcg {
-    fn next_u64(&mut self) -> u64 {
+    const fn next_u64(&mut self) -> u64 {
         self.0 = self
             .0
             .wrapping_mul(6364136223846793005)
@@ -209,7 +209,7 @@ fn pgo_config() -> PoseGraphSe3Config {
     }
 }
 
-fn loop_constraint(from: u64, to: u64, relative: SE3) -> LoopClosureConstraint {
+const fn loop_constraint(from: u64, to: u64, relative: SE3) -> LoopClosureConstraint {
     LoopClosureConstraint {
         from_keyframe_id: from,
         to_keyframe_id: to,
@@ -388,8 +388,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 rng.range(-1.0, 1.0),
             );
             let rotation = nalgebra::Unit::try_new(axis, 1e-9)
-                .map(|a| UnitQuaternion::from_axis_angle(&a, rng.range(0.0, 0.2)))
-                .unwrap_or_else(UnitQuaternion::identity);
+                .map_or_else(UnitQuaternion::identity, |a| {
+                    UnitQuaternion::from_axis_angle(&a, rng.range(0.0, 0.2))
+                });
             candidates.push(LoopClosureConstraint {
                 from_keyframe_id: i as u64,
                 to_keyframe_id: j as u64,

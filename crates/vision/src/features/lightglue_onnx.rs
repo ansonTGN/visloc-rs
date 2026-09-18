@@ -127,7 +127,7 @@ impl LightGlueOnnxMatcher {
     }
 
     /// **Stub** — see [`load_from_path`](Self::load_from_path).
-    pub fn match_features(
+    pub const fn match_features(
         &self,
         _keypoints0: &[Point2<f64>],
         _descriptors0: &[Vec<f32>],

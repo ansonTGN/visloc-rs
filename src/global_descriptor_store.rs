@@ -90,7 +90,7 @@ impl GlobalDescriptorWriter {
         })
     }
 
-    pub fn completed(&self) -> u64 {
+    pub const fn completed(&self) -> u64 {
         self.completed
     }
 
@@ -200,12 +200,12 @@ impl GlobalDescriptorStore {
         })
     }
 
-    pub fn binding(&self) -> &GlobalDescriptorBinding {
+    pub const fn binding(&self) -> &GlobalDescriptorBinding {
         &self.binding
     }
 
     /// Byte stride between descriptor rows, including the trailing checksum.
-    pub fn record_len_bytes(&self) -> usize {
+    pub const fn record_len_bytes(&self) -> usize {
         self.record_len
     }
 

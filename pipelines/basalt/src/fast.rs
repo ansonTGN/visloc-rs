@@ -259,11 +259,11 @@ fn opencv_sort_by_response(candidates: &mut [(u8, usize, usize)]) {
     final_insertion_sort(candidates);
 }
 
-fn floor_log2(value: usize) -> usize {
+const fn floor_log2(value: usize) -> usize {
     (usize::BITS - 1 - value.leading_zeros()) as usize
 }
 
-fn less_response(a: &(u8, usize, usize), b: &(u8, usize, usize)) -> bool {
+const fn less_response(a: &(u8, usize, usize), b: &(u8, usize, usize)) -> bool {
     a.0 > b.0
 }
 
@@ -410,7 +410,13 @@ fn fast_score(
 /// Returns true for the pixels examined by OpenCV's FAST_t implementation on
 /// a `cell_size x cell_size` `cv::Mat` sub-image.  Its scan starts at 3 and
 /// stops before `size - 3`, because the 16-pixel circle has radius 3.
-fn fast_pixel_in_cell(x: usize, y: usize, cell_x: usize, cell_y: usize, cell_size: usize) -> bool {
+const fn fast_pixel_in_cell(
+    x: usize,
+    y: usize,
+    cell_x: usize,
+    cell_y: usize,
+    cell_size: usize,
+) -> bool {
     x >= cell_x + 3
         && x < cell_x + cell_size.saturating_sub(3)
         && y >= cell_y + 3
@@ -492,7 +498,7 @@ fn has_circular_run9(mask: u16) -> bool {
 }
 
 #[inline]
-fn raw_to_u8(pixel: u16) -> u8 {
+const fn raw_to_u8(pixel: u16) -> u8 {
     // Basalt's dataset reader promotes an 8-bit PNG sample to u16 by shifting
     // left eight bits, and detectKeypointsMapping reverses that conversion
     // with this exact truncating shift (not normalization or rounding).

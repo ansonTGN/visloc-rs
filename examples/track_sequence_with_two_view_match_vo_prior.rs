@@ -292,15 +292,14 @@ fn write_demo_report(
 }
 
 fn format_optional_residual(value: Option<f64>) -> String {
-    value
-        .map(|residual| format!("{residual:.3}"))
-        .unwrap_or_else(|| "n/a".to_string())
+    value.map_or_else(|| "n/a".to_string(), |residual| format!("{residual:.3}"))
 }
 
 fn format_optional_center(center: Option<Point3<f64>>) -> String {
-    center
-        .map(|point| format!("[{:.3}, {:.3}, {:.3}]", point.x, point.y, point.z))
-        .unwrap_or_else(|| "n/a".to_string())
+    center.map_or_else(
+        || "n/a".to_string(),
+        |point| format!("[{:.3}, {:.3}, {:.3}]", point.x, point.y, point.z),
+    )
 }
 
 fn parse_output_dir(args: &mut Vec<String>) -> Option<PathBuf> {

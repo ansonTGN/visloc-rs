@@ -26,7 +26,7 @@ impl AffineCompact2f {
         }
     }
 
-    pub fn new(linear: Matrix2<f32>, translation: Vector2<f32>) -> Self {
+    pub const fn new(linear: Matrix2<f32>, translation: Vector2<f32>) -> Self {
         Self {
             linear,
             translation,
@@ -257,7 +257,7 @@ pub(crate) mod portable_cosf {
         0x993c4390, 0x3c439041,
     ];
 
-    fn abstop12(value: f32) -> u32 {
+    const fn abstop12(value: f32) -> u32 {
         (value.to_bits() >> 20) & 0x7ff
     }
 

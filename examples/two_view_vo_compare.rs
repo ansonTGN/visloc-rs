@@ -160,8 +160,7 @@ fn run_with_essential_frontend(
         let scale = truth_translations
             .iter()
             .find(|((p, c), _)| *p == *previous_id && *c == *current_id)
-            .map(|(_, translation)| translation.norm())
-            .unwrap_or(1.0);
+            .map_or(1.0, |(_, translation)| translation.norm());
         frontend.insert_matches_with_scale(*previous_id, *current_id, matches, scale);
     }
     drive_tracker_with_frontend(
@@ -342,16 +341,14 @@ fn print_diagnostics(run: &RunDiagnostics) {
     for frame in &run.frames {
         let estimated = frame
             .estimated_relative_translation
-            .map(format_vector)
-            .unwrap_or_else(|| "n/a".to_string());
+            .map_or_else(|| "n/a".to_string(), format_vector);
         let truth = frame
             .truth_relative_translation
-            .map(format_vector)
-            .unwrap_or_else(|| "n/a".to_string());
-        let center = frame
-            .estimated_camera_center
-            .map(|center| format!("[{:.3}, {:.3}, {:.3}]", center.x, center.y, center.z))
-            .unwrap_or_else(|| "n/a".to_string());
+            .map_or_else(|| "n/a".to_string(), format_vector);
+        let center = frame.estimated_camera_center.map_or_else(
+            || "n/a".to_string(),
+            |center| format!("[{:.3}, {:.3}, {:.3}]", center.x, center.y, center.z),
+        );
         println!(
             "frame={} vo_prior={} matches={} inliers={} relative_t_estimated={} relative_t_truth={} candidates={} success={} center={}",
             frame.frame_id,
@@ -401,16 +398,14 @@ fn write_run(report: &mut String, run: &RunDiagnostics) {
     for frame in &run.frames {
         let estimated = frame
             .estimated_relative_translation
-            .map(format_vector)
-            .unwrap_or_else(|| "n/a".to_string());
+            .map_or_else(|| "n/a".to_string(), format_vector);
         let truth = frame
             .truth_relative_translation
-            .map(format_vector)
-            .unwrap_or_else(|| "n/a".to_string());
-        let center = frame
-            .estimated_camera_center
-            .map(|center| format!("[{:.3}, {:.3}, {:.3}]", center.x, center.y, center.z))
-            .unwrap_or_else(|| "n/a".to_string());
+            .map_or_else(|| "n/a".to_string(), format_vector);
+        let center = frame.estimated_camera_center.map_or_else(
+            || "n/a".to_string(),
+            |center| format!("[{:.3}, {:.3}, {:.3}]", center.x, center.y, center.z),
+        );
         let _ = writeln!(
             report,
             "  frame={} vo_prior={} matches={} inliers={} relative_t_estimated={} relative_t_truth={} candidates={} success={} center={}",

@@ -82,7 +82,7 @@ enum AdmissionPolicy {
 }
 
 impl AdmissionPolicy {
-    fn name(self) -> &'static str {
+    const fn name(self) -> &'static str {
         match self {
             Self::ReciprocalSequenceV1 => "reciprocal-sequence-v1",
             Self::RankMarginPathV2 => "rank-margin-path-v2",

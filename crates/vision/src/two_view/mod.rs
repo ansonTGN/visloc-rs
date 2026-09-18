@@ -81,7 +81,7 @@ pub struct TwoViewCorrespondence {
 }
 
 impl TwoViewCorrespondence {
-    pub fn new(previous_xy: Point2<f64>, current_xy: Point2<f64>) -> Self {
+    pub const fn new(previous_xy: Point2<f64>, current_xy: Point2<f64>) -> Self {
         Self {
             previous_xy,
             current_xy,
@@ -533,7 +533,7 @@ impl Default for CheiralityOptions {
 impl CheiralityOptions {
     /// Courtyard-class edge quality: angle-gated cheirality, ambiguity
     /// rejection, and a majority positive-depth requirement.
-    pub fn hardened() -> Self {
+    pub const fn hardened() -> Self {
         Self {
             min_tri_angle_deg: 1.0,
             max_ambiguity_ratio: 0.85,
@@ -545,7 +545,7 @@ impl CheiralityOptions {
     /// the runner-up is exposed via [`RelativePoseRecovery::alternate`] so the
     /// view-graph can carry multi-hypothesis edges instead of discarding the
     /// pair.
-    pub fn hardened_keep_ambiguous() -> Self {
+    pub const fn hardened_keep_ambiguous() -> Self {
         Self {
             max_ambiguity_ratio: 1.0,
             ..Self::hardened()
@@ -771,7 +771,7 @@ pub fn recover_relative_pose_with_options(
     }
     ranked.sort_by(|a, b| b.0.cmp(&a.0));
     let (best_score, rotation, translation) = ranked.first().copied()?;
-    let second_score = ranked.get(1).map(|(s, _, _)| *s).unwrap_or(0);
+    let second_score = ranked.get(1).map_or(0, |(s, _, _)| *s);
     if options.min_positive_depth_fraction > 0.0 {
         let required = (options.min_positive_depth_fraction * inliers.len() as f64).ceil() as i64;
         if best_score < required {

@@ -232,7 +232,7 @@ impl VisualInertialInitializer {
     /// returned instance owns no samples; feed it the IMU stream via
     /// [`Self::push_sample`] until [`Self::try_initialize`] reports
     /// success.
-    pub fn new(config: VisualInertialInitializerConfig) -> Self {
+    pub const fn new(config: VisualInertialInitializerConfig) -> Self {
         Self {
             config,
             samples: Vec::new(),
@@ -266,7 +266,7 @@ impl VisualInertialInitializer {
     }
 
     /// Borrow the active configuration.
-    pub fn config(&self) -> &VisualInertialInitializerConfig {
+    pub const fn config(&self) -> &VisualInertialInitializerConfig {
         &self.config
     }
 
@@ -874,7 +874,7 @@ mod tests {
 
         let dt = 0.005;
         let mut initializer_a = VisualInertialInitializer::new(config.clone());
-        let mut initializer_b = VisualInertialInitializer::new(config.clone());
+        let mut initializer_b = VisualInertialInitializer::new(config);
         for _ in 0..200 {
             initializer_a.push_sample(Vector3::zeros(), accel_a, dt);
             initializer_b.push_sample(Vector3::zeros(), accel_b, dt);

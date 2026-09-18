@@ -47,12 +47,12 @@ pub struct MutualSoftmaxMatcher {
 }
 
 impl MutualSoftmaxMatcher {
-    pub fn new(config: MutualSoftmaxConfig) -> Self {
+    pub const fn new(config: MutualSoftmaxConfig) -> Self {
         Self { config }
     }
 
     fn similarity(query: &[Vec<f32>], train: &[Vec<f32>]) -> Option<Vec<f32>> {
-        let descriptor_dim = query.first().map(|q| q.len()).unwrap_or(0);
+        let descriptor_dim = query.first().map_or(0, |q| q.len());
         if descriptor_dim == 0 {
             return None;
         }

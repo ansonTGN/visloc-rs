@@ -67,7 +67,7 @@ pub struct StereoFrame {
 }
 
 impl StereoFrame {
-    pub fn new(
+    pub const fn new(
         frame_id: FrameId,
         timestamp_ns: i64,
         cam0: crate::RawU16Image,
@@ -266,7 +266,7 @@ impl DirectKltStream {
         self.next_track_id
     }
 
-    pub fn cumulative_reject_counters(&self) -> &RejectReasonCounters {
+    pub const fn cumulative_reject_counters(&self) -> &RejectReasonCounters {
         &self.cumulative_rejects
     }
 
@@ -806,14 +806,14 @@ fn track_direction_from_seed_impl(
     ))
 }
 
-fn map_patch_error(error: PatchResidualError) -> KltFailure {
+const fn map_patch_error(error: PatchResidualError) -> KltFailure {
     match error {
         PatchResidualError::NoValidTargetSamples => KltFailure::TargetNoValidSamples,
         PatchResidualError::InsufficientOverlap { .. } => KltFailure::TargetInsufficientOverlap,
     }
 }
 
-fn map_update_error(error: Se2UpdateError) -> KltFailure {
+const fn map_update_error(error: Se2UpdateError) -> KltFailure {
     match error {
         Se2UpdateError::NonFiniteIncrement => KltFailure::IncrementNonFinite,
         Se2UpdateError::IncrementTooLarge { .. } => KltFailure::IncrementTooLarge,

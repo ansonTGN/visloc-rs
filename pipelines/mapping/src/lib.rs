@@ -122,7 +122,7 @@ pub struct SimpleKeyframePolicy {
 }
 
 impl SimpleKeyframePolicy {
-    pub fn new(config: KeyframePolicyConfig) -> Self {
+    pub const fn new(config: KeyframePolicyConfig) -> Self {
         Self {
             config,
             last_keyframe_frame_id: None,
@@ -132,23 +132,23 @@ impl SimpleKeyframePolicy {
         }
     }
 
-    pub fn config(&self) -> &KeyframePolicyConfig {
+    pub const fn config(&self) -> &KeyframePolicyConfig {
         &self.config
     }
 
-    pub fn last_keyframe_frame_id(&self) -> Option<FrameId> {
+    pub const fn last_keyframe_frame_id(&self) -> Option<FrameId> {
         self.last_keyframe_frame_id
     }
 
-    pub fn last_keyframe_pose(&self) -> Option<&Pose> {
+    pub const fn last_keyframe_pose(&self) -> Option<&Pose> {
         self.last_keyframe_pose.as_ref()
     }
 
-    pub fn selected_keyframe_count(&self) -> usize {
+    pub const fn selected_keyframe_count(&self) -> usize {
         self.selected_keyframe_count
     }
 
-    pub fn last_keyframe_tracked_landmark_count(&self) -> Option<usize> {
+    pub const fn last_keyframe_tracked_landmark_count(&self) -> Option<usize> {
         self.last_keyframe_tracked_landmark_count
     }
 
@@ -165,7 +165,7 @@ impl SimpleKeyframePolicy {
         self.decision(result.frame_id, true, reason)
     }
 
-    fn rejected(
+    const fn rejected(
         &self,
         result: &TrackingResult,
         reason: KeyframeDecisionReason,
@@ -173,7 +173,7 @@ impl SimpleKeyframePolicy {
         self.decision(result.frame_id, false, reason)
     }
 
-    fn decision(
+    const fn decision(
         &self,
         frame_id: FrameId,
         selected: bool,
@@ -308,8 +308,9 @@ impl KeyframePolicy for SimpleKeyframePolicy {
         let translation = self
             .last_keyframe_pose
             .as_ref()
-            .map(|last_pose| (pose.camera_center_world() - last_pose.camera_center_world()).norm())
-            .unwrap_or(f64::INFINITY);
+            .map_or(f64::INFINITY, |last_pose| {
+                (pose.camera_center_world() - last_pose.camera_center_world()).norm()
+            });
         if translation < self.config.min_translation {
             return self.rejected(
                 result,
@@ -830,7 +831,7 @@ pub enum MapUpdateValidationIssue {
     },
 }
 
-fn observation_key(observation: &Observation) -> (FrameId, LandmarkId, usize) {
+const fn observation_key(observation: &Observation) -> (FrameId, LandmarkId, usize) {
     (
         observation.frame_id,
         observation.landmark_id,
@@ -945,7 +946,7 @@ pub struct LandmarkCandidate {
 }
 
 impl LandmarkCandidate {
-    pub fn new(id: LandmarkCandidateId) -> Self {
+    pub const fn new(id: LandmarkCandidateId) -> Self {
         Self {
             id,
             observations: Vec::new(),
@@ -964,7 +965,7 @@ impl LandmarkCandidate {
         self
     }
 
-    pub fn with_position_covariance_world(mut self, covariance: Matrix3<f64>) -> Self {
+    pub const fn with_position_covariance_world(mut self, covariance: Matrix3<f64>) -> Self {
         self.position_covariance_world = Some(covariance);
         self
     }
@@ -1048,7 +1049,7 @@ pub struct LandmarkCandidateStereoMeasurement {
 }
 
 impl LandmarkCandidateObservation {
-    pub fn new(frame_id: FrameId, keypoint_index: usize, xy: Point2<f64>) -> Self {
+    pub const fn new(frame_id: FrameId, keypoint_index: usize, xy: Point2<f64>) -> Self {
         Self {
             frame_id,
             keypoint_index,
@@ -1057,7 +1058,7 @@ impl LandmarkCandidateObservation {
         }
     }
 
-    pub fn with_stereo_measurement(
+    pub const fn with_stereo_measurement(
         mut self,
         right_camera_id: CameraId,
         xy_right: Point2<f64>,
@@ -1135,7 +1136,7 @@ pub enum LandmarkCandidateValidationIssue {
     },
 }
 
-fn candidate_observation_key(observation: &LandmarkCandidateObservation) -> (FrameId, usize) {
+const fn candidate_observation_key(observation: &LandmarkCandidateObservation) -> (FrameId, usize) {
     (observation.frame_id, observation.keypoint_index)
 }
 
@@ -1159,7 +1160,7 @@ impl Default for LinearTriangulator {
 }
 
 impl LinearTriangulator {
-    pub fn new(config: TriangulationConfig) -> Self {
+    pub const fn new(config: TriangulationConfig) -> Self {
         Self { config }
     }
 }
@@ -1410,7 +1411,7 @@ pub struct LocalRefinementResult {
 }
 
 impl LocalRefinementResult {
-    pub fn skipped(reason: LocalRefinementReason) -> Self {
+    pub const fn skipped(reason: LocalRefinementReason) -> Self {
         Self {
             refined: false,
             reason,
@@ -1457,7 +1458,7 @@ where
     K: KeyframePolicy,
     T: Triangulator,
 {
-    pub fn new(
+    pub const fn new(
         keyframe_policy: K,
         triangulator: T,
         local_window_config: LocalMapWindowConfig,
@@ -1479,7 +1480,7 @@ where
     T: Triangulator,
     R: LocalRefiner,
 {
-    pub fn with_refiner(
+    pub const fn with_refiner(
         keyframe_policy: K,
         triangulator: T,
         local_refiner: R,

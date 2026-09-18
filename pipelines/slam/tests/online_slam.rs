@@ -938,8 +938,7 @@ fn recovered_marginal_factors_inject_into_pose_graph_sink() {
     let edge_count = slam
         .pose_graph_state
         .as_ref()
-        .map(|state| state.graph.edges.len())
-        .unwrap_or(0);
+        .map_or(0, |state| state.graph.edges.len());
     assert!(
         edge_count >= stats.recovered_marginal_factors_injected,
         "pose graph should carry recovered factors"
@@ -1627,8 +1626,8 @@ fn pose_graph_translation_gauss_newton_pulls_drifted_loop_back_to_anchor() {
     let edge_10_30 = relative_world_to_camera(&truth_10, &truth_30);
 
     let mut graph = PoseGraph::new();
-    graph.add_pose(10, truth_10.clone());
-    graph.add_pose(20, truth_20.clone());
+    graph.add_pose(10, truth_10);
+    graph.add_pose(20, truth_20);
     // Initialize node 30 with a deliberate translation drift.
     let drifted_30 = pose_at(Vector3::new(0.45, 0.10, 0.30));
     graph.add_pose(30, drifted_30);
@@ -1766,8 +1765,8 @@ fn pose_graph_se3_gauss_newton_corrects_rotation_and_translation_drift() {
     let edge_10_30 = relative_world_to_camera(&truth_10, &truth_30);
 
     let mut graph = PoseGraph::new();
-    graph.add_pose(10, truth_10.clone());
-    graph.add_pose(20, truth_20.clone());
+    graph.add_pose(10, truth_10);
+    graph.add_pose(20, truth_20);
     let drifted_30 = pose_with_yaw(Vector3::new(0.6, 0.05, 0.4), 0.55);
     graph.add_pose(30, drifted_30);
     graph.anchor(10);
@@ -3529,7 +3528,7 @@ mod vi_init_integration {
         VisualInertialInitializerConfig,
     };
 
-    fn euroc_z_up_gravity() -> Vector3<f64> {
+    const fn euroc_z_up_gravity() -> Vector3<f64> {
         Vector3::new(0.0, 0.0, -9.81)
     }
 

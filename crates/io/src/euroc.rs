@@ -607,7 +607,7 @@ fn strip_comment(line: &str) -> &str {
     // YAML comments start with '#' but only when not inside quotes. EuRoC
     // sensor.yaml files only carry simple '# ...' trailers, so a plain split
     // on the first '#' is sufficient here.
-    line.find('#').map(|idx| &line[..idx]).unwrap_or(line)
+    line.find('#').map_or(line, |idx| &line[..idx])
 }
 
 fn leading_spaces(line: &str) -> usize {

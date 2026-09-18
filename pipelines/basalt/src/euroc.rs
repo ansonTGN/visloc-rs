@@ -176,11 +176,11 @@ impl EurocSensorDataset {
         &self.root
     }
 
-    pub fn calibration(&self) -> &BasaltCalibration {
+    pub const fn calibration(&self) -> &BasaltCalibration {
         &self.calibration
     }
 
-    pub fn config(&self) -> &BasaltConfig {
+    pub const fn config(&self) -> &BasaltConfig {
         &self.config
     }
 
@@ -190,7 +190,7 @@ impl EurocSensorDataset {
 
     /// Number of rows in the original cam0 manifest, before requiring the
     /// stereo timestamp intersection used by upstream Basalt optical flow.
-    pub fn cam0_manifest_count(&self) -> usize {
+    pub const fn cam0_manifest_count(&self) -> usize {
         self.cam0_manifest_count
     }
 

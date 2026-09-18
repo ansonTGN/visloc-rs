@@ -375,7 +375,7 @@ pub struct LocalSubmapBuilder {
 }
 
 impl LocalSubmapBuilder {
-    pub fn new(config: LocalSubmapConfig) -> Self {
+    pub const fn new(config: LocalSubmapConfig) -> Self {
         Self { config }
     }
 

@@ -141,16 +141,15 @@ fn main() {
 
 fn print_verification(label: &str, candidate: &visloc_rs::LoopClosureCandidate) {
     let verification = candidate.verification.as_ref().expect("verifier was run");
-    let relative = verification
-        .relative_pose
-        .as_ref()
-        .map(|p| {
+    let relative = verification.relative_pose.as_ref().map_or_else(
+        || "-".to_string(),
+        |p| {
             format!(
                 "[{:.3}, {:.3}, {:.3}]",
                 p.translation.x, p.translation.y, p.translation.z
             )
-        })
-        .unwrap_or_else(|| "-".to_string());
+        },
+    );
     let mean_label = if let Some(px) = verification.mean_reprojection_error_px {
         format!("mean_reproj={px:.4} px")
     } else {

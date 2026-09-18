@@ -409,7 +409,7 @@ fn factor_blocks_inner<const B: usize>(
         .map(|col| col.iter().map(to_dyn).collect())
         .collect();
     let diag_inv_dyn = diag_inv.iter().map(to_dyn).collect();
-    Ok((sym.col_rows.clone(), col_vals_dyn, diag_inv_dyn))
+    Ok((sym.col_rows, col_vals_dyn, diag_inv_dyn))
 }
 
 /// The block size known, dispatch to the monomorphized solver. `threads` caps
@@ -1029,7 +1029,7 @@ impl<const B: usize> BlockIncrementalSolver<B> {
     }
 
     /// Number of block columns currently in the factor.
-    pub(crate) fn blocks(&self) -> usize {
+    pub(crate) const fn blocks(&self) -> usize {
         self.sym.n
     }
 
@@ -2127,7 +2127,7 @@ mod tests {
         let (mut cv, mut di) = seq(&t1, &sym);
 
         let c = n / 2;
-        let mut t2 = t1.clone();
+        let mut t2 = t1;
         for d in 0..b {
             t2.push((c * b + d, c * b + d, 0.75)); // perturb only column c's diagonal
         }
@@ -2162,7 +2162,7 @@ mod tests {
         let sym2 = analyze(&t3, dim, b);
         let (mut cv2, mut di2) = seq(&t3, &sym2);
         let c2 = 5;
-        let mut t4 = t3.clone();
+        let mut t4 = t3;
         for d in 0..b {
             t4.push((c2 * b + d, c2 * b + d, 0.5));
         }

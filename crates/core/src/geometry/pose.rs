@@ -13,7 +13,10 @@ impl Pose {
         }
     }
 
-    pub fn from_world_to_camera(rotation: UnitQuaternion<f64>, translation: Vector3<f64>) -> Self {
+    pub const fn from_world_to_camera(
+        rotation: UnitQuaternion<f64>,
+        translation: Vector3<f64>,
+    ) -> Self {
         Self {
             world_to_camera: SE3::new(rotation, translation),
         }

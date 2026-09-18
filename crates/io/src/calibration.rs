@@ -27,19 +27,19 @@ pub struct KittiProjection {
 }
 
 impl KittiProjection {
-    pub fn fx(&self) -> f64 {
+    pub const fn fx(&self) -> f64 {
         self.values[0]
     }
 
-    pub fn fy(&self) -> f64 {
+    pub const fn fy(&self) -> f64 {
         self.values[5]
     }
 
-    pub fn cx(&self) -> f64 {
+    pub const fn cx(&self) -> f64 {
         self.values[2]
     }
 
-    pub fn cy(&self) -> f64 {
+    pub const fn cy(&self) -> f64 {
         self.values[6]
     }
 
@@ -47,10 +47,10 @@ impl KittiProjection {
     /// KITTI stereo, the right camera's projection is `K · [I | t]` where
     /// `t = (-b, 0, 0)`, so this column equals `(-fx·b, 0, 0)` and the
     /// reference (left) camera's column is `(0, 0, 0)`.
-    pub fn t(&self) -> (f64, f64, f64) {
+    pub const fn t(&self) -> (f64, f64, f64) {
         (self.values[3], self.values[7], self.values[11])
     }
-    pub fn tx(&self) -> f64 {
+    pub const fn tx(&self) -> f64 {
         self.values[3]
     }
 

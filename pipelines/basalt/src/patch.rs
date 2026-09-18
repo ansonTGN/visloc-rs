@@ -121,7 +121,7 @@ impl MeanNormalizedPatch51 {
         patch
     }
 
-    pub fn sample_count(&self) -> usize {
+    pub const fn sample_count(&self) -> usize {
         Pattern51::SAMPLE_COUNT
     }
 

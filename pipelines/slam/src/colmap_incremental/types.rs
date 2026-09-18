@@ -82,7 +82,7 @@ pub struct SensorT {
 }
 
 impl SensorT {
-    pub fn camera(camera_id: CameraT) -> Self {
+    pub const fn camera(camera_id: CameraT) -> Self {
         Self {
             sensor_type: SensorType::Camera,
             id: camera_id,
@@ -105,7 +105,7 @@ pub struct DataT {
 }
 
 impl DataT {
-    pub fn camera(camera_id: CameraT, image_id: ImageT) -> Self {
+    pub const fn camera(camera_id: CameraT, image_id: ImageT) -> Self {
         Self {
             sensor_id: SensorT::camera(camera_id),
             id: image_id,
@@ -126,7 +126,7 @@ pub struct Rig {
 }
 
 impl Rig {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             rig_id: INVALID_RIG_ID,
             ref_sensor_id: SensorT::INVALID,
@@ -134,17 +134,17 @@ impl Rig {
         }
     }
 
-    pub fn rig_id(&self) -> RigT {
+    pub const fn rig_id(&self) -> RigT {
         self.rig_id
     }
 
-    pub fn set_rig_id(&mut self, rig_id: RigT) {
+    pub const fn set_rig_id(&mut self, rig_id: RigT) {
         self.rig_id = rig_id;
     }
 
     /// Port of `AddRefSensor` (`rig.h:57`). Must be called before any
     /// `add_sensor` call (COLMAP's own documented ordering requirement).
-    pub fn add_ref_sensor(&mut self, ref_sensor_id: SensorT) {
+    pub const fn add_ref_sensor(&mut self, ref_sensor_id: SensorT) {
         self.ref_sensor_id = ref_sensor_id;
     }
 
@@ -168,7 +168,7 @@ impl Rig {
     }
 
     /// Port of `RefSensorId` (`rig.h:133`).
-    pub fn ref_sensor_id(&self) -> SensorT {
+    pub const fn ref_sensor_id(&self) -> SensorT {
         self.ref_sensor_id
     }
 
@@ -194,7 +194,7 @@ impl Rig {
     }
 
     /// Port of `NonRefSensors` (`rig.h:153-159`).
-    pub fn non_ref_sensors(&self) -> &BTreeMap<SensorT, Option<SE3>> {
+    pub const fn non_ref_sensors(&self) -> &BTreeMap<SensorT, Option<SE3>> {
         &self.sensors_from_rig
     }
 
@@ -272,7 +272,7 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub fn new(frame_id: FrameT, rig_id: RigT) -> Self {
+    pub const fn new(frame_id: FrameT, rig_id: RigT) -> Self {
         Self {
             frame_id,
             rig_id,
@@ -281,24 +281,24 @@ impl Frame {
         }
     }
 
-    pub fn frame_id(&self) -> FrameT {
+    pub const fn frame_id(&self) -> FrameT {
         self.frame_id
     }
 
-    pub fn set_frame_id(&mut self, frame_id: FrameT) {
+    pub const fn set_frame_id(&mut self, frame_id: FrameT) {
         self.frame_id = frame_id;
     }
 
-    pub fn rig_id(&self) -> RigT {
+    pub const fn rig_id(&self) -> RigT {
         self.rig_id
     }
 
-    pub fn set_rig_id(&mut self, rig_id: RigT) {
+    pub const fn set_rig_id(&mut self, rig_id: RigT) {
         self.rig_id = rig_id;
     }
 
     /// Port of `DataIds` (`frame.h:57`).
-    pub fn data_ids(&self) -> &BTreeSet<DataT> {
+    pub const fn data_ids(&self) -> &BTreeSet<DataT> {
         &self.data_ids
     }
 
@@ -334,30 +334,30 @@ impl Frame {
     }
 
     /// Port of `HasPose` (`frame.h:94`).
-    pub fn has_pose(&self) -> bool {
+    pub const fn has_pose(&self) -> bool {
         self.rig_from_world.is_some()
     }
 
     /// Port of `ResetPose` (`frame.h:95`).
-    pub fn reset_pose(&mut self) {
+    pub const fn reset_pose(&mut self) {
         self.rig_from_world = None;
     }
 
     /// Port of `RigFromWorld` (`frame.h:88-89`, const accessor). Panics if
     /// unposed, mirroring COLMAP's `THROW_CHECK`.
-    pub fn rig_from_world(&self) -> &SE3 {
+    pub const fn rig_from_world(&self) -> &SE3 {
         self.rig_from_world
             .as_ref()
             .expect("frame does not have a valid pose")
     }
 
     /// Port of `MaybeRigFromWorld` (`frame.h:90-91`).
-    pub fn maybe_rig_from_world(&self) -> Option<&SE3> {
+    pub const fn maybe_rig_from_world(&self) -> Option<&SE3> {
         self.rig_from_world.as_ref()
     }
 
     /// Port of `SetRigFromWorld` (`frame.h:92-93`).
-    pub fn set_rig_from_world(&mut self, rig_from_world: SE3) {
+    pub const fn set_rig_from_world(&mut self, rig_from_world: SE3) {
         self.rig_from_world = Some(rig_from_world);
     }
 

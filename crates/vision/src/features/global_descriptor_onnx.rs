@@ -83,7 +83,7 @@ impl GlobalDescriptorOnnxExtractor {
     /// Compute the global descriptor for one frame.
     ///
     /// **Stub** — always returns [`GlobalDescriptorOnnxError::FeatureDisabled`].
-    pub fn extract_global(
+    pub const fn extract_global(
         &self,
         _image: &GrayscaleImage,
     ) -> Result<Vec<f32>, GlobalDescriptorOnnxError> {

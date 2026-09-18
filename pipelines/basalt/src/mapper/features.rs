@@ -321,7 +321,7 @@ pub fn detect_keypoints_mapping(image: &RawU16Image, num_features: usize) -> Vec
         .collect()
 }
 
-fn reflect101(index: i32, size: i32) -> i32 {
+const fn reflect101(index: i32, size: i32) -> i32 {
     if size <= 1 {
         return 0;
     }

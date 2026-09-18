@@ -562,7 +562,7 @@ impl BasaltVioEstimator {
     }
 
     /// Returns the cumulative internal timing snapshot for the adapter sidecar.
-    pub(crate) fn timing_breakdown(&self) -> &TimingBreakdown {
+    pub(crate) const fn timing_breakdown(&self) -> &TimingBreakdown {
         &self.timing
     }
 
@@ -641,7 +641,7 @@ impl BasaltVioEstimator {
         self.window_poses.len()
     }
 
-    pub(crate) fn no_output_mode_active(&self) -> bool {
+    pub(crate) const fn no_output_mode_active(&self) -> bool {
         self.lean_no_output_mode
     }
 
@@ -653,7 +653,7 @@ impl BasaltVioEstimator {
         self.window_states.len() * NAV_STATE_DOF
     }
 
-    pub fn has_prior(&self) -> bool {
+    pub const fn has_prior(&self) -> bool {
         self.prior.is_some()
     }
 

@@ -183,7 +183,7 @@ impl SparseFactorGraph {
         }
     }
 
-    pub fn config(&self) -> &SparseFactorGraphConfig {
+    pub const fn config(&self) -> &SparseFactorGraphConfig {
         &self.config
     }
 

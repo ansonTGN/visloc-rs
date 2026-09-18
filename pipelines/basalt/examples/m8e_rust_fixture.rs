@@ -211,7 +211,7 @@ fn main() {
         GlobalBaConfig::default(),
     );
     let t = s.trace.first();
-    let it: Vec<_>=s.trace.iter().map(|x| { let q=x.trials.first(); serde_json::json!({"iteration":x.iteration,"vision":x.vision_cost,"relative":x.relative_cost,"roll_pitch":x.roll_pitch_cost,"hdiag0":x.h_diagonal.first().copied().unwrap_or(0.0),"max_pose_increment":q.map_or(0.0,|z|z.max_pose_increment),"f_diff":q.map_or(0.0,|z|z.f_diff),"accepted":q.is_some_and(|z|z.accepted),"landmark_3_increment":x.landmark_increments.iter().find(|(id,_)|*id==3).map(|(_,v)|v).unwrap_or(&[0.0;3])}) }).collect();
+    let it: Vec<_>=s.trace.iter().map(|x| { let q=x.trials.first(); serde_json::json!({"iteration":x.iteration,"vision":x.vision_cost,"relative":x.relative_cost,"roll_pitch":x.roll_pitch_cost,"hdiag0":x.h_diagonal.first().copied().unwrap_or(0.0),"max_pose_increment":q.map_or(0.0,|z|z.max_pose_increment),"f_diff":q.map_or(0.0,|z|z.f_diff),"accepted":q.is_some_and(|z|z.accepted),"landmark_3_increment":x.landmark_increments.iter().find(|(id,_)|*id==3).map_or(&[0.0;3], |(_,v)|v)}) }).collect();
     println!(
         "{}",
         serde_json::json!({"initial_cost":s.initial_cost,"final_cost":s.final_cost,"iterations":s.iterations,"final_lambda":s.final_lambda,"final_state_hash":s.final_state_hash,"trace_hash":s.trace_hash,"pose_count":s.pose_count,"track_count":s.track_count,"initial_vision":t.map_or(0.0,|x|x.vision_cost),"initial_relative":t.map_or(0.0,|x|x.relative_cost),"initial_roll_pitch":t.map_or(0.0,|x|x.roll_pitch_cost),"relative_factor_costs":rel_costs,"roll_pitch_factor_costs":rp_costs,"trace":it})

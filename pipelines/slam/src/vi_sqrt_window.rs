@@ -55,7 +55,7 @@ pub enum NavBlock {
 }
 
 impl NavBlock {
-    pub fn dof(self) -> usize {
+    pub const fn dof(self) -> usize {
         match self {
             NavBlock::Pose6 => 6,
             NavBlock::PoseVelBias15 => 15,
@@ -135,7 +135,7 @@ pub fn step_window_marginal(
         .sum();
 
     // Build the full sqrt stack: append the carried marginal rows (if any) over `carried_slots`.
-    let carried_rows = carried.map(|m| m.factor.nrows()).unwrap_or(0);
+    let carried_rows = carried.map_or(0, |m| m.factor.nrows());
     let n_rows = window_jac.nrows() + carried_rows;
     let mut jac = DMatrix::zeros(n_rows, total);
     let mut resid = DVector::zeros(n_rows);
@@ -317,7 +317,7 @@ mod tests {
         // slots 0,1 (b,c = cols 6..18 of the original = first 12 of the slice). Marginalize b
         // (the first 6 dof of the slice), keep [c,d].
         let j_step2 = j.columns(6, 18).into_owned(); // 18 cols = [b,c,d]
-        let r_step2 = r.clone();
+        let r_step2 = r;
         let second = step_window_marginal(
             &j_step2,
             &r_step2,

@@ -21,11 +21,11 @@ fn keyframe(frame_id: u64, camera_id: u64) -> Keyframe {
     }
 }
 
-fn landmark(landmark_id: u64) -> Landmark {
+const fn landmark(landmark_id: u64) -> Landmark {
     Landmark::new(landmark_id, Point3::new(0.0, 0.0, 5.0))
 }
 
-fn observation(frame_id: u64, landmark_id: u64, keypoint_index: usize) -> Observation {
+const fn observation(frame_id: u64, landmark_id: u64, keypoint_index: usize) -> Observation {
     Observation {
         frame_id,
         landmark_id,

@@ -133,7 +133,7 @@ fn recall_at_topk(pairs: &[(usize, usize)], labels: &[usize], k: usize) -> f64 {
     per_query_recall.iter().sum::<f64>() / per_query_recall.len() as f64
 }
 
-fn tree_hkm(depth: usize) -> HkmBuildOptions {
+const fn tree_hkm(depth: usize) -> HkmBuildOptions {
     // branching^depth leaf words: small enough to build fast on a laptop,
     // deep enough that word separation keeps same-place images ahead of
     // cross-place leakage (the regime the benchmark studies).

@@ -90,7 +90,7 @@ pub struct MatchData {
 }
 
 impl MatchData {
-    pub fn new(inliers: Vec<(FeatureId, FeatureId)>) -> Self {
+    pub const fn new(inliers: Vec<(FeatureId, FeatureId)>) -> Self {
         Self { inliers }
     }
 
@@ -431,7 +431,7 @@ pub struct TrackFilterReport {
 }
 
 impl TrackFilterReport {
-    pub fn exported_track_count(&self) -> usize {
+    pub const fn exported_track_count(&self) -> usize {
         self.component_count_after
     }
 }
@@ -582,7 +582,7 @@ impl TrackBuilder {
             component_count_after,
             conflict_track_ids: conflict_track_ids.clone(),
             short_track_ids: short_track_ids.clone(),
-            rejected_track_ids: rejected_track_ids.clone(),
+            rejected_track_ids,
             rejected_conflict_ids: conflict_track_ids,
             rejected_short_ids: short_track_ids,
             component_lengths,
@@ -625,7 +625,7 @@ impl TrackBuilder {
         self.map_node_to_index.len()
     }
 
-    pub fn last_filter_report(&self) -> Option<&TrackFilterReport> {
+    pub const fn last_filter_report(&self) -> Option<&TrackFilterReport> {
         self.last_filter_report.as_ref()
     }
 
@@ -946,7 +946,7 @@ impl GlobalBaOptimizerState {
     /// Construct the source mapper state.  `lambda_initial` is intentionally
     /// ignored here: Basalt's `NfrMapper` constructor sets the live lambda to
     /// `mapper_lm_lambda_min`, not to the VIO optimizer's initial value.
-    pub fn new(min_lambda: f64, max_lambda: f64) -> Self {
+    pub const fn new(min_lambda: f64, max_lambda: f64) -> Self {
         Self {
             lambda: min_lambda,
             min_lambda,
@@ -1025,7 +1025,7 @@ pub struct MapperSummary {
     pub trace_hash: u64,
 }
 
-fn identity_rotation_array() -> [f64; 9] {
+const fn identity_rotation_array() -> [f64; 9] {
     [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
 }
 type Matrix2x3 = nalgebra::SMatrix<f64, 2, 3>;
@@ -2796,7 +2796,7 @@ pub fn extract_nonlinear_factors(
     if matrix_rank(&h) != asize {
         return Err(NfrExtractionError::RankDeficient);
     }
-    let Some(cov_old) = h.clone().qr().solve(&DMatrix::identity(asize, asize)) else {
+    let Some(cov_old) = h.qr().solve(&DMatrix::identity(asize, asize)) else {
         return Err(NfrExtractionError::RankDeficient);
     };
     if cov_old.iter().any(|x| !x.is_finite()) {

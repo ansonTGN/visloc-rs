@@ -390,9 +390,7 @@ fn reference_trajectory_from_poses(poses: &[(u64, Pose, Point3<f64>)]) -> PoseTr
 }
 
 fn optional_f64_json(value: Option<f64>) -> String {
-    value
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "null".to_string())
+    value.map_or_else(|| "null".to_string(), |value| value.to_string())
 }
 
 fn frame_from_projected_landmarks(

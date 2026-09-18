@@ -73,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..LoopClosureConfig::default()
             },
             pose_graph_refinement: Some(OnlineSlamLoopClosureRefinementConfig {
-                camera: camera.clone(),
+                camera,
                 verifier_config: LoopClosureVerifierConfig {
                     min_inliers: 8,
                     min_inlier_ratio: 0.5,

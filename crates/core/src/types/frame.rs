@@ -15,7 +15,7 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub fn new(id: FrameId, camera_id: CameraId) -> Self {
+    pub const fn new(id: FrameId, camera_id: CameraId) -> Self {
         Self {
             id,
             camera_id,

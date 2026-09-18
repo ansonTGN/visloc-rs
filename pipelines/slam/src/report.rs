@@ -45,18 +45,18 @@ pub fn online_slam_results_to_html_report(results: &[OnlineSlamResult]) -> Strin
     push_metric_card(
         &mut output,
         "Final keyframes",
-        &results
-            .last()
-            .map(|result| result.map_keyframe_count.to_string())
-            .unwrap_or_else(|| "0".to_string()),
+        &results.last().map_or_else(
+            || "0".to_string(),
+            |result| result.map_keyframe_count.to_string(),
+        ),
     );
     push_metric_card(
         &mut output,
         "Final landmarks",
-        &results
-            .last()
-            .map(|result| result.map_landmark_count.to_string())
-            .unwrap_or_else(|| "0".to_string()),
+        &results.last().map_or_else(
+            || "0".to_string(),
+            |result| result.map_landmark_count.to_string(),
+        ),
     );
     output.push_str("</section>\n");
     output.push_str("<section class=\"panel\">\n");
@@ -94,8 +94,7 @@ pub fn online_slam_results_to_html_report(results: &[OnlineSlamResult]) -> Strin
                     verification
                         .failure_reason
                         .as_ref()
-                        .map(format_loop_closure_failure_reason)
-                        .unwrap_or_else(|| "&mdash;".to_string()),
+                        .map_or_else(|| "&mdash;".to_string(), format_loop_closure_failure_reason),
                 )
             } else {
                 (

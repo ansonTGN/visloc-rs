@@ -64,7 +64,7 @@ impl BasaltOpticalFlowConfig {
 
     /// FB² threshold for same-timestamp stereo LK (always the Basalt value).
     #[inline]
-    pub fn stereo_max_recovered_dist2(&self) -> f32 {
+    pub const fn stereo_max_recovered_dist2(&self) -> f32 {
         self.optical_flow_max_recovered_dist2
     }
 }
@@ -200,67 +200,67 @@ impl BasaltVioConfigFile {
 fn default_flow_type() -> String {
     "frame_to_frame".into()
 }
-fn default_grid_size() -> i32 {
+const fn default_grid_size() -> i32 {
     50
 }
-fn default_max_recovered_dist2() -> f32 {
+const fn default_max_recovered_dist2() -> f32 {
     0.04
 }
-fn default_pattern() -> i32 {
+const fn default_pattern() -> i32 {
     51
 }
-fn default_max_iterations() -> i32 {
+const fn default_max_iterations() -> i32 {
     5
 }
-fn default_epipolar_error() -> f32 {
+const fn default_epipolar_error() -> f32 {
     0.005
 }
-fn default_levels() -> i32 {
+const fn default_levels() -> i32 {
     3
 }
-fn default_skip_frames() -> i32 {
+const fn default_skip_frames() -> i32 {
     1
 }
 fn default_linearization() -> String {
     "ABS_QR".into()
 }
-fn default_true() -> bool {
+const fn default_true() -> bool {
     true
 }
-fn default_max_states() -> i32 {
+const fn default_max_states() -> i32 {
     3
 }
-fn default_max_kfs() -> i32 {
+const fn default_max_kfs() -> i32 {
     7
 }
-fn default_min_frames_after_kf() -> i32 {
+const fn default_min_frames_after_kf() -> i32 {
     5
 }
-fn default_new_kf_thresh() -> f32 {
+const fn default_new_kf_thresh() -> f32 {
     0.7
 }
-fn default_obs_std() -> f64 {
+const fn default_obs_std() -> f64 {
     0.5
 }
-fn default_huber() -> f64 {
+const fn default_huber() -> f64 {
     1.0
 }
-fn default_min_tri_dist() -> f64 {
+const fn default_min_tri_dist() -> f64 {
     0.05
 }
-fn default_outlier_threshold() -> f64 {
+const fn default_outlier_threshold() -> f64 {
     3.0
 }
-fn default_vio_iters() -> i32 {
+const fn default_vio_iters() -> i32 {
     7
 }
-fn default_lm_lambda_initial() -> f64 {
+const fn default_lm_lambda_initial() -> f64 {
     1e-4
 }
-fn default_lm_lambda_min() -> f64 {
+const fn default_lm_lambda_min() -> f64 {
     1e-6
 }
-fn default_lm_lambda_max() -> f64 {
+const fn default_lm_lambda_max() -> f64 {
     1e2
 }
 

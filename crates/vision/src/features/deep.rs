@@ -192,11 +192,11 @@ pub struct HogLikeFeatureExtractor {
 }
 
 impl HogLikeFeatureExtractor {
-    pub fn new(config: HogLikeFeatureConfig) -> Self {
+    pub const fn new(config: HogLikeFeatureConfig) -> Self {
         Self { config }
     }
 
-    fn patch_radius() -> usize {
+    const fn patch_radius() -> usize {
         HOG_CELLS_PER_SIDE * HOG_CELL_SIZE / 2
     }
 
@@ -369,7 +369,7 @@ impl DeepFeatureExtractor for HogLikeFeatureExtractor {
         }
 
         let candidates = self.detect_keypoints(image);
-        let max_score = candidates.first().map(|c| c.0).unwrap_or(0.0);
+        let max_score = candidates.first().map_or(0.0, |c| c.0);
 
         let mut keypoints = Vec::with_capacity(candidates.len());
         let mut scores = Vec::with_capacity(candidates.len());
@@ -406,7 +406,7 @@ pub struct CornerDeepAdapter {
 }
 
 impl CornerDeepAdapter {
-    pub fn new(inner: CornerFeatureExtractor) -> Self {
+    pub const fn new(inner: CornerFeatureExtractor) -> Self {
         Self { inner }
     }
 }
@@ -508,7 +508,7 @@ pub struct MultiScaleDeepExtractor<E> {
 }
 
 impl<E> MultiScaleDeepExtractor<E> {
-    pub fn new(inner: E, config: MultiScaleDeepConfig) -> Self {
+    pub const fn new(inner: E, config: MultiScaleDeepConfig) -> Self {
         Self { inner, config }
     }
 }

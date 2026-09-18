@@ -1166,7 +1166,7 @@ struct Reader<R> {
 }
 
 impl<R: Read> Reader<R> {
-    fn new(inner: R, payload_len: u64) -> Self {
+    const fn new(inner: R, payload_len: u64) -> Self {
         Self {
             inner,
             offset: 0,
@@ -1282,7 +1282,7 @@ impl<R: Read> Reader<R> {
         Ok(Some(values))
     }
 
-    fn done(&self) -> bool {
+    const fn done(&self) -> bool {
         self.offset == self.payload_len
     }
 }
@@ -1585,7 +1585,7 @@ fn payload_len(snapshot: &Snapshot) -> Result<u64, String> {
 }
 
 impl<W> PayloadDigestWriter<W> {
-    fn new(inner: W) -> Self {
+    const fn new(inner: W) -> Self {
         Self {
             inner,
             checksum: 0xcbf29ce484222325,

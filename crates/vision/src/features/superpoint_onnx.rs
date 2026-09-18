@@ -109,7 +109,7 @@ impl fmt::Debug for SuperPointOnnxExtractor {
 
 impl SuperPointOnnxExtractor {
     /// Borrow the active configuration.
-    pub fn config(&self) -> &SuperPointOnnxConfig {
+    pub const fn config(&self) -> &SuperPointOnnxConfig {
         &self.config
     }
 }

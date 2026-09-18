@@ -43,7 +43,7 @@ pub struct Point2D {
 }
 
 impl Point2D {
-    pub fn new(xy: Point2<f64>) -> Self {
+    pub const fn new(xy: Point2<f64>) -> Self {
         Self {
             xy,
             point3d_id: None,
@@ -51,7 +51,7 @@ impl Point2D {
     }
 
     /// Port of `Point2D::HasPoint3D` (`scene/point2d.h`).
-    pub fn has_point3d(&self) -> bool {
+    pub const fn has_point3d(&self) -> bool {
         self.point3d_id.is_some()
     }
 }
@@ -69,7 +69,7 @@ pub struct Image {
 }
 
 impl Image {
-    pub fn new(image_id: ImageT, camera_id: CameraT, frame_id: FrameT, name: String) -> Self {
+    pub const fn new(image_id: ImageT, camera_id: CameraT, frame_id: FrameT, name: String) -> Self {
         Self {
             image_id,
             camera_id,
@@ -111,7 +111,7 @@ pub struct Point3D {
 }
 
 impl Point3D {
-    pub fn new(xyz: Point3<f64>) -> Self {
+    pub const fn new(xyz: Point3<f64>) -> Self {
         Self {
             xyz,
             color: [0, 0, 0],
@@ -223,19 +223,19 @@ impl Reconstruction {
         self.points3d.keys().copied().collect()
     }
 
-    pub fn rigs(&self) -> &BTreeMap<RigT, Rig> {
+    pub const fn rigs(&self) -> &BTreeMap<RigT, Rig> {
         &self.rigs
     }
-    pub fn cameras(&self) -> &BTreeMap<CameraT, Camera> {
+    pub const fn cameras(&self) -> &BTreeMap<CameraT, Camera> {
         &self.cameras
     }
-    pub fn frames(&self) -> &BTreeMap<FrameT, Frame> {
+    pub const fn frames(&self) -> &BTreeMap<FrameT, Frame> {
         &self.frames
     }
-    pub fn images(&self) -> &BTreeMap<ImageT, Image> {
+    pub const fn images(&self) -> &BTreeMap<ImageT, Image> {
         &self.images
     }
-    pub fn points3d(&self) -> &BTreeMap<Point3DT, Point3D> {
+    pub const fn points3d(&self) -> &BTreeMap<Point3DT, Point3D> {
         &self.points3d
     }
     /// Port of `RegFrameIds` (`reconstruction.h:91`).

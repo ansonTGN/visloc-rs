@@ -1292,8 +1292,7 @@ fn augment_tracks_with_pose_guided_edges(
             let db = (b.as_ref().unwrap().camera_center_world() - anchor_center).norm_squared();
             da.total_cmp(&db)
         })
-        .map(|(image, _)| image)
-        .unwrap_or(anchor);
+        .map_or(anchor, |(image, _)| image);
     ba.fix_pose(scale_anchor as u64);
     for (track_id, track) in candidate_tracks.iter().enumerate() {
         ba.add_landmark(track_id as u64, track.position);
@@ -1563,7 +1562,7 @@ fn refine_with_pose_only_edges(
         parallel: parallel_ba,
         ..BaConfig::default()
     })?;
-    let mut candidate_tracks = original_tracks.clone();
+    let mut candidate_tracks = original_tracks;
     for (track_id, track) in candidate_tracks.iter_mut().enumerate() {
         track.position = ba.landmarks[&(track_id as u64)];
     }
@@ -1644,7 +1643,7 @@ fn accept_wide_hypothesis(
 /// whereas MH03's harmful graph collapses to 77.6% / 81.9%. The thresholds sit
 /// between those measured regimes and are evaluated before any candidate seed,
 /// triangulation, or BA work.
-fn accept_wide_track_preflight(trusted: TrackBuildStats, candidate: TrackBuildStats) -> bool {
+const fn accept_wide_track_preflight(trusted: TrackBuildStats, candidate: TrackBuildStats) -> bool {
     candidate.input_correspondences > trusted.input_correspondences
         && candidate.retained_tracks * 100 >= trusted.retained_tracks * 82
         && candidate.retained_observations * 100 >= trusted.retained_observations * 85
@@ -2118,7 +2117,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             seam_ba_config.ba.parallel = args.parallel_ba;
             hierarchical_config.seam_bundle_adjustment = Some(seam_ba_config);
         }
-        hierarchical_config.local_submap.sfm = config.clone();
+        hierarchical_config.local_submap.sfm = config;
         let source_frame_ids = (0..features.len())
             .map(|index| index as u64)
             .collect::<Vec<_>>();

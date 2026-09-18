@@ -389,19 +389,14 @@ pub fn estimate_gr6p_ransac_with_config(
             if score.inliers.len() < config.min_inliers {
                 continue;
             }
-            let replace = best
-                .as_ref()
-                .map(|(best_pose, best_score)| {
-                    is_better_gr6p_score(&score, &candidate, best_score, best_pose)
-                })
-                .unwrap_or(true);
+            let replace = best.as_ref().is_none_or(|(best_pose, best_score)| {
+                is_better_gr6p_score(&score, &candidate, best_score, best_pose)
+            });
             if replace {
                 best = Some((candidate, score));
                 required_iterations = required_iterations.min(confidence_iterations(
                     config.confidence,
-                    best.as_ref()
-                        .map(|(_, score)| score.inliers.len())
-                        .unwrap_or(0),
+                    best.as_ref().map_or(0, |(_, score)| score.inliers.len()),
                     normalized.len(),
                     config.min_iterations,
                     config.max_iterations,
@@ -2017,7 +2012,7 @@ mod tests {
             estimate_gr6p_ransac(&nonfinite),
             Err(GeneralizedRelativePoseRansacError::NonFiniteObservation { index: 0 })
         );
-        let mut zero_length = input.clone();
+        let mut zero_length = input;
         zero_length[1].rig1.bearing = Vector3::zeros();
         assert_eq!(
             estimate_gr6p_ransac(&zero_length),

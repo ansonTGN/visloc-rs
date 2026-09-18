@@ -460,7 +460,7 @@ mod tests {
         let ev = j_full.transpose() * &r_full;
         let dense_factors = recover_relative_pose_factors(
             &lv.clone().cholesky().unwrap().l().transpose(),
-            &(lv.clone().try_inverse().unwrap() * &ev),
+            &(lv.try_inverse().unwrap() * &ev),
             n,
         )
         .unwrap();

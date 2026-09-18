@@ -20,17 +20,17 @@ pub struct Timestamp {
 }
 
 impl Timestamp {
-    pub fn from_nanoseconds(nanoseconds: i128) -> Self {
+    pub const fn from_nanoseconds(nanoseconds: i128) -> Self {
         Self { nanoseconds }
     }
 
-    pub fn from_seconds_nanoseconds(seconds: i64, nanoseconds: u32) -> Self {
+    pub const fn from_seconds_nanoseconds(seconds: i64, nanoseconds: u32) -> Self {
         Self {
             nanoseconds: seconds as i128 * 1_000_000_000 + nanoseconds as i128,
         }
     }
 
-    pub fn as_nanoseconds(&self) -> i128 {
+    pub const fn as_nanoseconds(&self) -> i128 {
         self.nanoseconds
     }
 
@@ -50,11 +50,11 @@ pub struct TimeDelta {
 }
 
 impl TimeDelta {
-    pub fn from_nanoseconds(nanoseconds: i128) -> Self {
+    pub const fn from_nanoseconds(nanoseconds: i128) -> Self {
         Self { nanoseconds }
     }
 
-    pub fn as_nanoseconds(&self) -> i128 {
+    pub const fn as_nanoseconds(&self) -> i128 {
         self.nanoseconds
     }
 
@@ -70,7 +70,7 @@ pub struct Timed<T> {
 }
 
 impl<T> Timed<T> {
-    pub fn new(timestamp: Timestamp, value: T) -> Self {
+    pub const fn new(timestamp: Timestamp, value: T) -> Self {
         Self { timestamp, value }
     }
 }
@@ -182,7 +182,7 @@ impl FramePriorSyncSummary {
         }
     }
 
-    pub fn all_frames_matched(&self) -> bool {
+    pub const fn all_frames_matched(&self) -> bool {
         self.missing_measurement_count == 0
     }
 
@@ -318,7 +318,7 @@ pub struct PositionCovariance {
 }
 
 impl PositionCovariance {
-    pub fn new(matrix: Matrix3<f64>) -> Self {
+    pub const fn new(matrix: Matrix3<f64>) -> Self {
         Self { matrix }
     }
 
@@ -347,7 +347,7 @@ pub struct PoseCovariance {
 }
 
 impl PoseCovariance {
-    pub fn new(matrix: PoseCovarianceMatrix) -> Self {
+    pub const fn new(matrix: PoseCovarianceMatrix) -> Self {
         Self { matrix }
     }
 
@@ -552,7 +552,7 @@ where
         }
     }
 
-    pub fn with_prior_config(mut self, prior_config: PriorConfig) -> Self {
+    pub const fn with_prior_config(mut self, prior_config: PriorConfig) -> Self {
         self.prior_config = prior_config;
         self
     }
@@ -640,7 +640,7 @@ pub struct GnssMeasurement {
 }
 
 impl GnssMeasurement {
-    pub fn new(timestamp: Timestamp, position_world: Point3<f64>) -> Self {
+    pub const fn new(timestamp: Timestamp, position_world: Point3<f64>) -> Self {
         Self {
             timestamp,
             position_world,
@@ -650,7 +650,7 @@ impl GnssMeasurement {
         }
     }
 
-    pub fn with_accuracy(
+    pub const fn with_accuracy(
         mut self,
         horizontal_accuracy: Option<f64>,
         vertical_accuracy: Option<f64>,
@@ -660,7 +660,10 @@ impl GnssMeasurement {
         self
     }
 
-    pub fn with_position_covariance(mut self, position_covariance: PositionCovariance) -> Self {
+    pub const fn with_position_covariance(
+        mut self,
+        position_covariance: PositionCovariance,
+    ) -> Self {
         self.position_covariance = Some(position_covariance);
         self
     }
@@ -677,8 +680,9 @@ impl GnssMeasurement {
                     .as_ref()
                     .and_then(PositionCovariance::max_standard_deviation)
             })
-            .map(|sigma| sigma * config.confidence_multiplier)
-            .unwrap_or(config.default_radius);
+            .map_or(config.default_radius, |sigma| {
+                sigma * config.confidence_multiplier
+            });
         accuracy_radius.max(config.min_radius)
     }
 }
@@ -707,7 +711,7 @@ pub struct PosePriorMeasurement {
 }
 
 impl PosePriorMeasurement {
-    pub fn new(timestamp: Timestamp, pose: Pose) -> Self {
+    pub const fn new(timestamp: Timestamp, pose: Pose) -> Self {
         Self {
             timestamp,
             pose,
@@ -716,12 +720,12 @@ impl PosePriorMeasurement {
         }
     }
 
-    pub fn with_translation_sigma(mut self, translation_sigma: f64) -> Self {
+    pub const fn with_translation_sigma(mut self, translation_sigma: f64) -> Self {
         self.translation_sigma = Some(translation_sigma);
         self
     }
 
-    pub fn with_pose_covariance(mut self, pose_covariance: PoseCovariance) -> Self {
+    pub const fn with_pose_covariance(mut self, pose_covariance: PoseCovariance) -> Self {
         self.pose_covariance = Some(pose_covariance);
         self
     }
@@ -733,8 +737,9 @@ impl PosePriorMeasurement {
                     .as_ref()
                     .and_then(PoseCovariance::max_translation_standard_deviation)
             })
-            .map(|sigma| sigma * config.confidence_multiplier)
-            .unwrap_or(config.default_radius)
+            .map_or(config.default_radius, |sigma| {
+                sigma * config.confidence_multiplier
+            })
             .max(config.min_radius)
     }
 }
@@ -763,7 +768,7 @@ pub struct ImuMeasurement {
 }
 
 impl ImuMeasurement {
-    pub fn new(
+    pub const fn new(
         timestamp: Timestamp,
         angular_velocity: Vector3<f64>,
         linear_acceleration: Vector3<f64>,
@@ -776,7 +781,7 @@ impl ImuMeasurement {
         }
     }
 
-    pub fn with_orientation(mut self, orientation: UnitQuaternion<f64>) -> Self {
+    pub const fn with_orientation(mut self, orientation: UnitQuaternion<f64>) -> Self {
         self.orientation = Some(orientation);
         self
     }

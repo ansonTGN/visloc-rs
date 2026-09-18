@@ -193,7 +193,7 @@ impl OnlineSlamMotionViInitState {
 
     /// `true` while the motion-based stage is waiting for its trigger.
     /// Mirrors the convention used by [`crate::OnlineSlamViInitState::is_active`].
-    pub(crate) fn is_active(&self) -> bool {
+    pub(crate) const fn is_active(&self) -> bool {
         self.completed.is_none()
     }
 
@@ -210,7 +210,7 @@ impl OnlineSlamMotionViInitState {
     /// replaced the placeholder-zero bias linearisation with the
     /// refined/estimated seed (see that method's doc comment), so it
     /// counts as "no longer pending" exactly like a terminal `completed`.
-    pub(crate) fn velocity_stage_fired(&self) -> bool {
+    pub(crate) const fn velocity_stage_fired(&self) -> bool {
         self.initializer.velocity_stage_result().is_some()
     }
 

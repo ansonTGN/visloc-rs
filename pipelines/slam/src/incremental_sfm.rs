@@ -464,7 +464,7 @@ pub struct PairwiseMatches {
 
 impl PairwiseMatches {
     /// Construct matches without a known two-view configuration.
-    pub fn new(image_i: usize, image_j: usize, matches: Vec<(usize, usize)>) -> Self {
+    pub const fn new(image_i: usize, image_j: usize, matches: Vec<(usize, usize)>) -> Self {
         Self {
             image_i,
             image_j,
@@ -4478,7 +4478,7 @@ fn place_seed_pair(
 /// growth loop.  The after-post policy deliberately suppresses this path and
 /// invokes the same proposal logic only after the ordinary post-refinement
 /// sweep has stalled.
-fn sequence_fallback_enabled_during_growth(config: &IncrementalSfmConfig) -> bool {
+const fn sequence_fallback_enabled_during_growth(config: &IncrementalSfmConfig) -> bool {
     config.sequence_relative_pose_fallback && !config.sequence_fallback_after_post
 }
 
@@ -4488,7 +4488,10 @@ fn sequence_fallback_enabled_during_growth(config: &IncrementalSfmConfig) -> boo
 /// the newly registered image, and sequence fallback has its own full-scan
 /// commit helper. All of those modes therefore retain the historical full
 /// pending-track scan.
-fn targeted_plain_growth_enabled(config: &IncrementalSfmConfig, has_initial_poses: bool) -> bool {
+const fn targeted_plain_growth_enabled(
+    config: &IncrementalSfmConfig,
+    has_initial_poses: bool,
+) -> bool {
     !has_initial_poses
         && !config.colmap_style_mapper
         && !config.incremental_correspondence_triangulation
@@ -4535,9 +4538,8 @@ fn grow_from_seed_with_sequence_overrides(
     let mut last_progress_triangulation = 0.0;
     let mut last_progress_ba = 0.0;
     let n_images = features.len();
-    let mut poses: Vec<Option<Pose>> = initial_poses
-        .map(|poses| poses.to_vec())
-        .unwrap_or_else(|| vec![None; n_images]);
+    let mut poses: Vec<Option<Pose>> =
+        initial_poses.map_or_else(|| vec![None; n_images], |poses| poses.to_vec());
     let mut track_point: Vec<Option<Point3<f64>>> = vec![None; tracks.len()];
     let mut correspondence_state = config
         .incremental_correspondence_triangulation
@@ -6721,14 +6723,13 @@ fn structureless_registration_pass(
             track_point.clone_from_slice(&points_before);
             if sfm_debug_enabled() {
                 let (pose_rotation_deg, pose_forward_ratio, pose_line_ratio) = pose_consistency
-                    .map(|diagnostic| {
+                    .map_or((f64::NAN, f64::NAN, f64::NAN), |diagnostic| {
                         (
                             diagnostic.max_rotation_deg,
                             diagnostic.min_forward_ratio,
                             diagnostic.line_error_ratio,
                         )
-                    })
-                    .unwrap_or((f64::NAN, f64::NAN, f64::NAN));
+                    });
                 eprintln!(
                     "sfm-debug: structure-less image {image} rolled back \
                      (neighbors={} line-ratio={:.4} support={} mean={:.3}px \
@@ -9887,7 +9888,7 @@ fn sequence_essential_matches(
 /// Only a pair explicitly marked by the caller as having passed the narrow
 /// high-support F→E override may use the evidence-backed 100-point / 30%
 /// floor.  The minimum seed support is still enforced in both modes.
-fn sequence_triangulation_admission_ok(
+const fn sequence_triangulation_admission_ok(
     triangulated_points: usize,
     selected_matches: usize,
     min_seed_matches: usize,
@@ -10838,7 +10839,7 @@ fn next_image_auto_metrics(result: &IncrementalSfmResult) -> NextImageAutoMetric
 /// the comparison for every incomplete result is intentional: a candidate
 /// that misses only one image can still be less accurate than a complete
 /// count-policy reconstruction.
-fn next_image_auto_count_candidate_is_needed(
+const fn next_image_auto_count_candidate_is_needed(
     registered_images: usize,
     total_images: usize,
 ) -> bool {
@@ -10848,7 +10849,10 @@ fn next_image_auto_count_candidate_is_needed(
 /// Auto's completion pass is considered only for a genuinely incomplete
 /// model.  A complete primary candidate is returned without a second mapper
 /// run, preserving both its bytes and its runtime.
-fn next_image_auto_post_candidate_is_needed(registered_images: usize, total_images: usize) -> bool {
+const fn next_image_auto_post_candidate_is_needed(
+    registered_images: usize,
+    total_images: usize,
+) -> bool {
     next_image_auto_count_candidate_is_needed(registered_images, total_images)
 }
 
@@ -12548,7 +12552,7 @@ fn count_observations(
 /// explicit and testable: `minimum_registered == 0` is exactly the historical
 /// behavior, while a positive minimum only defers a due solve and never
 /// disables the final BA.
-fn periodic_ba_due(
+const fn periodic_ba_due(
     ba_every: usize,
     minimum_registered: usize,
     registrations_since_ba: usize,
@@ -13334,7 +13338,7 @@ fn sfm_debug_ba_landmarks(records: &[LandmarkBaDiagnostic], min_parallax_deg: f6
         .filter(|value| value.is_finite())
         .sum::<f64>();
     let invalid_depth_count = rows.iter().filter(|row| row.geometry.invalid_depth).count();
-    let mut median_displacement = displacements.clone();
+    let mut median_displacement = displacements;
     let median_displacement = sfm_oracle_median(&mut median_displacement);
     let finite_rows: Vec<&LandmarkBaDiagnostic> = rows
         .iter()
@@ -13892,7 +13896,7 @@ mod tests {
         let defaults = IncrementalSfmConfig::default();
         assert!(!sequence_fallback_enabled_during_growth(&defaults));
 
-        let mut eager = defaults.clone();
+        let mut eager = defaults;
         eager.sequence_relative_pose_fallback = true;
         assert!(sequence_fallback_enabled_during_growth(&eager));
 
@@ -14491,7 +14495,7 @@ mod tests {
                 pair
             })
             .collect::<Vec<_>>();
-        let mut reversed_component = component.clone();
+        let mut reversed_component = component;
         reversed_component.reverse();
         let second = pose_guided_split_tracks(
             &scene.camera,
@@ -14703,7 +14707,7 @@ mod tests {
             vec![vec![(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0)]]
         );
 
-        let mut reversed_tracks = chain_tracks.clone();
+        let mut reversed_tracks = chain_tracks;
         reversed_tracks.reverse();
         let reversed_edges = chain_edges
             .iter()
@@ -14777,18 +14781,13 @@ mod tests {
         ];
         assert_eq!(
             pose_guided_merge_restorations(
-                &[
-                    good_left.clone(),
-                    good_right.clone(),
-                    bad_left.clone(),
-                    bad_right.clone(),
-                ],
+                &[good_left, good_right, bad_left.clone(), bad_right.clone(),],
                 &[Some(point), Some(point), Some(point_b), Some(point_b)],
                 &[good_merged.clone(), bad_merged.clone()],
             ),
             restorations
         );
-        let mut tracks = vec![good_merged.clone(), bad_merged.clone()];
+        let mut tracks = vec![good_merged.clone(), bad_merged];
         let mut points = vec![Some(point), Some(point)];
         let result = pose_guided_restore_invalid_merges(
             &scene.camera,
@@ -14800,10 +14799,7 @@ mod tests {
             0.1,
         );
         assert_eq!(result, (2, 1));
-        assert_eq!(
-            tracks,
-            vec![good_merged, bad_left.clone(), bad_right.clone()]
-        );
+        assert_eq!(tracks, vec![good_merged, bad_left, bad_right]);
         assert_eq!(points, vec![Some(point), Some(point_b), Some(point_b)]);
         assert!(pose_guided_merge_restorations_reprojection_valid(
             &scene.camera,
@@ -14989,7 +14985,7 @@ mod tests {
         );
         assert_eq!(cut.cut_edges, vec![edge(first[0], second[1])]);
         assert_eq!(cut.cut_sizes, vec![(4, 4)]);
-        assert_eq!(cut.components, vec![first.clone(), second.clone()]);
+        assert_eq!(cut.components, vec![first.clone(), second]);
 
         let mut reversed_edges = false_bridge_edges.clone();
         reversed_edges.reverse();
@@ -15231,7 +15227,7 @@ mod tests {
                 pair
             })
             .collect::<Vec<_>>();
-        let mut reversed_component = component.clone();
+        let mut reversed_component = component;
         reversed_component.reverse();
         let second = pose_guided_split_tracks(
             &scene.camera,
@@ -15606,7 +15602,7 @@ mod tests {
         assert_eq!(output.stats.retained_tracks, 1);
         assert_eq!(output.tracks, vec![vec![(0, 0), (1, 0), (2, 0), (3, 0)]]);
 
-        let mut permuted = pairwise.clone();
+        let mut permuted = pairwise;
         permuted.reverse();
         permuted[0].matches.reverse();
         let permuted_output = build_tracks_incremental_correspondence(&features, &permuted, 2);
@@ -16112,7 +16108,7 @@ mod tests {
         // landmark semantics: residual rows remain present, while the point
         // has no Schur variable. A healthy point is free to move instead.
         let initial = Point3::new(0.2, 0.1, 2.2);
-        let mut healthy_ba = BundleAdjustment::new(camera.clone());
+        let mut healthy_ba = BundleAdjustment::new(camera);
         for (id, pose) in poses.iter().enumerate() {
             healthy_ba.add_pose(id as u64, pose.as_ref().unwrap().clone());
             healthy_ba.fix_pose(id as u64);
@@ -17636,7 +17632,7 @@ mod tests {
             &config,
             &mut track_point,
         );
-        let poses_initial = poses.clone();
+        let poses_initial = poses;
         let points_initial = track_point.clone();
         let mut poses_a = poses_initial.clone();
         let mut points_a = points_initial.clone();

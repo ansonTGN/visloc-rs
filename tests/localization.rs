@@ -1419,7 +1419,7 @@ fn projection_window_matching_finds_the_same_pose_as_appearance_matching_on_a_cl
             .push(camera.project(&pose.transform_world_point(point)).unwrap());
         frame.descriptors.push(descriptor);
     }
-    let query = QueryImage::from_frame(&frame, camera.clone());
+    let query = QueryImage::from_frame(&frame, camera);
 
     let appearance_set = CorrespondenceBuilder::new(BruteForceMatcher { ratio: Some(0.8) })
         .build(&query, &map, &descriptor_store)
@@ -1566,9 +1566,9 @@ fn projection_window_matching_disambiguates_identical_descriptors_at_different_l
         .project(&pose.transform_world_point(&landmark_1_point))
         .unwrap();
     let query = QueryImage {
-        camera: camera.clone(),
+        camera,
         keypoints: vec![keypoint_near_landmark_2, keypoint_near_landmark_1],
-        descriptors: vec![shared_descriptor.clone(), shared_descriptor.clone()],
+        descriptors: vec![shared_descriptor.clone(), shared_descriptor],
     };
 
     // Appearance-only matching (no ratio test, so identical-distance ties

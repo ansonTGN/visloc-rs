@@ -1063,7 +1063,7 @@ impl PerPoseGravityObservation {
     /// Build an observation with the default neutral per-obs weight
     /// (`1.0`). Use the public `weight` field directly when emitting
     /// per-sample stiffness from a sensor model.
-    pub fn new(keyframe_id: u64, g_camera_observed: Vector3<f64>) -> Self {
+    pub const fn new(keyframe_id: u64, g_camera_observed: Vector3<f64>) -> Self {
         Self {
             keyframe_id,
             g_camera_observed,
@@ -1110,7 +1110,7 @@ pub struct PerPoseGravityPrior {
 }
 
 impl PerPoseGravityPrior {
-    pub fn new(g_world: Vector3<f64>, weight: f64) -> Self {
+    pub const fn new(g_world: Vector3<f64>, weight: f64) -> Self {
         Self {
             observations: Vec::new(),
             g_world,
@@ -1237,14 +1237,14 @@ pub struct PositionPrior {
 }
 
 impl PositionPrior {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             observations: Vec::new(),
             couple_rotation: true,
         }
     }
 
-    pub fn with_rotation_coupling(mut self, couple_rotation: bool) -> Self {
+    pub const fn with_rotation_coupling(mut self, couple_rotation: bool) -> Self {
         self.couple_rotation = couple_rotation;
         self
     }
@@ -1485,7 +1485,7 @@ impl BundleAdjustment {
 
     /// Set the calibrated camera/sensor-to-body transform used only by IMU
     /// residuals. Reprojection residuals always retain the camera pose state.
-    pub fn set_imu_body_to_camera(&mut self, body_to_camera: SE3) {
+    pub const fn set_imu_body_to_camera(&mut self, body_to_camera: SE3) {
         self.imu_body_to_camera = body_to_camera;
     }
 
@@ -1520,7 +1520,7 @@ impl BundleAdjustment {
 
     /// Install (or replace) the gravity prior used by [`Self::optimize`]
     /// and [`Self::robust_cost`]. See [`GravityPrior`] for semantics.
-    pub fn set_gravity_prior(&mut self, prior: GravityPrior) {
+    pub const fn set_gravity_prior(&mut self, prior: GravityPrior) {
         self.gravity_prior = Some(prior);
     }
 
@@ -1585,7 +1585,7 @@ impl BundleAdjustment {
     /// Set the rectified-stereo baseline (positive, metric, in the units of
     /// the landmark coordinates). Required when any
     /// [`Self::stereo_observations`] are present.
-    pub fn set_stereo_baseline(&mut self, baseline: f64) {
+    pub const fn set_stereo_baseline(&mut self, baseline: f64) {
         self.stereo_baseline = Some(baseline);
     }
 
@@ -6139,7 +6139,7 @@ struct MatrixFreeRuntime {
 }
 
 impl MatrixFreeRuntime {
-    fn new(options: MatrixFreeBaOptions) -> Self {
+    const fn new(options: MatrixFreeBaOptions) -> Self {
         Self {
             landmark_qr: false,
             cluster8: false,
@@ -6154,7 +6154,7 @@ impl MatrixFreeRuntime {
         }
     }
 
-    fn with_restart(options: MatrixFreeBaOptions, restart_limit: usize) -> Self {
+    const fn with_restart(options: MatrixFreeBaOptions, restart_limit: usize) -> Self {
         Self {
             landmark_qr: false,
             cluster8: false,
@@ -6169,7 +6169,7 @@ impl MatrixFreeRuntime {
         }
     }
 
-    fn with_column_scaling(options: MatrixFreeBaOptions) -> Self {
+    const fn with_column_scaling(options: MatrixFreeBaOptions) -> Self {
         Self {
             landmark_qr: false,
             cluster8: false,
@@ -6184,7 +6184,7 @@ impl MatrixFreeRuntime {
         }
     }
 
-    fn with_column_scaling_adaptive(options: MatrixFreeBaOptions) -> Self {
+    const fn with_column_scaling_adaptive(options: MatrixFreeBaOptions) -> Self {
         Self {
             landmark_qr: false,
             cluster8: false,
@@ -9921,7 +9921,7 @@ pub struct BundleAdjustmentRefiner {
 }
 
 impl BundleAdjustmentRefiner {
-    pub fn new(config: BaConfig) -> Self {
+    pub const fn new(config: BaConfig) -> Self {
         Self { config }
     }
 }
@@ -10130,7 +10130,7 @@ mod implicit_schur {
     }
 
     impl ImplicitSchurError {
-        pub(super) fn diagnostics(&self) -> (Option<usize>, Option<f64>, Option<f64>) {
+        pub(super) const fn diagnostics(&self) -> (Option<usize>, Option<f64>, Option<f64>) {
             match *self {
                 Self::ResidualCheckFailed {
                     iterations,
@@ -10480,7 +10480,7 @@ mod implicit_schur {
             self.diagonal.len() * 6
         }
 
-        pub(super) fn rhs(&self) -> &DVector<f64> {
+        pub(super) const fn rhs(&self) -> &DVector<f64> {
             &self.rhs
         }
 
@@ -11919,7 +11919,7 @@ mod matrix_free_ba_api_tests {
             .unwrap();
         assert_eq!(matrix_result, dense_dispatch_result);
 
-        let mut repeat = problem.clone();
+        let mut repeat = problem;
         let repeat_result = repeat
             .optimize_matrix_free(&config, MatrixFreeBaOptions::default())
             .unwrap();
@@ -12522,7 +12522,7 @@ mod matrix_free_ba_api_tests {
         let problem = make_problem();
         let config = matrix_free_config();
         let mut first = problem.clone();
-        let mut second = problem.clone();
+        let mut second = problem;
         let first_result = first
             .optimize_matrix_free_column_scaled(
                 &config,
@@ -16685,11 +16685,11 @@ mod imu_gradient_tests {
             }
         }
 
-        let max_h = (h_sqrt.clone() - h_full.clone())
+        let max_h = (h_sqrt - h_full.clone())
             .iter()
             .fold(0.0_f64, |acc, x| acc.max(x.abs()));
         assert!(max_h < 1e-8, "sqrt-jac H mismatch: {max_h}");
-        let max_b = (b_sqrt.clone() - b_full.clone())
+        let max_b = (b_sqrt - b_full.clone())
             .iter()
             .fold(0.0_f64, |acc, x| acc.max(x.abs()));
         assert!(max_b < 1e-8, "sqrt-jac b mismatch: {max_b}");
@@ -16897,7 +16897,7 @@ mod parallel_ba_tests {
     fn parallel_path_is_deterministic_across_runs() {
         let ba = build_synthetic_ba(TEST_CAMERAS, TEST_LANDMARKS);
         let mut ba_run_a = ba.clone();
-        let mut ba_run_b = ba.clone();
+        let mut ba_run_b = ba;
 
         let config = BaConfig {
             max_iterations: 8,

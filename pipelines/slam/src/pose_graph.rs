@@ -405,7 +405,7 @@ impl PoseGraph {
 
     /// Designate `keyframe_id` as the anchor whose pose stays fixed during
     /// translation optimization. Replaces any previously selected anchor.
-    pub fn anchor(&mut self, keyframe_id: u64) {
+    pub const fn anchor(&mut self, keyframe_id: u64) {
         self.anchor = Some(keyframe_id);
     }
 
@@ -1040,7 +1040,7 @@ impl PoseGraph {
         let solution = match linear_solver {
             LinearSolver::Dense => {
                 let h = h_dense.expect("dense matrix initialized when LinearSolver::Dense");
-                let chol = h.clone().cholesky().ok_or(PoseGraphError::SingularSystem)?;
+                let chol = h.cholesky().ok_or(PoseGraphError::SingularSystem)?;
                 chol.solve(&rhs)
             }
             LinearSolver::Sparse => {

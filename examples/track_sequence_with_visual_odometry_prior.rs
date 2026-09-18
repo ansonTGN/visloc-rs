@@ -180,10 +180,11 @@ fn frame_from_projected_landmarks(
 }
 
 fn format_estimated_center(pose: &Option<Pose>) -> String {
-    pose.as_ref()
-        .map(|pose| {
+    pose.as_ref().map_or_else(
+        || "n/a".to_string(),
+        |pose| {
             let center = pose.camera_center_world();
             format!("[{:.3}, {:.3}, {:.3}]", center.x, center.y, center.z)
-        })
-        .unwrap_or_else(|| "n/a".to_string())
+        },
+    )
 }

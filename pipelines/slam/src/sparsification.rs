@@ -370,7 +370,7 @@ mod tests {
             }
         }
         // The mean is preserved: Λ_tree⁻¹ η_tree == Λ⁻¹ η.
-        let mu = lambda.clone().cholesky().unwrap().solve(&eta);
+        let mu = lambda.cholesky().unwrap().solve(&eta);
         let mu_t = sp.lambda.clone().cholesky().unwrap().solve(&sp.eta);
         assert!((mu - mu_t).norm() < 1e-9, "mean not preserved");
     }
@@ -518,7 +518,7 @@ mod tests {
             }
         }
         // Mean preserved: Λ_diag⁻¹ η_diag == Λ⁻¹ η.
-        let mu = lambda.clone().cholesky().unwrap().solve(&eta);
+        let mu = lambda.cholesky().unwrap().solve(&eta);
         let mu_d = sp.lambda.clone().cholesky().unwrap().solve(&sp.eta);
         assert!((mu - mu_d).norm() < 1e-9, "mean not preserved");
     }

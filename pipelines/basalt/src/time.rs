@@ -22,7 +22,10 @@ pub struct TimeInterval {
 
 impl TimeInterval {
     /// Creates `[start_ns, end_ns)`, allowing a zero-duration interval.
-    pub fn new(start_ns: TimestampNs, end_ns: TimestampNs) -> Result<Self, TimeIntervalError> {
+    pub const fn new(
+        start_ns: TimestampNs,
+        end_ns: TimestampNs,
+    ) -> Result<Self, TimeIntervalError> {
         if end_ns < start_ns {
             return Err(TimeIntervalError::EndBeforeStart { start_ns, end_ns });
         }
@@ -41,7 +44,7 @@ impl TimeInterval {
         self.start_ns == self.end_ns
     }
 
-    pub fn duration_ns(self) -> TimestampNs {
+    pub const fn duration_ns(self) -> TimestampNs {
         self.end_ns - self.start_ns
     }
 

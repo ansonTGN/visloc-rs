@@ -1791,7 +1791,7 @@ mod tests {
         pnp_ba.add_pose(
             1,
             Pose {
-                world_to_camera: r_seed.clone(),
+                world_to_camera: r_seed,
             },
         );
         for (id, corr) in corrs.iter().enumerate() {

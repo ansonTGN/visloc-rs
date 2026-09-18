@@ -108,7 +108,10 @@ pub enum RigBaBackend {
     BoundedDirect64Qr,
 }
 
-fn select_bounded_rig_backend(requested: RigBaBackend, variable_poses: usize) -> RigBaBackend {
+const fn select_bounded_rig_backend(
+    requested: RigBaBackend,
+    variable_poses: usize,
+) -> RigBaBackend {
     match requested {
         RigBaBackend::BoundedDirect64Qr if variable_poses <= 64 => RigBaBackend::Legacy,
         RigBaBackend::BoundedDirect64Qr => RigBaBackend::MatrixFreeQr,
@@ -728,7 +731,7 @@ struct TemporalTrackSupportCount {
     metric_tracks: usize,
 }
 
-fn temporal_track_span_class(span_frames: usize) -> &'static str {
+const fn temporal_track_span_class(span_frames: usize) -> &'static str {
     match span_frames {
         0 => "same-frame",
         1..=7 => "1-7",
@@ -3565,8 +3568,7 @@ fn working_tracks_from_result(
                     image: observations
                         .iter()
                         .find(|&&(image, _)| image >= image_assignment.len())
-                        .map(|&(image, _)| image)
-                        .unwrap_or(usize::MAX),
+                        .map_or(usize::MAX, |&(image, _)| image),
                     keypoint: usize::MAX,
                 });
             }
@@ -7654,7 +7656,7 @@ mod tests {
                 sensor_from_rig: SE3::identity(),
             },
             RigSensor {
-                camera: camera.clone(),
+                camera,
                 sensor_from_rig: SE3::identity(),
             },
         ])
@@ -8044,7 +8046,7 @@ mod tests {
             PairwiseMatches::new(0, 1, identity.clone()),
             PairwiseMatches::new(2, 3, identity.clone()),
             PairwiseMatches::new(0, 2, identity.clone()),
-            PairwiseMatches::new(1, 3, identity.clone()),
+            PairwiseMatches::new(1, 3, identity),
         ];
 
         let output = build_metric_temporal_quadrilaterals(&features, &complete, &assignment, 2);
@@ -8661,7 +8663,7 @@ mod tests {
             PairwiseMatches::new(12, 14, identity_matches.clone()),
             PairwiseMatches::new(13, 15, identity_matches.clone()),
         ];
-        let source_stereo = vec![PairwiseMatches::new(12, 13, identity_matches.clone())];
+        let source_stereo = vec![PairwiseMatches::new(12, 13, identity_matches)];
         let assignment = image_assignment(&frames, features.len());
         let direct_links =
             build_relevant_verified_stereo_links(&source_stereo, &direct_suffix, &assignment);
@@ -9193,7 +9195,7 @@ mod tests {
         // only source of this metric seed.
         let pairwise = vec![
             PairwiseMatches::new(0, 2, identity.clone()),
-            PairwiseMatches::new(2, 1, identity.clone()),
+            PairwiseMatches::new(2, 1, identity),
         ];
         let assignment = image_assignment(&frames, features.len());
         let csr = build_rig_correspondence_csr_from_features(&features, &pairwise).unwrap();
@@ -9314,7 +9316,7 @@ mod tests {
             PairwiseMatches::new(0, 1, identity.clone()),
             PairwiseMatches::new(2, 3, identity.clone()),
             PairwiseMatches::new(0, 2, identity.clone()),
-            PairwiseMatches::new(1, 3, identity.clone()),
+            PairwiseMatches::new(1, 3, identity),
         ];
         let config = RigSfmConfig {
             dynamic_correspondence_tracking: true,

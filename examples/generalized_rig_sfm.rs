@@ -2345,7 +2345,7 @@ struct WeakLongPartitionStats {
     pose_rejected_pairs: usize,
 }
 
-fn should_defer_weak_long_pair(
+const fn should_defer_weak_long_pair(
     frame_i: usize,
     frame_j: usize,
     e_inliers: u64,
@@ -2485,7 +2485,7 @@ impl FrameRotationConstraint {
         )
     }
 
-    fn weight(self) -> f64 {
+    const fn weight(self) -> f64 {
         self.capped_e_inliers as f64
     }
 }

@@ -58,8 +58,9 @@ fn query_timestamp_seconds(path: &Path, fallback_index: usize) -> f64 {
     path.file_stem()
         .and_then(|stem| stem.to_str())
         .and_then(|stem| stem.parse::<f64>().ok())
-        .map(|nanoseconds| nanoseconds * 1.0e-9)
-        .unwrap_or(fallback_index as f64 * 0.05)
+        .map_or(fallback_index as f64 * 0.05, |nanoseconds| {
+            nanoseconds * 1.0e-9
+        })
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -160,7 +160,7 @@ pub struct EssentialMatrixLoopClosureVerifier {
 }
 
 impl EssentialMatrixLoopClosureVerifier {
-    pub fn new(
+    pub const fn new(
         estimator: RelativePoseEstimator<EightPointEssentialMatrixEstimator>,
         config: LoopClosureVerifierConfig,
     ) -> Self {
@@ -320,7 +320,7 @@ impl<R> PnPLoopClosureVerifier<R>
 where
     R: RobustPoseEstimator,
 {
-    pub fn new(ransac: R, config: PnPLoopClosureVerifierConfig) -> Self {
+    pub const fn new(ransac: R, config: PnPLoopClosureVerifierConfig) -> Self {
         Self { ransac, config }
     }
 
@@ -446,7 +446,7 @@ where
             .pose
             .world_to_camera
             .compose(&keyframe_pose.world_to_camera.inverse());
-        let inlier_indices = report.inliers.clone();
+        let inlier_indices = report.inliers;
         (
             LoopClosureVerification {
                 verified,
@@ -767,7 +767,7 @@ impl<R> HybridLoopClosureVerifier<R>
 where
     R: RobustPoseEstimator,
 {
-    pub fn new(
+    pub const fn new(
         essential: EssentialMatrixLoopClosureVerifier,
         pnp: PnPLoopClosureVerifier<R>,
         config: HybridLoopClosureVerifierConfig,

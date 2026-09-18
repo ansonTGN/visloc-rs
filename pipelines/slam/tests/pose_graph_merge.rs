@@ -42,7 +42,7 @@ fn chain_graph(poses: &[Pose]) -> PoseGraph {
     g
 }
 
-fn bridge(from: u64, to: u64, relative: SE3) -> LoopClosureConstraint {
+const fn bridge(from: u64, to: u64, relative: SE3) -> LoopClosureConstraint {
     LoopClosureConstraint {
         from_keyframe_id: from,
         to_keyframe_id: to,
@@ -177,7 +177,7 @@ fn consistent_session_bridges_drops_a_wrong_cross_session_match() {
         (0..3).map(|i| bridge(i, i, identity.clone())).collect();
     // A wrong bridge: A node 0 ↔ B node 3 claimed co-located (identity) — but
     // they are different places, so it is inconsistent with the genuine clique.
-    candidates.push(bridge(0, 3, identity.clone()));
+    candidates.push(bridge(0, 3, identity));
 
     let cfg = PcmConfig {
         threshold: 0.5,
@@ -193,7 +193,7 @@ fn consistent_session_bridges_drops_a_wrong_cross_session_match() {
     );
 
     // Merging with a screened genuine bridge welds B onto the shared frame.
-    let mut merged = a.clone();
+    let mut merged = a;
     merged.merge_session(&b, 4, &candidates[kept[0]]).unwrap();
     assert_eq!(merged.poses.len(), 8);
 }

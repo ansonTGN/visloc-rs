@@ -173,7 +173,7 @@ pub struct SubmapSim3Rejection {
 }
 
 impl SubmapSim3Rejection {
-    fn new(reason: SubmapSim3RejectionReason, correspondence_count: usize) -> Self {
+    const fn new(reason: SubmapSim3RejectionReason, correspondence_count: usize) -> Self {
         Self {
             reason,
             correspondence_count,

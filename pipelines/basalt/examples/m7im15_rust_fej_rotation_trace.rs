@@ -78,14 +78,14 @@ fn delta(root: &Value) -> ImuPreintegratedDelta {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = env::args().collect();
-    let input = args
-        .get(1)
-        .map(String::as_str)
-        .unwrap_or("target/m7im15_so3_bias_fresh7_frame6_full_link0_iter3_inputs_20260828.json");
-    let output = args
-        .get(2)
-        .map(String::as_str)
-        .unwrap_or("target/m7im15_rust_fej_rotation_producer_trace_20260828.json");
+    let input = args.get(1).map_or(
+        "target/m7im15_so3_bias_fresh7_frame6_full_link0_iter3_inputs_20260828.json",
+        String::as_str,
+    );
+    let output = args.get(2).map_or(
+        "target/m7im15_rust_fej_rotation_producer_trace_20260828.json",
+        String::as_str,
+    );
     let root: Value = serde_json::from_str(&fs::read_to_string(input)?)?;
     let current_from = state(&root["current"]["from"]);
     let current_to = state(&root["current"]["to"]);

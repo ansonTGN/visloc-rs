@@ -14,7 +14,7 @@ impl SE3 {
         }
     }
 
-    pub fn new(rotation: UnitQuaternion<f64>, translation: Vector3<f64>) -> Self {
+    pub const fn new(rotation: UnitQuaternion<f64>, translation: Vector3<f64>) -> Self {
         Self {
             rotation,
             translation,

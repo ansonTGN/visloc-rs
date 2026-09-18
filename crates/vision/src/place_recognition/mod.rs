@@ -47,7 +47,7 @@ pub struct Vocabulary {
 struct Lcg(u64);
 
 impl Lcg {
-    fn next_u64(&mut self) -> u64 {
+    const fn next_u64(&mut self) -> u64 {
         self.0 = self
             .0
             .wrapping_mul(6364136223846793005)
@@ -898,7 +898,7 @@ mod tests {
         // world_to_camera. Rotation must match; translation direction must match
         // (magnitude is up to scale).
         let bridge = proposals.iter().find(|p| p.query == 0).unwrap();
-        let truth = b0.world_to_camera.clone();
+        let truth = b0.world_to_camera;
         let rot_err = bridge
             .query_to_db
             .rotation

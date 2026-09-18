@@ -1116,7 +1116,7 @@ pub fn dpvo_ba_step(
 // directly (kept as a documented type witness for `SE3::adjoint`'s return
 // type, matched against in the module doc's adjoint section).
 #[allow(dead_code)]
-fn _adjoint_type_witness(m: Matrix6<f64>) -> Matrix6<f64> {
+const fn _adjoint_type_witness(m: Matrix6<f64>) -> Matrix6<f64> {
     m
 }
 

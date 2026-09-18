@@ -849,7 +849,7 @@ mod tests {
         // revisit" a real GRU update would supply).
         let mut edges_with_loop = temporal_edges.clone();
         edges_with_loop.push(DpvoEdge { i: 0, j: 3, k: 0 });
-        let mut targets_with_loop = temporal_targets.clone();
+        let mut targets_with_loop = temporal_targets;
         targets_with_loop.push(transform_point(
             &true_poses[0],
             &true_poses[3],

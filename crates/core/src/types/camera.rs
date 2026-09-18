@@ -71,7 +71,7 @@ impl CameraModel {
 
     /// Whether this model is a fisheye/wide-angle model whose pixel-to-ray map
     /// is not the pinhole `(x/z, y/z)` projection.
-    pub fn is_fisheye(&self) -> bool {
+    pub const fn is_fisheye(&self) -> bool {
         matches!(
             self,
             Self::OpenCvFisheye | Self::SimpleRadialFisheye | Self::RadialFisheye | Self::Fov

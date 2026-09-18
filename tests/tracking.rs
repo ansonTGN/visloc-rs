@@ -2079,7 +2079,7 @@ fn projection_guided_local_map_refinement_accepts_only_when_inliers_do_not_decre
     let worse_refined = successful_localization_result(2, 6, 0.0);
     let mut rejecting_tracker = Tracker::new(
         RefinementControlledLocalizer {
-            initial: initial.clone(),
+            initial,
             refined: worse_refined,
         },
         config,

@@ -1930,7 +1930,7 @@ impl BackwardInternalVariant {
     }
 
     #[inline]
-    fn use_fma_correction(self) -> bool {
+    const fn use_fma_correction(self) -> bool {
         matches!(
             self,
             Self::FmaProductsPlainSum | Self::FmaProductsFmaSubtract
@@ -1938,7 +1938,7 @@ impl BackwardInternalVariant {
     }
 
     #[inline]
-    fn use_fma_subtract(self) -> bool {
+    const fn use_fma_subtract(self) -> bool {
         matches!(
             self,
             Self::PlainProductsFmaSubtract | Self::FmaProductsFmaSubtract

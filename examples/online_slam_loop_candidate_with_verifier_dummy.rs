@@ -232,31 +232,25 @@ fn frame_from_pose(
 
 fn print_candidate(candidate: &visloc_rs::LoopClosureCandidate) {
     let verification = candidate.verification.as_ref();
-    let verified = verification
-        .map(|v| v.verified.to_string())
-        .unwrap_or_else(|| "n/a".to_string());
-    let inliers = verification
-        .map(|v| v.inlier_count.to_string())
-        .unwrap_or_else(|| "n/a".to_string());
-    let inlier_ratio = verification
-        .map(|v| format!("{:.3}", v.inlier_ratio))
-        .unwrap_or_else(|| "n/a".to_string());
-    let mean_sampson = verification
-        .map(|v| {
+    let verified = verification.map_or_else(|| "n/a".to_string(), |v| v.verified.to_string());
+    let inliers = verification.map_or_else(|| "n/a".to_string(), |v| v.inlier_count.to_string());
+    let inlier_ratio =
+        verification.map_or_else(|| "n/a".to_string(), |v| format!("{:.3}", v.inlier_ratio));
+    let mean_sampson = verification.map_or_else(
+        || "n/a".to_string(),
+        |v| {
             if v.mean_sampson_error.is_finite() {
                 format!("{:.4}", v.mean_sampson_error)
             } else {
                 "inf".to_string()
             }
-        })
-        .unwrap_or_else(|| "n/a".to_string());
-    let verifier_score = verification
-        .map(|v| format!("{:.3}", v.score))
-        .unwrap_or_else(|| "n/a".to_string());
+        },
+    );
+    let verifier_score =
+        verification.map_or_else(|| "n/a".to_string(), |v| format!("{:.3}", v.score));
     let failure = verification
         .and_then(|v| v.failure_reason.as_ref())
-        .map(|reason| format!("{:?}", reason))
-        .unwrap_or_else(|| "-".to_string());
+        .map_or_else(|| "-".to_string(), |reason| format!("{:?}", reason));
     println!(
         "loop_candidate query={} matched_keyframe={} shared={} shared_ratio={:.3} score={:.3} verified={} verifier_inliers={} verifier_inlier_ratio={} mean_sampson={} verifier_score={} failure={}",
         candidate.query_frame_id,

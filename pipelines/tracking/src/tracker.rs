@@ -47,15 +47,15 @@ impl<X, T> ImageTracker<X, T>
 where
     X: FeatureExtractor,
 {
-    pub fn with_tracker(extractor: X, tracker: T) -> Self {
+    pub const fn with_tracker(extractor: X, tracker: T) -> Self {
         Self { extractor, tracker }
     }
 
-    pub fn tracker(&self) -> &T {
+    pub const fn tracker(&self) -> &T {
         &self.tracker
     }
 
-    pub fn tracker_mut(&mut self) -> &mut T {
+    pub const fn tracker_mut(&mut self) -> &mut T {
         &mut self.tracker
     }
 
@@ -99,31 +99,31 @@ where
         }
     }
 
-    pub fn state(&self) -> TrackingState {
+    pub const fn state(&self) -> TrackingState {
         self.state
     }
 
-    pub fn successive_failures(&self) -> usize {
+    pub const fn successive_failures(&self) -> usize {
         self.successive_failures
     }
 
-    pub fn last_result(&self) -> Option<&TrackingResult> {
+    pub const fn last_result(&self) -> Option<&TrackingResult> {
         self.last_result.as_ref()
     }
 
-    pub fn last_successful_frame_id(&self) -> Option<FrameId> {
+    pub const fn last_successful_frame_id(&self) -> Option<FrameId> {
         self.last_successful_frame_id
     }
 
-    pub fn last_successful_pose(&self) -> Option<&Pose> {
+    pub const fn last_successful_pose(&self) -> Option<&Pose> {
         self.last_successful_pose.as_ref()
     }
 
-    pub fn stats(&self) -> &TrackingStats {
+    pub const fn stats(&self) -> &TrackingStats {
         &self.stats
     }
 
-    pub fn motion_model(&self) -> &M {
+    pub const fn motion_model(&self) -> &M {
         &self.motion_model
     }
 
@@ -131,7 +131,7 @@ where
     /// out-of-band inputs (e.g., raw IMU samples into
     /// [`ImuPredictiveMotionModel`]) that the per-frame `track_frame*`
     /// path does not surface.
-    pub fn motion_model_mut(&mut self) -> &mut M {
+    pub const fn motion_model_mut(&mut self) -> &mut M {
         &mut self.motion_model
     }
 
@@ -1036,8 +1036,7 @@ where
             // a pose the camera left several frames ago.
             let frames_since_last_tracking_success = self
                 .last_successful_frame_id
-                .map(|last_id| frame.id.saturating_sub(last_id))
-                .unwrap_or(1)
+                .map_or(1, |last_id| frame.id.saturating_sub(last_id))
                 .max(1);
             let multiplier = pose_jump_gap_scaling_multiplier(
                 frames_since_last_tracking_success,
@@ -2237,7 +2236,7 @@ impl TrackingEvaluationConfig {
 }
 
 impl TrackingEvaluationFailure {
-    pub fn reason(&self) -> &'static str {
+    pub const fn reason(&self) -> &'static str {
         match self {
             Self::SuccessRateTooLow { .. } => "success_rate_too_low",
             Self::FailureRateTooHigh { .. } => "failure_rate_too_high",

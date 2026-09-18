@@ -156,7 +156,7 @@ impl GncState {
     }
 
     /// Current control parameter `μ`.
-    pub fn mu(&self) -> f64 {
+    pub const fn mu(&self) -> f64 {
         self.mu
     }
 
@@ -423,7 +423,7 @@ mod tests {
             v
         };
         let with_extreme = {
-            let mut v = inliers.clone();
+            let mut v = inliers;
             v.extend((0..20).map(|_| 5000.0_f64.powi(2)));
             v
         };

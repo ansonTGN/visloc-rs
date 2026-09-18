@@ -564,7 +564,7 @@ fn peak_working_set_bytes() -> u64 {
 }
 
 #[cfg(not(windows))]
-fn peak_working_set_bytes() -> u64 {
+const fn peak_working_set_bytes() -> u64 {
     0
 }
 

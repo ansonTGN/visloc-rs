@@ -130,7 +130,7 @@ fn calibration() -> BasaltCalibration {
     }
 }
 
-fn config() -> DirectKltConfig {
+const fn config() -> DirectKltConfig {
     DirectKltConfig {
         pyramid_levels: 2,
         max_iterations: 5,

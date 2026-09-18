@@ -304,8 +304,7 @@ fn collect_oxts_data_paths(data_dir: &Path) -> Result<Vec<PathBuf>, KittiOxtsErr
             && path
                 .extension()
                 .and_then(|extension| extension.to_str())
-                .map(|extension| extension.eq_ignore_ascii_case("txt"))
-                .unwrap_or(false)
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("txt"))
         {
             paths.push(path);
         }
@@ -369,7 +368,7 @@ fn days_since_unix_epoch(year: i64, month: u32, day: u32) -> Result<i128, String
     Ok(days)
 }
 
-fn days_in_month(year: i64, month: u32) -> u32 {
+const fn days_in_month(year: i64, month: u32) -> u32 {
     match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,

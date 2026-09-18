@@ -460,7 +460,9 @@ pub fn widen_and_build<T, E>(
     Ok(outputs)
 }
 
-fn validate_config(config: &AdaptiveSubmapPartitionConfig) -> Result<(), SubmapPartitionError> {
+const fn validate_config(
+    config: &AdaptiveSubmapPartitionConfig,
+) -> Result<(), SubmapPartitionError> {
     if config.min_images == 0 {
         return Err(SubmapPartitionError::ZeroMinimum);
     }

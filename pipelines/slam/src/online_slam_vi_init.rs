@@ -316,7 +316,7 @@ impl OnlineSlamViInitState {
     /// `true` while the auto-bootstrap stage is still active — neither
     /// `Succeeded` nor `GaveUp` has fired. Drives the stale-factor gate
     /// (factors staged in this state are discarded rather than exposed).
-    pub(crate) fn is_active(&self) -> bool {
+    pub(crate) const fn is_active(&self) -> bool {
         self.completed.is_none() && self.gave_up.is_none()
     }
 

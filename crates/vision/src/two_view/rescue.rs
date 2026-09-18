@@ -491,7 +491,7 @@ mod tests {
         );
 
         // 8. With (2, 3) admitted, the view graph is now a single component.
-        let mut edges_after = edges_before.clone();
+        let mut edges_after = edges_before;
         edges_after.push((2, 3));
         let components_after = connected_components(6, &edges_after);
         assert_eq!(

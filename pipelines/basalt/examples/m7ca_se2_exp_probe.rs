@@ -37,7 +37,7 @@ fn emit(label: &str, tangent: Vector3<f32>) {
     );
 }
 
-fn from_bits(value: u32) -> f32 {
+const fn from_bits(value: u32) -> f32 {
     f32::from_bits(value)
 }
 

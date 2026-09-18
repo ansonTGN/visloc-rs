@@ -46,7 +46,7 @@ pub(crate) fn pcm_admits_loop(
                 Some(noise) => pcm::pairwise_mahalanobis(new, a, odometry, noise),
                 None => pcm::pairwise_residual(new, a, odometry),
             };
-            residual.map(|r| r <= cfg.threshold).unwrap_or(false)
+            residual.is_some_and(|r| r <= cfg.threshold)
         })
         .count();
     // Strict majority of the established set agrees with the new closure.

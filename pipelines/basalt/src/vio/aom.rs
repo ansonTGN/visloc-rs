@@ -2401,7 +2401,7 @@ pub(crate) struct LmTrialBinding {
 }
 
 impl LmTrialBinding {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         window_identity: usize,
         window_generation: u64,
         scalar_mode: ScalarMode,
@@ -2419,14 +2419,14 @@ impl LmTrialBinding {
 }
 
 impl LmTrialToken {
-    pub(crate) fn with_landmark_steps(landmark_steps: Vec<Option<Vector3<f64>>>) -> Self {
+    pub(crate) const fn with_landmark_steps(landmark_steps: Vec<Option<Vector3<f64>>>) -> Self {
         Self {
             landmark_steps: Some(landmark_steps),
             binding: None,
         }
     }
 
-    pub(crate) fn with_bound_landmark_steps(
+    pub(crate) const fn with_bound_landmark_steps(
         landmark_steps: Vec<Option<Vector3<f64>>>,
         binding: LmTrialBinding,
     ) -> Self {
@@ -3458,7 +3458,7 @@ impl WhitenedFactorRowStack {
     /// Assign a semantic source to a factor returned by an existing
     /// constructor.  Keeping this small adapter preserves the historical
     /// constructor API for downstream synthetic callers.
-    pub fn with_kind(mut self, kind: FactorKind) -> Self {
+    pub const fn with_kind(mut self, kind: FactorKind) -> Self {
         self.kind = kind;
         self
     }
@@ -3466,7 +3466,7 @@ impl WhitenedFactorRowStack {
     /// Attach the absolute start/end navigation-block columns owned by an
     /// IMU link.  This is deliberately a separate adapter so legacy factor
     /// constructors remain source-compatible.
-    pub fn with_imu_link_offsets(mut self, start: usize, end: usize) -> Self {
+    pub const fn with_imu_link_offsets(mut self, start: usize, end: usize) -> Self {
         self.imu_link_offsets = Some(ImuLinkOffsets { start, end });
         self
     }
@@ -3483,7 +3483,7 @@ impl WhitenedFactorRowStack {
     /// Attach the optional landmark identity used by the clean UpstreamF32
     /// compact recovery plan.  Callers that do not provide it retain the
     /// historical per-factor recovery fallback.
-    pub fn with_landmark_metadata(mut self, landmark_index: usize, track_id: u64) -> Self {
+    pub const fn with_landmark_metadata(mut self, landmark_index: usize, track_id: u64) -> Self {
         self.landmark_metadata = Some(LandmarkFactorMetadata {
             landmark_index,
             track_id,
@@ -3617,17 +3617,17 @@ impl CompactLandmarkBackSubstitutionF32 {
     }
 
     #[cfg(test)]
-    fn q1_state_shape(&self) -> (usize, usize) {
+    const fn q1_state_shape(&self) -> (usize, usize) {
         (self.landmark_cols, self.state_cols)
     }
 
     #[cfg(test)]
-    fn q1_residual_len(&self) -> usize {
+    const fn q1_residual_len(&self) -> usize {
         self.landmark_cols
     }
 
     #[cfg(test)]
-    fn upper_r_shape(&self) -> (usize, usize) {
+    const fn upper_r_shape(&self) -> (usize, usize) {
         (self.landmark_cols, self.landmark_cols)
     }
 
@@ -3675,7 +3675,7 @@ impl<'a> CompactLandmarkBackSubstitutionViewF32<'a> {
     }
 
     #[inline]
-    fn q1_residual_len(&self) -> usize {
+    const fn q1_residual_len(&self) -> usize {
         self.landmark_cols
     }
 }
@@ -5557,12 +5557,12 @@ impl LandmarkHouseholderF32 {
     }
 
     #[inline]
-    fn index(&self, row: usize, column: usize) -> usize {
+    const fn index(&self, row: usize, column: usize) -> usize {
         row * self.storage_cols() + column
     }
 
     #[inline]
-    fn storage_cols(&self) -> usize {
+    const fn storage_cols(&self) -> usize {
         self.residual_offset + 1
     }
 
@@ -6258,7 +6258,7 @@ fn validate_imu_pairing(
     Ok(())
 }
 
-fn validate_imu_offsets(
+const fn validate_imu_offsets(
     index: usize,
     offsets: ImuLinkOffsets,
     state_dof: usize,
@@ -7200,7 +7200,7 @@ fn full70_f32_storage_bits(values: &[f32]) -> serde_json::Value {
     })
 }
 
-fn full70_factor_kind_name(kind: FactorKind) -> &'static str {
+const fn full70_factor_kind_name(kind: FactorKind) -> &'static str {
     match kind {
         FactorKind::Generic => "Generic",
         FactorKind::Prior => "Prior",
@@ -7815,7 +7815,7 @@ fn visual_prefix_trace_path() -> Option<&'static Path> {
 }
 
 #[inline]
-fn visual_prefix_hash_mix(hash: &mut u64, value: u64) {
+const fn visual_prefix_hash_mix(hash: &mut u64, value: u64) {
     *hash ^= value;
     *hash = hash.wrapping_mul(LM_VECTOR_FNV_PRIME);
 }
@@ -16623,9 +16623,9 @@ mod tests {
         });
         let residual = DVector::from_fn(8, |row, _| row as f32 * 0.125 - 0.25);
         let valid = WhitenedFactorRowStack::new(
-            state.clone().map(f64::from),
-            landmark.clone().map(f64::from),
-            residual.clone().map(f64::from),
+            state.map(f64::from),
+            landmark.map(f64::from),
+            residual.map(f64::from),
         )
         .unwrap();
         assert!(LandmarkHouseholderF32::factor_from_whitened(&valid).is_some());
@@ -16650,7 +16650,7 @@ mod tests {
         assert!(compact.is_none());
         assert_eq!(arena, arena_before);
 
-        let mut wrong_residual_len = valid.clone();
+        let mut wrong_residual_len = valid;
         wrong_residual_len.residual = DVector::zeros(7);
         assert!(LandmarkHouseholderF32::factor_from_whitened(&wrong_residual_len).is_none());
 
@@ -16700,9 +16700,9 @@ mod tests {
         let residual32 =
             DVector::from_iterator(12, (0..12).map(|row| input[row * storage_cols + 79]));
         let factor = WhitenedFactorRowStack::new(
-            state32.clone().map(f64::from),
-            landmark32.clone().map(f64::from),
-            residual32.clone().map(f64::from),
+            state32.map(f64::from),
+            landmark32.map(f64::from),
+            residual32.map(f64::from),
         )
         .unwrap();
 
@@ -16760,9 +16760,9 @@ mod tests {
         });
         let visual_residual = DVector::from_fn(6, |row, _| (row as f32 - 1.5) * 0.25);
         let visual_factor = WhitenedFactorRowStack::new(
-            visual_state.clone().map(f64::from),
-            visual_landmark.clone().map(f64::from),
-            visual_residual.clone().map(f64::from),
+            visual_state.map(f64::from),
+            visual_landmark.map(f64::from),
+            visual_residual.map(f64::from),
         )
         .unwrap()
         .with_kind(FactorKind::Visual);
@@ -16783,9 +16783,9 @@ mod tests {
             let residual =
                 DVector::from_fn(rows, |row, _| seed * 0.25 - (row as f32 + 1.0) * 0.09375);
             let factor = WhitenedFactorRowStack::new(
-                state.clone().map(f64::from),
+                state.map(f64::from),
                 DMatrix::zeros(rows, 0),
-                residual.clone().map(f64::from),
+                residual.map(f64::from),
             )
             .unwrap()
             .with_kind(kind);
@@ -16941,7 +16941,7 @@ mod tests {
         let imu = WhitenedFactorRowStack::with_objective_cost_kind(
             imu_jacobian.clone().map(f64::from),
             DMatrix::zeros(9, 0),
-            imu_residual.clone().map(f64::from),
+            imu_residual.map(f64::from),
             0.0,
             FactorKind::Imu,
         )
@@ -16950,7 +16950,7 @@ mod tests {
         let bias = WhitenedFactorRowStack::with_objective_cost_kind(
             bias_jacobian.clone().map(f64::from),
             DMatrix::zeros(6, 0),
-            bias_residual.clone().map(f64::from),
+            bias_residual.map(f64::from),
             0.0,
             FactorKind::Bias,
         )
@@ -16972,9 +16972,9 @@ mod tests {
         });
         let prior_residual = DVector::from_fn(9, |row, _| 1.0_f32 - row as f32 * 0.0625);
         let prior = WhitenedFactorRowStack::with_objective_cost_kind(
-            prior_jacobian.clone().map(f64::from),
+            prior_jacobian.map(f64::from),
             DMatrix::zeros(9, 0),
-            prior_residual.clone().map(f64::from),
+            prior_residual.map(f64::from),
             0.0,
             FactorKind::Prior,
         )
@@ -20458,14 +20458,11 @@ mod tests {
             (payload_model as f32).to_bits()
         );
 
-        let linearization = LmLinearization {
-            factors: factors.clone(),
-            cost: 0.0,
-        };
+        let linearization = LmLinearization { factors, cost: 0.0 };
         let state = DVector::zeros(state_dof);
         let trial_state = &state + &state_step;
         let damping = DVector::zeros(state_dof);
-        let reduced = legacy.clone().as_f64();
+        let reduced = legacy.as_f64();
         let event = LmDiagnosticEvent {
             iteration: 0,
             trial: 0,

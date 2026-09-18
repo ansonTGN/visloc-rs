@@ -214,7 +214,7 @@ fn bundle_cost_is_zero_at_truth() {
 #[test]
 fn bundle_optimize_with_no_data_returns_appropriate_errors() {
     let camera = pinhole();
-    let mut empty = BundleAdjustment::new(camera.clone());
+    let mut empty = BundleAdjustment::new(camera);
     assert_eq!(empty.optimize(&BaConfig::default()), Err(BaError::NoPoses));
 
     // With a pose but no observations / IMU factors, the solver bails with
@@ -566,7 +566,7 @@ fn ba_refiner_pulls_drifted_staged_keyframe_back_to_truth() {
     // off, so BA can pull pose to truth using the fixed gauge.
     let drifted_30 = pose_at(Vector3::new(1.04, -0.01, 0.02));
     let mut kf_30_drifted = build_keyframe(&camera, 30, &truth_30, &landmarks_truth);
-    kf_30_drifted.frame.pose = Some(drifted_30.clone());
+    kf_30_drifted.frame.pose = Some(drifted_30);
 
     // working_map = map ∪ {new keyframe} (mirrors what LocalMappingPipeline
     // does internally before invoking the refiner).
@@ -1465,7 +1465,7 @@ fn per_pose_gravity_prior_recovers_per_keyframe_pitch() {
 #[test]
 fn per_pose_gravity_prior_respects_per_keyframe_observation_independence() {
     let camera = pinhole();
-    let mut ba = BundleAdjustment::new(camera.clone());
+    let mut ba = BundleAdjustment::new(camera);
     // Pose 10: level. Pose 20: pitched by +0.10 rad. Each pose's
     // accelerometer-derived observation matches its actual rotation,
     // so the per-pose prior cost must be zero.
@@ -1566,7 +1566,7 @@ fn per_pose_gravity_prior_per_obs_weight_scales_cost() {
 #[test]
 fn position_prior_zero_cost_on_truth_trajectory() {
     let camera = pinhole();
-    let mut ba = BundleAdjustment::new(camera.clone());
+    let mut ba = BundleAdjustment::new(camera);
     let truth_poses = [
         (10u64, pose_at(Vector3::new(0.0, 0.0, 0.0))),
         (20u64, pose_at(Vector3::new(0.5, 0.0, 0.0))),
@@ -2200,7 +2200,7 @@ fn imu_pose_jacobian_respects_camera_to_body_extrinsic() {
     let body_pose_1 = SE3::new(UnitQuaternion::identity(), Vector3::new(-1.0, 0.0, 0.0));
     let camera_pose_0 = body_to_camera.inverse().compose(&body_pose_0);
     let camera_pose_1 = body_to_camera.inverse().compose(&body_pose_1);
-    let mut drifted_camera_pose_1 = camera_pose_1.clone();
+    let mut drifted_camera_pose_1 = camera_pose_1;
     drifted_camera_pose_1.translation += Vector3::new(0.25, -0.12, 0.08);
 
     let mut ba = BundleAdjustment::new(pinhole());
@@ -2255,7 +2255,7 @@ fn imu_factor_pulls_drifted_velocity_back_to_truth() {
     let pose_0 = pose_at(Vector3::new(0.0, 0.0, 0.0));
     let pose_1 = pose_at(Vector3::new(1.0, 0.0, 0.0));
     ba.add_pose(10, pose_0.clone());
-    ba.add_pose(20, pose_1.clone());
+    ba.add_pose(20, pose_1);
     ba.fix_pose(10);
     ba.fix_pose(20);
 
@@ -2452,7 +2452,7 @@ fn imu_bias_recovers_hidden_accel_bias() {
     let pose_0 = pose_at(Vector3::new(0.0, 0.0, 0.0));
     let pose_1 = pose_at(Vector3::new(1.0, 0.0, 0.0));
     ba.add_pose(10, pose_0.clone());
-    ba.add_pose(20, pose_1.clone());
+    ba.add_pose(20, pose_1);
     ba.fix_pose(10);
     ba.fix_pose(20);
 
@@ -2532,7 +2532,7 @@ fn imu_bias_fixed_acts_as_correction_only() {
     let pose_0 = pose_at(Vector3::new(0.0, 0.0, 0.0));
     let pose_1 = pose_at(Vector3::new(1.0, 0.0, 0.0));
     ba.add_pose(10, pose_0.clone());
-    ba.add_pose(20, pose_1.clone());
+    ba.add_pose(20, pose_1);
     ba.fix_pose(10);
     ba.fix_pose(20);
 
@@ -2593,7 +2593,7 @@ fn bias_random_walk_zero_cost_at_truth() {
     let pose_0 = pose_at(Vector3::new(0.0, 0.0, 0.0));
     let pose_1 = pose_at(Vector3::new(1.0, 0.0, 0.0));
     ba.add_pose(10, pose_0.clone());
-    ba.add_pose(20, pose_1.clone());
+    ba.add_pose(20, pose_1);
     ba.fix_pose(10);
     ba.fix_pose(20);
 
@@ -2668,7 +2668,7 @@ fn bias_random_walk_pulls_drifted_bias_toward_neighbor() {
     let pose_0 = pose_at(Vector3::new(0.0, 0.0, 0.0));
     let pose_1 = pose_at(Vector3::new(1.0, 0.0, 0.0));
     ba.add_pose(10, pose_0.clone());
-    ba.add_pose(20, pose_1.clone());
+    ba.add_pose(20, pose_1);
     ba.fix_pose(10);
     ba.fix_pose(20);
 
@@ -2730,8 +2730,8 @@ fn bias_random_walk_propagates_observable_bias_to_neighbor() {
     let pose_1 = pose_at(Vector3::new(1.0, 0.0, 0.0));
     let pose_2 = pose_at(Vector3::new(3.0, 0.0, 0.0));
     ba.add_pose(10, pose_0.clone());
-    ba.add_pose(20, pose_1.clone());
-    ba.add_pose(30, pose_2.clone());
+    ba.add_pose(20, pose_1);
+    ba.add_pose(30, pose_2);
     ba.fix_pose(10);
     ba.fix_pose(20);
     ba.fix_pose(30);
@@ -2929,7 +2929,7 @@ fn bench_ba_sparse_solver() {
 fn ba_refiner_skips_when_no_observations_align() {
     let camera = pinhole();
     let mut map = VisualMap::new();
-    map.cameras.insert(camera.id, camera.clone());
+    map.cameras.insert(camera.id, camera);
     // Empty window + empty staging — refiner should produce a `Noop` skip
     // without panicking or attempting to run BA.
     let local_window = LocalMapWindow::default();

@@ -113,7 +113,7 @@ pub enum RigSubmapAlignmentMethod {
 }
 
 impl RigSubmapAlignmentMethod {
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Generic => "generic",
             Self::FixedRotationPrimary => "fixed-primary",
@@ -1082,7 +1082,7 @@ fn mean_translation_fixed_rotation(
     }) / indices.len().max(1) as f64
 }
 
-fn fallback_rejection(
+const fn fallback_rejection(
     reason: SubmapSim3RejectionReason,
     correspondence_count: usize,
 ) -> SubmapSim3Rejection {
@@ -1920,7 +1920,7 @@ mod tests {
         config.allow_fixed_rotation_fallback = true;
         let baseline = estimate_rig_submap_sim3_constraint(0, 1, &source, &target, &config)
             .expect("legacy fixed fallback should pass");
-        let mut explicit_default = config.clone();
+        let mut explicit_default = config;
         explicit_default.force_fixed_rotation_unit_scale = false;
         let explicit =
             estimate_rig_submap_sim3_constraint(0, 1, &source, &target, &explicit_default)
