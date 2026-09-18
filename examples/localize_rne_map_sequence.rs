@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use visloc_rs::core::geometry::Pose;
-use visloc_rs::core::types::QueryImage;
+use visloc_rs::core::types::{LandmarkDescriptorStore, LocalizationResult, QueryImage, VisualMap};
 use visloc_rs::io::colmap::ColmapMapProvider;
 use visloc_rs::io::query_features::read_query_features_txt;
 use visloc_rs::{DescriptorProvider, LocalizationPipeline, MapProvider, RadiusLandmarkSelector};
@@ -34,6 +34,24 @@ fn parse_flag(args: &mut Vec<String>, name: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+fn localize_with_prior(
+    pipeline: &LocalizationPipeline,
+    query: &QueryImage,
+    map: &VisualMap,
+    store: &LandmarkDescriptorStore,
+    pose: &Pose,
+    radius_m: f64,
+) -> LocalizationResult {
+    let selector = RadiusLandmarkSelector::new(pose.camera_center_world(), radius_m);
+    pipeline.localize_with_candidate_selector_and_descriptor_store_and_pose_prior(
+        query,
+        map,
+        store,
+        selector,
+        Some(pose),
+    )
 }
 
 fn query_timestamp_seconds(path: &PathBuf, fallback_index: usize) -> f64 {
@@ -119,16 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let used_prior = prior.is_some();
         let start = Instant::now();
         let result = match &prior {
-            Some(pose) => {
-                let selector = RadiusLandmarkSelector::new(pose.camera_center_world(), radius_m);
-                pipeline.localize_with_candidate_selector_and_descriptor_store_and_pose_prior(
-                    &query,
-                    map,
-                    store,
-                    selector,
-                    Some(pose),
-                )
-            }
+            Some(pose) => localize_with_prior(&pipeline, &query, map, store, pose, radius_m),
             None => pipeline.localize_with_descriptor_store(&query, map, store),
         };
         let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
