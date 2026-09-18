@@ -1,0 +1,51 @@
+{
+  "date": "2026-09-18",
+  "finding": "The M5 candidate-generation wall cost is the single-core O(N^2 * D) exact VLAD top-k scan in candidate_pairs_vlad_scored_from_globals. Computing each image's independent, deterministic top-k (and each image's VLAD aggregate) with rayon leaves the exported candidate manifest byte-identical while cutting the 10k candidate wall by about 4x.",
+  "change": {
+    "file": "examples/unordered_sfm_demo.rs",
+    "functions": [
+      "candidate_pairs_vlad_scored_from_globals: per-image exact_topk_similar_images now runs under (0..n).into_par_iter(); the same BTreeMap<pair,max_score> admission follows.",
+      "candidate_pairs_vlad_scored: VLAD aggregation (vlad) now runs under features.par_iter(), preserving image order."
+    ],
+    "correctness_argument": "exact_topk_similar_images is a deterministic pure function of (query, globals, topk); the previous mutual path already derived admission from completed neighbour sets. Indexed rayon collection preserves order, so the pair set, its tie order, and the max scores are unchanged.",
+    "not_included": "No ANN/LSH behavior change. The existing approximate paths (--retrieval-backend ann with --ann-tables/--ann-bits/--ann-probes, and candidate_pairs_vlad_lsh_scored) remain the behavioral A/B and are not byte-identical by design."
+  },
+  "measurements": {
+    "environment": "level=image-io release example unordered_sfm_demo; RAYON_NUM_THREADS controls threads",
+    "tiers": [
+      {
+        "tier": "tier-1000",
+        "candidate_budget": 7000,
+        "one_thread_wall_s": 73.25,
+        "eight_thread_wall_s": 39.37,
+        "speedup": 1.86,
+        "manifest_sha256_1t": "268f88d2b6e4822b96af3c2b049038cfaa6bf662d2d6e0a368b93d04956c2c88",
+        "manifest_sha256_8t": "268f88d2b6e4822b96af3c2b049038cfaa6bf662d2d6e0a368b93d04956c2c88"
+      },
+      {
+        "tier": "tier-5000",
+        "candidate_budget": 35000,
+        "one_thread_wall_s": 1051.4,
+        "eight_thread_wall_s": 291.65,
+        "speedup": 3.6,
+        "manifest_sha256_1t": "d0123e4a81fe6e2c625388c2e8f433c2aea8097374ec9ff417079af78d029ea0",
+        "manifest_sha256_8t": "d0123e4a81fe6e2c625388c2e8f433c2aea8097374ec9ff417079af78d029ea0"
+      },
+      {
+        "tier": "tier-10000",
+        "candidate_budget": 70000,
+        "eight_thread_wall_s": 1017.61,
+        "eight_thread_cpu_percent": 413,
+        "eight_thread_user_seconds": 4201.98,
+        "equivalent_one_thread_wall_s_estimate": 4212,
+        "speedup_estimate": 4.14,
+        "candidate_pairs": 70000,
+        "manifest_sha256": "6a060d5d148d39fe4378f7fedebf6420ae827d17e82774d13ba1a5da3269a28a",
+        "peak_rss_kib": 1206856
+      }
+    ]
+  },
+  "baseline_caveat": "The frozen M5 tier-10000 candidates.txt was produced by an older policy: current main adds two manifest metadata lines (retrieval_fill_policy global-score-desc-v1, temporal_long_level_sampling dense-through-32;stride=offset/16) and differs from the frozen 10k manifest by roughly 10k of 70k pairs. The frozen candidate_wall_s=2989.03 is therefore NOT the current-code sequential baseline; the reported speedup is against the current code's own 1-thread run (5k measured, 10k from conserved CPU time).",
+  "tests": "cargo test --release --example unordered_sfm_demo --features image-io: 70 passed.",
+  "schema": "visloc_m5_candidate_parallel_v1"
+}

@@ -143,3 +143,30 @@ sequence evidence through same-image UnionFind conflicts. This report does not
 label the current connected pipeline linear-time or fully registered. Exact
 source/config/artifact hashes and all four tier ledgers are in
 [`m5-openloris-connected-scale-validation.json`](../benchmarks/electro/m5-openloris-connected-scale-validation.json).
+
+## Follow-up: candidate scan parallelization (2026-09-18)
+
+The first item in the paragraph above — "replacing that full similarity scan"
+— was addressed by parallelizing the exact scan rather than approximating it.
+`candidate_pairs_vlad_scored_from_globals` now computes each image's
+independent, deterministic exact top-k with rayon (`(0..n).into_par_iter()`),
+and `candidate_pairs_vlad_scored` aggregates each image's VLAD descriptor in
+parallel. Indexed collection preserves order, so the exported candidate
+manifest is byte-identical to the single-threaded run.
+
+| tier | 1 thread | 8 threads | speedup | manifest |
+| --- | ---: | ---: | ---: | --- |
+| 1,000 | 73.25 s | 39.37 s | 1.86x | identical SHA-256 |
+| 5,000 | 1051.4 s | 291.65 s | 3.60x | identical SHA-256 |
+| 10,000 | (4212 s from CPU time) | 1017.6 s | ~4.1x | 70,000 pairs |
+
+The remaining sequential cost is feature loading plus vocabulary construction
+(the streaming item below). The approximate ANN/LSH backends
+(`--retrieval-backend ann`, `candidate_pairs_vlad_lsh_scored`) remain available
+as the behavioral A/B and are not expected to be byte-identical. Evidence:
+`benchmarks/electro/m5-candidate-parallel-v1.json`.
+
+Note that the frozen tier-10000 `candidates.txt` predates two current manifest
+metadata policies and differs by roughly 10k of 70k pairs, so the historical
+`candidate_wall_s=2989.03` is not the current-code sequential baseline; the
+speedups above are measured against the current code's own 1-thread run.
