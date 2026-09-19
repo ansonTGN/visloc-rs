@@ -2188,6 +2188,8 @@ struct Args {
     /// omitted keeps the historical registration and support unchanged.
     final_min_track_length: Option<usize>,
     seed_trials: usize,
+    /// Maximum number of seed *growth attempts* (`0` = use `seed_trials`).
+    seed_attempts: usize,
     /// Optional diagnostic restriction to one seed pair (`I,J`).
     seed_pair: Option<(usize, usize)>,
     /// Map each sufficiently large verified-view-graph component independently
@@ -4693,6 +4695,7 @@ where
     let mut final_ba = true;
     let mut final_min_track_length: Option<usize> = None;
     let mut seed_trials = 12usize;
+    let mut seed_attempts = 0usize;
     let mut seed_pair: Option<(usize, usize)> = None;
     let mut component_model_min_images: Option<usize> = None;
     let mut component_model_max_count = 16usize;
@@ -5176,6 +5179,9 @@ where
                 final_min_track_length = Some(value);
             }
             "--seed-trials" => seed_trials = a.remove(i + 1).parse().map_err(|e| format!("{e}"))?,
+            "--seed-attempts" => {
+                seed_attempts = a.remove(i + 1).parse().map_err(|e| format!("{e}"))?
+            }
             "--seed-pair" => seed_pair = Some(parse_seed_pair(&a.remove(i + 1))?),
             "--component-model-min-images" => {
                 component_model_min_images = Some(
@@ -6366,6 +6372,7 @@ where
         final_ba,
         final_min_track_length,
         seed_trials,
+        seed_attempts,
         seed_pair,
         component_model_min_images,
         component_model_max_count,
@@ -17524,6 +17531,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         final_global_ba: args.final_ba,
         final_min_track_length: args.final_min_track_length,
         seed_trials: args.seed_trials,
+        seed_attempts: args.seed_attempts,
         seed_pair: args.seed_pair,
         // Distortion self-calibration runs inside the joint intrinsics BA, so it
         // implies intrinsics refinement; the (k1, k2) flag rides on `ba_config`.
