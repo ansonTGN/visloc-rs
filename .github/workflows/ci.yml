@@ -45,6 +45,19 @@ jobs:
       - name: Check workspace
         run: scripts/check_msrv.sh
 
+  deny:
+    name: Dependency policy (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cargo-deny
+
+      - name: Check advisories, licenses, bans, sources
+        run: cargo deny --all-features check
+
   rust:
     runs-on: ubuntu-latest
     steps:
