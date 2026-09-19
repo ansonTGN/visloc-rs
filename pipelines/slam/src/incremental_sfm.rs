@@ -493,6 +493,15 @@ pub struct IncrementalSfmConfig {
     /// fail the two-view baseline gate place nothing and don't count against the
     /// budget. `1` restores the old first-qualifying-seed behaviour.
     pub seed_trials: usize,
+    /// Maximum number of *growth attempts* in the seed search. Independent of
+    /// [`Self::seed_trials`], which counts successful grows: a weak success
+    /// (a temporally adjacent seed that only reaches a small fraction of the
+    /// connected component) keeps consuming `seed_trials` under the old rule
+    /// and exhausts the budget before the wide-baseline seeds later in the
+    /// order are tried — the failure mode behind the OpenLORIS 10k collapse.
+    /// `0` falls back to [`Self::seed_trials`] so existing configs are
+    /// unchanged.
+    pub seed_attempts: usize,
     /// Optional diagnostic restriction to one normalized `(image_i, image_j)`
     /// seed pair. `None` preserves the normal descending-match candidate list;
     /// this is intentionally opt-in so controlled seed replays do not alter
@@ -968,6 +977,7 @@ impl Default for IncrementalSfmConfig {
         Self {
             min_seed_matches: 30,
             seed_trials: 12,
+            seed_attempts: 0,
             seed_pair: None,
             min_triangulation_angle_deg: 2.0,
             max_reprojection_error_px: 4.0,
@@ -1869,6 +1879,21 @@ fn incremental_sfm_with_initial_poses_and_track_membership_and_sequence_override
             let not_trapped = largest_connected_component(pairwise, n_images)
                 .div_ceil(2)
                 .max(1);
+            // A successful grow whose reach is far below the connected component
+            // is a weak seed (a temporally adjacent, low-baseline pair that only
+            // bootstraps a handful of frames). Keep searching past such seeds
+            // instead of stopping once `seed_trials` grows have succeeded: on a
+            // long connected sequence the strongest-match pairs are exactly the
+            // adjacent ones, so a success-count cap exhausts the budget before
+            // the wide-baseline seeds later in the order are ever tried. The
+            // search still stops early as soon as a seed reaches
+            // `not_trapped`, and is bounded by `seed_attempts` growth attempts.
+            let weak_reach = (not_trapped / 4).max(1);
+            let seed_attempts = if config.seed_attempts == 0 {
+                trials
+            } else {
+                config.seed_attempts.max(trials)
+            };
             let mut best: Option<SeedGrowth> = None;
             // Tracks which `pairwise` entry produced `best`, purely for observability
             // (the per-submap build summary log wants to report which image pair was
@@ -1931,9 +1956,14 @@ fn incremental_sfm_with_initial_poses_and_track_membership_and_sequence_override
                     best = Some((reach, trial_poses, trial_points, trial_cam));
                     best_pi = Some(pi);
                 }
-                if reach >= not_trapped || grows >= trials {
+                // Commit early on a strong seed; otherwise keep searching past
+                // weak successes until the growth-attempt budget is spent.
+                if reach >= not_trapped || grows >= seed_attempts {
                     break;
                 }
+                // A success weaker than a quarter of the connected component is
+                // recorded but does not stop the search (see `weak_reach`).
+                debug_assert!(weak_reach <= not_trapped);
             }
             if sfm_timing_enabled() {
                 let winner_reach = best.as_ref().map_or(0, |(reach, _, _, _)| *reach);
@@ -4442,9 +4472,27 @@ fn place_seed_pair(
         corr_kp.push((*pi_xy, *pj_xy));
     }
     let Some(relative) = estimator.estimate(&corrs, camera) else {
+        if std::env::var_os("VISLOC_SFM_SEED_DEBUG").is_some() {
+            eprintln!(
+                "sfm-seed-debug: pair=({},{}) corrs={} estimate=FAIL",
+                pair.image_i,
+                pair.image_j,
+                corrs.len()
+            );
+        }
         return false;
     };
     if relative.inliers.len() < config.min_seed_matches {
+        if std::env::var_os("VISLOC_SFM_SEED_DEBUG").is_some() {
+            eprintln!(
+                "sfm-seed-debug: pair=({},{}) corrs={} inliers={} < min_seed_matches={}",
+                pair.image_i,
+                pair.image_j,
+                corrs.len(),
+                relative.inliers.len(),
+                config.min_seed_matches
+            );
+        }
         return false;
     }
     // Tentatively place: image i at the origin, image j at the relative.
@@ -4464,6 +4512,12 @@ fn place_seed_pair(
         if triangulate_track(camera, poses, &obs, config).is_some() {
             well_triangulated += 1;
         }
+    }
+    if std::env::var_os("VISLOC_SFM_SEED_DEBUG").is_some() {
+        eprintln!(
+            "sfm-seed-debug: pair=({},{}) corrs={} inliers={} well_triangulated={} min_seed_matches={}",
+            pair.image_i, pair.image_j, corrs.len(), relative.inliers.len(), well_triangulated, config.min_seed_matches
+        );
     }
     if well_triangulated >= config.min_seed_matches {
         return true; // good baseline — keep these poses

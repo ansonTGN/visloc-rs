@@ -1,0 +1,30 @@
+{
+  "date": "2026-09-19",
+  "finding": "The 10k registration collapse (199/10000) is a seed-selection failure, not a track-build or matching-quality failure. The multi-seed search caps how many pairs *grow* a reconstruction at seed_trials (16). At 2.5k/5k the 16 successful grows include a seed that reaches most of the connected component (reach 875 / 1183); at 10k all 16 successful grows are weak (max reach 169) and the strong seeds that win at 5k (e.g. pair (1750,1758), reach 875) are never reached before the 16-success cap cuts the search off.",
+  "measurements": {
+    "tier_2500": {"candidates": 14832, "attempted": 6617, "zero_reach": 6601, "successful": 16, "winner_reach": 875, "winner_pair": "(1750,1758)"},
+    "tier_5000": {"candidates": 26490, "attempted": 8069, "zero_reach": 8053, "successful": 16, "winner_reach": 1183},
+    "tier_10000": {"candidates": 42921, "attempted": 7808, "zero_reach": 7792, "successful": 16, "winner_reach": 169, "winner_pair": "(2504,2512)"}
+  },
+  "seed_gate_detail": {
+    "observation": "Almost every seed pair passes the two-view relative-pose test with ~95 inliers but triangulates almost nothing: e.g. pair (0,1) inliers=96 well_triangulated=1 against min_seed_matches=30. Only ~16 of ~8000 attempted pairs produce >=30 well-triangulated points, and those cluster at image ids 2500-2517 and 400/3000/5000.",
+    "why": "place_seed_pair requires >= min_seed_matches (30) triangulatable correspondences. Adjacent low-parallax frames satisfy the epipolar geometry but have essentially no baseline, so they never seed. The scene's genuinely wide-baseline pairs are the few that pass; the winner_reach difference is how far each of those then grows."
+  },
+  "track_build_is_scale_invariant": {
+    "tier_5000": {"input": 1934599, "components": 43622, "conflicts": 4441, "conflict_obs": 553682, "retained_tracks": 39181, "retained_obs": 175660, "conflict_ratio": 0.2862},
+    "tier_10000": {"input": 3202444, "components": 73925, "conflicts": 7441, "conflict_obs": 920463, "retained_tracks": 66484, "retained_obs": 285305, "conflict_ratio": 0.2874},
+    "conclusion": "Same-image conflict ratio and retained-observations-per-component are essentially identical at 5k and 10k, so the union-find track builder does not degrade with scale."
+  },
+  "root_cause": "seed_candidate_order ranks pairs by matches.len() descending, which does not predict growth reach. The search then stops after seed_trials successful grows. On a connected 10k sequence the strongest-match pairs are temporally adjacent low-baseline pairs that barely grow; the wide-baseline seeds that do grow are later in the order and never tried.",
+  "fix": {
+    "change": "Add IncrementalSfmConfig::seed_attempts (CLI --seed-attempts, runner --seed-attempts). It bounds *growth attempts*, independent of seed_trials (which counts successful grows). A success whose reach is below a quarter of the connected component no longer stops the search; only a seed reaching >= half the component (not_trapped) does. 0 preserves the old seed_trials behaviour, so existing configs are unchanged.",
+    "results_tier_10000": [
+      {"seed_attempts": 0, "attempted": 7808, "successful": 16, "winner_reach": 169, "registered": 199, "tracks": 873},
+      {"seed_attempts": 64, "attempted": 11536, "successful": 64, "winner_reach": 240, "registered": 275, "tracks": 1398},
+      {"seed_attempts": 512, "attempted": 18587, "successful": 512, "winner_reach": 809, "registered": 1205, "tracks": 2438}
+    ],
+    "non_regression_tier_2500": "Default seed_attempts=0 gives 1223 / 4226 / 1.766 px, identical to before; cargo test -p visloc-slam --lib 787 passed."
+  },
+  "control": "colmap:latest model0 registers 8988 of 10000 images (both cameras, frames 0-4493) as one model, so the target component is ~9000, not the port's 199. seed_attempts=512 recovers 1205 (roughly the 1.2k plateau seen at 2.5k/5k) but is still far short of 8988, so a second limitation remains in single-seed growth reach.",
+  "schema": "visloc_colmap_port_10k_seed_collapse_v1"
+}

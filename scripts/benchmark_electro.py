@@ -1199,6 +1199,7 @@ def build_mapping_command(
     snapshot_keypoints_only: bool = False,
     periodic_ba_min_registered_images: int | None = None,
     seed_trials: int | None = None,
+    seed_attempts: int | None = None,
     seed_pair: str | None = None,
     component_model_min_images: int | None = None,
     component_model_max_count: int | None = None,
@@ -1247,6 +1248,7 @@ def build_mapping_command(
     positive_options = (
         ("--periodic-ba-min-registered-images", periodic_ba_min_registered_images),
         ("--seed-trials", seed_trials),
+        ("--seed-attempts", seed_attempts),
         ("--ba-max-iterations", ba_max_iterations),
     )
     for option, value in positive_options:
@@ -2284,6 +2286,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--periodic-ba-min-registered-images", type=int)
     parser.add_argument("--seed-trials", type=int)
+    parser.add_argument("--seed-attempts", type=int)
     parser.add_argument("--seed-pair", help="fixed mapper seed pair as I,J")
     parser.add_argument("--component-model-min-images", type=int)
     parser.add_argument("--component-model-max-count", type=int)
@@ -2550,6 +2553,7 @@ def main(argv: list[str] | None = None) -> int:
                     snapshot_keypoints_only=args.snapshot_keypoints_only,
                     periodic_ba_min_registered_images=args.periodic_ba_min_registered_images,
                     seed_trials=args.seed_trials,
+                    seed_attempts=args.seed_attempts,
                     seed_pair=args.seed_pair,
                     component_model_min_images=args.component_model_min_images,
                     component_model_max_count=args.component_model_max_count,
