@@ -1,8 +1,39 @@
-# VI-SLAM speed: compact MargData LM path (`lean_marg_data`)
+# VI-SLAM speed + accuracy investigation (`lean_marg_data`, L1)
 
 Date: 2026-09-20
 Baseline: `f31ce1a` (Merge PR #187) + uncommitted measurement tooling.
 Host: 8 logical cores, Linux, rustc 1.94.0.
+
+## Session summary and handover
+
+Delivered (all committed, full `visloc-basalt` suite green):
+* **Speed** (`3c2bf75`, `19ecae3`): compact MargData LM path + reduction cache
+  across rejected trials + payload model decrease. 3.6-4.3x VIO wall time on
+  MH_01/02/03/04/05, byte-identical `trajectory.tum` and `marg_data/`.
+* **Tooling** (`cf1c568`, `fa8ccbf`): `--num-opt-iter` + richer
+  `final_optimize` report; local track-length evidence.
+* **L1 infrastructure** (`7c99799`, `a7b9871`, `41ea166`): persistent map
+  surfaced on the live mapper, projection-rematch matcher, incremental local
+  mapping. All opt-in/default-off; measured negative results below.
+
+Datasets local now (under
+`/mnt/win/linux_data/euroc_mh03_official_20260830/`): `MH_03_medium`,
+`extracted/{MH_01_easy,MH_02_easy,MH_04_difficult,MH_05_difficult,V2_03_difficult}`.
+V2_03 came from the HuggingFace mirror `GlowBond/EuRoC_MAV_Dataset`.
+
+Accuracy findings (all measured, see sections below):
+* MH_04/05/V2_03 losses reproduce locally; gap is drift, not frontend tracking.
+* Global-BA iteration count is not the limiter.
+* Projection re-observation and incremental local mapping (appearance-only) do
+  **not** improve ATE: verified matches are recent-pair duplicates, so no
+  long-range edge enters `feature_matches`.
+
+Next candidate (not started): changes to the keyframe density / covisible-window
+full-BA policy (and loop closure over that denser graph), which is what
+ORB-SLAM3 has and this port lacks. Suggested first A/B: raise keyframe retention
+/ lower the keyframe-spacing policy and measure `average_track_length` and ATE
+on MH_04, using `--optimize-every-k` and the `final_optimize` report already in
+place. Read `docs/vi_slam_global_consistency_plan.md` §1.7 for the diagnosis.
 
 ## Problem
 
