@@ -65,10 +65,10 @@ use crate::mapper::{
     },
     session::{
         NfrMapper, NfrMapperError, NfrMapperFilterReport, NfrMapperHeadlessConfig,
-        NfrMapperMatchData, NfrMapperOptimizeReport, NfrMapperResult,
+        NfrMapperLandmarkDb, NfrMapperMatchData, NfrMapperOptimizeReport, NfrMapperResult,
     },
-    GlobalBaConfig, GlobalBaOptimizerState, MapperConfig, MatchData, OfflineMapperConfig,
-    TimeCamId,
+    FeatureTracks, GlobalBaConfig, GlobalBaOptimizerState, MapperConfig, MatchData,
+    OfflineMapperConfig, TimeCamId,
 };
 
 /// Diagnostic-only fine-grained stage trace, gated by the
@@ -314,6 +314,14 @@ pub struct OnlineNfrMapper {
 struct BackgroundOptimizeResult {
     poses: std::collections::BTreeMap<u64, SE3>,
     optimizer_state: GlobalBaOptimizerState,
+    /// Persistent track graph and landmark database produced by this job's
+    /// `build_tracks` + `setup_opt` + `filter_outliers` sequence.  Before this
+    /// was carried back, the live mapper's `feature_tracks`/`lmdb` stayed
+    /// empty for the whole run (they are only otherwise populated by
+    /// `finalize`'s live `optimize_pass`), so there was no persistent map for
+    /// projection-based re-observation to use.
+    feature_tracks: FeatureTracks,
+    lmdb: NfrMapperLandmarkDb,
     breakdown: BackgroundOptimizeBreakdown,
 }
 
@@ -964,6 +972,19 @@ impl OnlineNfrMapper {
         for (frame_id, pose) in result.poses {
             self.mapper.frame_poses.insert(frame_id, pose);
         }
+        // Surface the persistent track graph and landmark database on the live
+        // mapper.  The snapshot was cloned from the live mapper and then
+        // advanced by `build_tracks`/`setup_opt`/`filter_outliers`, so its
+        // landmark state is the freshest available; keyframes detected after
+        // the snapshot was taken simply have no landmarks yet and are picked
+        // up by the next `build_tracks`.  This is what makes the map
+        // persistent between optimizations instead of empty until `finalize`.
+        if !result.feature_tracks.is_empty() {
+            self.mapper.feature_tracks = result.feature_tracks;
+        }
+        if !result.lmdb.landmarks.is_empty() {
+            self.mapper.lmdb = result.lmdb;
+        }
         self.mapper.optimizer_state = result.optimizer_state;
         self.last_optimize_duration = Duration::from_secs_f64(result.breakdown.total_seconds);
         self.total_optimize_passes += 1;
@@ -1012,6 +1033,8 @@ impl OnlineNfrMapper {
             BackgroundOptimizeResult {
                 poses: snapshot.frame_poses,
                 optimizer_state: snapshot.optimizer_state,
+                feature_tracks: snapshot.feature_tracks,
+                lmdb: snapshot.lmdb,
                 breakdown: BackgroundOptimizeBreakdown {
                     build_tracks_seconds,
                     setup_opt_seconds,
