@@ -184,6 +184,26 @@ The tractable next lever is therefore **more/longer persistent tracks**
 (projection-based re-observation) feeding the global problem, not more solver
 iterations or a new frontend.
 
+### Track-length evidence for the L1 diagnosis (MH_04, 600 frames)
+
+Offline NFR mapper on the first 600 MH_04 frames (75 packets, 82 poses,
+1697 landmarks):
+
+* median map-point observation count **9**; mean 19.5 (this counts stereo
+  camera-images);
+* **841 of 1697 landmarks (50%) have only 5-9 observations**, i.e. they are
+  seen by a handful of keyframes and then dropped;
+* long tail to 151 observations;
+* `average_track_length` 17.9, 4194 tracks rejected as short
+  (`metrics.tracks`).
+
+With ~82 keyframes over 600 frames, a 9-observation point spans only ~66 VIO
+frames (~2 s). ORB-SLAM3 keeps points alive across far more keyframes via
+projection-based local-map re-observation, which is exactly the missing L1
+mechanism: the online mapper matches by appearance (BoW) + a short temporal
+window, not by projecting the persistent landmark map into each new keyframe's
+search window. This is now measured, not assumed.
+
 ## Next levers (not in this change)
 
 * **Parallelize the landmark reduction** (`reduce_landmark_factors_f32_checked_with_compact_back_substitution`)
