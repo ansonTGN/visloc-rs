@@ -2465,6 +2465,30 @@ pub struct LmResult {
     pub trace: Vec<LmTraceEntry>,
 }
 
+/// Whether the lean LM should evaluate the model decrease from the compact
+/// Q1/Q2 payload retained by the same landmark reduction (instead of
+/// re-factoring every landmark in `model_cost_decrease_f32`).
+///
+/// The payload evaluator is bit-identical to the full evaluator on the
+/// audited factor mixes (see the `m7_q2_model_reuse_*` tests) and returns
+/// `None` on any topology/rank/dimension mismatch, in which case the caller
+/// falls back to the full evaluator.
+///
+/// The variable is deliberately *not* `VISLOC_BASALT_*`: any such key opts the
+/// estimator back into the fully diagnostic path (`diagnostic_env_active`), so
+/// a `VISLOC_BASALT_`-prefixed switch could not isolate this evaluator.  Set
+/// `VISLOC_RS_PAYLOAD_MODEL_DECREASE=0` to force the historical full evaluator
+/// for A/B replay.
+fn payload_model_decrease_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        !matches!(
+            std::env::var("VISLOC_RS_PAYLOAD_MODEL_DECREASE").as_deref(),
+            Ok("0") | Ok("false")
+        )
+    })
+}
+
 /// Lean UpstreamF32 LM loop used only by the explicit no-diagnostics window
 /// path.  The retained/diagnostic implementation below deliberately keeps its
 /// historical f64 mirror and event payloads.  In this path the active solve
@@ -2499,25 +2523,41 @@ fn solve_lm_without_diagnostics_f32<P: LmProblem>(
     // Upstream uses `it <= vio_max_iterations`, i.e. a configured value of
     // seven permits eight accepted/rejected attempts in total.
     let mut lambda_vee = 2.0;
+    // The linearization point only changes on acceptance, and rejection leaves
+    // `state` untouched.  Relinearizing and re-reducing on a rejected damping
+    // trial therefore recomputes bit-identical `lin`/`reduced` from identical
+    // inputs.  Cache them and re-run only the damping, the small reduced-system
+    // solve, the model evaluation, and the trial cost for each lambda attempt.
+    // This mirrors upstream Basalt's inner damping backtracking loop without
+    // changing the attempt budget or the arithmetic of any evaluation.
+    let mut cached: Option<(LmLinearization, ReducedNormalSystemF32)> = None;
     for iteration in 0..=config.max_iterations {
         set_active_diagnostic_lm_iteration(Some(iteration));
         set_active_diagnostic_lm_frame(problem.diagnostic_frame_id());
-        let lin = timing.measure(TimingBucket::LmLinearize, || problem.linearize(&state))?;
-        if !lin.cost.is_finite() {
-            return Err(LmFailure::NonFinite);
+        if cached.is_none() {
+            let lin = timing.measure(TimingBucket::LmLinearize, || problem.linearize(&state))?;
+            if !lin.cost.is_finite() {
+                return Err(LmFailure::NonFinite);
+            }
+            let reduced = timing.measure(TimingBucket::LmLandmarkReduction, || {
+                reduce_landmark_factors_f32_checked_with_compact_back_substitution(
+                    &lin.factors,
+                    state.len(),
+                    1e-10,
+                )
+                .map_err(|_| LmFailure::LinearSolve)
+            })?;
+            cached = Some((lin, reduced));
         }
+        let (lin, reduced) = cached
+            .as_ref()
+            .expect("linearization cache populated above");
 
         // Native refreshes error_total from linearizeProblem each iteration;
         // the previous trial's expression schedule can yield different bits.
+        // With the cache, `lin.cost` is the same value the fresh linearization
+        // would return for this unchanged state.
         cost = lin.cost;
-        let reduced = timing.measure(TimingBucket::LmLandmarkReduction, || {
-            reduce_landmark_factors_f32_checked_with_compact_back_substitution(
-                &lin.factors,
-                state.len(),
-                1e-10,
-            )
-            .map_err(|_| LmFailure::LinearSolve)
-        })?;
         let mut h32 = reduced.h.clone();
         if !h32.iter().all(|value| value.is_finite())
             || !reduced.b.iter().all(|value| value.is_finite())
@@ -2542,11 +2582,18 @@ fn solve_lm_without_diagnostics_f32<P: LmProblem>(
             return Err(LmFailure::NonFinite);
         }
 
-        // Keep the complete transformed row-stack model decrease.  This is
-        // the historical local evaluator; the compact payload is used only
-        // for the one-shot landmark recovery path below.
+        // Prefer the Q1/Q2 payload retained by the reduction that produced
+        // this same reduced system: it is bit-identical to the full evaluator
+        // on the audited mixes and avoids re-factoring every landmark.  Fall
+        // back to the complete transformed row-stack evaluator whenever the
+        // payload is absent or structurally ineligible.
         let model_decrease = timing.measure(TimingBucket::LmModelDecrease, || {
-            model_cost_decrease_f32(&lin.factors, &step, 1e-10).ok_or(LmFailure::RankDeficient)
+            let payload = payload_model_decrease_enabled()
+                .then(|| reduced.model_cost_decrease_from_payload(&lin.factors, &step, 1e-10))
+                .flatten();
+            payload
+                .or_else(|| model_cost_decrease_f32(&lin.factors, &step, 1e-10))
+                .ok_or(LmFailure::RankDeficient)
         })?;
         let model = (cost as f32 - model_decrease as f32) as f64;
         let step_norm = step
@@ -2561,7 +2608,7 @@ fn solve_lm_without_diagnostics_f32<P: LmProblem>(
         // retained implementations discard it and keep their legacy recovery
         // behavior.
         let preparation = timing.measure(TimingBucket::LmCompactBackSubstitution, || {
-            reduced.into_trial_preparation(&state, &step, 1e-10)
+            reduced.trial_preparation_ref(&state, &step, 1e-10)
         });
 
         let trial = timing.measure(TimingBucket::LmCompactApplyStep, || {
@@ -2600,6 +2647,9 @@ fn solve_lm_without_diagnostics_f32<P: LmProblem>(
             timing.measure(TimingBucket::LmAccept, || {
                 problem.accept_step_with_token(&state, &step, trial_token)
             })?;
+            // The linearization point moved, so the next attempt must
+            // relinearize and re-reduce rather than reuse the cached pair.
+            cached = None;
             timing.measure(TimingBucket::LmDecisionStateBookkeeping, || {
                 state = trial.clone();
                 cost = actual;
@@ -3969,6 +4019,50 @@ impl ReducedNormalSystemF32 {
                 let track_id = data.track_id;
                 let step = back_substitute_landmark_compact_entry_f32(
                     &data, &storage, state_step, tolerance,
+                )
+                .and_then(|step| {
+                    (step.len() == 3 && step.iter().all(|value| value.is_finite()))
+                        .then(|| Vector3::new(step[0], step[1], step[2]))
+                });
+                LmPreparedLandmarkStep {
+                    landmark_index,
+                    track_id,
+                    step,
+                }
+            })
+            .collect();
+        Some(LmTrialPreparation {
+            landmark_steps,
+            tolerance_bits: tolerance.to_bits(),
+            state_fingerprint: lm_trial_vector_fingerprint(state),
+            step_fingerprint: lm_trial_vector_fingerprint(state_step),
+        })
+    }
+
+    /// Borrowing twin of [`Self::into_trial_preparation`].
+    ///
+    /// The LM damping backtracking loop reuses one reduction across every
+    /// rejected lambda attempt, so the compact payload must stay owned by the
+    /// caller.  This produces the same owned per-landmark preparation as the
+    /// consuming version without moving (or cloning) the shared f32 arena.
+    fn trial_preparation_ref(
+        &self,
+        state: &DVector<f64>,
+        state_step: &DVector<f64>,
+        tolerance: f64,
+    ) -> Option<LmTrialPreparation> {
+        let compact = self.compact_back_substitution.as_ref()?;
+        let landmark_steps = compact
+            .entries
+            .iter()
+            .map(|data| {
+                let landmark_index = data.landmark_index;
+                let track_id = data.track_id;
+                let step = back_substitute_landmark_compact_entry_f32(
+                    data,
+                    &compact.storage,
+                    state_step,
+                    tolerance,
                 )
                 .and_then(|step| {
                     (step.len() == 3 && step.iter().all(|value| value.is_finite()))

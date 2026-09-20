@@ -238,14 +238,25 @@ the VIO and online demos; the online demo enables it by default):
   (**4.2x**), per frame 318-326 ms -> 99-100 ms. Frontend and marginalization
   unchanged. End-to-end online mapper RTF 0.128 -> **0.349**.
 
+Follow-up in the same stage: the lean loop now caches the linearization and
+landmark reduction across rejected damping trials (a rejection does not move
+the linearization point, so both would recompute bit-identical values) and
+evaluates the model decrease from the Q1/Q2 payload retained by that same
+reduction instead of re-factoring every landmark. Across MH_01/02/03/04/05
+(300-400 frames each) the lean path is 3.6-4.3x faster than the diagnostic
+path with byte-identical trajectory and MargData; the rejection-heavy MH_04
+benefits most (4.26x, LM 5.4x).
+
 Full evidence: [lean MargData LM speedup](work/vi_slam_lean_margdata_lm_speedup_20260920.md).
 This is a pure implementation-path change: no algorithm, window configuration,
 or calibration changed, and the diagnostic/provenance path remains bit-for-bit
-available. Remaining LM cost is dominated by `lm_landmark_reduction` and
-`lm_model_decrease`, which still re-factor the same landmark set twice per
-iteration; upstream Basalt's inner damping backtracking loop (re-solve only the
-tiny reduced system per rejected lambda) is the next lever and is expected to
-matter most on the rejection-heavy MH_04/MH_05/V2_03.
+available. The largest remaining LM bucket is the landmark reduction itself
+(`lm_landmark_reduction`); ordered `par_iter` parallelism over landmarks is the
+next lever, followed by structureless landmark elimination (arXiv:2505.12337),
+which also improves MH_04/V2_03 accuracy.
+
+Dataset note: MH_01/02/04/05 were recovered from the local `machine_hall.zip`
+bundle; only V2_03_difficult is still missing locally.
 
 ### 1.5 Result 2026-09-16: the offline mapper's 8/11 result reproduced online
 

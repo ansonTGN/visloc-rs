@@ -116,14 +116,55 @@ The remaining LM cost after this change is `lm_landmark_reduction`
 (~4.7 s); `lm_landmark_reduction` and `lm_model_decrease` still re-factor the
 same landmark set twice per iteration.
 
+## Follow-up 2026-09-20: cache the reduction across rejected trials + payload model decrease
+
+Two further changes, both confined to the lean UpstreamF32 LM loop:
+
+1. **Reduction cache across rejected damping trials.** A rejection leaves the
+   linearization point untouched, so `problem.linearize(&state)` and the
+   landmark reduction recompute bit-identical values. The loop now caches
+   `(LmLinearization, ReducedNormalSystemF32)` and invalidates it only on
+   acceptance, re-running just the damping, the small reduced-system solve,
+   the model evaluation, and the trial cost per lambda attempt. This mirrors
+   upstream Basalt's inner backtracking loop without changing the attempt
+   budget or any arithmetic.
+2. **Payload model decrease.** `model_cost_decrease_f32` re-factored every
+   landmark on every attempt. The loop now prefers
+   `ReducedNormalSystemF32::model_cost_decrease_from_payload` (the Q1/Q2
+   payload retained by the same reduction) and falls back to the full
+   evaluator on any structural mismatch. The payload evaluator is bit-identical
+   to the full one on the audited factor mixes (`m7_q2_model_reuse_*` tests).
+   Opt out with `VISLOC_RS_PAYLOAD_MODEL_DECREASE=0` (not a `VISLOC_BASALT_*`
+   key, which would opt back into the diagnostic path).
+
+### Multi-sequence verification (300-400 frames each, lean vs retained)
+
+| Sequence | retained | lean | speedup | artifacts |
+| --- | ---: | ---: | ---: | --- |
+| MH_01_easy | 142.1 s | 38.5 s | 3.69x | trajectory + MargData byte-identical |
+| MH_02_easy | 121.7 s | 31.3 s | 3.88x | byte-identical |
+| MH_03_medium | 98.0 s | 27.5 s | 3.57x | byte-identical |
+| MH_04_difficult | 195.4 s | 45.9 s | 4.26x | byte-identical |
+| MH_05_difficult | 145.6 s | 36.2 s | 4.02x | byte-identical |
+
+The rejection-heavy MH_04 benefits most (4.26x), consistent with the cache
+removing relinearization on rejected trials. MH_04 300-400 frames: LM solve
+183.6 s -> 33.9 s (5.4x).
+
+Dataset note: MH_01/02/04/05 were recovered from the local
+`machine_hall.zip` bundle (12.7 GB) at
+`/mnt/win/linux_data/euroc_mh03_official_20260830/machine_hall.zip`; only
+V2_03_difficult is not yet local.
+
 ## Next levers (not in this change)
 
-* **Inner LM damping loop.** Upstream Basalt re-forms only the ~87x87 reduced
-  system per rejected lambda trial; this port relinearizes and re-reduces on
-  every rejection. Folding the reduction into an outer loop is the next large
-  win, expected to matter most on MH_04/MH_05/V2_03 where rejection rates are
-  highest.
-* **Consume the compact model-decrease payload** already saved by the clean
-  reducer instead of re-factoring in `model_cost_decrease_f32`.
-* Parallelize `landmark_steps` over landmarks with ordered `par_iter`
-  (bit-exact because order-preserving).
+* **Parallelize the landmark reduction** (`reduce_landmark_factors_f32_checked_with_compact_back_substitution`)
+  over landmarks with ordered `par_iter` (bit-exact because order-preserving).
+  After the cache + payload changes, the reduction is the largest remaining LM
+  bucket (MH_03 300f: 7.3 s of 18.4 s LM; MH_04 400f: 12.1 s of 33.9 s).
+* **Structureless landmark elimination** (arXiv:2505.12337) removes landmark
+  states entirely and also improves MH_04/V2_03 accuracy; high effort.
+* **ICE-BA linearization-point freezing** for variables that have converged.
+* The diagnostic/provenance path is intentionally unchanged; any of these
+  further changes should stay inside the lean loop and be A/B-verified for
+  byte-identical trajectory and MargData as above.

@@ -113,7 +113,12 @@ total VIO wall time fell from 127-131 s to 39-40 s (**3.2x**), with the LM
 solver itself **4.2x** faster (116-119 s -> 28 s); end-to-end online-mapper RTF
 rose from 0.128 to **0.349**. The VIO demo and online demo expose
 `--retained-marg-diagnostics` to restore the old path; the online demo enables
-the compact path by default. Full evidence:
+the compact path by default. The lean loop also caches the linearization and
+landmark reduction across rejected damping trials and evaluates the model
+decrease from the retained Q1/Q2 payload instead of re-factoring landmarks.
+Across MH_01/02/03/04/05 (300-400 frames each) it is **3.6-4.3x** faster than
+the diagnostic path with byte-identical trajectory and MargData (MH_04, the
+rejection-heavy sequence, is 4.26x; its LM solve is 5.4x). Full evidence:
 [lean MargData LM speedup](../work/vi_slam_lean_margdata_lm_speedup_20260920.md).
 This does not change any algorithm, window setting, or calibration, so the
 accuracy tables above are unaffected.
