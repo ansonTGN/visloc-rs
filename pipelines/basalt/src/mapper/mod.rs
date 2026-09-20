@@ -2008,6 +2008,49 @@ pub fn global_ba_with_state(
     )
 }
 
+/// Local bundle adjustment over a subset of keyframes (a covisibility window).
+///
+/// `window_frames` lists the frame IDs that stay **variable**; every other pose
+/// in `poses` is treated as fixed. This localizes `global_ba_impl_in_place` to
+/// the window by (a) restricting `pose_indices` to the window and (b) letting
+/// out-of-window observations drop out, since every observation whose pose is
+/// not in the window is skipped by `linearize_mapper_observation`. Landmarks
+/// are shared, so a landmark observed by both window and non-window frames is
+/// optimized against its window observations only. The window's oldest frame is
+/// the gauge anchor.
+///
+/// This is the cheap, solver-reusing local-BA step for the online mapper: it
+/// keeps the same factor machinery as global BA while solving a much smaller
+/// pose block. It returns the same [`MapperSummary`] shape; `poses` is updated
+/// in place only for the window frames.
+pub fn local_ba_with_state(
+    poses: &mut BTreeMap<u64, SE3>,
+    factors: &MapperFactors,
+    landmarks: &mut BTreeMap<u64, MapperLandmark>,
+    window_frames: &BTreeSet<u64>,
+    calibration: &BasaltCalibration,
+    config: GlobalBaConfig,
+    optimizer: &mut GlobalBaOptimizerState,
+) -> MapperSummary {
+    let mut window_poses = poses
+        .iter()
+        .filter(|(id, _)| window_frames.contains(id))
+        .map(|(&id, pose)| (id, pose.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let summary = global_ba_impl_in_place(
+        &mut window_poses,
+        factors,
+        landmarks,
+        Some(calibration),
+        config,
+        optimizer,
+    );
+    for (id, pose) in window_poses {
+        poses.insert(id, pose);
+    }
+    summary
+}
+
 fn global_ba_impl_in_place(
     poses: &mut BTreeMap<u64, SE3>,
     factors: &MapperFactors,

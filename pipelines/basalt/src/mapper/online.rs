@@ -231,6 +231,13 @@ pub struct OnlineMapperConfig {
     pub loop_closure_min_correspondences: usize,
     /// Scalar weight multiplied into the loop factor's information matrix.
     pub loop_closure_weight: f64,
+    /// Covisibility local-BA window size in keyframes (0 disables). When
+    /// non-zero, `optimize_pass` runs a local windowed BA around the newest
+    /// keyframe after the global steps, cheaply refining the active part of the
+    /// map between global merges.
+    pub local_ba_window: usize,
+    /// LM iteration budget for the local windowed BA.
+    pub local_ba_iterations: usize,
 }
 
 impl Default for OnlineMapperConfig {
@@ -249,6 +256,8 @@ impl Default for OnlineMapperConfig {
             loop_closure_factors: false,
             loop_closure_min_correspondences: 10,
             loop_closure_weight: 1.0,
+            local_ba_window: 0,
+            local_ba_iterations: 4,
         }
     }
 }
@@ -1273,6 +1282,20 @@ impl OnlineNfrMapper {
             .mapper
             .optimize(num_opt_iter)
             .map_err(|_| OnlineMapperError::MissingCalibration)?;
+        if self.config.local_ba_window > 0 {
+            let local = self
+                .mapper
+                .optimize_local_window(self.config.local_ba_window, self.config.local_ba_iterations)
+                .map_err(|_| OnlineMapperError::MissingCalibration)?;
+            mapper_trace!(
+                "local_ba: window={} poses={} landmarks={} cost {:.3}->{:.3}",
+                self.config.local_ba_window,
+                local.pose_count,
+                local.landmark_count,
+                local.initial_cost,
+                local.final_cost
+            );
+        }
         Ok((first_optimize, filter, second_optimize))
     }
 

@@ -47,12 +47,12 @@ use crate::vio::margdata::MARGDATA_SCHEMA_VERSION_V3;
 
 use super::{
     extract_nonlinear_factors, global_ba_with_state, linearize_mapper_observation,
-    process_marg_data, rel_pose_error, roll_pitch_error, setup_opt as run_setup_opt,
-    triangulate_pair, FeatureId, FeatureTracks, GlobalBaConfig, GlobalBaIteration,
-    GlobalBaOptimizerState, ImagePair, MapperConfig, MapperFactors, MapperLandmark,
-    MapperObservation, MapperSummary, MargDataProcessError, MatchData, Matches, NfrExtractionError,
-    OfflineMapperConfig, SetupOptInput, SetupOptReport, TemporalRansacResult, TimeCamId,
-    TrackBuilder, TrackFilterReport,
+    local_ba_with_state, process_marg_data, rel_pose_error, roll_pitch_error,
+    setup_opt as run_setup_opt, triangulate_pair, FeatureId, FeatureTracks, GlobalBaConfig,
+    GlobalBaIteration, GlobalBaOptimizerState, ImagePair, MapperConfig, MapperFactors,
+    MapperLandmark, MapperObservation, MapperSummary, MargDataProcessError, MatchData, Matches,
+    NfrExtractionError, OfflineMapperConfig, SetupOptInput, SetupOptReport, TemporalRansacResult,
+    TimeCamId, TrackBuilder, TrackFilterReport,
 };
 
 /// Errors raised while processing an individual mapper packet.
@@ -1347,6 +1347,115 @@ impl NfrMapper {
         num_iterations: usize,
     ) -> Result<NfrMapperOptimizeReport, NfrMapperOptimizeError> {
         self.optimize(num_iterations)
+    }
+
+    /// Select a covisibility window around the newest keyframe: the newest
+    /// `window_keyframes` keyframes ranked by shared-landmark count with the
+    /// active frame, plus the active frame itself.
+    ///
+    /// Returns frame IDs (not image IDs). Empty when there are fewer than two
+    /// poses or no landmarks.
+    pub fn covisibility_window(&self, active: u64, window_keyframes: usize) -> BTreeSet<u64> {
+        let mut window = BTreeSet::new();
+        window.insert(active);
+        if window_keyframes == 0 {
+            return window;
+        }
+        // Count shared landmarks between the active frame and every other frame.
+        let mut shared: BTreeMap<u64, usize> = BTreeMap::new();
+        let mut active_landmarks: BTreeSet<u64> = BTreeSet::new();
+        for (&track_id, landmark) in &self.lmdb.landmarks {
+            let touches_active = landmark
+                .observations
+                .iter()
+                .any(|o| o.image.frame_id == active)
+                || landmark.host.frame_id == active;
+            if !touches_active {
+                continue;
+            }
+            active_landmarks.insert(track_id);
+            // Every other frame observing this landmark shares it.
+            for observation in &landmark.observations {
+                if observation.image.frame_id != active {
+                    *shared.entry(observation.image.frame_id).or_default() += 1;
+                }
+            }
+            if landmark.host.frame_id != active {
+                *shared.entry(landmark.host.frame_id).or_default() += 1;
+            }
+        }
+        let _ = active_landmarks;
+        // Rank by shared count, tie-break by frame id for determinism.
+        let mut ranked = shared.into_iter().collect::<Vec<_>>();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        for (frame_id, _) in ranked.into_iter().take(window_keyframes) {
+            window.insert(frame_id);
+        }
+        window
+    }
+
+    /// Local bundle adjustment over the covisibility window around the newest
+    /// keyframe. Reuses the global-BA factor machinery on the window's pose
+    /// block (see [`local_ba_with_state`]).
+    pub fn optimize_local_window(
+        &mut self,
+        window_keyframes: usize,
+        num_iterations: usize,
+    ) -> Result<NfrMapperOptimizeReport, NfrMapperOptimizeError> {
+        let calibration = self
+            .calibration
+            .as_ref()
+            .ok_or(NfrMapperOptimizeError::MissingCalibration)?;
+        let Some(&active) = self.frame_poses.keys().next_back() else {
+            return Err(NfrMapperOptimizeError::MissingCalibration);
+        };
+        let window = self.covisibility_window(active, window_keyframes);
+        let requested_iterations = num_iterations;
+        let initial_lambda = self.optimizer_state.lambda;
+        let initial_lambda_vee = self.optimizer_state.lambda_vee;
+        let mut config = self.optimize_config;
+        config.max_iterations = requested_iterations;
+        let summary = local_ba_with_state(
+            &mut self.frame_poses,
+            &self.factors,
+            &mut self.lmdb.landmarks,
+            &window,
+            calibration,
+            config,
+            &mut self.optimizer_state,
+        );
+        self.lmdb.rebuild_observation_index();
+        let accepted_step_count = summary
+            .trace
+            .iter()
+            .flat_map(|iteration| iteration.trials.iter())
+            .filter(|trial| trial.accepted)
+            .count();
+        let rejected_trial_count = summary
+            .trace
+            .iter()
+            .flat_map(|iteration| iteration.trials.iter())
+            .filter(|trial| !trial.accepted)
+            .count();
+        Ok(NfrMapperOptimizeReport {
+            requested_iterations,
+            iterations: summary.iterations,
+            pose_count: summary.pose_count,
+            landmark_count: summary.track_count,
+            initial_cost: summary.initial_cost,
+            final_cost: summary.final_cost,
+            accepted_step_count,
+            rejected_trial_count,
+            initial_lambda,
+            min_lambda: self.optimizer_state.min_lambda,
+            max_lambda: self.optimizer_state.max_lambda,
+            initial_lambda_vee,
+            final_lambda: self.optimizer_state.lambda,
+            final_lambda_vee: self.optimizer_state.lambda_vee,
+            final_state_hash: summary.final_state_hash,
+            trace_hash: summary.trace_hash,
+            trace: summary.trace,
+        })
     }
 
     /// Return the current world-point payload using the inherited

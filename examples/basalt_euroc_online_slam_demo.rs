@@ -88,6 +88,10 @@ struct Args {
     loop_closure_min_correspondences: usize,
     /// Scalar weight for loop-closure factors.
     loop_closure_weight: f64,
+    /// Covisibility local-BA window size in keyframes (0 disables).
+    local_ba_window: usize,
+    /// LM iterations for the local windowed BA.
+    local_ba_iterations: usize,
 }
 
 /// Default bound on the VIO-to-mapper `MargData` channel (see
@@ -226,6 +230,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             loop_closure_factors: args.loop_closure_factors,
             loop_closure_min_correspondences: args.loop_closure_min_correspondences,
             loop_closure_weight: args.loop_closure_weight,
+            local_ba_window: args.local_ba_window,
+            local_ba_iterations: args.local_ba_iterations,
             ..OnlineMapperConfig::default()
         },
     );
@@ -725,6 +731,8 @@ impl Args {
         let mut loop_closure_min_correspondences =
             OnlineMapperConfig::default().loop_closure_min_correspondences;
         let mut loop_closure_weight = OnlineMapperConfig::default().loop_closure_weight;
+        let mut local_ba_window = OnlineMapperConfig::default().local_ba_window;
+        let mut local_ba_iterations = OnlineMapperConfig::default().local_ba_iterations;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy().into_owned();
@@ -796,6 +804,18 @@ impl Args {
                 "--retained-marg-diagnostics" => retained_marg_diagnostics = true,
                 "--projection-rematch" => projection_rematch = true,
                 "--local-mapping" => incremental_local_mapping = true,
+                "--local-ba-window" => {
+                    local_ba_window = next(&mut arguments, &option)?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --local-ba-window: {error}"))?;
+                }
+                "--local-ba-iterations" => {
+                    local_ba_iterations = next(&mut arguments, &option)?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --local-ba-iterations: {error}"))?;
+                }
                 "--loop-closure-factors" => loop_closure_factors = true,
                 "--loop-closure-min-corr" => {
                     loop_closure_min_correspondences = next(&mut arguments, &option)?
@@ -864,6 +884,8 @@ impl Args {
             loop_closure_factors,
             loop_closure_min_correspondences,
             loop_closure_weight,
+            local_ba_window,
+            local_ba_iterations,
         })
     }
 
@@ -875,7 +897,8 @@ impl Args {
          [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N] \
          [--projection-rematch] [--local-mapping] \
          [--projection-host-window N] [--projection-radius PX] \
-         [--loop-closure-factors] [--loop-closure-min-corr N] [--loop-closure-weight W]"
+         [--loop-closure-factors] [--loop-closure-min-corr N] [--loop-closure-weight W] \
+         [--local-ba-window N] [--local-ba-iterations N]"
             .into()
     }
 }

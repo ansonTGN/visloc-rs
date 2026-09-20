@@ -382,6 +382,38 @@ noisy two-view yaw measurement: the tuned optimum is ~300. This confirms the
 constraint-structure diagnosis. The metric path (map-based SE3) is the next
 improvement, followed by covisibility local BA.
 
+## Covisibility local BA 2026-09-20 (neutral at merge cadence)
+
+Implemented `local_ba_with_state` (mod.rs) and
+`NfrMapper::optimize_local_window` / `covisibility_window` (session.rs):
+
+* `local_ba_with_state` restricts `global_ba_impl_in_place` to a subset of
+  poses (the window); out-of-window observations drop out because
+  `linearize_mapper_observation` skips any observation whose pose is not in
+  `pose_indices`. Landmarks are shared and optimized against window
+  observations only; the window's oldest frame is the gauge anchor.
+* `covisibility_window` ranks other frames by shared-landmark count with the
+  active (newest) frame and takes the top N.
+* `OnlineMapperConfig::{local_ba_window, local_ba_iterations}` (default 0/off),
+  run after the global steps in `optimize_pass`; demo flags
+  `--local-ba-window` / `--local-ba-iterations`.
+
+Full MH_04 (2033 frames):
+
+| configuration | ATE | wall |
+| --- | ---: | ---: |
+| baseline | 0.0830 m | 430 s |
+| `--local-ba-window 10` | 0.0828 m | 756 s |
+| `--local-ba-window 30` | 0.0831 m | 1143 s |
+| loop weight 300 | 0.0702 m | 424 s |
+| loop weight 300 + local-BA window 10 | 0.0699 m | 721 s |
+
+**Negative result:** local BA at the same (merge) cadence as global BA is
+neutral and 1.7-2.7x slower, because the mapper already runs full global BA
+over the whole map. Its value would come from running **every keyframe** with
+the new observations already integrated, which needs the incremental-mapping
+and window paths combined. Kept default-off; the loop factor remains the win.
+
 ## Next levers (not in this change)
 
 * **Parallelize the landmark reduction** (`reduce_landmark_factors_f32_checked_with_compact_back_substitution`)
