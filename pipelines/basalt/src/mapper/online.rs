@@ -45,7 +45,7 @@ use std::sync::OnceLock;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use nalgebra::{Matrix3, UnitQuaternion, Vector3};
+use nalgebra::{Matrix3, Point3, UnitQuaternion, Vector3};
 use rayon::prelude::*;
 use thiserror::Error;
 use visloc_core::geometry::SE3;
@@ -63,11 +63,12 @@ use crate::mapper::{
         query_bow_candidates, BowQueryCandidate, FeaturePipelineError, MapperImageFeatures,
         MapperImageId,
     },
+    hamming_distance,
     session::{
         NfrMapper, NfrMapperError, NfrMapperFilterReport, NfrMapperHeadlessConfig,
         NfrMapperLandmarkDb, NfrMapperMatchData, NfrMapperOptimizeReport, NfrMapperResult,
     },
-    FeatureTracks, GlobalBaConfig, GlobalBaOptimizerState, MapperConfig, MatchData,
+    FeatureTracks, GlobalBaConfig, GlobalBaOptimizerState, ImagePair, MapperConfig, MatchData,
     OfflineMapperConfig, TimeCamId,
 };
 
@@ -184,6 +185,27 @@ pub struct OnlineMapperConfig {
     /// `temporal_seed: None`, exactly like the offline mapper's default
     /// `run_headless` call; tests use a fixed seed for determinism.
     pub headless: NfrMapperHeadlessConfig,
+    /// L1 projection re-observation: for each new keyframe, project the
+    /// persistent landmark map (surfaced by `merge_background_result`) into
+    /// the new keyframe's image using the current pose and add descriptor
+    /// matches found within `projection_search_radius_px`. This is the
+    /// ORB-SLAM3-style local-map association that keeps map points alive
+    /// across many keyframes; without it tracks die after a few keyframes
+    /// (median 9 observations on MH_04).
+    ///
+    /// Default **off**: this adds matches beyond the batch `match_all`
+    /// candidate set, so `tests::incremental_matches_equal_batch` (and the
+    /// byte-exact online/batch contract) only hold when it is disabled.
+    pub projection_rematch: bool,
+    /// Pixel radius of the projection search window. A candidate landmark's
+    /// projected pixel must fall within this radius of the matched keypoint.
+    pub projection_search_radius_px: f64,
+    /// Maximum Hamming distance accepted for a projection descriptor match.
+    pub projection_max_hamming: u32,
+    /// Only consider landmarks hosted by keyframes within this many
+    /// keyframe-ranks of the query (a cheap covisibility proxy). Bounds the
+    /// per-keyframe projection cost as the map grows.
+    pub projection_host_window: u64,
 }
 
 impl Default for OnlineMapperConfig {
@@ -194,6 +216,10 @@ impl Default for OnlineMapperConfig {
             loop_gap_keyframes: 30,
             match_top_k: 5,
             headless: NfrMapperHeadlessConfig::default(),
+            projection_rematch: false,
+            projection_search_radius_px: 12.0,
+            projection_max_hamming: 70,
+            projection_host_window: 20,
         }
     }
 }
@@ -859,10 +885,171 @@ impl OnlineNfrMapper {
                 loop_count += 1;
             }
         }
+        if self.config.projection_rematch {
+            accepted_count += self.projection_rematch(query_id);
+        }
         mapper_trace!(
             "match_new_keyframe: query={query_id:?} accepted={accepted_count} loops={loop_count}"
         );
         (accepted_count, loop_count)
+    }
+
+    /// L1 projection re-observation: project persistent landmarks into
+    /// `query_id` using the current pose and add descriptor matches found in a
+    /// pixel window as new inlier pairs.
+    ///
+    /// Returns the number of accepted projection matches. Only landmarks
+    /// hosted within `projection_host_window` keyframe-ranks of the query are
+    /// considered (a cheap covisibility proxy), and only the highest-scoring
+    /// descriptor within `projection_search_radius_px` under
+    /// `projection_max_hamming` is accepted. New pairs are inserted into
+    /// `feature_match_data`/`feature_matches` with the host as the older
+    /// image, so `build_tracks` folds them into longer tracks.
+    fn projection_rematch(&mut self, query_id: TimeCamId) -> usize {
+        let Some(calibration) = self.mapper.calibration.clone() else {
+            return 0;
+        };
+        let Some(query_pose) = self.mapper.frame_poses.get(&query_id.frame_id).cloned() else {
+            return 0;
+        };
+        let Some(query_camera) = calibration.camera(query_id.cam_id).copied() else {
+            return 0;
+        };
+        let Some(t_imu_cam_q) = calibration.camera_to_imu(query_id.cam_id).cloned() else {
+            return 0;
+        };
+        let Some(query_features) = self.mapper.feature_corners.get(&query_id) else {
+            return 0;
+        };
+        let query_rank = self
+            .keyframe_rank
+            .get(&query_id.frame_id)
+            .copied()
+            .unwrap_or(0);
+        let host_window = self.config.projection_host_window;
+        let radius = self.config.projection_search_radius_px as f32;
+        let radius_sq = radius * radius;
+        let max_hamming = self.config.projection_max_hamming;
+
+        // Snapshot the candidate landmarks and their host observations before
+        // mutating the match graph below (borrow checker: `self.mapper.lmdb`
+        // is read while `feature_match_data` is written).
+        let candidates: Vec<(TimeCamId, u64, Point3<f64>, [u8; 32])> = self
+            .mapper
+            .lmdb
+            .landmarks
+            .values()
+            .filter_map(|landmark| {
+                let host = landmark.host;
+                if host.frame_id == query_id.frame_id {
+                    return None;
+                }
+                let host_rank = self.keyframe_rank.get(&host.frame_id).copied().unwrap_or(0);
+                if query_rank.abs_diff(host_rank) > host_window {
+                    return None;
+                }
+                let position_host = landmark.position_in_host()?;
+                let observation = landmark
+                    .observations
+                    .iter()
+                    .find(|observation| observation.image == host)?;
+                let host_features = self.mapper.feature_corners.get(&host)?;
+                let descriptor = host_features
+                    .descriptors
+                    .get(usize::try_from(observation.feature_id).ok()?)?;
+                Some((
+                    host,
+                    observation.feature_id,
+                    Point3::from(position_host),
+                    *descriptor,
+                ))
+            })
+            .collect();
+
+        mapper_trace!(
+            "projection_rematch: query={query_id:?} landmarks={} candidates={}",
+            self.mapper.lmdb.landmarks.len(),
+            candidates.len()
+        );
+        let mut added = 0usize;
+        let mut touched: BTreeSet<ImagePair> = BTreeSet::new();
+        for (host, host_feature, position_host, descriptor) in candidates {
+            let Some(t_imu_cam_h) = calibration.camera_to_imu(host.cam_id).cloned() else {
+                continue;
+            };
+            let Some(host_pose) = self.mapper.frame_poses.get(&host.frame_id).cloned() else {
+                continue;
+            };
+            // T_w_c = T_w_i * T_i_c, then express the host-camera point in the
+            // query camera frame: T_cq_ch = (T_w_cq)^-1 * T_w_ch.
+            let t_w_cq = query_pose.compose(&t_imu_cam_q);
+            let t_w_ch = host_pose.compose(&t_imu_cam_h);
+            let t_cq_ch = t_w_cq.inverse().compose(&t_w_ch);
+            let point_query = t_cq_ch.transform_point(&position_host);
+            let Some(projected) = query_camera.project(&point_query) else {
+                continue;
+            };
+            if point_query.z <= 0.0 {
+                continue;
+            }
+            // Best descriptor within the pixel window.
+            let mut best: Option<(u32, u64)> = None;
+            for (index, corner) in query_features.corners.iter().enumerate() {
+                let dx = corner.x as f32 - projected.x as f32;
+                let dy = corner.y as f32 - projected.y as f32;
+                if dx * dx + dy * dy > radius_sq {
+                    continue;
+                }
+                let Some(query_descriptor) = query_features.descriptors.get(index) else {
+                    continue;
+                };
+                let distance = hamming_distance(&descriptor, query_descriptor);
+                if distance > max_hamming {
+                    continue;
+                }
+                if best.is_none_or(|(best_distance, _)| distance < best_distance) {
+                    best = Some((distance, index as u64));
+                }
+            }
+            let Some((_distance, query_feature)) = best else {
+                continue;
+            };
+            let pair = (host, query_id);
+            let entry = self
+                .mapper
+                .feature_match_data
+                .entry(pair)
+                .or_insert_with(|| NfrMapperMatchData {
+                    t_i_j: t_cq_ch.clone(),
+                    matches: Vec::new(),
+                    inliers: Vec::new(),
+                });
+            // One-to-one: skip if either endpoint already claimed in this pair.
+            if entry
+                .inliers
+                .iter()
+                .any(|(left, right)| *left == host_feature || *right == query_feature)
+            {
+                continue;
+            }
+            entry.matches.push((host_feature, query_feature));
+            entry.inliers.push((host_feature, query_feature));
+            touched.insert(pair);
+            added += 1;
+        }
+        mapper_trace!("projection_rematch: query={query_id:?} added={added}");
+        // Reflect the projection inliers in the inlier-only `feature_matches`
+        // view for exactly the pairs this call touched, so `build_tracks`
+        // folds them into longer tracks. Existing pairs keep their prior
+        // entries for untouched pairs.
+        for pair in touched {
+            if let Some(data) = self.mapper.feature_match_data.get(&pair) {
+                self.mapper
+                    .feature_matches
+                    .insert(pair, MatchData::new(data.inliers.clone()));
+            }
+        }
+        added
     }
 
     /// Rule 3: the exact tail of `NfrMapper::run_headless`

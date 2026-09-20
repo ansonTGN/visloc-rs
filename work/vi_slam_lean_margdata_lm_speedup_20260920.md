@@ -204,6 +204,41 @@ mechanism: the online mapper matches by appearance (BoW) + a short temporal
 window, not by projecting the persistent landmark map into each new keyframe's
 search window. This is now measured, not assumed.
 
+## L1 first steps 2026-09-20 (projection re-observation)
+
+Two changes toward ORB-SLAM3-style persistent re-observation:
+
+1. **Surface the map on the live mapper** (committed). The background optimizer
+   merged only poses; `feature_tracks`/`lmdb` were dropped, so the live mapper
+   had no landmark map between optimizations. `BackgroundOptimizeResult` now
+   carries both and `merge_background_result` installs them. Final ATE is
+   unchanged (finalize rebuilds tracks), so this is a safe substrate.
+2. **Projection rematch** (`OnlineMapperConfig::projection_rematch`, default
+   off; `--projection-rematch` on the demo). For each new keyframe it projects
+   persistent landmarks hosted within `projection_host_window` keyframe-ranks
+   using the current pose, and adds descriptor matches within
+   `projection_search_radius_px` under `projection_max_hamming`.
+
+The matcher works: with `--optimize-every-k 10` on MH_04 it adds 70-115
+projection matches per keyframe (trace lines in `projection_rematch`). But it
+does **not** improve ATE:
+
+| MH_04 600 frames | ATE | landmarks |
+| --- | ---: | ---: |
+| baseline | 0.0168 m | 1852 |
+| `--projection-rematch` | 0.0170 m | 1856 |
+| `--optimize-every-k 10` | 0.0170 m | 1852 |
+| `--optimize-every-k 10 --projection-rematch` | 0.0167 m | 1778 |
+
+Reason: the live landmark map only exists just after an optimize merge
+(`setup_opt`), and is small (182-888 landmarks) and dominated by *recent*
+hosts, so the projection matches mostly duplicate the short-range links BoW and
+temporal matching already provide. They do not create the long-range
+re-observations that would lengthen tracks. Making L1 effective needs
+**incremental local mapping** (triangulate new map points every keyframe and
+keep a covisible persistent map), not a matcher bolted onto an
+optimize-cadence map. That is the next, larger step.
+
 ## Next levers (not in this change)
 
 * **Parallelize the landmark reduction** (`reduce_landmark_factors_f32_checked_with_compact_back_substitution`)

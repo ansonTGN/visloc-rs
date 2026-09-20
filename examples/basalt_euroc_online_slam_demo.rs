@@ -73,6 +73,8 @@ struct Args {
     /// (`NfrMapperHeadlessConfig::num_opt_iter`).  Defaults to the mapper
     /// contract's 10.
     num_opt_iter: usize,
+    /// Enable L1 projection-based persistent-landmark re-observation.
+    projection_rematch: bool,
 }
 
 /// Default bound on the VIO-to-mapper `MargData` channel (see
@@ -200,6 +202,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             optimize_every_k: args.optimize_every_k,
             periodic_iterations: args.periodic_iterations,
             headless,
+            projection_rematch: args.projection_rematch,
             ..OnlineMapperConfig::default()
         },
     );
@@ -458,6 +461,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "schema": "basalt.online_mapper.run.v1",
         "lean_marg_data": !args.retained_marg_diagnostics,
         "final_optimize_iterations_budget": args.num_opt_iter,
+        "projection_rematch": args.projection_rematch,
         "pacing": if args.realtime { "dataset_rate" } else { "as_fast_as_possible" },
         "frames_processed": frame_limit,
         "dataset_duration_seconds": dataset_duration_seconds,
@@ -689,6 +693,7 @@ impl Args {
         let mut mapper_queue_capacity = DEFAULT_MAPPER_QUEUE_CAPACITY;
         let mut retained_marg_diagnostics = false;
         let mut num_opt_iter = 10usize;
+        let mut projection_rematch = false;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy().into_owned();
@@ -758,6 +763,7 @@ impl Args {
                     }
                 }
                 "--retained-marg-diagnostics" => retained_marg_diagnostics = true,
+                "--projection-rematch" => projection_rematch = true,
                 "--num-opt-iter" => {
                     num_opt_iter = next(&mut arguments, &option)?
                         .to_string_lossy()
@@ -788,6 +794,7 @@ impl Args {
             mapper_queue_capacity,
             retained_marg_diagnostics,
             num_opt_iter,
+            projection_rematch,
         })
     }
 
@@ -796,7 +803,8 @@ impl Args {
          [--config FILE] [--out-dir DIR] [--max-frames N] [--optimize-every-k K] \
          [--periodic-iterations N] [--realtime | --as-fast-as-possible] \
          [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
-         [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N]"
+         [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N] \
+         [--projection-rematch]"
             .into()
     }
 }
