@@ -74,3 +74,19 @@ own gate, not an ORB-SLAM3 comparison; the trajectory ATE is available in each
 run's `slam_trajectory.csv` for `evo` scoring. The point here is the relative
 front-end cost breakdown and the cross-check matcher lever, which are
 architecture-level and carry to other sequences.
+
+## Recommended configurations
+
+- **Real-time on a GTX 1660 Ti** (inside the 20 Hz budget):
+  `--feature-extractor superpoint-onnx --superpoint-onnx-model models/superpoint_512.onnx
+  --superpoint-onnx-backend cuda --cross-check-matcher` - 36 ms/frame (27.6 fps),
+  tracking 0.38.
+- **Best robustness within budget**:
+  the 1500-keypoint model with the same flags - 52.5 ms/frame (19 fps),
+  tracking 0.543.
+- **Avoid the default `BruteForceMatcher` with a dense SuperPoint extractor**:
+  it costs ~3.4x more per frame for no tracking gain over `CrossCheckMatcher`
+  (179 -> 52.5 ms at 1500 keypoints). `CrossCheckMatcher` is the recommended
+  matcher for the dense deep front-end; the classical corner extractor is
+  unaffected in quality by the swap but still fails to track EuRoC texture
+  (0.02).
