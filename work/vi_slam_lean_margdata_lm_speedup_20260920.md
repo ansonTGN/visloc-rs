@@ -311,6 +311,77 @@ changes to the keyframe/BA policy, not a matcher. This is a measured negative
 result, not an absence of measurement; the infrastructure is correct and
 default-off so the byte-exact contract is preserved.
 
+## Long-horizon drift diagnosis 2026-09-20 (full MH_04)
+
+Isolated the full-sequence ATE by component (MH_04, 2033 frames, lean path):
+
+| system | 600 frames | FULL sequence |
+| --- | ---: | ---: |
+| VIO-only (`basalt_euroc_vio_demo`) | 0.0160 m | 0.0987 m |
+| Online mapper (global BA) | 0.0164 m | 0.0830 m |
+| ORB-SLAM3 (reference) | - | 0.043 m |
+
+Findings:
+* Short-horizon accuracy is already SoTA-class (~16 mm). The gap is purely
+  **long-horizon drift**.
+* The mapper's full global BA *does* help the VIO (0.0987 -> 0.0830, -16%),
+  so BA is working, just not enough.
+* **BA convergence is not the limiter:** `periodic_iterations` 1/4/16 give
+  0.0828/0.0830/0.0827 m; more iterations even reduce the number of merges.
+* **BA frequency is not the limiter:** `optimize_every_k=10` vs 5 and
+  `periodic_iterations` changes move ATE by <0.5 mm.
+* 235 loop pairs are accepted and enter the graph, but only as **vision
+  factors**. There is no loop *relative-pose* factor: `linearize_factors`
+  (mod.rs:1404) consumes only `relative_pose` (VIO-marginalization pairs) and
+  `roll_pitch`. `extract_nonlinear_factors` always returns
+  `ba_covisibility: Vec::new()` (mod.rs:2897), so the recovered covisibility
+  path is dead code.
+* `match_temporal_ransac` operates on unit rays, so a loop pair's `t_i_j` is
+  **scale-free** (rotation reliable, translation up to scale).
+
+**Conclusion:** long-horizon drift is a loop-closure *constraint-structure*
+problem, not a solver-budget problem. The bounded next step is a
+rotation/relative-pose loop factor (scale from the existing map when
+available), then a proper covisibility local BA.
+
+## Loop-closure relative-pose factors 2026-09-20 (first accuracy win)
+
+Implemented `OnlineMapperConfig::loop_closure_factors` (default off) plus
+`online.rs::OnlineNfrMapper::loop_closure_factor` and `fit_se3`:
+
+* For every match accepted with `keyframe_rank` gap > `loop_gap_keyframes`,
+  build a `RelativePoseFactor` and append it to the mapper's factor set before
+  global BA.
+* **Metric path** (preferred): gather landmarks observed in both keyframes,
+  express each in its observing camera frame, and solve the point-set
+  registration `p_left ≈ T_left_right * p_right` with Umeyama/Horn (`fit_se3`).
+  In practice the *new* keyframe's features have no map landmark yet (the last
+  `setup_opt` predates them), so this path rarely fires.
+* **Rotation fallback**: the two-view RANSAC measurement `t_i_j` is scale-free
+  but its rotation is a valid, VIO-independent loop constraint. Keep the VIO
+  relative translation as a neutral measurement and put near-zero information
+  on translation, so only yaw/roll/pitch close the loop.
+
+Full MH_04 (2033 frames, `--optimize-every-k 10 --periodic-iterations 4`):
+
+| loop-closure weight | ATE |
+| --- | ---: |
+| baseline (off) | 0.0830 m |
+| 1 | 0.0821 m |
+| 50 | 0.0793 m |
+| 100 | 0.0761 m |
+| **300** | **0.0702 m** (repeat 0.0704) |
+| 500 | 0.0762 m |
+| 700 | 0.1262 m |
+| 1000 | 0.5563 m |
+| 10000 | diverges (1.89 m) |
+
+**Result: 0.0830 -> 0.0702 m (-15.4%) at weight 300**, reproducible, with no
+wall-time change (424 s vs 430 s). Over-weighting diverges, as expected for a
+noisy two-view yaw measurement: the tuned optimum is ~300. This confirms the
+constraint-structure diagnosis. The metric path (map-based SE3) is the next
+improvement, followed by covisibility local BA.
+
 ## Next levers (not in this change)
 
 * **Parallelize the landmark reduction** (`reduce_landmark_factors_f32_checked_with_compact_back_substitution`)

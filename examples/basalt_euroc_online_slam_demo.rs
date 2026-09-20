@@ -82,6 +82,12 @@ struct Args {
     projection_host_window: Option<u64>,
     /// Projection search radius override in pixels (None keeps the default).
     projection_radius_px: Option<f64>,
+    /// Enable loop-closure relative-pose factors recovered from map landmarks.
+    loop_closure_factors: bool,
+    /// Minimum 3D-3D correspondences for a loop factor.
+    loop_closure_min_correspondences: usize,
+    /// Scalar weight for loop-closure factors.
+    loop_closure_weight: f64,
 }
 
 /// Default bound on the VIO-to-mapper `MargData` channel (see
@@ -217,6 +223,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             projection_search_radius_px: args
                 .projection_radius_px
                 .unwrap_or(OnlineMapperConfig::default().projection_search_radius_px),
+            loop_closure_factors: args.loop_closure_factors,
+            loop_closure_min_correspondences: args.loop_closure_min_correspondences,
+            loop_closure_weight: args.loop_closure_weight,
             ..OnlineMapperConfig::default()
         },
     );
@@ -712,6 +721,10 @@ impl Args {
         let mut incremental_local_mapping = false;
         let mut projection_host_window = None;
         let mut projection_radius_px = None;
+        let mut loop_closure_factors = false;
+        let mut loop_closure_min_correspondences =
+            OnlineMapperConfig::default().loop_closure_min_correspondences;
+        let mut loop_closure_weight = OnlineMapperConfig::default().loop_closure_weight;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy().into_owned();
@@ -783,6 +796,19 @@ impl Args {
                 "--retained-marg-diagnostics" => retained_marg_diagnostics = true,
                 "--projection-rematch" => projection_rematch = true,
                 "--local-mapping" => incremental_local_mapping = true,
+                "--loop-closure-factors" => loop_closure_factors = true,
+                "--loop-closure-min-corr" => {
+                    loop_closure_min_correspondences = next(&mut arguments, &option)?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --loop-closure-min-corr: {error}"))?;
+                }
+                "--loop-closure-weight" => {
+                    loop_closure_weight = next(&mut arguments, &option)?
+                        .to_string_lossy()
+                        .parse::<f64>()
+                        .map_err(|error| format!("invalid --loop-closure-weight: {error}"))?;
+                }
                 "--projection-host-window" => {
                     projection_host_window = Some(
                         next(&mut arguments, &option)?
@@ -835,6 +861,9 @@ impl Args {
             incremental_local_mapping,
             projection_host_window,
             projection_radius_px,
+            loop_closure_factors,
+            loop_closure_min_correspondences,
+            loop_closure_weight,
         })
     }
 
@@ -845,7 +874,8 @@ impl Args {
          [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
          [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N] \
          [--projection-rematch] [--local-mapping] \
-         [--projection-host-window N] [--projection-radius PX]"
+         [--projection-host-window N] [--projection-radius PX] \
+         [--loop-closure-factors] [--loop-closure-min-corr N] [--loop-closure-weight W]"
             .into()
     }
 }

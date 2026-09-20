@@ -471,6 +471,24 @@ impl NfrMapperLandmarkDb {
             .collect()
     }
 
+    /// Return the first landmark observed at `(image, feature_id)`, if any.
+    ///
+    /// The landmark store is small (thousands) and loop-factor construction
+    /// runs only on accepted loop pairs, so a linear scan is fine; the
+    /// `observations` index is host-centric and does not key by feature.
+    pub fn landmark_for_observation(
+        &self,
+        image: TimeCamId,
+        feature_id: FeatureId,
+    ) -> Option<&MapperLandmark> {
+        self.landmarks.values().find(|landmark| {
+            landmark
+                .observations
+                .iter()
+                .any(|o| o.image == image && o.feature_id == feature_id)
+        })
+    }
+
     pub fn num_landmark_observations(&self, track_id: u64) -> Option<usize> {
         self.landmarks
             .get(&track_id)

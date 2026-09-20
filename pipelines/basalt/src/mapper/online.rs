@@ -68,8 +68,8 @@ use crate::mapper::{
         NfrMapper, NfrMapperError, NfrMapperFilterReport, NfrMapperHeadlessConfig,
         NfrMapperLandmarkDb, NfrMapperMatchData, NfrMapperOptimizeReport, NfrMapperResult,
     },
-    FeatureTracks, GlobalBaConfig, GlobalBaOptimizerState, ImagePair, MapperConfig, MatchData,
-    OfflineMapperConfig, TimeCamId,
+    FeatureId, FeatureTracks, GlobalBaConfig, GlobalBaOptimizerState, ImagePair, MapperConfig,
+    MatchData, OfflineMapperConfig, RelativePoseFactor, TimeCamId,
 };
 
 /// Diagnostic-only fine-grained stage trace, gated by the
@@ -216,6 +216,21 @@ pub struct OnlineMapperConfig {
     /// Default **off** for the same byte-exactness reason as
     /// `projection_rematch`.
     pub incremental_local_mapping: bool,
+    /// Loop-closure relative-pose factors: when a newly accepted match is
+    /// classified as a loop (`keyframe_rank` gap > `loop_gap_keyframes`),
+    /// recover its metric SE3 from the map landmarks observed in both
+    /// keyframes and append it as a `RelativePoseFactor`. This is the
+    /// constraint that kills long-horizon drift (see the full-sequence MH_04
+    /// diagnosis in `work/vi_slam_lean_margdata_lm_speedup_20260920.md`).
+    ///
+    /// Default **off**; opt-in until the byte-exactness A/B is re-baselined.
+    pub loop_closure_factors: bool,
+    /// Minimum number of 3D-3D correspondences required before a loop factor is
+    /// accepted. Guards against fitting a relative pose from a handful of
+    /// outliers.
+    pub loop_closure_min_correspondences: usize,
+    /// Scalar weight multiplied into the loop factor's information matrix.
+    pub loop_closure_weight: f64,
 }
 
 impl Default for OnlineMapperConfig {
@@ -231,6 +246,9 @@ impl Default for OnlineMapperConfig {
             projection_max_hamming: 70,
             projection_host_window: 20,
             incremental_local_mapping: false,
+            loop_closure_factors: false,
+            loop_closure_min_correspondences: 10,
+            loop_closure_weight: 1.0,
         }
     }
 }
@@ -856,6 +874,7 @@ impl OnlineNfrMapper {
 
         let mut accepted_count = 0;
         let mut loop_count = 0;
+        let mut loop_pairs: Vec<ImagePair> = Vec::new();
         for outcome in outcomes.into_iter().flatten() {
             let CandidateMatchOutcome {
                 left_id,
@@ -894,7 +913,23 @@ impl OnlineNfrMapper {
             let gap = left_rank.abs_diff(right_rank);
             if gap > self.config.loop_gap_keyframes {
                 loop_count += 1;
+                if self.config.loop_closure_factors {
+                    loop_pairs.push((left_id, right_id));
+                }
             }
+        }
+        if !loop_pairs.is_empty() {
+            let mut accepted_factors = 0usize;
+            for &(left_id, right_id) in &loop_pairs {
+                if let Some(factor) = self.loop_closure_factor(left_id, right_id) {
+                    self.mapper.factors.relative_pose.push(factor);
+                    accepted_factors += 1;
+                }
+            }
+            mapper_trace!(
+                "loop_closure_factors: candidates={} accepted={accepted_factors}",
+                loop_pairs.len()
+            );
         }
         if self.config.incremental_local_mapping {
             let (attempted, accepted, rejected) = self
@@ -911,6 +946,132 @@ impl OnlineNfrMapper {
             "match_new_keyframe: query={query_id:?} accepted={accepted_count} loops={loop_count}"
         );
         (accepted_count, loop_count)
+    }
+
+    /// Build a metric loop-closure `RelativePoseFactor` for an accepted loop
+    /// pair `(left_id, right_id)`.
+    ///
+    /// The two-view RANSAC measurement (`t_i_j`) is scale-free because the
+    /// temporal matcher works on unit rays, so it cannot constrain metric
+    /// drift. Instead this gathers the map landmarks observed in *both*
+    /// images, expresses each landmark in its observing camera's frame, and
+    /// solves the point-set registration `p_left ≈ T_left_right * p_right`.
+    /// The result is the metric relative pose ORB-SLAM3 derives from its loop
+    /// map points, and it is the constraint that kills long-horizon drift.
+    ///
+    /// Returns `None` when fewer than `loop_closure_min_correspondences`
+    /// landmarks are shared or the fit is degenerate.
+    fn loop_closure_factor(
+        &self,
+        left_id: TimeCamId,
+        right_id: TimeCamId,
+    ) -> Option<RelativePoseFactor> {
+        let calibration = self.mapper.calibration.as_ref()?;
+        let left_pose = self.mapper.frame_poses.get(&left_id.frame_id)?.clone();
+        let right_pose = self.mapper.frame_poses.get(&right_id.frame_id)?.clone();
+        let t_imu_cam_l = calibration.camera_to_imu(left_id.cam_id)?.clone();
+        let t_imu_cam_r = calibration.camera_to_imu(right_id.cam_id)?.clone();
+        let t_world_cam_l = left_pose.compose(&t_imu_cam_l);
+        let t_world_cam_r = right_pose.compose(&t_imu_cam_r);
+        let t_cam_l_world = t_world_cam_l.inverse();
+        let t_cam_r_world = t_world_cam_r.inverse();
+
+        // `loop_pairs` come straight from `match_new_keyframe`, which inserts
+        // `feature_match_data` under `(query_id, other_id)`.
+        let data = self.mapper.feature_match_data.get(&(left_id, right_id))?;
+
+        // Resolve a landmark observed at `(image, feature)` to its 3D point in
+        // the observing camera's frame by going through the host frame.
+        let point_in_frame =
+            |image: TimeCamId, feature: FeatureId, t_cam_world: &SE3| -> Option<Vector3<f64>> {
+                let landmark = self.mapper.lmdb.landmark_for_observation(image, feature)?;
+                let p_host = landmark.position_in_host()?;
+                let host_pose = self.mapper.frame_poses.get(&landmark.host.frame_id)?;
+                let host_extrinsic = calibration.camera_to_imu(landmark.host.cam_id)?;
+                let t_world_cam_host = host_pose.compose(host_extrinsic);
+                let p_world = t_world_cam_host.transform_point(&Point3::from(p_host));
+                Some(t_cam_world.transform_point(&p_world).coords)
+            };
+
+        let mut left_points: Vec<Vector3<f64>> = Vec::new();
+        let mut right_points: Vec<Vector3<f64>> = Vec::new();
+        for &(left_feature, right_feature) in &data.inliers {
+            let Some(p_cam_l) = point_in_frame(left_id, left_feature, &t_cam_l_world) else {
+                continue;
+            };
+            let Some(p_cam_r) = point_in_frame(right_id, right_feature, &t_cam_r_world) else {
+                continue;
+            };
+            left_points.push(p_cam_l);
+            right_points.push(p_cam_r);
+        }
+
+        // Preferred: metric SE(3) from map landmarks observed in both frames.
+        // `fit_se3` gives `T_left_right` (`p_left ≈ T_left_right * p_right`);
+        // the factor's convention is `T_from_to`, so invert it.
+        if left_points.len() >= self.config.loop_closure_min_correspondences {
+            if let Some(t_left_right) = fit_se3(&right_points, &left_points) {
+                let t_right_left = t_left_right.inverse();
+                let q = t_right_left.rotation.quaternion();
+                return Some(self.build_loop_factor(
+                    right_id.frame_id,
+                    left_id.frame_id,
+                    t_right_left.translation,
+                    [q.w, q.i, q.j, q.k],
+                    true,
+                ));
+            }
+        }
+
+        // Fallback: the two-view RANSAC measurement is scale-free, but its
+        // rotation is a valid, VIO-independent loop constraint. Keep the
+        // translation at the current VIO estimate (neutral) and put near-zero
+        // information on it, so only rotation closes the loop (this is what
+        // removes yaw drift, the dominant long-horizon error mode).
+        let relative = right_pose.inverse().compose(&left_pose);
+        // `data.t_i_j` is `T_left_right`; the factor wants `T_right_left`.
+        let rotation = data.t_i_j.inverse().rotation;
+        let q = rotation.quaternion();
+        Some(self.build_loop_factor(
+            right_id.frame_id,
+            left_id.frame_id,
+            relative.translation,
+            [q.w, q.i, q.j, q.k],
+            false,
+        ))
+    }
+
+    /// Assemble a loop `RelativePoseFactor`. When `metric` is true the
+    /// information matrix is strong on all six DOF; otherwise only rotation is
+    /// constrained (`1e-6` on translation directions).
+    fn build_loop_factor(
+        &self,
+        from: u64,
+        to: u64,
+        translation: Vector3<f64>,
+        rotation: [f64; 4],
+        metric: bool,
+    ) -> RelativePoseFactor {
+        let strong = self.config.loop_closure_weight / 1e-3;
+        let weak = 1e-6;
+        let mut information = vec![0.0; 36];
+        for i in 0..6 {
+            let is_translation = i < 3;
+            let value = if metric || !is_translation {
+                strong
+            } else {
+                weak
+            };
+            information[i * 6 + i] = value;
+        }
+        RelativePoseFactor {
+            from,
+            to,
+            translation: translation.into(),
+            rotation,
+            information,
+            weight: 1.0,
+        }
     }
 
     /// L1 projection re-observation: project persistent landmarks into
@@ -1491,6 +1652,36 @@ fn temporal_result_se3(result: &crate::mapper::features::TemporalRansacResult) -
     )
 }
 
+/// Least-squares SE(3) registration aligning `source` onto `target`
+/// (Umeyama / Horn without scale): returns `T` minimizing
+/// `sum || T * source_i - target_i ||^2`.
+///
+/// Returns `None` for fewer than three points or a degenerate (rank-deficient)
+/// cross-covariance.
+fn fit_se3(source: &[Vector3<f64>], target: &[Vector3<f64>]) -> Option<SE3> {
+    if source.len() != target.len() || source.len() < 3 {
+        return None;
+    }
+    let n = source.len() as f64;
+    let mean_source = source.iter().sum::<Vector3<f64>>() / n;
+    let mean_target = target.iter().sum::<Vector3<f64>>() / n;
+    let mut cov = Matrix3::zeros();
+    for (s, t) in source.iter().zip(target) {
+        cov += (s - mean_source) * (t - mean_target).transpose();
+    }
+    let svd = cov.svd(true, true);
+    let u = svd.u?;
+    let v_t = svd.v_t?;
+    let mut d = Matrix3::identity();
+    if (v_t.transpose() * u.transpose()).determinant() < 0.0 {
+        d[(2, 2)] = -1.0;
+    }
+    let rotation = v_t.transpose() * d * u.transpose();
+    let rotation = UnitQuaternion::from_matrix(&rotation);
+    let translation = mean_target - rotation.transform_vector(&mean_source);
+    Some(SE3::new(rotation, translation))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1982,5 +2173,42 @@ mod tests {
         // optimize_pass runs on an empty problem -- finalize must still not
         // panic.
         let _ = online.finalize();
+    }
+
+    #[test]
+    fn fit_se3_recovers_a_known_transform() {
+        let expected = SE3::new(
+            UnitQuaternion::from_euler_angles(0.2, -0.35, 0.5),
+            Vector3::new(0.4, -0.2, 1.3),
+        );
+        let source: Vec<Vector3<f64>> = vec![
+            Vector3::new(1.0, 0.0, 0.5),
+            Vector3::new(0.0, 1.0, -0.5),
+            Vector3::new(-1.0, 0.5, 0.0),
+            Vector3::new(0.3, -0.7, 2.0),
+            Vector3::new(2.0, 1.0, -1.0),
+        ];
+        let target: Vec<Vector3<f64>> = source
+            .iter()
+            .map(|p| expected.transform_point(&Point3::from(*p)).coords)
+            .collect();
+        let fitted = fit_se3(&source, &target).expect("fit");
+        for (a, b) in fitted.translation.iter().zip(expected.translation.iter()) {
+            assert!((a - b).abs() < 1e-9, "{fitted:?} != {expected:?}");
+        }
+        let r = fitted.rotation.to_rotation_matrix().into_inner()
+            * expected
+                .rotation
+                .to_rotation_matrix()
+                .into_inner()
+                .transpose();
+        assert!((r - Matrix3::identity()).norm() < 1e-9);
+    }
+
+    #[test]
+    fn fit_se3_rejects_degenerate_input() {
+        assert!(fit_se3(&[], &[]).is_none());
+        let p = vec![Vector3::zeros(), Vector3::new(1.0, 0.0, 0.0)];
+        assert!(fit_se3(&p, &p).is_none());
     }
 }
