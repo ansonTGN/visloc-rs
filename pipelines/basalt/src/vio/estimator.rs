@@ -443,6 +443,15 @@ pub struct BasaltVioEstimator {
     /// Retaining MargData again would therefore emit an incomplete packet, so
     /// that transition is rejected until the estimator is recreated.
     lean_no_output_mode: bool,
+    /// Opt-in: when a frame retains MargData, use the compact f32 LM
+    /// preparation path (no per-trial landmark re-factorization and no
+    /// diagnostic prepass) while still retaining the final factor snapshot the
+    /// packet needs.  The accepted trajectory and the MargData bytes are
+    /// identical to the diagnostic path (see
+    /// `lean_with_factors_matches_retained_diagnostics_exactly`); only the
+    /// `window.lm` diagnostic trace payload is omitted.  Default off so
+    /// diagnostic/provenance callers keep their existing behavior.
+    lean_marg_data: bool,
     /// Marginalization bookkeeping exposed in the next MargData artifact.
     last_kf_to_marg: Vec<(u64, u64)>,
     last_marg_targets: MarginalizationTargets,
@@ -547,6 +556,7 @@ impl BasaltVioEstimator {
             frames_after_kf: 0,
             num_points_kf: BTreeMap::new(),
             lean_no_output_mode: false,
+            lean_marg_data: false,
             last_kf_to_marg: Vec::new(),
             last_marg_targets: MarginalizationTargets::default(),
             last_lost_landmarks: Vec::new(),
@@ -564,6 +574,13 @@ impl BasaltVioEstimator {
     /// Returns the cumulative internal timing snapshot for the adapter sidecar.
     pub(crate) const fn timing_breakdown(&self) -> &TimingBreakdown {
         &self.timing
+    }
+
+    /// Enables the compact MargData LM path (byte-identical trajectory and
+    /// packet, no `window.lm` diagnostic trace).  See the `lean_marg_data`
+    /// field for the contract.
+    pub fn set_lean_marg_data(&mut self, enabled: bool) {
+        self.lean_marg_data = enabled;
     }
 
     /// Replaces the compatibility camera-0 setup with the complete calibrated
@@ -1063,7 +1080,21 @@ impl BasaltVioEstimator {
             let initial_state = problem.initial_state();
             let lm_started = self.timing.start();
             let solution_result = if retain_marg_data {
-                problem.solve_with_timing(initial_state, self.config.solver, &mut self.timing)
+                if self.lean_marg_data {
+                    // MargData needs the post-solve factor snapshot, not the
+                    // diagnostic LM payloads.  Use the compact f32 preparation
+                    // path (byte-identical trajectory, verified by the
+                    // retained-vs-lean regression test) instead of the
+                    // per-trial landmark re-factorization the diagnostic path
+                    // performs.
+                    problem.solve_lean_with_factors_with_timing(
+                        initial_state,
+                        self.config.solver,
+                        &mut self.timing,
+                    )
+                } else {
+                    problem.solve_with_timing(initial_state, self.config.solver, &mut self.timing)
+                }
             } else if retain_trace_payload {
                 problem.solve_without_factors_with_timing(
                     initial_state,

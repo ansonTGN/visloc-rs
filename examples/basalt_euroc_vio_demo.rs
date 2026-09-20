@@ -38,6 +38,7 @@ struct Args {
     max_frames: Option<usize>,
     no_trace: bool,
     no_marg_data: bool,
+    retained_marg_diagnostics: bool,
     native_companion_binding: Option<PathBuf>,
     pipeline: bool,
     pipeline_capacity: usize,
@@ -117,6 +118,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut adapter =
         BasaltVioEstimatorAdapter::from_config(dataset.calibration(), dataset.config())?;
+    adapter
+        .estimator
+        .set_lean_marg_data(!args.retained_marg_diagnostics);
     let frame_limit = args
         .max_frames
         .unwrap_or(dataset.frame_count())
@@ -764,6 +768,7 @@ impl Args {
         let mut max_frames = None;
         let mut no_trace = false;
         let mut no_marg_data = false;
+        let mut retained_marg_diagnostics = false;
         let mut native_companion_binding = None;
         let mut pipeline = false;
         let mut pipeline_capacity = 4usize;
@@ -800,6 +805,7 @@ impl Args {
                 }
                 "--no-trace" => no_trace = true,
                 "--no-marg-data" => no_marg_data = true,
+                "--retained-marg-diagnostics" => retained_marg_diagnostics = true,
                 "--native-companion-binding" => {
                     native_companion_binding = Some(next_path(&mut arguments, &option)?);
                 }
@@ -855,6 +861,7 @@ impl Args {
             max_frames,
             no_trace,
             no_marg_data,
+            retained_marg_diagnostics,
             native_companion_binding,
             pipeline,
             pipeline_capacity,
@@ -864,7 +871,7 @@ impl Args {
     }
 
     fn usage() -> String {
-        "usage: basalt_euroc_vio_demo --euroc-dir DIR --calibration FILE [--config FILE] [--out-dir DIR] [--max-frames N] [--no-trace] [--no-marg-data] [--native-companion-binding FILE] [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N]".into()
+        "usage: basalt_euroc_vio_demo --euroc-dir DIR --calibration FILE [--config FILE] [--out-dir DIR] [--max-frames N] [--no-trace] [--no-marg-data] [--retained-marg-diagnostics] [--native-companion-binding FILE] [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N]".into()
     }
 }
 

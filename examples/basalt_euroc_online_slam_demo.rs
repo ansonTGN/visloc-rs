@@ -64,6 +64,11 @@ struct Args {
     decode_threads: usize,
     threads: Option<usize>,
     mapper_queue_capacity: usize,
+    /// Restores the legacy diagnostic MargData LM path (per-trial landmark
+    /// re-factorization + pre-solve diagnostic linearization).  Off by default:
+    /// the compact path is byte-identical in trajectory and MargData bytes, so
+    /// it is the canonical online-mapper setting.
+    retained_marg_diagnostics: bool,
 }
 
 /// Default bound on the VIO-to-mapper `MargData` channel (see
@@ -161,6 +166,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let dataset = EurocSensorDataset::open(&args.euroc_dir, &args.calibration, &args.config)?;
     let mut adapter =
         BasaltVioEstimatorAdapter::from_config(dataset.calibration(), dataset.config())?;
+    // Default: compact MargData LM path.  Trajectory and MargData bytes are
+    // identical to the diagnostic path (verified by the retained-vs-lean
+    // window regression test); only the per-trial diagnostic trace is skipped.
+    adapter
+        .estimator
+        .set_lean_marg_data(!args.retained_marg_diagnostics);
     let frame_limit = args
         .max_frames
         .unwrap_or(dataset.frame_count())
@@ -436,6 +447,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let summary = json!({
         "schema": "basalt.online_mapper.run.v1",
+        "lean_marg_data": !args.retained_marg_diagnostics,
         "pacing": if args.realtime { "dataset_rate" } else { "as_fast_as_possible" },
         "frames_processed": frame_limit,
         "dataset_duration_seconds": dataset_duration_seconds,
@@ -655,6 +667,7 @@ impl Args {
         let mut decode_threads = 3usize;
         let mut threads = None;
         let mut mapper_queue_capacity = DEFAULT_MAPPER_QUEUE_CAPACITY;
+        let mut retained_marg_diagnostics = false;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy().into_owned();
@@ -723,6 +736,7 @@ impl Args {
                         return Err("--mapper-queue-capacity must be positive".into());
                     }
                 }
+                "--retained-marg-diagnostics" => retained_marg_diagnostics = true,
                 unknown => return Err(format!("unknown option `{unknown}`\n\n{}", Self::usage())),
             }
         }
@@ -742,6 +756,7 @@ impl Args {
             decode_threads,
             threads,
             mapper_queue_capacity,
+            retained_marg_diagnostics,
         })
     }
 
@@ -750,7 +765,7 @@ impl Args {
          [--config FILE] [--out-dir DIR] [--max-frames N] [--optimize-every-k K] \
          [--periodic-iterations N] [--realtime | --as-fast-as-possible] \
          [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
-         [--mapper-queue-capacity N]"
+         [--mapper-queue-capacity N] [--retained-marg-diagnostics]"
             .into()
     }
 }

@@ -1,11 +1,14 @@
 # VI-SLAM global-consistency plan: Basalt-class local VIO + ORB-SLAM3-class global consistency
 
-Status: 2026-09-16 — Stage 0/1c done, **8/11 wins vs measured ORB-SLAM3**
+Status: 2026-09-20 — Stage 0/1c done, **8/11 wins vs measured ORB-SLAM3**
 offline (§1.4, PR #147); Stage 1 (custom persistent map) paused, did not
 beat the simpler calibration fix; Stage 7 (online mapper) done by owner
 override, **the same 8/11 result reproduced online** with the mapper
-keeping up with the VIO (§1.5, branch `feat/basalt-online-mapper`). Stage
-5/6 (VIO tracking robustness on the three remaining losses) remain open.
+keeping up with the VIO (§1.5, branch `feat/basalt-online-mapper`); VIO
+speed stage done (§1.6): the compact `lean_marg_data` LM path cuts VIO wall
+time **3.2x** (LM solve **4.2x**) with byte-identical trajectory and
+MargData, online-mapper RTF 0.128 -> 0.349. Stage 5/6 (VIO tracking
+robustness on the three remaining losses) remain open.
 Owner goal: beat existing OSS visual-inertial SLAM on EuRoC — ORB-SLAM3
 stereo-inertial first, VINS-Mono second — while keeping the Basalt Rust
 port's runtime/memory edge.
@@ -203,6 +206,47 @@ merged; the three remaining losses are VIO tracking-robustness limits (§4),
 where a persistent map is unlikely to help until the local estimator itself
 tracks through the difficult segments.
 
+### 1.6 Result 2026-09-20: compact MargData LM path removes 3.2x of VIO wall time
+
+The online mapper was measured at RTF 0.05-0.13 on MH_03 — far below real
+time. Profiling the VIO (`timing_breakdown`) located 83% of wall time in the
+LM solver, and inside it the dominant buckets were *around* the linear algebra
+rather than in it: `lm_trial_construct_step` / `lm_trial_landmark_recovery`
+(per-trial landmark re-factorization), `lm_accept`, and
+`lm_landmark_reduction`. The actual reduced-system solve
+(`lm_linear_system_solve`, the dense LDLT) was 0.6% of runtime.
+
+Root cause: `retain_marg_data` selected `solve_with_timing`
+(`retain_factors = true, retain_diagnostics = true`), the fully diagnostic LM
+path that re-factors every landmark per trial and deep-clones trial state.
+MargData only needs the post-solve **factor snapshot**, not the diagnostic LM
+payloads; the two were coupled in the estimator.
+
+Change (`lean_marg_data`, default off; `--retained-marg-diagnostics` opt-out on
+the VIO and online demos; the online demo enables it by default):
+
+* `WindowProblem::solve_lean_with_factors[_with_timing]` runs the compact f32
+  preparation LM (`retain_factors = true, retain_diagnostics = false`) and
+  derives `emit_marg`'s row counters from the same final linearization,
+  skipping the duplicate pre-solve diagnostic linearization.
+* Byte-identical outputs, verified on 200 and 400 MH_03 frames:
+  `trajectory.tum` SHA-256 identical and `marg_data/` byte-identical between
+  the diagnostic and lean paths. Regression test
+  `lean_with_factors_matches_retained_diagnostics_exactly`.
+* Speed, 400 MH_03 frames, two reps: `adapter_total` 127.2-130.5 s ->
+  39.5-40.1 s (**3.2x**), `estimator_lm_solve` 115.9-118.9 s -> 27.8-28.3 s
+  (**4.2x**), per frame 318-326 ms -> 99-100 ms. Frontend and marginalization
+  unchanged. End-to-end online mapper RTF 0.128 -> **0.349**.
+
+Full evidence: [lean MargData LM speedup](work/vi_slam_lean_margdata_lm_speedup_20260920.md).
+This is a pure implementation-path change: no algorithm, window configuration,
+or calibration changed, and the diagnostic/provenance path remains bit-for-bit
+available. Remaining LM cost is dominated by `lm_landmark_reduction` and
+`lm_model_decrease`, which still re-factor the same landmark set twice per
+iteration; upstream Basalt's inner damping backtracking loop (re-solve only the
+tiny reduced system per rejected lambda) is the next lever and is expected to
+matter most on the rejection-heavy MH_04/MH_05/V2_03.
+
 ### 1.5 Result 2026-09-16: the offline mapper's 8/11 result reproduced online
 
 Owner-approved override of §4's original sequencing (Stage 7 was to follow
@@ -362,6 +406,8 @@ same-protocol measurements in §1.1; every claim cites an artifact path.
 | 5 | **VIO tracking robustness on MH_04/MH_05 (fast motion / motion blur) and V2_03 (dark, fast)**: (a) raise FAST-9 corner count and lower the grid non-max-suppression radius specifically where flow confidence drops; (b) extend patch lifetime / reduce the window's forced-marginalization rate so fewer landmarks are lost mid-difficult-segment; (c) SuperPoint descriptors for frame-to-frame association in place of the Pattern51 patch tracker on these sequences, reusing the repository's existing SP-ONNX frontend; (d) relocalisation inside the mapper (or as a VIO-side fallback) when the tracker loses the window entirely, instead of only forward-marginalizing through a bad segment | Each of MH_04, MH_05, V2_03 VIO ATE improves without regressing the 8 already-winning sequences | A lever that does not move the failing three within its own sequence is dropped before trying the next; if all four (a–d) fail, the honest conclusion is that these three need a different frontend, not a differently-tuned Basalt one |
 | 6 | Re-run the official-calibration + mapper sweep on all 11 with whatever Stage 5 levers passed | ≥ 9/11 wins vs ORB-SLAM3 measured | < 8/11 (regression from PR #147) → revert the Stage 5 change that caused it |
 | 7 (done, owner override — see §1.5) | Online: mapper in a background thread behind the live VIO, incremental solve — this is the same online-mapping goal as the original plan's Stage 3, run now (owner-approved override) directly on the existing 8/11 PR #147 result instead of after Stage 5/6's VIO-robustness work | Accuracy within ~10 % of the offline mapper's result, mapper keeps up with the VIO (whole-system wall ≈ VIO-alone wall) | — passed on all 11 (§1.5); Stage 5/6 (VIO tracking robustness on MH_04/MH_05/V2_03) remain open, unaffected by this stage |
+| 7b (done, see §1.6) | **VIO speed:** compact `lean_marg_data` LM path — skip per-trial diagnostic landmark re-factorization and the duplicate pre-solve linearization while keeping the MargData factor snapshot | Byte-identical trajectory and MargData; material wall-time reduction on MH_03 | — passed: 3.2x total VIO, 4.2x LM, RTF 0.128 -> 0.349; diagnostic path preserved behind `--retained-marg-diagnostics` |
+| 7c (next) | **VIO speed, next lever:** upstream Basalt's inner LM damping backtracking loop — reduce landmarks once per outer iteration and re-solve only the tiny dense reduced system per rejected lambda; consume the compact model-decrease payload instead of re-factoring; parallelize `landmark_steps` over landmarks with ordered `par_iter` | Further wall-time cut without a trajectory bit change; largest expected effect on rejection-heavy MH_04/MH_05/V2_03 | A lever that changes trajectory bits is rejected; if reduction is already negligible after 7b on the measured window size, stop |
 | 8 | Same-protocol re-measurement (ORB-SLAM3 one run, ours one run), README VI-SLAM section update with figures/tables | — | — |
 
 MH_04/MH_05/V2_03 are the first target now for the same reason V1_02 was

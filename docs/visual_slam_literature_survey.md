@@ -313,6 +313,33 @@ one declared sequence improves and every other declared sequence is either
 improvement. Missing declared sequences or repetitions keep the matrix
 `INCOMPLETE`.
 
+## VI-SLAM estimator speed: surveyed techniques and the measured lever
+
+This section records the 2026-09-20 speed investigation for the Basalt Rust
+port (`pipelines/basalt`), where the tightly-coupled stereo-inertial VIO was
+measured at real-time factor 0.05-0.38 on EuRoC. The port reproduces upstream
+Basalt's window configuration (`vio_max_states=3`, `vio_max_kfs=7`,
+`vio_linearization_type=ABS_QR`, square-root marginalization, single
+precision), so the speed gap is an implementation gap, not a formulation gap.
+
+| Work | Central contribution | visloc-rs lever / status |
+| --- | --- | --- |
+| [Basalt / NFR (RA-L 2020)](https://arxiv.org/abs/1904.06504) | ABS/QR LM with per-landmark QR elimination; **inner damping backtracking loop re-forms only the small dense reduced system per rejected lambda**, TBB-parallel landmark linearize/QR/back-substitute; ~7.8 ms/frame EuRoC | Partly adopted: the compact f32 preparation LM path (see §1.6 of the plan). The inner backtracking loop and full rayon parallelism are the next lever |
+| [Square Root Bundle Adjustment (CVPR 2021)](https://arxiv.org/abs/2103.01843) | Nullspace/QR marginalization; ~42% faster than the best competitor at 1% cost tolerance; single precision ~2x faster | Already the port's architecture; confirmed the f32 compact path is the correct canonical path |
+| [Square Root Marginalization for Sliding-Window BA (ICCV 2021)](https://arxiv.org/abs/2109.02182) | Specialized QR updates the square-root prior without forming normal equations; 36% faster than the Hessian baseline; f32 numerically stable | Already ported (`margdata.rs`); validates the square-root prior choice |
+| [ICE-BA (CVPR 2018)](https://openaccess.thecvf.com/content_cvpr_2018/papers/Liu_ICE-BA_Incremental_Consistent_CVPR_2018_paper.pdf) | Incremental BA with **fixed/frozen linearization points** (removing it costs ~4x), incremental triangulation, I-PCG, relative marginalization; also improves accuracy on hard sequences | Candidate high-value lever: reuse Jacobians/fix linearization points across iterations instead of relinearizing every trial |
+| [Structureless VIO (2025)](https://arxiv.org/abs/2505.12337) | Eliminates landmark states; ~2.3x faster solve and *better* ATE on MH_04 (0.378 -> 0.257) and V2_03 (0.298 -> 0.245) | Directly targets both the remaining LM cost and the three losing sequences; high effort |
+| [SchurVINS (CVPR 2024)](https://arxiv.org/abs/2312.01616) | Reuses Schur-complement intermediates so the structure update is ~3x faster; single precision; cache-friendly Hessian | The "reuse intermediates instead of rebuilding" principle matches the compact preparation payload this change adopted |
+| [DM-VIO (RA-L 2022)](https://arxiv.org/abs/2201.04114) | Delayed marginalization keeps a factor history so priors can be rebuilt after scale/gravity/Biases change | Accuracy lever for inconsistent priors; relevant if hard-sequence regressions trace to the prior |
+| [XFeat (CVPR 2024)](https://arxiv.org/abs/2404.19174) | Real-time CPU local features, up to 5x faster than DL features | The only learned frontend worth adopting CPU-first, for off-critical-path relocalization, not the estimator |
+| [DROID-SLAM](https://arxiv.org/abs/2108.10869) / [DPVO](https://arxiv.org/abs/2208.04726) / [MASt3R-SLAM](https://arxiv.org/abs/2412.12392) | Recurrent correspondence + differentiable BA / sparse patch graph / foundation-model pointmaps | GPU-bound; not a drop-in for a CPU-first, no-mandatory-ML-runtime core. Structural ideas only |
+
+Measured outcome of the adopted lever (compact `lean_marg_data` LM path,
+byte-identical trajectory and MargData): 400 MH_03 frames, total VIO wall time
+127-131 s -> 39-40 s (**3.2x**), LM solve 116-119 s -> 28 s (**4.2x**),
+online-mapper RTF 0.128 -> **0.349**. Full evidence:
+[lean MargData LM speedup](../work/vi_slam_lean_margdata_lm_speedup_20260920.md).
+
 ## Ordered implementation experiments
 
 1. Instrument every appearance candidate and graph solve before changing more

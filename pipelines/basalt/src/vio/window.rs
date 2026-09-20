@@ -2178,6 +2178,58 @@ fn minimal_window_diagnostics(problem: &WindowProblem, state: &DVector<f64>) -> 
     }
 }
 
+/// Populate the four `emit_marg` row counters from a final factor snapshot.
+///
+/// The lean-with-factors path deliberately skips `initial_window_diagnostics`
+/// (which performs a full pre-solve linearization just for metadata).  The
+/// factor grouping used here is the same prior/anchor → visual → IMU/bias
+/// partition that function applies, so the MargData metadata is populated
+/// without the duplicate linearization.
+fn fill_diagnostic_factor_rows(
+    problem: &WindowProblem,
+    diagnostics: &mut WindowDiagnostics,
+    factors: &[WhitenedFactorRowStack],
+) {
+    let prior_factor_count = usize::from(problem.prior.is_some());
+    let anchor_factor_count = if problem.prior.is_none()
+        && problem
+            .anchor_point
+            .as_ref()
+            .is_some_and(|point| point.len() == NAV_STATE_DOF && !problem.states.is_empty())
+    {
+        1
+    } else {
+        0
+    };
+    let prefix = (prior_factor_count + anchor_factor_count).min(factors.len());
+    let imu_factor_count = problem
+        .imu_links
+        .len()
+        .saturating_mul(2)
+        .min(factors.len().saturating_sub(prefix));
+    let visual_end = factors.len().saturating_sub(imu_factor_count);
+    let rows = |slice: &[WhitenedFactorRowStack]| {
+        slice
+            .iter()
+            .map(WhitenedFactorRowStack::rows)
+            .sum::<usize>()
+    };
+    diagnostics.factor_count = factors.len();
+    diagnostics.factor_rows = rows(factors);
+    diagnostics.prior_factor_rows = rows(&factors[..prefix]);
+    diagnostics.visual_factor_rows = rows(&factors[prefix..visual_end]);
+    diagnostics.imu_factor_rows = factors[visual_end..]
+        .chunks(2)
+        .filter_map(|pair| pair.first())
+        .map(WhitenedFactorRowStack::rows)
+        .sum();
+    diagnostics.bias_factor_rows = factors[visual_end..]
+        .chunks(2)
+        .filter_map(|pair| pair.get(1))
+        .map(WhitenedFactorRowStack::rows)
+        .sum();
+}
+
 /// Emit a complete, reproducible numeric snapshot when explicitly requested.
 ///
 /// The normal estimator path does not write diagnostics.  Setting
@@ -4199,6 +4251,33 @@ impl WindowProblem {
         self.solve_with_options(initial, config, false, false, timing)
     }
 
+    /// Solve the active window for its accepted state **and** the final factor
+    /// snapshot, while skipping the diagnostic prepass and per-trial
+    /// diagnostic payloads.
+    ///
+    /// This is the online-mapper/MargData fast path.  It has the same LM math
+    /// as [`Self::solve_without_diagnostics_with_timing`] (the compact f32
+    /// preparation path) but, like [`Self::solve_with_timing`], retains the
+    /// post-solve factor snapshot that MargData consumes.  The retained
+    /// diagnostic *row counters* are recovered from that same final
+    /// linearization, so `emit_marg`'s metadata is populated without the
+    /// duplicate pre-solve linearization `initial_window_diagnostics` performs.
+    ///
+    /// Any Basalt probe or compatibility environment variable falls back to
+    /// the fully diagnostic implementation so instrumentation keeps observing
+    /// the historical boundaries.
+    pub(crate) fn solve_lean_with_factors_with_timing(
+        &mut self,
+        initial: DVector<f64>,
+        config: LmConfig,
+        timing: &mut TimingBreakdown,
+    ) -> Result<WindowSolveResult, WindowSolveError> {
+        if diagnostic_env_active() {
+            return self.solve_with_timing(initial, config, timing);
+        }
+        self.solve_with_options(initial, config, true, false, timing)
+    }
+
     fn solve_with_options(
         &mut self,
         initial: DVector<f64>,
@@ -4277,7 +4356,18 @@ impl WindowProblem {
         let state = first.state;
         let factors = if retain_factors {
             match self.linearize(&state) {
-                Ok(linearization) => linearization.factors,
+                Ok(linearization) => {
+                    // The diagnostic prepass (`initial_window_diagnostics`) is
+                    // skipped on the lean-with-factors path, but `emit_marg`
+                    // still reads these four row counters from the packet
+                    // metadata.  Derive them from the final linearization we
+                    // already hold instead of paying for a second full
+                    // pre-solve linearization.
+                    if !retain_diagnostics {
+                        fill_diagnostic_factor_rows(self, &mut diagnostics, &linearization.factors);
+                    }
+                    linearization.factors
+                }
                 Err(error) => {
                     let message = format!("window final linearization: {error:?}");
                     diagnostics.status = "final_linearization_failed".into();
@@ -13346,6 +13436,90 @@ mod tests {
         let solved = problem.solve(initial, LmConfig::default()).unwrap();
         assert!(solved.state.iter().all(|value| value.is_finite()));
         assert!(solved.cost.is_finite());
+    }
+
+    #[test]
+    fn lean_with_factors_matches_retained_diagnostics_exactly() {
+        // The online-mapper/MargData fast path must produce the same accepted
+        // state and the same retained factor snapshot as the fully diagnostic
+        // implementation, because MargData bytes depend on both.  Build a
+        // visual landmark problem with observable geometry so the LM actually
+        // iterates, then compare the two solve entry points field by field.
+        let camera =
+            DoubleSphereCamera::new(300.0, 300.0, 320.0, 240.0, 0.5, 0.7, 640, 480).unwrap();
+        let true_point = Point3::new(0.2, -0.1, 1.5);
+        let mut landmarks = Vec::new();
+        for track_id in 0..6u64 {
+            landmarks.push(WindowLandmark {
+                track_id,
+                anchor_state_index: 0,
+                anchor_camera_id: 0,
+                direction: StereographicDirection::from_bearing(Vector3::new(
+                    0.1 * track_id as f64,
+                    -0.05,
+                    1.0,
+                ))
+                .unwrap(),
+                inverse_distance: 0.9,
+                observations: vec![
+                    WindowObservation {
+                        state_index: 0,
+                        camera_id: 0,
+                        pixel: camera.project(&true_point).unwrap(),
+                    },
+                    WindowObservation {
+                        state_index: 1,
+                        camera_id: 0,
+                        pixel: camera.project(&true_point).unwrap(),
+                    },
+                ],
+            });
+        }
+        let make = || test_window(vec![nav(0, 0.0), nav(1, 0.2)], landmarks.clone());
+
+        let initial = make().initial_state();
+        let config = LmConfig::default();
+        let mut retained_timing = TimingBreakdown::default();
+        let mut lean_timing = TimingBreakdown::default();
+        let retained = make()
+            .solve_with_timing(initial.clone(), config, &mut retained_timing)
+            .unwrap();
+        let lean = make()
+            .solve_lean_with_factors_with_timing(initial, config, &mut lean_timing)
+            .unwrap();
+
+        assert_eq!(lean.state, retained.state);
+        assert_eq!(lean.cost, retained.cost);
+        assert_eq!(lean.iterations, retained.iterations);
+        assert_eq!(lean.factors.len(), retained.factors.len());
+        for (lean_factor, retained_factor) in lean.factors.iter().zip(&retained.factors) {
+            assert_eq!(
+                lean_factor.state_jacobian.as_slice(),
+                retained_factor.state_jacobian.as_slice()
+            );
+            assert_eq!(
+                lean_factor.landmark_jacobian.as_slice(),
+                retained_factor.landmark_jacobian.as_slice()
+            );
+            assert_eq!(
+                lean_factor.residual.as_slice(),
+                retained_factor.residual.as_slice()
+            );
+        }
+        // The row counters emit_marg reads stay populated on the lean path
+        // even though the pre-solve diagnostic linearization is skipped.
+        assert_eq!(
+            lean.diagnostics.visual_factor_rows,
+            retained.diagnostics.visual_factor_rows
+        );
+        assert_eq!(
+            lean.diagnostics.factor_count,
+            retained.diagnostics.factor_count
+        );
+        assert_eq!(
+            lean.diagnostics.factor_rows,
+            retained.diagnostics.factor_rows
+        );
     }
 
     #[test]

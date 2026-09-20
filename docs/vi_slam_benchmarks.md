@@ -103,6 +103,21 @@ duration / wall time, 0.09-0.38× above) is bounded by the VIO estimator,
 which is still single-threaded on this branch; real-time VIO performance is
 a separate initiative (PR #153), not a claim of this stage.
 
+**Speed (2026-09-20): compact MargData LM path.** The VIO estimator now has an
+opt-in `lean_marg_data` path that keeps the post-solve factor snapshot MargData
+needs but skips the diagnostic LM payloads: no per-trial landmark
+re-factorization, no duplicate pre-solve diagnostic linearization. Outputs are
+byte-identical — `trajectory.tum` SHA-256 and the whole `marg_data/` tree match
+the diagnostic path on 200- and 400-frame MH_03 runs. On 400 MH_03 frames the
+total VIO wall time fell from 127-131 s to 39-40 s (**3.2x**), with the LM
+solver itself **4.2x** faster (116-119 s -> 28 s); end-to-end online-mapper RTF
+rose from 0.128 to **0.349**. The VIO demo and online demo expose
+`--retained-marg-diagnostics` to restore the old path; the online demo enables
+the compact path by default. Full evidence:
+[lean MargData LM speedup](../work/vi_slam_lean_margdata_lm_speedup_20260920.md).
+This does not change any algorithm, window setting, or calibration, so the
+accuracy tables above are unaffected.
+
 Getting an online mapper that keeps up with the VIO took three real bugs
 found and fixed via live full-sequence reruns: a bounded channel that
 blocked the VIO thread whenever the mapper fell behind (replaced with an
@@ -301,6 +316,13 @@ live-updating `summary.md`/`summary.json`); see its module docstring.
   alike): these are VIO tracking-robustness limits on fast/motion-blurred/
   dark sequences, not calibration or mapper limits — see
   [the plan doc](vi_slam_global_consistency_plan.md) for next steps.
+- The online-mapper **propagated** trajectory is not reproducible across
+  identical runs (background-optimizer threading); the estimator-level VIO
+  trajectory and the `MargData` bytes are deterministic and byte-identical.
+- The `lean_marg_data` speed path (2026-09-20) is byte-identical to the
+  diagnostic path but omits the `window.lm` diagnostic trace payload; callers
+  that consume that trace must keep the default or pass
+  `--retained-marg-diagnostics`.
 - V2_02_medium's *offline* reference number (used only for the "vs offline"
   comparison, not the headline ORB-SLAM3 table) is from a manual rerun
   after the offline all-11 sweep's own attempt for that sequence hit a
