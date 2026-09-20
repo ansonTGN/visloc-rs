@@ -75,6 +75,13 @@ struct Args {
     num_opt_iter: usize,
     /// Enable L1 projection-based persistent-landmark re-observation.
     projection_rematch: bool,
+    /// Enable incremental local mapping (per-keyframe triangulation into the
+    /// live landmark map).
+    incremental_local_mapping: bool,
+    /// Projection host-rank window override (None keeps the mapper default).
+    projection_host_window: Option<u64>,
+    /// Projection search radius override in pixels (None keeps the default).
+    projection_radius_px: Option<f64>,
 }
 
 /// Default bound on the VIO-to-mapper `MargData` channel (see
@@ -203,6 +210,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             periodic_iterations: args.periodic_iterations,
             headless,
             projection_rematch: args.projection_rematch,
+            incremental_local_mapping: args.incremental_local_mapping,
+            projection_host_window: args
+                .projection_host_window
+                .unwrap_or(OnlineMapperConfig::default().projection_host_window),
+            projection_search_radius_px: args
+                .projection_radius_px
+                .unwrap_or(OnlineMapperConfig::default().projection_search_radius_px),
             ..OnlineMapperConfig::default()
         },
     );
@@ -462,6 +476,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "lean_marg_data": !args.retained_marg_diagnostics,
         "final_optimize_iterations_budget": args.num_opt_iter,
         "projection_rematch": args.projection_rematch,
+        "incremental_local_mapping": args.incremental_local_mapping,
         "pacing": if args.realtime { "dataset_rate" } else { "as_fast_as_possible" },
         "frames_processed": frame_limit,
         "dataset_duration_seconds": dataset_duration_seconds,
@@ -694,6 +709,9 @@ impl Args {
         let mut retained_marg_diagnostics = false;
         let mut num_opt_iter = 10usize;
         let mut projection_rematch = false;
+        let mut incremental_local_mapping = false;
+        let mut projection_host_window = None;
+        let mut projection_radius_px = None;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy().into_owned();
@@ -764,6 +782,25 @@ impl Args {
                 }
                 "--retained-marg-diagnostics" => retained_marg_diagnostics = true,
                 "--projection-rematch" => projection_rematch = true,
+                "--local-mapping" => incremental_local_mapping = true,
+                "--projection-host-window" => {
+                    projection_host_window = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<u64>()
+                            .map_err(|error| {
+                                format!("invalid --projection-host-window: {error}")
+                            })?,
+                    );
+                }
+                "--projection-radius" => {
+                    projection_radius_px = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<f64>()
+                            .map_err(|error| format!("invalid --projection-radius: {error}"))?,
+                    );
+                }
                 "--num-opt-iter" => {
                     num_opt_iter = next(&mut arguments, &option)?
                         .to_string_lossy()
@@ -795,6 +832,9 @@ impl Args {
             retained_marg_diagnostics,
             num_opt_iter,
             projection_rematch,
+            incremental_local_mapping,
+            projection_host_window,
+            projection_radius_px,
         })
     }
 
@@ -804,7 +844,8 @@ impl Args {
          [--periodic-iterations N] [--realtime | --as-fast-as-possible] \
          [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
          [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N] \
-         [--projection-rematch]"
+         [--projection-rematch] [--local-mapping] \
+         [--projection-host-window N] [--projection-radius PX]"
             .into()
     }
 }

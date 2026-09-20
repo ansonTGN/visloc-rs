@@ -239,6 +239,47 @@ re-observations that would lengthen tracks. Making L1 effective needs
 keep a covisible persistent map), not a matcher bolted onto an
 optimize-cadence map. That is the next, larger step.
 
+## L1 incremental local mapping 2026-09-20 (negative result)
+
+Implemented the incremental-local-mapping step the design calls for:
+
+* `triangulate_pair` (triangulation.rs) reproduces `setup_opt`'s exact gate
+  order for one (host, second) observation pair.
+* `NfrMapper::local_map_new_keyframes` (session.rs) seeds the live `lmdb`
+  continuously: it triangulates new landmarks from just-accepted pairs and
+  appends re-observations to existing landmarks, with namespaced ids and a
+  consistent reverse index.
+* `OnlineNfrMapper::match_new_keyframe` calls it before `projection_rematch`
+  when `OnlineMapperConfig::incremental_local_mapping` is set (default off;
+  `--local-mapping` on the demo). New `--projection-host-window` and
+  `--projection-radius` overrides expose the projection knobs.
+
+It does **not** improve MH_04 ATE (600 frames, `--optimize-every-k 10`):
+
+| configuration | ATE | landmarks |
+| --- | ---: | ---: |
+| baseline | 0.0164 m | 1846 |
+| `--local-mapping` | 0.0167 m | 1840 |
+| `--local-mapping --projection-rematch` | 0.0164 m | 1774 |
+| `--local-mapping --projection-rematch --projection-host-window 100000 --projection-radius 20` | 0.0170 m | 1653 |
+| `--projection-rematch --projection-host-window 100000 --projection-radius 20` | 0.0168 m | 1656 |
+
+Even projecting **all** landmarks with a wide window leaves ATE unchanged. The
+final `setup_opt` rebuilds tracks from `feature_matches`, and the projection
+matches it can actually verify are overwhelmingly recent-pair duplicates (the
+appearance descriptor does not re-match the same physical point across large
+viewpoint/scale changes), so no long-range edges enter the graph. The durable
+product is the match edge, and projection is not producing new long-range
+edges.
+
+**Conclusion for root cause:** the MH_04/05/V2_03 gap is *not* repaired by
+adding a projection re-observation layer on top of the existing appearance
+match graph. The remaining candidate causes (ORB-SLAM3's much denser keyframe
+graph + covisible-window full BA, and its loop closure over that graph) require
+changes to the keyframe/BA policy, not a matcher. This is a measured negative
+result, not an absence of measurement; the infrastructure is correct and
+default-off so the byte-exact contract is preserved.
+
 ## Next levers (not in this change)
 
 * **Parallelize the landmark reduction** (`reduce_landmark_factors_f32_checked_with_compact_back_substitution`)

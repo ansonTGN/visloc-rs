@@ -10,8 +10,8 @@ pub mod triangulation;
 
 pub use triangulation::{
     canonical_setup_opt_bytes, canonical_setup_opt_hash, setup_opt, setup_opt_from_corners,
-    triangulate_ba, MapperLandmark, MapperObservation, SetupOptCandidate, SetupOptInput,
-    SetupOptRejectReason, SetupOptReport, SetupOptResult, SetupOptTrackReport,
+    triangulate_ba, triangulate_pair, MapperLandmark, MapperObservation, SetupOptCandidate,
+    SetupOptInput, SetupOptRejectReason, SetupOptReport, SetupOptResult, SetupOptTrackReport,
 };
 
 pub use features::{

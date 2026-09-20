@@ -305,6 +305,93 @@ const fn map_lookup_reason(error: LookupError) -> SetupOptRejectReason {
     lookup_reason(error)
 }
 
+/// Triangulate one (host, second) observation pair using exactly the gates
+/// `setup_opt` applies to a candidate. Returns the landmark direction,
+/// inverse distance, and the two `MapperObservation`s on success, or the same
+/// `SetupOptRejectReason` `setup_opt` would have recorded.
+///
+/// `host` must sort before `second` in `TimeCamId` order, matching `setup_opt`'s
+/// host choice. This is the building block for incremental local mapping; it
+/// deliberately duplicates `setup_opt`'s gate order so an incrementally
+/// triangulated landmark is indistinguishable from a batch one.
+pub fn triangulate_pair(
+    host: TimeCamId,
+    host_feature_id: FeatureId,
+    second: TimeCamId,
+    second_feature_id: FeatureId,
+    feature_corners: &BTreeMap<TimeCamId, MapperImageFeatures>,
+    frame_poses: &BTreeMap<u64, SE3>,
+    calibration: &BasaltCalibration,
+    min_triangulation_distance: f64,
+) -> Result<
+    (
+        StereographicDirection,
+        f64,
+        MapperObservation,
+        MapperObservation,
+    ),
+    SetupOptRejectReason,
+> {
+    if !min_triangulation_distance.is_finite() || min_triangulation_distance < 0.0 {
+        return Err(SetupOptRejectReason::InvalidMinimumDistance);
+    }
+    let min_distance2 = min_triangulation_distance * min_triangulation_distance;
+
+    let (host_pixel, host_bearing) =
+        lookup_bearing(feature_corners, calibration, host, host_feature_id)
+            .map_err(map_lookup_reason)?;
+    let host_pose =
+        lookup_camera_pose(frame_poses, calibration, host).map_err(map_lookup_reason)?;
+    let (second_pixel, second_bearing) =
+        lookup_bearing(feature_corners, calibration, second, second_feature_id)
+            .map_err(map_lookup_reason)?;
+    let second_pose =
+        lookup_camera_pose(frame_poses, calibration, second).map_err(map_lookup_reason)?;
+
+    let relative_pose = host_pose.inverse().compose(&second_pose);
+    let baseline2 = relative_pose.translation.norm_squared();
+    if !baseline2.is_finite() {
+        return Err(SetupOptRejectReason::NonFiniteBaseline);
+    }
+    if baseline2 < min_distance2 {
+        return Err(SetupOptRejectReason::BaselineTooSmall);
+    }
+
+    let point = triangulate_ba(host_bearing, second_bearing, &relative_pose)
+        .ok_or(SetupOptRejectReason::TriangulationNonFinite)?;
+    if point.iter().any(|value| !value.is_finite()) {
+        return Err(SetupOptRejectReason::TriangulationNonFinite);
+    }
+    let inverse_distance = point[3];
+    if !inverse_distance.is_finite() {
+        return Err(SetupOptRejectReason::InverseDistanceNonFinite);
+    }
+    if inverse_distance <= 0.0 {
+        return Err(SetupOptRejectReason::InverseDistanceNonPositive);
+    }
+    if inverse_distance > 2.0 {
+        return Err(SetupOptRejectReason::InverseDistanceTooLarge);
+    }
+    let direction =
+        StereographicDirection::from_bearing(Vector3::new(point[0], point[1], point[2]))
+            .ok_or(SetupOptRejectReason::StereographicProjectionFailed)?;
+
+    Ok((
+        direction,
+        inverse_distance,
+        MapperObservation {
+            image: host,
+            feature_id: host_feature_id,
+            pixel: host_pixel,
+        },
+        MapperObservation {
+            image: second,
+            feature_id: second_feature_id,
+            pixel: second_pixel,
+        },
+    ))
+}
+
 /// Run the pinned `NfrMapper::setup_opt()` initialization pass.
 pub fn setup_opt(input: SetupOptInput<'_>) -> SetupOptResult {
     let mut report = SetupOptReport::new(input.tracks.len());

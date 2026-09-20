@@ -206,6 +206,16 @@ pub struct OnlineMapperConfig {
     /// keyframe-ranks of the query (a cheap covisibility proxy). Bounds the
     /// per-keyframe projection cost as the map grows.
     pub projection_host_window: u64,
+    /// Incremental local mapping: after each new keyframe is matched and
+    /// before projection re-observation, triangulate new landmarks from the
+    /// just-accepted pairs and append re-observations to existing landmarks
+    /// (`NfrMapper::local_map_new_keyframes`). This keeps the live `lmdb`
+    /// populated between optimize merges so projection can link a new keyframe
+    /// to older landmarks.
+    ///
+    /// Default **off** for the same byte-exactness reason as
+    /// `projection_rematch`.
+    pub incremental_local_mapping: bool,
 }
 
 impl Default for OnlineMapperConfig {
@@ -220,6 +230,7 @@ impl Default for OnlineMapperConfig {
             projection_search_radius_px: 12.0,
             projection_max_hamming: 70,
             projection_host_window: 20,
+            incremental_local_mapping: false,
         }
     }
 }
@@ -884,6 +895,14 @@ impl OnlineNfrMapper {
             if gap > self.config.loop_gap_keyframes {
                 loop_count += 1;
             }
+        }
+        if self.config.incremental_local_mapping {
+            let (attempted, accepted, rejected) = self
+                .mapper
+                .local_map_new_keyframes(std::slice::from_ref(&query_id));
+            mapper_trace!(
+                "local_map_new_keyframes: query={query_id:?} attempted={attempted} accepted={accepted} rejected={rejected}"
+            );
         }
         if self.config.projection_rematch {
             accepted_count += self.projection_rematch(query_id);

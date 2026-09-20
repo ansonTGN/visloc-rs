@@ -47,11 +47,12 @@ use crate::vio::margdata::MARGDATA_SCHEMA_VERSION_V3;
 
 use super::{
     extract_nonlinear_factors, global_ba_with_state, linearize_mapper_observation,
-    process_marg_data, rel_pose_error, roll_pitch_error, setup_opt as run_setup_opt, FeatureId,
-    FeatureTracks, GlobalBaConfig, GlobalBaIteration, GlobalBaOptimizerState, ImagePair,
-    MapperConfig, MapperFactors, MapperLandmark, MapperSummary, MargDataProcessError, MatchData,
-    Matches, NfrExtractionError, OfflineMapperConfig, SetupOptInput, SetupOptReport,
-    TemporalRansacResult, TimeCamId, TrackBuilder, TrackFilterReport,
+    process_marg_data, rel_pose_error, roll_pitch_error, setup_opt as run_setup_opt,
+    triangulate_pair, FeatureId, FeatureTracks, GlobalBaConfig, GlobalBaIteration,
+    GlobalBaOptimizerState, ImagePair, MapperConfig, MapperFactors, MapperLandmark,
+    MapperObservation, MapperSummary, MargDataProcessError, MatchData, Matches, NfrExtractionError,
+    OfflineMapperConfig, SetupOptInput, SetupOptReport, TemporalRansacResult, TimeCamId,
+    TrackBuilder, TrackFilterReport,
 };
 
 /// Errors raised while processing an individual mapper packet.
@@ -1090,6 +1091,168 @@ impl NfrMapper {
     #[allow(non_snake_case)]
     pub fn setupOpt(&mut self) -> Result<SetupOptReport, NfrMapperSetupOptError> {
         self.setup_opt()
+    }
+
+    /// Incremental local mapping for freshly matched keyframes.
+    ///
+    /// Unlike [`Self::setup_opt`] (a full track rebuild that *replaces*
+    /// `lmdb`), this seeds `lmdb` continuously: for every match pair that
+    /// touches one of `keys`, it either appends the new observation to an
+    /// existing landmark or triangulates a new landmark with
+    /// [`triangulate_pair`]'s exact `setup_opt` gates. The durable product is
+    /// the `feature_matches` edge (which survives background merges); the
+    /// periodic `setup_opt` remains the canonical reconciler and renumbers all
+    /// ids, so incremental ids live in a disjoint namespace and are treated as
+    /// transient.
+    ///
+    /// Returns `(attempted, accepted, rejected)` pair counts.
+    pub fn local_map_new_keyframes(&mut self, keys: &[TimeCamId]) -> (usize, usize, usize) {
+        let Some(calibration) = self.calibration.clone() else {
+            return (0, 0, 0);
+        };
+        // `(image, feature) -> track_id` for landmarks already in the map.
+        let mut owner: BTreeMap<(TimeCamId, FeatureId), u64> = BTreeMap::new();
+        for (&track_id, landmark) in &self.lmdb.landmarks {
+            for observation in &landmark.observations {
+                owner.insert((observation.image, observation.feature_id), track_id);
+            }
+        }
+        let min_distance = self.feature_config.min_triangulation_distance;
+        // Disjoint from union-find-root ids (`setup_opt`), which are far below.
+        let mut next_incremental_id: u64 = 1 << 62;
+        let mut attempted = 0usize;
+        let mut accepted = 0usize;
+        let mut rejected = 0usize;
+        let mut added_landmarks: Vec<(u64, MapperLandmark)> = Vec::new();
+        let mut appended: Vec<(u64, MapperObservation)> = Vec::new();
+        let mut touched_pairs: BTreeSet<ImagePair> = BTreeSet::new();
+
+        let keys: BTreeSet<TimeCamId> = keys.iter().copied().collect();
+        for (&(left, right), data) in &self.feature_matches {
+            let query = if keys.contains(&right) {
+                right
+            } else if keys.contains(&left) {
+                left
+            } else {
+                continue;
+            };
+            let other = if query == right { left } else { right };
+            // Host must be the older image in TimeCamId order.
+            let (host, second) = if other < query {
+                (other, query)
+            } else {
+                (query, other)
+            };
+            if host == second {
+                continue;
+            }
+            for &(left_feature, right_feature) in &data.inliers {
+                // Map the pair's endpoints back onto (host, second).
+                let (host_feature, second_feature) = if other == host {
+                    (left_feature, right_feature)
+                } else {
+                    (right_feature, left_feature)
+                };
+                let host_owner = owner.get(&(host, host_feature)).copied();
+                let second_owner = owner.get(&(second, second_feature)).copied();
+                if let Some(track_id) = second_owner {
+                    // The query feature already belongs to a landmark (e.g. a
+                    // stereo/short link): re-observe it in `host` instead.
+                    if host_owner != Some(track_id) {
+                        if let Some(&pixel) = self.feature_corners.get(&host).and_then(|features| {
+                            features.corners.get(usize::try_from(host_feature).ok()?)
+                        }) {
+                            appended.push((
+                                track_id,
+                                MapperObservation {
+                                    image: host,
+                                    feature_id: host_feature,
+                                    pixel,
+                                },
+                            ));
+                            owner.insert((host, host_feature), track_id);
+                        }
+                    }
+                    continue;
+                }
+                if let Some(track_id) = host_owner {
+                    // Symmetric case: re-observe the landmark in `second`.
+                    if let Some(&pixel) = self.feature_corners.get(&second).and_then(|features| {
+                        features.corners.get(usize::try_from(second_feature).ok()?)
+                    }) {
+                        appended.push((
+                            track_id,
+                            MapperObservation {
+                                image: second,
+                                feature_id: second_feature,
+                                pixel,
+                            },
+                        ));
+                        owner.insert((second, second_feature), track_id);
+                    }
+                    continue;
+                }
+                // Neither endpoint owned: triangulate a new landmark.
+                attempted += 1;
+                match triangulate_pair(
+                    host,
+                    host_feature,
+                    second,
+                    second_feature,
+                    &self.feature_corners,
+                    &self.frame_poses,
+                    &calibration,
+                    min_distance,
+                ) {
+                    Ok((direction, inverse_distance, host_obs, second_obs)) => {
+                        let track_id = next_incremental_id;
+                        next_incremental_id += 1;
+                        owner.insert((host, host_feature), track_id);
+                        owner.insert((second, second_feature), track_id);
+                        added_landmarks.push((
+                            track_id,
+                            MapperLandmark {
+                                track_id,
+                                host,
+                                second,
+                                direction,
+                                inverse_distance,
+                                observations: vec![host_obs, second_obs],
+                            },
+                        ));
+                        touched_pairs.insert((host, second));
+                        accepted += 1;
+                    }
+                    Err(_reason) => rejected += 1,
+                }
+            }
+        }
+
+        if added_landmarks.is_empty() && appended.is_empty() {
+            return (attempted, accepted, rejected);
+        }
+        for (track_id, landmark) in added_landmarks {
+            self.lmdb.landmarks.insert(track_id, landmark);
+        }
+        for (track_id, observation) in appended {
+            if let Some(landmark) = self.lmdb.landmarks.get_mut(&track_id) {
+                if !landmark
+                    .observations
+                    .iter()
+                    .any(|existing| existing.image == observation.image)
+                {
+                    landmark.observations.push(observation);
+                }
+            }
+        }
+        // Keep the reverse index consistent with `landmarks` (required by
+        // `filter_outliers`/`get_current_points`; see `NfrMapperLandmarkDb`).
+        self.lmdb.rebuild_observation_index();
+        // The durable record is the match edge: the next full `setup_opt`
+        // rebuilds tracks from it. Projection-only pairs are already in
+        // `feature_matches`; nothing further to insert here.
+        let _ = touched_pairs;
+        (attempted, accepted, rejected)
     }
 
     /// Optimize the persistent mapper state in the pinned NFR order.
