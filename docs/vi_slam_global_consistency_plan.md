@@ -258,6 +258,30 @@ which also improves MH_04/V2_03 accuracy.
 Dataset note: MH_01/02/04/05 were recovered from the local `machine_hall.zip`
 bundle; only V2_03_difficult is still missing locally.
 
+### 1.7 Accuracy diagnosis 2026-09-20: the remaining gap is map information, not the solver
+
+Full-sequence local online runs with the lean path reproduce the documented
+losses: MH_04 SE(3) ATE 0.0829 m (repo 0.0824, ORB-SLAM3 0.043), MH_05 0.0621 m
+(repo 0.0594, ORB-SLAM3 0.055).
+
+Two hypotheses were tested and rejected:
+
+* **Frontend tracking loss on fast/blurred segments.** Rejected: on a 400-frame
+  MH_04 prefix the frontend rejects *fewer* tracks than MH_03 (16.1 vs 22.5 per
+  frame) with a similar observation count, and full MH_04 consecutive-pose RPE
+  is 4.9 mm / 0.04 deg. Local tracking is healthy; the error is slow drift.
+* **Global-BA under-convergence.** Rejected: on a 1000-frame MH_04 prefix,
+  raising `num_opt_iter` from 10 to 50 changed ATE from 0.0630 m to 0.0638 m
+  (slightly worse) while the first pass converged by 19 iterations. More solver
+  iterations do not help.
+
+The limit is the constraint structure of the map — the same "tracks average ~8
+keyframes" observation as §2 — so the tractable lever is longer/more persistent
+tracks (projection-based re-observation) feeding the global problem, i.e. the
+paused Stage 1 L1 idea, now with local MH_04/MH_05 data available to gate it.
+`basalt_euroc_online_slam_demo` gained `--num-opt-iter` and a richer
+`final_optimize` report to make this A/B reproducible.
+
 ### 1.5 Result 2026-09-16: the offline mapper's 8/11 result reproduced online
 
 Owner-approved override of §4's original sequencing (Stage 7 was to follow

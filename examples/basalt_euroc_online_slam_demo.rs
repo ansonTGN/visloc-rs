@@ -69,6 +69,10 @@ struct Args {
     /// the compact path is byte-identical in trajectory and MargData bytes, so
     /// it is the canonical online-mapper setting.
     retained_marg_diagnostics: bool,
+    /// LM iteration budget for the final full global-BA pass
+    /// (`NfrMapperHeadlessConfig::num_opt_iter`).  Defaults to the mapper
+    /// contract's 10.
+    num_opt_iter: usize,
 }
 
 /// Default bound on the VIO-to-mapper `MargData` channel (see
@@ -183,6 +187,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mapper_config = dataset.config().mapper_config()?;
     let feature_config = dataset.config().offline_mapper_config()?;
     let optimize_config = dataset.config().mapper_global_ba_config()?;
+    let headless = visloc_basalt::mapper::NfrMapperHeadlessConfig {
+        num_opt_iter: args.num_opt_iter,
+        ..visloc_basalt::mapper::NfrMapperHeadlessConfig::default()
+    };
     let online_mapper = OnlineNfrMapper::new(
         mapper_config,
         dataset.calibration().clone(),
@@ -191,6 +199,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         OnlineMapperConfig {
             optimize_every_k: args.optimize_every_k,
             periodic_iterations: args.periodic_iterations,
+            headless,
             ..OnlineMapperConfig::default()
         },
     );
@@ -448,6 +457,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let summary = json!({
         "schema": "basalt.online_mapper.run.v1",
         "lean_marg_data": !args.retained_marg_diagnostics,
+        "final_optimize_iterations_budget": args.num_opt_iter,
         "pacing": if args.realtime { "dataset_rate" } else { "as_fast_as_possible" },
         "frames_processed": frame_limit,
         "dataset_duration_seconds": dataset_duration_seconds,
@@ -479,10 +489,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "optimize_filter_seconds": aggregate.optimize_filter_seconds,
         },
         "final_optimize": {
+            "first_optimize_initial_cost": final_report.first_optimize.initial_cost,
             "first_optimize_final_cost": final_report.first_optimize.final_cost,
+            "first_optimize_iterations": final_report.first_optimize.iterations,
+            "first_optimize_requested_iterations": final_report.first_optimize.requested_iterations,
+            "first_optimize_accepted_steps": final_report.first_optimize.accepted_step_count,
+            "first_optimize_rejected_trials": final_report.first_optimize.rejected_trial_count,
             "second_optimize_final_cost": final_report.second_optimize.final_cost,
+            "second_optimize_iterations": final_report.second_optimize.iterations,
+            "second_optimize_rejected_trials": final_report.second_optimize.rejected_trial_count,
             "pose_count": final_report.result.poses.len(),
             "landmark_count": final_report.result.landmarks.len(),
+            "filter_before_landmarks": final_report.filter.before_landmark_count,
+            "filter_after_landmarks": final_report.filter.after_landmark_count,
+            "filter_reprojection_error": final_report.filter.reprojection_error,
         },
         "propagated_frame_count": propagated_frame_count,
         "peak_working_set_bytes": peak_rss_bytes,
@@ -668,6 +688,7 @@ impl Args {
         let mut threads = None;
         let mut mapper_queue_capacity = DEFAULT_MAPPER_QUEUE_CAPACITY;
         let mut retained_marg_diagnostics = false;
+        let mut num_opt_iter = 10usize;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy().into_owned();
@@ -737,6 +758,15 @@ impl Args {
                     }
                 }
                 "--retained-marg-diagnostics" => retained_marg_diagnostics = true,
+                "--num-opt-iter" => {
+                    num_opt_iter = next(&mut arguments, &option)?
+                        .to_string_lossy()
+                        .parse::<usize>()
+                        .map_err(|error| format!("invalid --num-opt-iter: {error}"))?;
+                    if num_opt_iter == 0 {
+                        return Err("--num-opt-iter must be positive".into());
+                    }
+                }
                 unknown => return Err(format!("unknown option `{unknown}`\n\n{}", Self::usage())),
             }
         }
@@ -757,6 +787,7 @@ impl Args {
             threads,
             mapper_queue_capacity,
             retained_marg_diagnostics,
+            num_opt_iter,
         })
     }
 
@@ -765,7 +796,7 @@ impl Args {
          [--config FILE] [--out-dir DIR] [--max-frames N] [--optimize-every-k K] \
          [--periodic-iterations N] [--realtime | --as-fast-as-possible] \
          [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
-         [--mapper-queue-capacity N] [--retained-marg-diagnostics]"
+         [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N]"
             .into()
     }
 }

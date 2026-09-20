@@ -156,6 +156,34 @@ Dataset note: MH_01/02/04/05 were recovered from the local
 `/mnt/win/linux_data/euroc_mh03_official_20260830/machine_hall.zip`; only
 V2_03_difficult is not yet local.
 
+## Accuracy diagnosis 2026-09-20 (MH_04/MH_05)
+
+Local full-sequence online-mapper runs with the lean path reproduce the
+documented losses: MH_04 SE(3) ATE **0.0829 m** (repo 0.0824, ORB-SLAM3 0.043),
+MH_05 **0.0621 m** (repo 0.0594, ORB-SLAM3 0.055). Dataset frames 2032/2273,
+association 97%+.
+
+The gap is **not** frontend tracking loss. On a 400-frame MH_04 prefix the
+frontend has *fewer* rejected tracks than MH_03 (16.1 vs 22.5 per frame) and a
+similar observation count (~302 vs 285); full MH_04 consecutive-pose RPE is
+4.9 mm translation / 0.04 deg rotation. Local tracking is healthy; the residual
+ATE is slow accumulated drift.
+
+The mapper's global BA is also not the limiter. `--num-opt-iter` A/B on a
+1000-frame MH_04 prefix:
+
+| `num_opt_iter` | ATE | first-pass cost | iters | rejected trials |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 (default) | **0.0630 m** | 5.41M -> 1.21M | 10 | 0 |
+| 50 | 0.0638 m | 5.49M -> 1.33M | 19 | 21 |
+
+More global-BA iterations do not improve ATE (slightly worse). The optimizer
+converges by ~10-19 iterations; the constraint structure of the map is the
+limit, consistent with the plan's "tracks average ~8 keyframes" diagnosis.
+The tractable next lever is therefore **more/longer persistent tracks**
+(projection-based re-observation) feeding the global problem, not more solver
+iterations or a new frontend.
+
 ## Next levers (not in this change)
 
 * **Parallelize the landmark reduction** (`reduce_landmark_factors_f32_checked_with_compact_back_substitution`)
