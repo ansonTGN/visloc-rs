@@ -68,8 +68,8 @@ use crate::mapper::{
         NfrMapper, NfrMapperError, NfrMapperFilterReport, NfrMapperHeadlessConfig,
         NfrMapperLandmarkDb, NfrMapperMatchData, NfrMapperOptimizeReport, NfrMapperResult,
     },
-    FeatureId, FeatureTracks, GlobalBaConfig, GlobalBaOptimizerState, ImagePair, MapperConfig,
-    MatchData, OfflineMapperConfig, RelativePoseFactor, TimeCamId,
+    FeatureTracks, GlobalBaConfig, GlobalBaOptimizerState, ImagePair, MapperConfig, MatchData,
+    OfflineMapperConfig, RelativePoseFactor, TimeCamId,
 };
 
 /// Diagnostic-only fine-grained stage trace, gated by the
@@ -238,6 +238,10 @@ pub struct OnlineMapperConfig {
     /// indicates a false loop (repeated structure) and the loop factor is
     /// dropped. `loop_closure_factors` must be enabled.
     pub loop_closure_max_rotation_error_deg: f64,
+    /// Maximum median angular residual (degrees) for the map-based metric loop
+    /// translation solve before the loop is rejected as geometrically
+    /// inconsistent.
+    pub loop_closure_max_metric_residual_deg: f64,
     /// Covisibility local-BA window size in keyframes (0 disables). When
     /// non-zero, `optimize_pass` runs a local windowed BA around the newest
     /// keyframe after the global steps, cheaply refining the active part of the
@@ -263,7 +267,8 @@ impl Default for OnlineMapperConfig {
             loop_closure_factors: false,
             loop_closure_min_correspondences: 10,
             loop_closure_weight: 1.0,
-            loop_closure_max_rotation_error_deg: 15.0,
+            loop_closure_max_rotation_error_deg: 180.0,
+            loop_closure_max_metric_residual_deg: 5.0,
             local_ba_window: 0,
             local_ba_iterations: 4,
         }
@@ -377,6 +382,14 @@ pub struct OnlineNfrMapper {
     last_optimize_started_at: Option<Instant>,
     last_optimize_duration: Duration,
     total_optimize_triggers: usize,
+    /// Accepted loop pairs (image pairs, query first) collected by
+    /// `match_new_keyframe`. Loop factors are **re-derived from the current
+    /// map** in `optimize_pass` after every `setup_opt`, so they must not be
+    /// appended to the persistent `NfrMapper::factors` (which accumulates VIO
+    /// marginalization factors by design). Keeping the pairs here lets the
+    /// background clone rebuild a fresh, map-consistent loop factor set each
+    /// merge.
+    loop_pairs: BTreeSet<ImagePair>,
 }
 
 /// Owned inputs/outputs of one background optimize job (rule 3). Computed
@@ -421,6 +434,7 @@ impl OnlineNfrMapper {
             last_optimize_started_at: None,
             last_optimize_duration: Duration::ZERO,
             total_optimize_triggers: 0,
+            loop_pairs: BTreeSet::new(),
         }
     }
 
@@ -935,18 +949,12 @@ impl OnlineNfrMapper {
                 }
             }
         }
-        if !loop_pairs.is_empty() {
-            let mut accepted_factors = 0usize;
-            for &(left_id, right_id) in &loop_pairs {
-                if let Some(factor) = self.loop_closure_factor(left_id, right_id) {
-                    self.mapper.factors.relative_pose.push(factor);
-                    accepted_factors += 1;
-                }
+        if self.config.loop_closure_factors {
+            // Record the pairs only; `optimize_pass` re-derives factors from the
+            // fresh map after `setup_opt`.
+            for pair in loop_pairs {
+                self.loop_pairs.insert(pair);
             }
-            mapper_trace!(
-                "loop_closure_factors: candidates={} accepted={accepted_factors}",
-                loop_pairs.len()
-            );
         }
         if self.config.incremental_local_mapping {
             let (attempted, accepted, rejected) = self
@@ -986,11 +994,8 @@ impl OnlineNfrMapper {
         let calibration = self.mapper.calibration.as_ref()?;
         let left_pose = self.mapper.frame_poses.get(&left_id.frame_id)?.clone();
         let right_pose = self.mapper.frame_poses.get(&right_id.frame_id)?.clone();
-        let t_imu_cam_l = calibration.camera_to_imu(left_id.cam_id)?.clone();
         let t_imu_cam_r = calibration.camera_to_imu(right_id.cam_id)?.clone();
-        let t_world_cam_l = left_pose.compose(&t_imu_cam_l);
         let t_world_cam_r = right_pose.compose(&t_imu_cam_r);
-        let t_cam_l_world = t_world_cam_l.inverse();
         let t_cam_r_world = t_world_cam_r.inverse();
 
         // `loop_pairs` come straight from `match_new_keyframe`, which inserts
@@ -1014,47 +1019,104 @@ impl OnlineNfrMapper {
             }
         }
 
-        // Resolve a landmark observed at `(image, feature)` to its 3D point in
-        // the observing camera's frame by going through the host frame.
-        let point_in_frame =
-            |image: TimeCamId, feature: FeatureId, t_cam_world: &SE3| -> Option<Vector3<f64>> {
-                let landmark = self.mapper.lmdb.landmark_for_observation(image, feature)?;
-                let p_host = landmark.position_in_host()?;
-                let host_pose = self.mapper.frame_poses.get(&landmark.host.frame_id)?;
-                let host_extrinsic = calibration.camera_to_imu(landmark.host.cam_id)?;
-                let t_world_cam_host = host_pose.compose(host_extrinsic);
-                let p_world = t_world_cam_host.transform_point(&Point3::from(p_host));
-                Some(t_cam_world.transform_point(&p_world).coords)
-            };
-
-        let mut left_points: Vec<Vector3<f64>> = Vec::new();
-        let mut right_points: Vec<Vector3<f64>> = Vec::new();
-        for &(left_feature, right_feature) in &data.inliers {
-            let Some(p_cam_l) = point_in_frame(left_id, left_feature, &t_cam_l_world) else {
+        // Metric loop recovery without requiring the new keyframe to already
+        // own map landmarks (it never does: `setup_opt` predates it). The old
+        // keyframe's landmarks are metric world points; each matched query
+        // feature supplies a bearing. With the reliable two-view RANSAC
+        // rotation `R` (from `t_i_j`), the metric translation `t` solves the
+        // bearing constraint `d × (R * p_old + t) = 0`, which is linear in `t`:
+        //
+        //     [d]x * t = -[d]x * (R * p_old)
+        //
+        // Stacking at least two non-degenerate inliers gives `t`. The per-inlier
+        // angular residual is a genuine geometric verification, so false loops
+        // (repeated structure) are rejected by their large residual rather than
+        // by the blunt VIO-prior gate above.
+        let query_features = self.mapper.feature_corners.get(&left_id)?;
+        let rotation = data.t_i_j.rotation;
+        let mut normal = Matrix3::zeros();
+        let mut rhs = Vector3::zeros();
+        let mut correspondences: Vec<(Vector3<f64>, Vector3<f64>, Vector3<f64>)> = Vec::new();
+        for &(query_feature, old_feature) in &data.inliers {
+            let Some(landmark) = self
+                .mapper
+                .lmdb
+                .landmark_for_observation(right_id, old_feature)
+            else {
                 continue;
             };
-            let Some(p_cam_r) = point_in_frame(right_id, right_feature, &t_cam_r_world) else {
+            let Some(p_host) = landmark.position_in_host() else {
                 continue;
             };
-            left_points.push(p_cam_l);
-            right_points.push(p_cam_r);
+            let Some(host_pose) = self.mapper.frame_poses.get(&landmark.host.frame_id) else {
+                continue;
+            };
+            let Some(host_extrinsic) = calibration.camera_to_imu(landmark.host.cam_id) else {
+                continue;
+            };
+            let p_world = host_pose
+                .compose(host_extrinsic)
+                .transform_point(&Point3::from(p_host))
+                .coords;
+            let p_old_cam = t_cam_r_world.transform_point(&Point3::from(p_world)).coords;
+            let Some(ray) = query_features.rays.get(query_feature as usize) else {
+                continue;
+            };
+            let d = Vector3::new(ray[0], ray[1], ray[2]);
+            if !d.iter().all(|v| v.is_finite()) || d.norm() < 1e-9 {
+                continue;
+            }
+            let d = d.normalize();
+            let rotated = rotation.transform_vector(&p_old_cam);
+            let skew = skew_vector(&d);
+            normal += skew.transpose() * skew;
+            rhs += -skew.transpose() * (skew * rotated);
+            correspondences.push((d, rotated, p_old_cam));
         }
-
-        // Preferred: metric SE(3) from map landmarks observed in both frames.
-        // `fit_se3` gives `T_left_right` (`p_left ≈ T_left_right * p_right`);
-        // the factor's convention is `T_from_to`, so invert it.
-        if left_points.len() >= self.config.loop_closure_min_correspondences {
-            if let Some(t_left_right) = fit_se3(&right_points, &left_points) {
-                let t_right_left = t_left_right.inverse();
-                let q = t_right_left.rotation.quaternion();
-                return Some(self.build_loop_factor(
-                    right_id.frame_id,
-                    left_id.frame_id,
-                    t_right_left.translation,
-                    [q.w, q.i, q.j, q.k],
-                    true,
-                    left_points.len(),
-                ));
+        mapper_trace!(
+            "loop_closure_factor: metric candidates {}/{} {left_id:?}/{right_id:?}",
+            correspondences.len(),
+            data.inliers.len()
+        );
+        // A well-conditioned bearing system needs at least two inliers; require
+        // the configured minimum before trusting the translation.
+        if correspondences.len() >= self.config.loop_closure_min_correspondences.max(3) {
+            if let Some(normal_inv) = normal.try_inverse() {
+                let translation = normal_inv * rhs;
+                // Geometric verification: angular residual between each query
+                // bearing and the reprojected point.
+                let mut residuals: Vec<f64> = correspondences
+                    .iter()
+                    .filter_map(|(d, rotated, _)| {
+                        let predicted = rotated + translation;
+                        let norm = predicted.norm();
+                        if norm < 1e-9 {
+                            return None;
+                        }
+                        let cos = (d.dot(&predicted) / norm).clamp(-1.0, 1.0);
+                        Some(cos.acos().to_degrees())
+                    })
+                    .collect();
+                residuals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                let median = residuals[residuals.len() / 2];
+                if median <= self.config.loop_closure_max_metric_residual_deg {
+                    let t_left_right = SE3::new(rotation, translation);
+                    let t_right_left = t_left_right.inverse();
+                    let q = t_right_left.rotation.quaternion();
+                    return Some(self.build_loop_factor(
+                        right_id.frame_id,
+                        left_id.frame_id,
+                        t_right_left.translation,
+                        [q.w, q.i, q.j, q.k],
+                        true,
+                        correspondences.len(),
+                    ));
+                }
+                mapper_trace!(
+                    "loop_closure_factor: metric reject median residual {median:.1} deg ({}/{} corr) {left_id:?}/{right_id:?}",
+                    correspondences.len(),
+                    data.inliers.len()
+                );
             }
         }
 
@@ -1294,6 +1356,27 @@ impl OnlineNfrMapper {
     /// `config.headless.num_opt_iter` (the same unbounded budget
     /// `run_headless` itself uses) so the shipped trajectory's last
     /// optimization is not a capped approximation of the offline path's.
+    /// Re-derive loop-closure relative-pose factors from the current map for
+    /// every collected loop pair. Called after `setup_opt` in `optimize_pass`,
+    /// so the factors reflect the freshly rebuilt landmark positions.
+    fn rebuild_loop_factors(&self) -> Vec<RelativePoseFactor> {
+        if !self.config.loop_closure_factors || self.loop_pairs.is_empty() {
+            return Vec::new();
+        }
+        let mut factors = Vec::new();
+        for &(left_id, right_id) in &self.loop_pairs {
+            if let Some(factor) = self.loop_closure_factor(left_id, right_id) {
+                factors.push(factor);
+            }
+        }
+        mapper_trace!(
+            "loop_closure_factors: pairs={} accepted={}",
+            self.loop_pairs.len(),
+            factors.len()
+        );
+        factors
+    }
+
     fn optimize_pass(
         &mut self,
         num_opt_iter: usize,
@@ -1310,9 +1393,13 @@ impl OnlineNfrMapper {
             .mapper
             .setup_opt()
             .map_err(|_| OnlineMapperError::MissingCalibration)?;
+        // Re-derive loop factors from the freshly rebuilt map, so they are
+        // consistent with the current landmark positions rather than stale
+        // snapshots from when the loop was first matched.
+        let loop_factors = self.rebuild_loop_factors();
         let first_optimize = self
             .mapper
-            .optimize(num_opt_iter)
+            .optimize_with_extra_factors(&loop_factors, num_opt_iter)
             .map_err(|_| OnlineMapperError::MissingCalibration)?;
         let filter = self
             .mapper
@@ -1323,7 +1410,7 @@ impl OnlineNfrMapper {
             .map_err(|_| OnlineMapperError::MissingCalibration)?;
         let second_optimize = self
             .mapper
-            .optimize(num_opt_iter)
+            .optimize_with_extra_factors(&loop_factors, num_opt_iter)
             .map_err(|_| OnlineMapperError::MissingCalibration)?;
         if self.config.local_ba_window > 0 {
             let local = self
@@ -1716,6 +1803,11 @@ fn temporal_result_se3(result: &crate::mapper::features::TemporalRansacResult) -
             result.refined_model_translation[2],
         ),
     )
+}
+
+/// Skew-symmetric matrix `[v]x` such that `[v]x * w = v × w`.
+fn skew_vector(v: &Vector3<f64>) -> Matrix3<f64> {
+    Matrix3::new(0.0, -v.z, v.y, v.z, 0.0, -v.x, -v.y, v.x, 0.0)
 }
 
 /// Least-squares SE(3) registration aligning `source` onto `target`

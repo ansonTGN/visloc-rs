@@ -51,8 +51,8 @@ use super::{
     setup_opt as run_setup_opt, triangulate_pair, FeatureId, FeatureTracks, GlobalBaConfig,
     GlobalBaIteration, GlobalBaOptimizerState, ImagePair, MapperConfig, MapperFactors,
     MapperLandmark, MapperObservation, MapperSummary, MargDataProcessError, MatchData, Matches,
-    NfrExtractionError, OfflineMapperConfig, SetupOptInput, SetupOptReport, TemporalRansacResult,
-    TimeCamId, TrackBuilder, TrackFilterReport,
+    NfrExtractionError, OfflineMapperConfig, RelativePoseFactor, SetupOptInput, SetupOptReport,
+    TemporalRansacResult, TimeCamId, TrackBuilder, TrackFilterReport,
 };
 
 /// Errors raised while processing an individual mapper packet.
@@ -1288,6 +1288,20 @@ impl NfrMapper {
         &mut self,
         num_iterations: usize,
     ) -> Result<NfrMapperOptimizeReport, NfrMapperOptimizeError> {
+        self.optimize_with_extra_factors(&[], num_iterations)
+    }
+
+    /// Global BA with transient extra relative-pose factors appended to the
+    /// persistent factor set (which is left untouched).
+    ///
+    /// This is how the online mapper injects **loop-closure** factors: they are
+    /// re-derived from the current map after every `setup_opt`, so they must not
+    /// accumulate on `self.factors` the way the VIO marginalization factors do.
+    pub fn optimize_with_extra_factors(
+        &mut self,
+        extra_relative_pose: &[RelativePoseFactor],
+        num_iterations: usize,
+    ) -> Result<NfrMapperOptimizeReport, NfrMapperOptimizeError> {
         let calibration = self
             .calibration
             .as_ref()
@@ -1297,9 +1311,11 @@ impl NfrMapper {
         let initial_lambda_vee = self.optimizer_state.lambda_vee;
         let mut config = self.optimize_config;
         config.max_iterations = requested_iterations;
+        let mut factors = self.factors.clone();
+        factors.relative_pose.extend_from_slice(extra_relative_pose);
         let summary: MapperSummary = global_ba_with_state(
             &mut self.frame_poses,
-            &self.factors,
+            &factors,
             &mut self.lmdb.landmarks,
             calibration,
             config,

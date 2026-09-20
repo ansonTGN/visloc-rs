@@ -445,6 +445,46 @@ is the **metric loop** (map-based SE(3) via PnP/3D-3D against the old
 keyframe's landmarks), which the metric path only achieves once the new
 keyframe's features have map landmarks. All loop knobs remain **default off**.
 
+## Loop-factor accumulation bug and corrected findings 2026-09-20
+
+**Bug found:** loop factors were pushed onto the persistent
+`NfrMapper::factors.relative_pose`, which only ever grows (VIO marginalization
+factors accumulate by design). So every merge re-applied **all historical**
+loop factors, including stale ones measured against older map states. The
+earlier MH_04 "win" (0.0830 -> 0.0691) was this accumulation artifact, not a
+genuine loop-closure improvement.
+
+**Fix:** `NfrMapper::optimize_with_extra_factors` appends transient loop factors
+to a **clone** of the persistent factor set, and the online mapper now stores
+loop **pairs** (`OnlineNfrMapper::loop_pairs`) and re-derives factors from the
+fresh map in `optimize_pass` after every `setup_opt` (`rebuild_loop_factors`).
+
+**Also implemented (metric loop):** the new keyframe has no map landmarks, so
+the metric path now recovers the loop translation from the **old** keyframe's
+metric landmarks plus the query feature **bearings**, using the reliable
+two-view rotation `R` (`t_i_j`): `d × (R p_old + t) = 0`, linear in `t`. 50-90
+correspondences per loop, median residual < 5 deg. This is a genuine geometric
+verification.
+
+**Corrected cross-sequence results (per-merge re-derivation, full sequences):**
+
+| configuration | MH_04 | MH_05 |
+| --- | ---: | ---: |
+| baseline (off) | 0.0830 m | 0.0615 m |
+| metric loop, weight 0.1 | 0.0836 m | - |
+| metric loop, weight 0.3 | 0.0862 m | - |
+| metric loop, weight 1 | 0.0952 m | 0.0604 m |
+| rotation-only (metric gate forced), weight 100 | 0.0946 m | - |
+
+**Corrected conclusion:** loop factors, metric or rotation, do **not** beat
+baseline on MH_04 and only marginally help MH_05. The metric loop's
+*translation* is derived from the current map, so it re-asserts the current
+estimate rather than correcting drift; the *rotation* is independent but
+over-weighting it distorts the solve. The pixel-level loop inliers already
+enter BA as vision observations via `build_tracks`, so an extra loop *factor*
+adds little. The remaining MH_04/05/V2_03 drift is a map-structure/BA-policy
+limitation, not a missing loop constraint. All loop knobs stay default off.
+
 ## Next levers (not in this change)
 
 * **Parallelize the landmark reduction** (`reduce_landmark_factors_f32_checked_with_compact_back_substitution`)
