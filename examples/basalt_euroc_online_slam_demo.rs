@@ -88,6 +88,8 @@ struct Args {
     loop_closure_min_correspondences: usize,
     /// Scalar weight for loop-closure factors.
     loop_closure_weight: f64,
+    /// Max loop rotation-vs-VIO disagreement in degrees.
+    loop_closure_max_rotation_error_deg: f64,
     /// Covisibility local-BA window size in keyframes (0 disables).
     local_ba_window: usize,
     /// LM iterations for the local windowed BA.
@@ -230,6 +232,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             loop_closure_factors: args.loop_closure_factors,
             loop_closure_min_correspondences: args.loop_closure_min_correspondences,
             loop_closure_weight: args.loop_closure_weight,
+            loop_closure_max_rotation_error_deg: args.loop_closure_max_rotation_error_deg,
             local_ba_window: args.local_ba_window,
             local_ba_iterations: args.local_ba_iterations,
             ..OnlineMapperConfig::default()
@@ -731,6 +734,8 @@ impl Args {
         let mut loop_closure_min_correspondences =
             OnlineMapperConfig::default().loop_closure_min_correspondences;
         let mut loop_closure_weight = OnlineMapperConfig::default().loop_closure_weight;
+        let mut loop_closure_max_rotation_error_deg =
+            OnlineMapperConfig::default().loop_closure_max_rotation_error_deg;
         let mut local_ba_window = OnlineMapperConfig::default().local_ba_window;
         let mut local_ba_iterations = OnlineMapperConfig::default().local_ba_iterations;
         let mut arguments = arguments.into_iter();
@@ -804,6 +809,12 @@ impl Args {
                 "--retained-marg-diagnostics" => retained_marg_diagnostics = true,
                 "--projection-rematch" => projection_rematch = true,
                 "--local-mapping" => incremental_local_mapping = true,
+                "--loop-closure-max-rot-error" => {
+                    loop_closure_max_rotation_error_deg = next(&mut arguments, &option)?
+                        .to_string_lossy()
+                        .parse::<f64>()
+                        .map_err(|e| format!("invalid --loop-closure-max-rot-error: {e}"))?;
+                }
                 "--local-ba-window" => {
                     local_ba_window = next(&mut arguments, &option)?
                         .to_string_lossy()
@@ -884,6 +895,7 @@ impl Args {
             loop_closure_factors,
             loop_closure_min_correspondences,
             loop_closure_weight,
+            loop_closure_max_rotation_error_deg,
             local_ba_window,
             local_ba_iterations,
         })
@@ -898,7 +910,7 @@ impl Args {
          [--projection-rematch] [--local-mapping] \
          [--projection-host-window N] [--projection-radius PX] \
          [--loop-closure-factors] [--loop-closure-min-corr N] [--loop-closure-weight W] \
-         [--local-ba-window N] [--local-ba-iterations N]"
+         [--loop-closure-max-rot-error DEG] [--local-ba-window N] [--local-ba-iterations N]"
             .into()
     }
 }

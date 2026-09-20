@@ -231,6 +231,13 @@ pub struct OnlineMapperConfig {
     pub loop_closure_min_correspondences: usize,
     /// Scalar weight multiplied into the loop factor's information matrix.
     pub loop_closure_weight: f64,
+    /// Maximum angular disagreement (degrees) between a loop's two-view RANSAC
+    /// rotation and the current VIO relative rotation for the loop to be
+    /// trusted. Genuine loops can have large *translation* drift but the
+    /// relative rotation estimate is robust, so a large rotation disagreement
+    /// indicates a false loop (repeated structure) and the loop factor is
+    /// dropped. `loop_closure_factors` must be enabled.
+    pub loop_closure_max_rotation_error_deg: f64,
     /// Covisibility local-BA window size in keyframes (0 disables). When
     /// non-zero, `optimize_pass` runs a local windowed BA around the newest
     /// keyframe after the global steps, cheaply refining the active part of the
@@ -256,6 +263,7 @@ impl Default for OnlineMapperConfig {
             loop_closure_factors: false,
             loop_closure_min_correspondences: 10,
             loop_closure_weight: 1.0,
+            loop_closure_max_rotation_error_deg: 15.0,
             local_ba_window: 0,
             local_ba_iterations: 4,
         }
@@ -989,6 +997,23 @@ impl OnlineNfrMapper {
         // `feature_match_data` under `(query_id, other_id)`.
         let data = self.mapper.feature_match_data.get(&(left_id, right_id))?;
 
+        // Geometric plausibility gate: compare the loop's two-view RANSAC
+        // rotation with the current VIO relative rotation. A false loop from
+        // repeated structure disagrees grossly; a genuine loop, whose
+        // translation may have drifted, agrees on rotation.
+        {
+            let vio_relative = left_pose.inverse().compose(&right_pose);
+            let measured = data.t_i_j.clone();
+            let delta = vio_relative.rotation.inverse() * measured.rotation;
+            let angle_deg = delta.angle().to_degrees();
+            if angle_deg > self.config.loop_closure_max_rotation_error_deg {
+                mapper_trace!(
+                    "loop_closure_factor: reject rotation mismatch {angle_deg:.1} deg for {left_id:?}/{right_id:?}"
+                );
+                return None;
+            }
+        }
+
         // Resolve a landmark observed at `(image, feature)` to its 3D point in
         // the observing camera's frame by going through the host frame.
         let point_in_frame =
@@ -1028,6 +1053,7 @@ impl OnlineNfrMapper {
                     t_right_left.translation,
                     [q.w, q.i, q.j, q.k],
                     true,
+                    left_points.len(),
                 ));
             }
         }
@@ -1035,8 +1061,17 @@ impl OnlineNfrMapper {
         // Fallback: the two-view RANSAC measurement is scale-free, but its
         // rotation is a valid, VIO-independent loop constraint. Keep the
         // translation at the current VIO estimate (neutral) and put near-zero
-        // information on it, so only rotation closes the loop (this is what
-        // removes yaw drift, the dominant long-horizon error mode).
+        // information on it, so only rotation closes the loop (what removes yaw
+        // drift, the dominant long-horizon error mode).
+        //
+        // A 2-3 inlier "loop" must not carry the same authority as a 100-inlier
+        // one, so the factor is gated on inlier count and its information is
+        // scaled by that count (see `build_loop_factor`).
+        let inliers = data.inliers.len();
+        let min_rotation_inliers = self.config.loop_closure_min_correspondences / 2;
+        if inliers < min_rotation_inliers.max(5) {
+            return None;
+        }
         let relative = right_pose.inverse().compose(&left_pose);
         // `data.t_i_j` is `T_left_right`; the factor wants `T_right_left`.
         let rotation = data.t_i_j.inverse().rotation;
@@ -1047,12 +1082,17 @@ impl OnlineNfrMapper {
             relative.translation,
             [q.w, q.i, q.j, q.k],
             false,
+            inliers,
         ))
     }
 
-    /// Assemble a loop `RelativePoseFactor`. When `metric` is true the
-    /// information matrix is strong on all six DOF; otherwise only rotation is
-    /// constrained (`1e-6` on translation directions).
+    /// Assemble a loop `RelativePoseFactor`.
+    ///
+    /// When `metric` is true the information matrix is strong on all six DOF;
+    /// otherwise only rotation is constrained (`1e-6` on translation). The
+    /// information is scaled by `support` (the correspondence/inlier count)
+    /// relative to `loop_closure_min_correspondences`, capped at 3x, so weak
+    /// loops contribute weakly.
     fn build_loop_factor(
         &self,
         from: u64,
@@ -1060,8 +1100,11 @@ impl OnlineNfrMapper {
         translation: Vector3<f64>,
         rotation: [f64; 4],
         metric: bool,
+        support: usize,
     ) -> RelativePoseFactor {
-        let strong = self.config.loop_closure_weight / 1e-3;
+        let reference = self.config.loop_closure_min_correspondences.max(1) as f64;
+        let support_scale = (support as f64 / reference).clamp(0.25, 3.0);
+        let strong = self.config.loop_closure_weight * support_scale / 1e-3;
         let weak = 1e-6;
         let mut information = vec![0.0; 36];
         for i in 0..6 {

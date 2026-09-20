@@ -414,6 +414,37 @@ over the whole map. Its value would come from running **every keyframe** with
 the new observations already integrated, which needs the incremental-mapping
 and window paths combined. Kept default-off; the loop factor remains the win.
 
+## Loop-factor tuning and cross-sequence validation 2026-09-20
+
+Refinements after the first loop-factor win:
+
+* Information now scales with `support` (correspondence/inlier count) relative
+  to `loop_closure_min_correspondences`, capped at 3x.
+* Rotation fallback gated on inlier count (`max(5, min_corr/2)`).
+* `loop_closure_max_rotation_error_deg` (default 15): reject a loop whose
+  two-view RANSAC rotation disagrees with the current VIO relative rotation by
+  more than that.
+
+Cross-sequence results (full sequences, `--optimize-every-k 10`):
+
+| configuration | MH_04 | MH_05 |
+| --- | ---: | ---: |
+| baseline (off) | 0.0830 m | 0.0615 m |
+| weight 100, no gate | **0.0691 m** | 0.0803 m |
+| weight 100, gate 15 deg | 0.0797 m | **0.0600 m** |
+| weight 100, gate 30 deg | 0.0766 m | 0.0635 m |
+| weight 100, min-corr 30, no gate | 0.0755 m | 0.0676 m |
+| weight 300, no gate | 0.0702 m | 0.0817 m |
+
+**Finding:** loop factors are a large, reproducible win on MH_04 (-17%) but
+regress MH_05 unless a rotation-consistency gate is applied, and every gate
+setting trades MH_04's win against MH_05's harm. Inlier-count gating does not
+separate the two datasets. This is because the fallback is a **scale-free
+appearance/rotation** constraint with no geometric verification: the real fix
+is the **metric loop** (map-based SE(3) via PnP/3D-3D against the old
+keyframe's landmarks), which the metric path only achieves once the new
+keyframe's features have map landmarks. All loop knobs remain **default off**.
+
 ## Next levers (not in this change)
 
 * **Parallelize the landmark reduction** (`reduce_landmark_factors_f32_checked_with_compact_back_substitution`)
