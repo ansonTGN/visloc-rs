@@ -75,6 +75,45 @@ found. It lowers long-horizon drift and removes a fragility, at the cost of more
 mapper keyframes (more wall time). This supersedes the loop-closure factor work,
 which was neutral on MH_04.
 
+### Root cause of the V2_03 divergence: ungated loop matches 2026-09-21
+
+Isolating the failure:
+
+* **VIO-only** V2_03 (no mapper) is stable: ATE 0.235 m, RPE 12.4 mm with the
+  default spacing. So the divergence is *not* the VIO.
+* **No loop matching** (`--no-loop-matching`, default spacing, k=10): the failing
+  online run goes from ATE 6.44 m / RPE 3.43 m to ATE 0.255 m / RPE 11.8 mm —
+  i.e. back to the VIO's own quality. **The loop matches are the entire cause.**
+* The keyframe-pose trajectory localises it: mapper keyframes 177-179 explode to
+  y = +65 m then -63 m, exactly at the two `loops=1` matches (`frame_id` 1268
+  and 1282). A single false/ill-conditioned loop match enters `feature_matches`
+  (unconditionally, regardless of `loop_closure_factors`) and corrupts
+  `build_tracks` -> global BA; frequent BA (k=10) propagates it catastrophically.
+  With the reference k=100 cadence the single bad correction is damped, which is
+  why the §1.5 baseline did not diverge.
+
+**Fix — loop-match safety gate.** `OnlineMapperConfig::loop_match_max_rotation_error_deg`
+(default 30 deg) discards a loop match whose two-view RANSAC rotation disagrees
+with the current pose-graph relative rotation before it is inserted. Measured on
+V2_03 (default spacing, k=10):
+
+| configuration | ATE | RPE |
+| --- | ---: | ---: |
+| ungated (default) | 6.4391 m | 3.4275 m |
+| gate 10 deg | 0.1346 m | 0.0184 m |
+| gate 30 deg | 0.0742 m | 0.0336 m |
+| no loop matching at all | 0.2550 m | 0.0118 m |
+
+At the reference k=100 cadence the gate is neutral (MH_04 0.0834 vs 0.0824,
+MH_05 0.0656 vs 0.0594, V2_03 0.0761 vs 0.0729): it is a **robustness
+safeguard**, not an accuracy lever. `OnlineMapperConfig::loop_matching` (default
+true) turns loop insertion off entirely for diagnosis.
+
+Takeaway: the accuracy lever is keyframe density; the *safety* lever is a
+geometric gate on loop matches. Both are needed — density for accuracy, the gate
+so that more frequent BA (a lower `optimize_every_k`) cannot turn one bad loop
+match into a catastrophic excursion.
+
 ## Problem
 
 The online VI-SLAM (Basalt Rust port) is not real-time: EuRoC MH_03 ran at

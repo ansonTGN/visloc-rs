@@ -82,6 +82,11 @@ struct Args {
     projection_host_window: Option<u64>,
     /// Projection search radius override in pixels (None keeps the default).
     projection_radius_px: Option<f64>,
+    /// Disable insertion of loop matches into the map (diagnostic/robustness
+    /// control; default is to insert them).
+    no_loop_matching: bool,
+    /// Loop-match rotation gate override in degrees (None keeps the default).
+    loop_match_max_rotation_error_deg: Option<f64>,
     /// Enable loop-closure relative-pose factors recovered from map landmarks.
     loop_closure_factors: bool,
     /// Minimum 3D-3D correspondences for a loop factor.
@@ -229,6 +234,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             projection_search_radius_px: args
                 .projection_radius_px
                 .unwrap_or(OnlineMapperConfig::default().projection_search_radius_px),
+            loop_matching: !args.no_loop_matching,
+            loop_match_max_rotation_error_deg: args
+                .loop_match_max_rotation_error_deg
+                .unwrap_or(OnlineMapperConfig::default().loop_match_max_rotation_error_deg),
             loop_closure_factors: args.loop_closure_factors,
             loop_closure_min_correspondences: args.loop_closure_min_correspondences,
             loop_closure_weight: args.loop_closure_weight,
@@ -730,6 +739,8 @@ impl Args {
         let mut incremental_local_mapping = false;
         let mut projection_host_window = None;
         let mut projection_radius_px = None;
+        let mut no_loop_matching = false;
+        let mut loop_match_max_rotation_error_deg = None;
         let mut loop_closure_factors = false;
         let mut loop_closure_min_correspondences =
             OnlineMapperConfig::default().loop_closure_min_correspondences;
@@ -827,6 +838,15 @@ impl Args {
                         .parse::<usize>()
                         .map_err(|error| format!("invalid --local-ba-iterations: {error}"))?;
                 }
+                "--no-loop-matching" => no_loop_matching = true,
+                "--loop-match-max-rot-error" => {
+                    loop_match_max_rotation_error_deg = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<f64>()
+                            .map_err(|e| format!("invalid --loop-match-max-rot-error: {e}"))?,
+                    )
+                }
                 "--loop-closure-factors" => loop_closure_factors = true,
                 "--loop-closure-min-corr" => {
                     loop_closure_min_correspondences = next(&mut arguments, &option)?
@@ -892,6 +912,8 @@ impl Args {
             incremental_local_mapping,
             projection_host_window,
             projection_radius_px,
+            no_loop_matching,
+            loop_match_max_rotation_error_deg,
             loop_closure_factors,
             loop_closure_min_correspondences,
             loop_closure_weight,

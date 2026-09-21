@@ -161,6 +161,27 @@ pub struct OnlineMapperConfig {
     /// loop-rich revisited segment cannot make every single packet start
     /// its own background job.
     pub loop_gap_keyframes: u64,
+    /// Whether a match pair classified as a loop (rank gap >
+    /// `loop_gap_keyframes`) is inserted into `feature_matches`/`build_tracks`.
+    ///
+    /// Default **on** (matches the pin). Turning it off is a diagnostic /
+    /// robustness control: on V2_03 with the default VIO keyframe spacing and a
+    /// short `optimize_every_k`, a single loop match was measured to drive the
+    /// global BA into a catastrophic pose excursion (see the keyframe-density
+    /// section in `work/vi_slam_lean_margdata_lm_speedup_20260920.md`).
+    pub loop_matching: bool,
+    /// Maximum angular disagreement (degrees) between a loop match's two-view
+    /// RANSAC rotation and the current pose-graph relative rotation before the
+    /// loop match is discarded (not inserted into `feature_matches`, so it
+    /// cannot corrupt `build_tracks`/BA). The two-view rotation is metric and
+    /// reliable even when translation has drifted, so a large disagreement
+    /// indicates a false loop (repeated structure). `180` disables the gate.
+    ///
+    /// This is the map-safety gate: unlike `loop_closure_max_rotation_error_deg`
+    /// (which only gates the optional extra factor), this gates the loop
+    /// *match itself*, which always feeds the global problem. A single
+    /// ungated false loop was measured to destroy the V2_03 estimate.
+    pub loop_match_max_rotation_error_deg: f64,
     /// Candidates considered per new keyframe query in
     /// `match_new_keyframe`, i.e. the `num_results` truncation passed to
     /// `query_bow_candidates` -- independent of (and by default smaller
@@ -257,6 +278,8 @@ impl Default for OnlineMapperConfig {
             optimize_every_k: 100,
             periodic_iterations: 4,
             loop_gap_keyframes: 30,
+            loop_matching: true,
+            loop_match_max_rotation_error_deg: 30.0,
             match_top_k: 5,
             headless: NfrMapperHeadlessConfig::default(),
             projection_rematch: false,
@@ -914,18 +937,6 @@ impl OnlineNfrMapper {
                 raw_matches,
                 inliers,
             } = outcome;
-            self.mapper.feature_match_data.insert(
-                (left_id, right_id),
-                NfrMapperMatchData {
-                    t_i_j,
-                    matches: raw_matches,
-                    inliers: inliers.clone(),
-                },
-            );
-            self.mapper
-                .feature_matches
-                .insert((left_id, right_id), MatchData::new(inliers));
-            accepted_count += 1;
             // Compare keyframe *rank* (assignment order), not raw
             // frame_id: frame_id is the VIO's per-frame index and
             // advances on every processed frame, not just keyframes, so
@@ -942,7 +953,34 @@ impl OnlineNfrMapper {
                 .copied()
                 .unwrap_or(0);
             let gap = left_rank.abs_diff(right_rank);
-            if gap > self.config.loop_gap_keyframes {
+            let is_loop = gap > self.config.loop_gap_keyframes;
+            if is_loop && !self.config.loop_matching {
+                continue;
+            }
+            if is_loop
+                && self.config.loop_match_max_rotation_error_deg < 180.0
+                && self
+                    .loop_match_rotation_error_deg(left_id, right_id, &t_i_j)
+                    .is_some_and(|angle| angle > self.config.loop_match_max_rotation_error_deg)
+            {
+                mapper_trace!(
+                    "match_new_keyframe: reject loop {left_id:?}/{right_id:?} rotation-gate"
+                );
+                continue;
+            }
+            self.mapper.feature_match_data.insert(
+                (left_id, right_id),
+                NfrMapperMatchData {
+                    t_i_j,
+                    matches: raw_matches,
+                    inliers: inliers.clone(),
+                },
+            );
+            self.mapper
+                .feature_matches
+                .insert((left_id, right_id), MatchData::new(inliers));
+            accepted_count += 1;
+            if is_loop {
                 loop_count += 1;
                 if self.config.loop_closure_factors {
                     loop_pairs.push((left_id, right_id));
@@ -971,6 +1009,23 @@ impl OnlineNfrMapper {
             "match_new_keyframe: query={query_id:?} accepted={accepted_count} loops={loop_count}"
         );
         (accepted_count, loop_count)
+    }
+
+    /// Angular disagreement (degrees) between a loop match's two-view RANSAC
+    /// rotation and the current pose-graph relative rotation. `None` when
+    /// either frame pose is unknown. Used by the loop-match safety gate in
+    /// `match_new_keyframe`.
+    fn loop_match_rotation_error_deg(
+        &self,
+        left_id: TimeCamId,
+        right_id: TimeCamId,
+        t_i_j: &SE3,
+    ) -> Option<f64> {
+        let left_pose = self.mapper.frame_poses.get(&left_id.frame_id)?;
+        let right_pose = self.mapper.frame_poses.get(&right_id.frame_id)?;
+        let vio_relative = left_pose.inverse().compose(right_pose);
+        let delta = vio_relative.rotation.inverse() * t_i_j.rotation;
+        Some(delta.angle().to_degrees())
     }
 
     /// Build a metric loop-closure `RelativePoseFactor` for an accepted loop
