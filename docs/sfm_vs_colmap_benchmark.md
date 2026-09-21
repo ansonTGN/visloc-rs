@@ -137,6 +137,40 @@ Intrinsics refinement is kept (off by default) because it *is* the right tool fo
 unknown / inaccurate calibration on observable geometry (sideways, orbiting, or
 unordered photo collections) — just not for rectified forward video.
 
+### Scaling the monocular mapper: matrix-free Schur BA (measured)
+
+The dense sparse-block Schur reduction keeps one block per observed pose pair,
+so when tracks are long the reduced camera system fills in and one LM linear
+solve becomes `O(pose^3)`. On a 600-frame unordered EuRoC slice with the same
+12,000-pair temporal-pyramid budget the default mapper's `linear_solve` grows
+super-linearly and the run no longer finishes in a practical window. The
+matrix-free implicit-Schur PCG backend (`--matrix-free-ba`) removes that wall.
+
+Unordered EuRoC (order-shuffled rectified left frames, frozen 12,000-pair
+candidate budget, SuperPoint features, `evo_ape` Sim(3) against Vicon GT; COLMAP
+4.1.0 with CUDA consumes the identical pair list):
+
+| frames | engine | mapper | total | registered | Sim(3) ATE |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 200 | visloc-rs `--matrix-free-ba` | **304 s** | **~353 s** | 188 / 200 | 0.44 cm |
+| 200 | COLMAP 4.1 CUDA | 252 s | 274 s | 200 / 200 | **0.40 cm** |
+| 600 | visloc-rs `--matrix-free-ba` | **2,033 s** | **2,116 s** | 565 / 600 | 1.47 cm |
+| 600 | COLMAP 4.1 CUDA | 5,375 s | 5,431 s | 600 / 600 | **0.87 cm** |
+| 600 | visloc-rs `--colmap-style --matrix-free-ba` | 1,506 s | ~1,590 s | 584 / 600 | 0.96 cm |
+
+Two regimes fall out of the same measurements:
+
+- **Speed crosses over with scale.** COLMAP is marginally faster at 200 frames,
+  but at 600 frames visloc's mapper is **2.6× faster** and the end-to-end run
+  **2.6× faster** — COLMAP's per-registration global BA is the super-linear term.
+- **Accuracy is schedule-bound, not density-bound.** A naive periodic global BA
+  every 64 registrations *raises* registration (592 / 600) but corrupts the
+  trajectory (Sim(3) 11.7 cm); the COLMAP-style local-BA + growth-triggered
+  global refinement reaches **0.96 cm** at 584 / 600, within ~1.1× of COLMAP's
+  0.87 cm while still 3.4× faster. Post-refinement registration alone recovers
+  only +1 frame (565 → 566) at 0.0137 m, confirming the residual is internal
+  drift, not missing coverage.
+
 ### Where refinement *does* pull — the observable orbit (measured)
 
 That last claim is now measured, on COLMAP's own **unordered** orbit set

@@ -116,7 +116,7 @@ re-reads one feature file at a time to validate the descriptor-bound snapshot
 hash, then keeps keypoints only. Its 1,459,194 KiB median peak is 1.16× the
 COLMAP mapper peak. See the
 <a href="electro_performance_roadmap.md">performance and memory roadmap</a>
-and <a href="../benchmarks/electro/quality-attribution.json">quality-attribution ledger</a>.</sub></p>
+  and <a href="../benchmarks/electro/quality-attribution.json">quality-attribution ledger</a>.</sub></p>
 <p align="center"><sub>BA implementation and all nine A/B timings:
 <a href="electro_ba_block_system.md">direct-block Schur report</a>.</sub></p>
 <p align="center"><sub>Quality-gated BA schedule audit and two-run hashes:
@@ -127,6 +127,32 @@ snapshot replay report</a>.</sub></p>
 <p align="center"><sub>Persistent worker, three-run matching median,
 bounded merge, byte-identical feature re-extraction, and end-to-end ledger:
 <a href="electro_persistent_matcher_audit.md">3.46× CPU8 report</a>.</sub></p>
+
+### Matrix-free Schur BA on long tracks
+
+The dense sparse-block Schur reduction keeps one block per observed pose pair.
+When tracks are long (large rig / temporal-pyramid candidate budgets) the
+reduced camera system fills in, so a single LM linear solve costs `O(pose^3)`:
+at 1,200 poses one iteration reached ~10 s and the Electro mapper did not
+finish in >5 h. The matrix-free implicit-Schur PCG backend
+(`BundleAdjustment::optimize_matrix_free`, now reachable from the mapper via
+`--matrix-free-ba` / `BaConfig::matrix_free_ba`) eliminates the landmarks
+implicitly and its cost tracks the observation count instead.
+
+Measured on the same frozen 12,000-pair Electro manifest with the default BA
+schedule:
+
+| Electro 1,200 mapper | wall | registered | camera-centre RMSE | relative RMSE |
+| --- | ---: | ---: | ---: | ---: |
+| visloc-rs + `--matrix-free-ba` | **1,193 s** | 1,182/1,200 | **3.76 cm** | **0.00591** |
+| COLMAP 3.9.1 CPU (frozen pairs) | 4,930 s | 1,200/1,200 | 4.68 cm | 0.00737 |
+| COLMAP 4.1.0 CUDA (frozen pairs) | 6,175 s | 1,200/1,200 | 5.56 cm | 0.00875 |
+
+Ineligible problems (intrinsics/distortion refinement, non-visual states or
+priors, a fully fixed pose set, no gauge anchor) transparently fall back to the
+ordinary solver, so the flag is a safe opt-in.
+
+
 
 <p align="center">
   <a href="assets/electro_1200_sfm_comparison.png"><img src="assets/electro_1200_sfm_comparison.png" alt="Full-resolution ETH3D Electro comparison with aligned camera centres, sparse structure, error distribution, mapper wall, and peak memory" width="820"></a><br>

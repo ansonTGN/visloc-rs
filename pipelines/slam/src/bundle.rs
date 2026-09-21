@@ -4310,6 +4310,19 @@ pub struct BaConfig {
     /// ignores it. **`false` by default** (the public
     /// [`BundleAdjustment::optimize`] is then bit-identical to before).
     pub parallel: bool,
+    /// Solve the pure-visual bundle adjustment with the matrix-free
+    /// implicit-Schur PCG backend (see [`BundleAdjustment::optimize_matrix_free`])
+    /// instead of the dense/sparse block-Cholesky Schur reduction.
+    ///
+    /// The default reduced pose system fills in when tracks are long, so one LM
+    /// linear solve becomes `O(pose^3)` and a large reconstruction can spend
+    /// hours in `linear_solve`. The matrix-free operator eliminates the
+    /// landmarks implicitly and its cost tracks the observation count.
+    /// Ineligible problems (intrinsics/distortion refinement, non-visual states
+    /// or priors, a fully fixed pose set, or a missing gauge anchor) fall back to
+    /// the ordinary solver, which keeps `true` safe as a general default-off
+    /// opt-in. **`false` by default** (the ordinary solve is then unchanged).
+    pub matrix_free_ba: bool,
 }
 
 impl Default for BaConfig {
@@ -4330,6 +4343,7 @@ impl Default for BaConfig {
             refine_intrinsics: false,
             refine_distortion: false,
             parallel: false,
+            matrix_free_ba: false,
         }
     }
 }
