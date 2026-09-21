@@ -47,6 +47,33 @@ EP).
    1660 Ti by 1.4x - while SuperPoint-1500 + CrossCheck + CUDA is 52.5 ms
    (19 fps) with the best tracking measured (0.543).
 
+### Where the frame time actually goes
+
+Isolating the components on synthetic 256-dimensional descriptors (the
+SuperPoint descriptor width) at the keypoint counts above:
+
+| keypoints | `BruteForceMatcher` | `CrossCheckMatcher` | ms/frame over a 20-frame run |
+| ---: | ---: | ---: | ---: |
+| 512 | 6.2 ms | 6.5 ms | 36 ms (measured) |
+| 1500 | 45.0 ms | 40.4 ms | 52.5 ms (measured) |
+| 2048 | 95.6 ms | 143.8 ms | - |
+
+Two conclusions:
+
+- **The descriptor matching is effectively the whole frame.** At 1,500 keypoints
+  the matcher alone is ~40-45 ms of the measured 52.5 ms; the SuperPoint network
+  is ~7 ms. The cost is the O(N^2) 256-dimensional dot-product GEMM, so it grows
+  quadratically with the keypoint cap (512 -> 6 ms, 1500 -> 45 ms).
+- **`--superpoint-onnx-backend cuda` only moves the extractor.** The matcher is
+  the CPU `CrossCheckMatcher<BruteForceMatcher>` regardless of the provider flag
+  (the CUDA label covers the ONNX session only). The single-GEMM
+  `match_descriptors_cross_checked` optimization was measured at 0.86-1.26x over
+  the two-pass cross-check at these sizes - not a meaningful win, because the
+  binding cost is the O(N^2) GEMM itself, not the redundant second pass.
+
+The practical lever is therefore the keypoint cap (or a subquadratic / GPU
+matcher): SuperPoint-512 sits inside the 20 Hz budget, SuperPoint-1500 does not.
+
 ## Reproduce
 
 ```sh

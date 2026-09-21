@@ -152,6 +152,23 @@ Ineligible problems (intrinsics/distortion refinement, non-visual states or
 priors, a fully fixed pose set, no gauge anchor) transparently fall back to the
 ordinary solver, so the flag is a safe opt-in.
 
+**Parity on small unordered sets.** The matrix-free backend is a large-scale
+lever; on the two small ETH3D battle sets (38-image courtyard, 26-image office,
+GPU SIFT features, VLAD pairs) it changes neither the registration nor the model
+in any way that matters, which is the expected result at this size:
+
+| set | engine | registered | common vs COLMAP | camera-centre RMSE |
+| --- | --- | ---: | ---: | ---: |
+| courtyard | visloc default | 14 / 38 | 8 | 0.40 cm |
+| courtyard | visloc `--matrix-free-ba` | 14 / 38 | 8 | 0.31 cm |
+| office | visloc default | 18 / 26 | 1 | - |
+| office | visloc `--matrix-free-ba` | 18 / 26 | 1 | - |
+
+The low courtyard registration (COLMAP's own reference model reaches 23 / 38) is
+the retrieval-limited small-unordered regime the unordered benchmark already
+documents; the matrix-free switch is behaviourally neutral here, exactly as
+intended for a solver backend that is only reached on long tracks.
+
 
 
 <p align="center">
