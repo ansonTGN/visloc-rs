@@ -28,12 +28,52 @@ Accuracy findings (all measured, see sections below):
   **not** improve ATE: verified matches are recent-pair duplicates, so no
   long-range edge enters `feature_matches`.
 
-Next candidate (not started): changes to the keyframe density / covisible-window
-full-BA policy (and loop closure over that denser graph), which is what
-ORB-SLAM3 has and this port lacks. Suggested first A/B: raise keyframe retention
-/ lower the keyframe-spacing policy and measure `average_track_length` and ATE
-on MH_04, using `--optimize-every-k` and the `final_optimize` report already in
-place. Read `docs/vi_slam_global_consistency_plan.md` §1.7 for the diagnosis.
+Next candidate: see the keyframe-density result below — it is the biggest
+accuracy lever found in this investigation and supersedes the loop-closure
+direction.
+
+## VIO keyframe density is the dominant accuracy lever 2026-09-21
+
+`decide_keyframe` (`pipelines/basalt/src/vio/estimator.rs:2783`) inserts a VIO
+keyframe only when `connected/total < new_kf_keypoints_threshold` **and**
+`frames_after_kf > config.vio_min_frames_after_kf` (`config.vio_min_frames_after_kf`,
+EuRoC default **5**). Lowering this spacing inserts keyframes more often, which
+feeds the persistent mapper longer/more persistent tracks.
+
+Config variants used: copy of `official_euroc_ds/euroc_config.json` with
+`config.vio_min_frames_after_kf` set to N (call it "kfN"). Measured full-sequence
+online ATE (`--optimize-every-k 10`, `--periodic-iterations 4`, MH_04):
+
+| min_frames_after_kf | MH_04 ATE |
+| --- | ---: |
+| 5 (default) | 0.0830 m |
+| 4 | 0.0741 m |
+| **3** | **0.0654 m** |
+| **2** | **0.0665 / 0.0668 m** (two reps) |
+| 1 | 0.0767 m |
+
+Reference-protocol cross-check (`--optimize-every-k 100`, the §1.5 driver
+setting; kf2 unless noted) vs the §1.5 online baseline:
+
+| Sequence | §1.5 baseline | kf2 (k=100) | delta |
+| --- | ---: | ---: | ---: |
+| MH_01_easy | 0.0167 | 0.0153 | -8.4% |
+| MH_02_easy | 0.0250 | 0.0261 | +4.4% |
+| MH_03_medium | 0.0268 | 0.0244 | -9.0% |
+| MH_04_difficult | 0.0824 | 0.0665 | **-19.3%** |
+| MH_05_difficult | 0.0594 | 0.0576 | -3.0% |
+| V2_03_difficult | 0.1078 | **0.0333** | **-69.1%** |
+
+**V2_03 additionally becomes cadence-robust.** With the default spacing and
+`--optimize-every-k 10`, V2_03 **diverges** (ATE 6.44 m, RPE 3.43 m): frequent
+global BA destabilises the sparse map. With kf2 the same run is healthy
+(0.0338 m, RPE 8.4 mm). kf2 beats ORB-SLAM3 on V2_03 (0.0563) and MH_04 gains
+~19% while MH_01/MH_03 also improve; only MH_02 regresses slightly (+4.4%).
+
+Conclusion: `config.vio_min_frames_after_kf = 2..3` is the best single change
+found. It lowers long-horizon drift and removes a fragility, at the cost of more
+mapper keyframes (more wall time). This supersedes the loop-closure factor work,
+which was neutral on MH_04.
 
 ## Problem
 
