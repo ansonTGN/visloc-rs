@@ -74,6 +74,30 @@ Two conclusions:
 The practical lever is therefore the keypoint cap (or a subquadratic / GPU
 matcher): SuperPoint-512 sits inside the 20 Hz budget, SuperPoint-1500 does not.
 
+### Adaptive keypoint cap
+
+Rather than fix the cap for a whole run, `--adaptive-keypoints` lets the demo
+pace it to a per-frame processing budget (`--adaptive-frame-budget-ms`,
+default 50). The extractor exposes a shared runtime cap
+(`SuperPointOnnxExtractor::set_runtime_max_keypoints`), and the controller
+scales it by a damped function of the rolling mean frame time, clamped between
+the configured cap and a quarter of it. The damping matters: a single
+reciprocal correction overshoots to the floor and costs most of the tracking.
+
+MH_01_easy, 400 frames, `--motion-vi-init --cross-check-matcher --superpoint-onnx-backend cuda`:
+
+| keypoint policy | ms/frame | fps | tracking success | mean keypoints |
+| --- | ---: | ---: | ---: | ---: |
+| fixed cap (1500) | 56.0 | 17.9 | **0.448** | 1173 |
+| adaptive, 50 ms budget | 49.8 | **20.1** | 0.435 | 1034 |
+| adaptive, 40 ms budget | 46.1 | 21.7 | 0.390 | 800 |
+| adaptive, 33 ms budget | 37.2 | 26.9 | 0.242 | 421 |
+
+The 50 ms budget lands on the 20 Hz camera rate with tracking within 3% of the
+fixed 1500 cap; tighter budgets buy frame rate at a steep tracking cost, which
+is the expected shape given the matcher is the quadratic term. Off by default,
+so the fixed-cap results above are unchanged.
+
 ## Reproduce
 
 ```sh
