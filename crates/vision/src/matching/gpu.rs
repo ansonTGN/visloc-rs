@@ -14,7 +14,10 @@
 //! failed load) the matcher transparently falls back to
 //! [`BruteForceMatcher`], so it is always safe to construct.
 
+use std::cell::RefCell;
 use std::path::Path;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use visloc_dpvo_cuda_runtime::{NativeDescriptorGemm, NativeDescriptorGemmError};
 
@@ -56,26 +59,51 @@ impl Top2Backend for NativeDescriptorGemm {
 /// exactly the two quantities the ratio gate needs. When the GPU backend is
 /// absent or a call fails, the matcher falls back to the CPU path for that
 /// call.
+///
+/// The device context lives behind a `RefCell` so the matcher implements
+/// [`Matcher`] with `&self` (the trait contract) and stays `Clone`. The
+/// localization pipeline clones the matcher per call, so the backend is shared
+/// through an `Rc` and the borrow is held only for one device call. The
+/// pipeline is single-threaded, so `Rc`/`RefCell` is sufficient; the native
+/// backend is not `Send`/`Sync` (raw device pointers).
 pub struct GpuDescriptorMatcher<B = NativeDescriptorGemm> {
     inner: BruteForceMatcher,
-    backend: Option<B>,
+    backend: Option<Rc<RefCell<B>>>,
     /// Set once a GPU call has failed, so subsequent calls skip the GPU rather
-    /// than paying a failed launch per frame.
-    disabled: bool,
+    /// than paying a failed launch per frame. Shared across clones.
+    disabled: Rc<AtomicBool>,
+}
+
+impl<B> Clone for GpuDescriptorMatcher<B> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner,
+            backend: self.backend.clone(),
+            disabled: self.disabled.clone(),
+        }
+    }
+}
+
+impl<B> std::fmt::Debug for GpuDescriptorMatcher<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GpuDescriptorMatcher")
+            .field("has_backend", &self.backend.is_some())
+            .finish()
+    }
 }
 
 impl GpuDescriptorMatcher<NativeDescriptorGemm> {
     /// Load the native kernel from `library_path`.
     ///
-    /// Returns `None` (a CPU-only matcher) when the library cannot be loaded,
-    /// so a caller can attempt the GPU and degrade without a hard error.
+    /// Returns a CPU-only matcher when the library cannot be loaded, so a
+    /// caller can attempt the GPU and degrade without a hard error.
     pub fn load(inner: BruteForceMatcher, library_path: impl AsRef<Path>) -> Self {
         let backend = NativeDescriptorGemm::load(library_path).ok();
         let disabled = backend.is_none();
         Self {
             inner,
-            backend,
-            disabled,
+            backend: backend.map(|backend| Rc::new(RefCell::new(backend))),
+            disabled: Rc::new(AtomicBool::new(disabled)),
         }
     }
 }
@@ -86,18 +114,18 @@ where
 {
     /// Construct with an explicit backend (or `None` for CPU-only). Useful for
     /// tests that inject a fake backend.
-    pub const fn with_backend(inner: BruteForceMatcher, backend: Option<B>) -> Self {
+    pub fn with_backend(inner: BruteForceMatcher, backend: Option<B>) -> Self {
         let disabled = backend.is_none();
         Self {
             inner,
-            backend,
-            disabled,
+            backend: backend.map(|backend| Rc::new(RefCell::new(backend))),
+            disabled: Rc::new(AtomicBool::new(disabled)),
         }
     }
 
     /// Whether a working GPU backend is currently active.
     pub fn is_gpu_active(&self) -> bool {
-        self.backend.is_some() && !self.disabled
+        self.backend.is_some() && !self.disabled.load(Ordering::Relaxed)
     }
 
     /// Borrow the inner brute-force policy.
@@ -105,11 +133,11 @@ where
         &self.inner
     }
 
-    fn match_impl(&mut self, query: &[Vec<f32>], train: &[Vec<f32>]) -> Vec<DescriptorMatch> {
-        if self.disabled {
+    fn match_impl(&self, query: &[Vec<f32>], train: &[Vec<f32>]) -> Vec<DescriptorMatch> {
+        if self.disabled.load(Ordering::Relaxed) {
             return self.inner.match_descriptors(query, train);
         }
-        let Some(backend) = self.backend.as_mut() else {
+        let Some(backend) = self.backend.as_ref() else {
             return self.inner.match_descriptors(query, train);
         };
         // The GPU kernel assumes a single uniform dimension, as does the CPU
@@ -125,12 +153,20 @@ where
 
         let flat_query = flatten(query, dim);
         let flat_train = flatten(train, dim);
-        let top2 = match backend.top2(&flat_query, query.len(), &flat_train, train.len(), dim) {
+        // Hold the borrow only for the device call; the CPU fallback below runs
+        // unlocked.
+        let top2 = {
+            let Ok(mut backend) = backend.try_borrow_mut() else {
+                return self.inner.match_descriptors(query, train);
+            };
+            backend.top2(&flat_query, query.len(), &flat_train, train.len(), dim)
+        };
+        let top2 = match top2 {
             Ok(top2) => top2,
             Err(_) => {
                 // One failure disables the GPU for the rest of the run and this
                 // call is served from the CPU so tracking never stalls.
-                self.disabled = true;
+                self.disabled.store(true, Ordering::Relaxed);
                 return self.inner.match_descriptors(query, train);
             }
         };
@@ -167,11 +203,7 @@ where
     B: Top2Backend,
 {
     fn match_descriptors(&self, query: &[Vec<f32>], train: &[Vec<f32>]) -> Vec<DescriptorMatch> {
-        // `match_impl` needs `&mut` for the persistent device context; the
-        // `Matcher` trait is `&self`. Callers that need the GPU path hold a
-        // mutable matcher and call `match_descriptors_mut`; this immutable
-        // entry point stays exact on the CPU.
-        self.inner.match_descriptors(query, train)
+        self.match_impl(query, train)
     }
 }
 
@@ -179,9 +211,8 @@ impl<B> GpuDescriptorMatcher<B>
 where
     B: Top2Backend,
 {
-    /// GPU-accelerated matching entry point (needs `&mut` for the device
-    /// context). Falls back to the CPU path internally when the GPU is absent
-    /// or has failed.
+    /// Backwards-compatible mutable entry point; identical to
+    /// [`Matcher::match_descriptors`] now that the device context is shared.
     pub fn match_descriptors_mut(
         &mut self,
         query: &[Vec<f32>],

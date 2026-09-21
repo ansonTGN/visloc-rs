@@ -72,6 +72,9 @@ onnx-inference = ["visloc-vision/onnx-inference", "visloc-slam/onnx-inference", 
 # As above, but with the CUDA execution provider (GPU SuperPoint inference,
 # CPU fallback). See `crates/vision/Cargo.toml` for the runtime requirements.
 onnx-cuda = ["onnx-inference", "visloc-vision/onnx-cuda"]
+# Adds the exact GPU descriptor matcher (`--gpu-matcher-dll`). See
+# `crates/vision/Cargo.toml`; a missing kernel library falls back to the CPU.
+gpu-matcher = ["visloc-vision/gpu-matcher"]
 
 [dependencies]
 nalgebra = { workspace = true }
