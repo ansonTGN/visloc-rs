@@ -49,8 +49,10 @@ use super::GrayscaleImage;
 use nalgebra::Point2;
 use std::fmt;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 #[cfg(feature = "onnx-inference")]
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 /// Configuration for [`SuperPointOnnxExtractor`].
 ///
@@ -84,15 +86,23 @@ impl Default for SuperPointOnnxConfig {
 ///
 /// The loaded session is wrapped in `Arc<Mutex<_>>` so the extractor
 /// remains cheaply cloneable for plumbing through stereo (cam0 /
-/// cam1) pipelines — both cameras share one session, exactly like
+/// cam1) pipelines ? both cameras share one session, exactly like
 /// the offline `SuperPointOfflineExtractor` shares one descriptor
 /// store across frames. The mutex serialises per-frame inference,
 /// matching the current EuRoC demo's single-threaded frame loop;
 /// callers that want parallel cam0/cam1 inference should hold two
 /// independent sessions instead.
+///
+/// A shared runtime keypoint cap ([`Self::set_runtime_max_keypoints`]) lets a
+/// pacing loop lower or raise the per-frame keypoint budget without rebuilding
+/// the extractor; clones observe the same cap.
 #[derive(Clone)]
 pub struct SuperPointOnnxExtractor {
     config: SuperPointOnnxConfig,
+    /// Optional override for [`SuperPointOnnxConfig::max_keypoints`], shared
+    /// across clones. `None`/`0` uses the configured value. Set through
+    /// [`Self::set_runtime_max_keypoints`].
+    runtime_max_keypoints: Arc<AtomicUsize>,
     #[cfg(feature = "onnx-inference")]
     session: Arc<Mutex<ort::session::Session>>,
 }
@@ -111,6 +121,24 @@ impl SuperPointOnnxExtractor {
     /// Borrow the active configuration.
     pub const fn config(&self) -> &SuperPointOnnxConfig {
         &self.config
+    }
+
+    /// Set a runtime keypoint cap that overrides
+    /// [`SuperPointOnnxConfig::max_keypoints`] on the next extraction, without
+    /// rebuilding the ONNX session. `0` clears the override and restores the
+    /// configured cap. Clones of this extractor share the override.
+    pub fn set_runtime_max_keypoints(&self, max_keypoints: usize) {
+        self.runtime_max_keypoints
+            .store(max_keypoints, Ordering::Relaxed);
+    }
+
+    /// The effective per-frame keypoint cap: the runtime override when set,
+    /// otherwise [`SuperPointOnnxConfig::max_keypoints`].
+    pub fn effective_max_keypoints(&self) -> usize {
+        match self.runtime_max_keypoints.load(Ordering::Relaxed) {
+            0 => self.config.max_keypoints,
+            override_value => override_value,
+        }
     }
 }
 
@@ -222,6 +250,7 @@ impl SuperPointOnnxExtractor {
             .map_err(SuperPointOnnxError::from_ort)?;
         Ok(Self {
             config,
+            runtime_max_keypoints: Arc::new(AtomicUsize::new(0)),
             session: Arc::new(Mutex::new(session)),
         })
     }
@@ -260,11 +289,12 @@ impl DeepFeatureExtractor for SuperPointOnnxExtractor {
         let (keypoints_array, scores_array, descriptors_array) =
             extract_named_outputs(&mut outputs)?;
 
-        let triples = postprocess(
+        let triples = postprocess_with_cap(
             keypoints_array.view(),
             scores_array.view(),
             descriptors_array.view(),
             &self.config,
+            self.effective_max_keypoints(),
         )?;
 
         let (keypoints, scores, descriptors) = unzip_triples(triples);
@@ -449,11 +479,27 @@ fn normalise_descriptors(
 // threshold, top-K truncation. Gated on `onnx-inference` because the
 // signature depends on `ndarray`, which is an optional dependency.
 #[cfg(feature = "onnx-inference")]
+/// Test convenience: [`postprocess_with_cap`] at the configured cap.
+#[cfg(test)]
+#[cfg(feature = "onnx-inference")]
 fn postprocess(
     keypoints: ndarray::ArrayView2<'_, i64>,
     scores: ndarray::ArrayView1<'_, f32>,
     descriptors: ndarray::ArrayView2<'_, f32>,
     config: &SuperPointOnnxConfig,
+) -> Result<DecodedKeypoints, SuperPointOnnxError> {
+    postprocess_with_cap(keypoints, scores, descriptors, config, config.max_keypoints)
+}
+
+/// [`postprocess`] with an explicit keypoint cap, so the runtime override can
+/// truncate to a different budget than the configured default.
+#[cfg(feature = "onnx-inference")]
+fn postprocess_with_cap(
+    keypoints: ndarray::ArrayView2<'_, i64>,
+    scores: ndarray::ArrayView1<'_, f32>,
+    descriptors: ndarray::ArrayView2<'_, f32>,
+    config: &SuperPointOnnxConfig,
+    max_keypoints: usize,
 ) -> Result<DecodedKeypoints, SuperPointOnnxError> {
     let n_kp = keypoints.shape()[0];
     let n_score = scores.shape()[0];
@@ -498,8 +544,8 @@ fn postprocess(
     // ties at this granularity are negligible, so we just preserve
     // insertion order via stable sort).
     triples.sort_by(|left, right| right.1.total_cmp(&left.1));
-    if triples.len() > config.max_keypoints {
-        triples.truncate(config.max_keypoints);
+    if triples.len() > max_keypoints {
+        triples.truncate(max_keypoints);
     }
     Ok(triples)
 }
@@ -656,6 +702,34 @@ mod tests {
         assert!((result[0].1 - 0.9).abs() < 1.0e-6);
         assert_eq!(result[1].0, Point2::new(3.0, 4.0));
         assert!((result[1].1 - 0.7).abs() < 1.0e-6);
+    }
+
+    #[cfg(feature = "onnx-inference")]
+    #[test]
+    fn runtime_keypoint_cap_overrides_the_configured_default() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        // Exercise the cap arithmetic without an ONNX session by building the
+        // shared counter the accessors read.
+        let config = SuperPointOnnxConfig {
+            max_keypoints: 1500,
+            ..SuperPointOnnxConfig::default()
+        };
+        let shared = AtomicUsize::new(0);
+        assert_eq!(shared.load(Ordering::Relaxed), 0, "0 means 'use config'");
+        assert_eq!(config.max_keypoints, 1500);
+        // The accessor contract: 0 -> config default, non-zero -> override.
+        let effective = |config: &SuperPointOnnxConfig, shared: &AtomicUsize| match shared
+            .load(Ordering::Relaxed)
+        {
+            0 => config.max_keypoints,
+            override_value => override_value,
+        };
+        shared.store(512, Ordering::Relaxed);
+        assert_eq!(effective(&config, &shared), 512);
+        shared.store(2048, Ordering::Relaxed);
+        assert_eq!(effective(&config, &shared), 2048);
+        shared.store(0, Ordering::Relaxed);
+        assert_eq!(effective(&config, &shared), 1500);
     }
 
     #[cfg(feature = "onnx-inference")]

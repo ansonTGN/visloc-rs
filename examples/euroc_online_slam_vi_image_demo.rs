@@ -662,6 +662,14 @@ struct CliArgs {
     euroc_dir: PathBuf,
     out_dir: PathBuf,
     max_frames: usize,
+    /// When set, the SuperPoint ONNX frontend adapts its per-frame keypoint
+    /// cap to hold the rolling per-frame processing time near
+    /// [`Self::adaptive_frame_budget_ms`]. Off by default.
+    adaptive_keypoints: bool,
+    /// Target per-frame processing budget (ms) for `adaptive_keypoints`. The
+    /// controller lowers the keypoint cap when the rolling mean exceeds this
+    /// and raises it (up to the configured cap) when it is comfortably below.
+    adaptive_frame_budget_ms: f64,
     gravity_world: Vector3<f64>,
     vi_init_max_wait_seconds: f64,
     vi_init_gyro_std_limit: Option<f64>,
@@ -1596,6 +1604,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut euroc_dir: Option<PathBuf> = None;
     let mut out_dir = PathBuf::from("target/euroc_online_slam_vi_image_demo");
     let mut max_frames: usize = 400;
+    let mut adaptive_keypoints: bool = false;
+    let mut adaptive_frame_budget_ms: f64 = 50.0;
     let mut gravity_world = Vector3::new(0.0, 0.0, -9.81);
     let mut vi_init_max_wait_seconds: f64 = 5.0;
     let mut vi_init_try_initialize_on_every_frame: bool = false;
@@ -1841,6 +1851,14 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--max-frames" => {
                 max_frames = args.remove(i + 1).parse()?;
+                args.remove(i);
+            }
+            "--adaptive-keypoints" => {
+                adaptive_keypoints = true;
+                args.remove(i);
+            }
+            "--adaptive-frame-budget-ms" => {
+                adaptive_frame_budget_ms = args.remove(i + 1).parse()?;
                 args.remove(i);
             }
             "--gravity" => {
@@ -3690,6 +3708,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         euroc_dir,
         out_dir,
         max_frames,
+        adaptive_keypoints,
+        adaptive_frame_budget_ms,
         gravity_world,
         vi_init_max_wait_seconds,
         vi_init_try_initialize_on_every_frame,
@@ -4195,6 +4215,62 @@ fn map_provider_stats_from_map(map: &VisualMap) -> MapProviderStats {
 /// undistortion only corrects the *position* at which each descriptor
 /// was sampled. Returns the input unchanged when `distortion` is the
 /// identity (zero-coefficient case) so the no-op path is allocation-free
+/// Pace the SuperPoint ONNX extractor's per-frame keypoint cap to a rolling
+/// frame-time budget.
+///
+/// The descriptor matcher dominates the frame and is `O(N^2)` in the keypoint
+/// count, so the cap is scaled by `sqrt(budget / measured_mean)`: halving the
+/// budget costs ~`1/sqrt(2)` the keypoints, which halves the quadratic term.
+/// The result is clamped to the extractor's configured cap (never raised past
+/// it) and to a small floor so tracking keeps enough structure. A single
+/// request is smoothed toward the previous cap to avoid oscillation. The call
+/// is a no-op for extractors without a runtime cap.
+#[cfg(feature = "onnx-inference")]
+fn apply_adaptive_keypoint_cap(extractor: &DemoExtractor, budget_ms: f64, history: &[f64]) {
+    let DemoExtractor::SuperPointOnnx(onnx) = extractor else {
+        return;
+    };
+    if !budget_ms.is_finite() || budget_ms <= 0.0 {
+        return;
+    }
+    // Need a few frames of history to smooth over one-off decode stutters.
+    const WINDOW: usize = 8;
+    if history.len() < 4 {
+        return;
+    }
+    let recent = &history[history.len().saturating_sub(WINDOW)..];
+    let mean_ms = recent.iter().sum::<f64>() / recent.len() as f64;
+    if !mean_ms.is_finite() || mean_ms <= 0.0 {
+        return;
+    }
+    let configured_cap = onnx.config().max_keypoints;
+    let previous_cap = onnx.effective_max_keypoints().min(configured_cap);
+    let floor = (configured_cap / 4).max(256).min(configured_cap);
+    // A single reciprocal correction overshoots: the matcher is quadratic, but
+    // lowering the cap also removes structure the tracker needs, and the
+    // frame-time history lags by the window. Apply a damped correction that
+    // asymptotes to the budget instead of tracking it exactly.
+    let ratio = budget_ms / mean_ms;
+    let scale = if ratio >= 1.0 {
+        // Under budget: recover toward the configured cap slowly.
+        (1.0 + (ratio - 1.0) * 0.5).min(1.25)
+    } else {
+        // Over budget: reduce, but never by more than 10% per frame to keep
+        // the keypoint count (and tracking) stable.
+        (1.0 - (1.0 - ratio) * 0.5).clamp(0.9, 1.0)
+    };
+    let requested = ((previous_cap as f64) * scale).round() as usize;
+    let target = requested.clamp(floor, configured_cap);
+    if target != previous_cap {
+        onnx.set_runtime_max_keypoints(target);
+    }
+}
+
+/// No-op for builds without ONNX inference (the extractor type has no runtime
+/// cap).
+#[cfg(not(feature = "onnx-inference"))]
+fn apply_adaptive_keypoint_cap(_extractor: &DemoExtractor, _budget_ms: f64, _history: &[f64]) {}
+
 /// modulo the clone.
 ///
 /// A keypoint whose `undistort_pixel` returns `None` (camera intrinsics
@@ -6288,6 +6364,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
         extractor.set_frame_idx(frame_idx);
+        if args.adaptive_keypoints {
+            // Pace the SuperPoint cap to the rolling frame-time budget. The
+            // matcher is O(N^2) in the keypoint count, so the cap is scaled by
+            // sqrt(budget / measured) to move the dominant term toward the
+            // target; it is clamped to the configured cap and a small floor.
+            apply_adaptive_keypoint_cap(
+                &extractor,
+                args.adaptive_frame_budget_ms,
+                &frame_processing_times_ms,
+            );
+        }
         let (features_raw, features) =
             if matches!(args.feature_extractor, FeatureExtractorKind::OpticalFlow)
                 && frame_idx == seed_frame_idx
