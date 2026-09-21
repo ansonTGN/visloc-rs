@@ -21,6 +21,7 @@ class FeatureMatrixTests(unittest.TestCase):
                 "image-io",
                 "onnx-inference",
                 "onnx-cuda",
+                "gpu-matcher",
                 # Internal, narrowly-scoped visloc-basalt opt-ins (timing
                 # sidecar / instrumentation, and capacity-only LM workspace
                 # reuse). Intentionally not part of the Tier 1/Tier 2
@@ -48,6 +49,7 @@ class FeatureMatrixTests(unittest.TestCase):
                 "image-io",
                 "onnx-inference",
                 "onnx-cuda",
+                "gpu-matcher",
             },
         )
 
