@@ -98,6 +98,31 @@ fixed 1500 cap; tighter budgets buy frame rate at a steep tracking cost, which
 is the expected shape given the matcher is the quadratic term. Off by default,
 so the fixed-cap results above are unchanged.
 
+### GPU descriptor matcher
+
+The descriptor matcher is the binding cost, and it grows with the map (the
+tracker matches against every map landmark). `GpuDescriptorMatcher` (feature
+`gpu-matcher`) computes the exact nearest + second-nearest row per query with a
+CUDA kernel (`native/descriptor_gemm/descriptor_gemm.cu`) and copies back only
+the per-query top-2, so the `N_query x N_train` distance matrix never crosses
+PCIe. Build it with `scripts/build_descriptor_gemm_kernels.ps1`, then point
+`VISLOC_DESCRIPTOR_GEMM_DLL` at the `.dll`; a missing library transparently
+falls back to the exact CPU matcher, and a mid-run kernel failure disables the
+GPU and is served from the CPU.
+
+Measured on exact (non-approximate) search, CPU vs GPU including the H2D/D2H
+copies, 256-d descriptors, matched pairs **identical** between the two paths:
+
+| N_query x N_train | CPU | GPU | speedup |
+| ---: | ---: | ---: | ---: |
+| 300 x 2,048 | 428 ms | 47.5 ms | 9.0x |
+| 1,173 x 929 | 521 ms | 41.8 ms | 12.5x |
+| 1,173 x 6,500 | 5,961 ms | 165 ms | **36.1x** |
+
+The win grows with the map, which is exactly where the CPU matcher hurts. This
+supersedes the IVF/ANN route (PR #195): the indexed API it added is the seam
+this matcher plugs into, and the exact kernel needs no recall trade-off.
+
 ## Reproduce
 
 ```sh

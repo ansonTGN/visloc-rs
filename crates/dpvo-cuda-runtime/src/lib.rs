@@ -402,3 +402,245 @@ impl Drop for NativeCudaCorrelation {
         unsafe { (self.destroy)(self.context.as_ptr()) };
     }
 }
+
+// ---------------------------------------------------------------------------
+// Batched descriptor top-2 search (`native/descriptor_gemm/descriptor_gemm.cu`)
+// ---------------------------------------------------------------------------
+
+type DescriptorGemmAbiFn = unsafe extern "C" fn() -> u32;
+type DescriptorGemmCreateFn = unsafe extern "C" fn() -> *mut c_void;
+type DescriptorGemmDestroyFn = unsafe extern "C" fn(*mut c_void);
+type DescriptorGemmLastErrorFn = unsafe extern "C" fn(*mut c_void) -> *const c_char;
+type DescriptorGemmRunFn = unsafe extern "C" fn(
+    *mut c_void,
+    *const c_float,
+    c_int,
+    *const c_float,
+    c_int,
+    c_int,
+    *mut c_float,
+) -> c_int;
+
+#[derive(Debug)]
+pub enum NativeDescriptorGemmError {
+    Load { path: PathBuf, message: String },
+    AbiVersion(u32),
+    NullContext,
+    Shape(String),
+    Runtime { code: i32, message: String },
+}
+
+impl fmt::Display for NativeDescriptorGemmError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Load { path, message } => {
+                write!(
+                    f,
+                    "load native descriptor GEMM {}: {message}",
+                    path.display()
+                )
+            }
+            Self::AbiVersion(version) => {
+                write!(f, "native descriptor GEMM ABI {version}, expected 1")
+            }
+            Self::NullContext => write!(f, "native descriptor GEMM returned a null context"),
+            Self::Shape(message) => write!(f, "native descriptor GEMM shape: {message}"),
+            Self::Runtime { code, message } => {
+                write!(f, "native descriptor GEMM failed ({code}): {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for NativeDescriptorGemmError {}
+
+/// One query's nearest and second-nearest train rows, as returned by
+/// [`NativeDescriptorGemm::run`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DescriptorTop2 {
+    pub best_distance: f32,
+    pub best_index: usize,
+    /// `None` when the train set has a single row.
+    pub second_distance: Option<f32>,
+    pub second_index: Option<usize>,
+}
+
+/// Runtime-loaded native descriptor top-2 search.
+///
+/// Mirrors [`NativeCudaCorrelation`]: the shared library is loaded lazily from
+/// an explicit path, every symbol is checked against the versioned C ABI, and
+/// the context is released exactly once on drop.
+pub struct NativeDescriptorGemm {
+    _library: Library,
+    context: NonNull<c_void>,
+    destroy: DescriptorGemmDestroyFn,
+    last_error: DescriptorGemmLastErrorFn,
+    run: DescriptorGemmRunFn,
+}
+
+impl fmt::Debug for NativeDescriptorGemm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NativeDescriptorGemm")
+            .field("context", &self.context)
+            .finish()
+    }
+}
+
+impl NativeDescriptorGemm {
+    pub const ABI_VERSION: u32 = 1;
+
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, NativeDescriptorGemmError> {
+        let path = path.as_ref();
+        let load_error = |message: String| NativeDescriptorGemmError::Load {
+            path: path.to_path_buf(),
+            message,
+        };
+        // SAFETY: every symbol is checked immediately against the versioned C
+        // ABI declared by native/descriptor_gemm/descriptor_gemm.cu. The
+        // Library is retained for at least as long as every copied pointer.
+        let library = unsafe { Library::new(path) }.map_err(|e| load_error(e.to_string()))?;
+        // SAFETY: symbols are requested under the exact versioned names
+        // declared by the native source, and the copied function pointers are
+        // only called while `library` is still owned by the struct.
+        let (abi_version, create, destroy, last_error, run): (
+            DescriptorGemmAbiFn,
+            DescriptorGemmCreateFn,
+            DescriptorGemmDestroyFn,
+            DescriptorGemmLastErrorFn,
+            DescriptorGemmRunFn,
+        ) = unsafe {
+            (
+                *library
+                    .get(b"visloc_descriptor_gemm_abi_version\0")
+                    .map_err(|e| load_error(e.to_string()))?,
+                *library
+                    .get(b"visloc_descriptor_gemm_create\0")
+                    .map_err(|e| load_error(e.to_string()))?,
+                *library
+                    .get(b"visloc_descriptor_gemm_destroy\0")
+                    .map_err(|e| load_error(e.to_string()))?,
+                *library
+                    .get(b"visloc_descriptor_gemm_last_error\0")
+                    .map_err(|e| load_error(e.to_string()))?,
+                *library
+                    .get(b"visloc_descriptor_gemm_run\0")
+                    .map_err(|e| load_error(e.to_string()))?,
+            )
+        };
+        // SAFETY: `abi_version` takes no arguments and cannot observe state.
+        let version = unsafe { abi_version() };
+        if version != Self::ABI_VERSION {
+            return Err(NativeDescriptorGemmError::AbiVersion(version));
+        }
+        // SAFETY: `create` is from the ABI-checked library; a null return is
+        // rejected and the non-null context is owned by `self`.
+        let context =
+            NonNull::new(unsafe { create() }).ok_or(NativeDescriptorGemmError::NullContext)?;
+        Ok(Self {
+            _library: library,
+            context,
+            destroy,
+            last_error,
+            run,
+        })
+    }
+
+    pub const fn abi_version(&self) -> u32 {
+        Self::ABI_VERSION
+    }
+
+    /// Exact nearest + second-nearest train row per query row.
+    ///
+    /// `query` is `n_query x dim` row-major and `train` is `n_train x dim`
+    /// row-major. Distances are Euclidean; `second_*` is `None` when the train
+    /// set has fewer than two rows. Ties break toward the lower train index.
+    pub fn run(
+        &mut self,
+        query: &[f32],
+        n_query: usize,
+        train: &[f32],
+        n_train: usize,
+        dim: usize,
+    ) -> Result<Vec<DescriptorTop2>, NativeDescriptorGemmError> {
+        if dim == 0 {
+            return Err(NativeDescriptorGemmError::Shape("dim is zero".to_string()));
+        }
+        if query.len() != n_query * dim || train.len() != n_train * dim {
+            return Err(NativeDescriptorGemmError::Shape(format!(
+                "query len {} != {n_query}x{dim} or train len {} != {n_train}x{dim}",
+                query.len(),
+                train.len()
+            )));
+        }
+        if n_query == 0 || n_train == 0 {
+            return Ok(Vec::new());
+        }
+        let Ok(n_query_i32) = c_int::try_from(n_query) else {
+            return Err(NativeDescriptorGemmError::Shape(
+                "n_query exceeds i32".to_string(),
+            ));
+        };
+        let Ok(n_train_i32) = c_int::try_from(n_train) else {
+            return Err(NativeDescriptorGemmError::Shape(
+                "n_train exceeds i32".to_string(),
+            ));
+        };
+        let Ok(dim_i32) = c_int::try_from(dim) else {
+            return Err(NativeDescriptorGemmError::Shape(
+                "dim exceeds i32".to_string(),
+            ));
+        };
+
+        let mut output = vec![0.0_f32; n_query * 4];
+        // SAFETY: `self.context` is a valid non-null context owned by `self`;
+        // the buffers outlive the call and their lengths were validated above
+        // against the declared shape, which is the native function's contract.
+        let code = unsafe {
+            (self.run)(
+                self.context.as_ptr(),
+                query.as_ptr(),
+                n_query_i32,
+                train.as_ptr(),
+                n_train_i32,
+                dim_i32,
+                output.as_mut_ptr(),
+            )
+        };
+        if code != 0 {
+            // SAFETY: `last_error` returns a pointer to a NUL-terminated buffer
+            // owned by the context, which is alive for the duration of the call.
+            let message = unsafe {
+                let pointer = (self.last_error)(self.context.as_ptr());
+                if pointer.is_null() {
+                    "unknown error".to_string()
+                } else {
+                    std::ffi::CStr::from_ptr(pointer)
+                        .to_string_lossy()
+                        .into_owned()
+                }
+            };
+            return Err(NativeDescriptorGemmError::Runtime { code, message });
+        }
+
+        let mut results = Vec::with_capacity(n_query);
+        for chunk in output.chunks_exact(4) {
+            let best_index = chunk[1];
+            let second_index = chunk[3];
+            results.push(DescriptorTop2 {
+                best_distance: chunk[0],
+                best_index: best_index as usize,
+                second_distance: (second_index >= 0.0).then_some(chunk[2]),
+                second_index: (second_index >= 0.0).then_some(second_index as usize),
+            });
+        }
+        Ok(results)
+    }
+}
+
+impl Drop for NativeDescriptorGemm {
+    fn drop(&mut self) {
+        // SAFETY: `context` is the non-null pointer returned by `create` and is
+        // released exactly once here, after which no method can observe it.
+        unsafe { (self.destroy)(self.context.as_ptr()) };
+    }
+}

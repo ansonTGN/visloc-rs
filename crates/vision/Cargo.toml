@@ -33,6 +33,11 @@ onnx-inference = ["dep:ort", "dep:ndarray", "dep:rayon", "dep:visloc-dpvo-cuda-r
 # CUDA 12 runtime + cuDNN 9 at run time (add cuDNN to `LD_LIBRARY_PATH` if it is
 # not on the system path); falls back to CPU when the GPU provider cannot load.
 onnx-cuda = ["onnx-inference", "ort/cuda"]
+# Adds the GPU descriptor matcher: a runtime-loaded CUDA top-2 nearest-neighbour
+# kernel (`native/descriptor_gemm`) behind `GpuDescriptorMatcher`. The DLL is
+# loaded from an explicit path at run time, so this only enables the wrapper; a
+# missing library transparently falls back to the exact CPU matcher.
+gpu-matcher = ["dep:visloc-dpvo-cuda-runtime"]
 
 [dependencies]
 nalgebra = { workspace = true }
