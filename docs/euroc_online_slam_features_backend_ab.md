@@ -123,6 +123,32 @@ The win grows with the map, which is exactly where the CPU matcher hurts. This
 supersedes the IVF/ANN route (PR #195): the indexed API it added is the seam
 this matcher plugs into, and the exact kernel needs no recall trade-off.
 
+**End-to-end, the tracker sees a smaller win than the kernel suggests.**
+Wiring `--gpu-matcher-dll` into `euroc_online_slam_vi_image_demo` (MH_01, 400
+frames, `--motion-vi-init --superpoint-onnx-backend cuda`), compared
+like-for-like with the same matcher semantics:
+
+| matcher | ms/frame | tracking |
+| --- | ---: | ---: |
+| CPU brute force (no cross-check) | 193.4 | 0.482 |
+| **GPU exact (no cross-check)** | **158.2** | 0.482 |
+| CPU cross-check | 77.1 | 0.448 |
+| GPU exact (with cross-check wrapper) | 183.3 | 0.482 |
+
+Two reasons the end-to-end gain is modest (1.22x) rather than 9-36x:
+
+- **The tracker's candidate set is bounded, not the whole map.** `map_landmarks`
+  stays at 929 even over 2,000 frames, so the kernel never operates on a
+  map-sized candidate set the way the microbenchmark does.
+- **Matching is a fraction of the frame**, and the per-call `flatten` allocation
+  plus the H2D/D2H copy are fixed costs the microbenchmark amortises over more
+  work. Cross-check doubles the matcher calls (forward + reverse).
+
+So the GPU matcher is a real 1.2x on the tracker today, and an up-to-36x
+kernel win that will matter if the candidate set is ever widened (a larger
+retrieval/covisibility window) or the whole-map matching path is used. It is an
+opt-in feature (`gpu-matcher`, `--gpu-matcher-dll`), off by default.
+
 ## Reproduce
 
 ```sh

@@ -322,6 +322,12 @@ enum DemoMatcher {
         inner: BruteForceMatcher,
         max_distance: f32,
     },
+    /// Exact nearest-neighbour on the GPU (CUDA top-2 kernel), wrapping the
+    /// same ratio policy as `BruteForce`. Falls back to the CPU path when the
+    /// library is missing or a device call fails. Requires the `gpu-matcher`
+    /// feature; absent otherwise.
+    #[cfg(feature = "gpu-matcher")]
+    Gpu(visloc_rs::vision::matching::GpuDescriptorMatcher),
 }
 
 #[cfg(feature = "image-io")]
@@ -339,6 +345,8 @@ impl Matcher for DemoMatcher {
                 .into_iter()
                 .filter(|m| m.distance <= *max_distance)
                 .collect(),
+            #[cfg(feature = "gpu-matcher")]
+            DemoMatcher::Gpu(m) => m.match_descriptors(query, train),
         }
     }
 }
@@ -1128,6 +1136,13 @@ struct CliArgs {
     /// `--max-pose-jump-meters 0.2` gate so the local-VI-BA chain (the
     /// Phase-9 mirror) actually fires on EuRoC.
     cross_check_matcher: bool,
+    /// When set, route the tracker/localizer matching through
+    /// `GpuDescriptorMatcher`, loading the CUDA top-2 kernel from this DLL path
+    /// (`scripts/build_descriptor_gemm_kernels.ps1`). Exact, so it replaces
+    /// `BruteForceMatcher` semantically; falls back to the CPU path when the
+    /// library is missing or a device call fails. Requires the `gpu-matcher`
+    /// feature (ignored with a warning otherwise).
+    gpu_matcher_dll: Option<PathBuf>,
     /// When `true`, replace the default `BruteForceMatcher` (and any
     /// `--cross-check-matcher` wrap) with `MutualSoftmaxMatcher`,
     /// LightGlue-style temperature-scaled mutual-softmax over the
@@ -1754,6 +1769,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut imu_extrinsic_from_cam0: bool = false;
     let mut imu_motion_model_carry_forward_velocity: bool = false;
     let mut cross_check_matcher: bool = false;
+    let mut gpu_matcher_dll: Option<PathBuf> = None;
     let mut mutual_softmax_matcher: bool = false;
     let mut mutual_softmax_matcher_overridden: bool = false;
     let mut mutual_softmax_temperature: f32 = 20.0;
@@ -2604,6 +2620,10 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
             }
             "--cross-check-matcher" => {
                 cross_check_matcher = true;
+                args.remove(i);
+            }
+            "--gpu-matcher-dll" => {
+                gpu_matcher_dll = Some(PathBuf::from(args.remove(i + 1)));
                 args.remove(i);
             }
             "--mutual-softmax-matcher" => {
@@ -3833,6 +3853,7 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         imu_extrinsic_from_cam0,
         imu_motion_model_carry_forward_velocity,
         cross_check_matcher,
+        gpu_matcher_dll,
         mutual_softmax_matcher,
         mutual_softmax_temperature,
         mutual_softmax_min_confidence,
@@ -5823,6 +5844,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         DemoMatcher::MaxDistance {
             inner: BruteForceMatcher { ratio: None },
             max_distance: 1.0e-3,
+        }
+    } else if let Some(dll) = args.gpu_matcher_dll.as_ref() {
+        // Exact GPU nearest-neighbour; the ratio policy matches BruteForce and
+        // the matcher degrades to the CPU path if the library is unusable.
+        #[cfg(feature = "gpu-matcher")]
+        {
+            let matcher = visloc_rs::vision::matching::GpuDescriptorMatcher::load(
+                BruteForceMatcher {
+                    ratio: localization_config.ratio,
+                },
+                dll,
+            );
+            println!(
+                "gpu matcher: dll={} active={}",
+                dll.display(),
+                matcher.is_gpu_active()
+            );
+            if !matcher.is_gpu_active() {
+                eprintln!(
+                    "warning: --gpu-matcher-dll {} could not be loaded; using the CPU matcher",
+                    dll.display()
+                );
+            }
+            DemoMatcher::Gpu(matcher)
+        }
+        #[cfg(not(feature = "gpu-matcher"))]
+        {
+            eprintln!(
+                "warning: --gpu-matcher-dll requires the `gpu-matcher` feature; using the CPU matcher"
+            );
+            let _ = dll;
+            DemoMatcher::BruteForce(BruteForceMatcher {
+                ratio: localization_config.ratio,
+            })
         }
     } else if args.cross_check_matcher {
         DemoMatcher::CrossCheck(CrossCheckMatcher::new(BruteForceMatcher {
