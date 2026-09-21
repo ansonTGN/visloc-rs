@@ -1,5 +1,7 @@
+pub mod ivf;
 pub mod mutual_softmax;
 
+pub use ivf::{IvfConfig, IvfMatcher};
 pub use mutual_softmax::{MutualSoftmaxConfig, MutualSoftmaxMatcher};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +22,41 @@ pub struct DescriptorMatch {
 
 pub trait Matcher {
     fn match_descriptors(&self, query: &[Vec<f32>], train: &[Vec<f32>]) -> Vec<DescriptorMatch>;
+
+    /// Match every query descriptor against the `train` rows named by
+    /// `train_indices`, returning matches whose `train_index` is the **global**
+    /// row index (an element of `train_indices`), not the position within
+    /// `train_indices`.
+    ///
+    /// This exists so an index-based matcher (an inverted-file / ANN matcher)
+    /// can evaluate candidate subsets — which differ per query — without
+    /// materialising a fresh `Vec<Vec<f32>>` for each subset. The default
+    /// implementation builds that subset once and delegates to
+    /// [`Matcher::match_descriptors`]; matchers whose kernel can consume the
+    /// borrowed rows directly should override it, because the subset copy
+    /// otherwise dominates and cancels the ANN's saving.
+    ///
+    /// `train_indices` must be strictly ascending and in range; callers that
+    /// violate this get the subset built in the given order (semantics are then
+    /// only guaranteed for well-formed input).
+    fn match_descriptors_indexed(
+        &self,
+        query: &[Vec<f32>],
+        train: &[Vec<f32>],
+        train_indices: &[usize],
+    ) -> Vec<DescriptorMatch> {
+        let subset: Vec<Vec<f32>> = train_indices
+            .iter()
+            .filter_map(|&index| train.get(index).cloned())
+            .collect();
+        let mut matches = self.match_descriptors(query, &subset);
+        for descriptor_match in &mut matches {
+            if let Some(&global) = train_indices.get(descriptor_match.train_index) {
+                descriptor_match.train_index = global;
+            }
+        }
+        matches
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -267,6 +304,95 @@ impl Matcher for BruteForceMatcher {
             });
         }
 
+        matches
+    }
+
+    /// Clone-free indexed match: build the `(N_candidates x dim)` train matrix
+    /// directly from the referenced rows instead of materialising a
+    /// `Vec<Vec<f32>>` subset. This is what makes an index-based matcher pay
+    /// off — the subset copy would otherwise dominate the GEMM it saves.
+    fn match_descriptors_indexed(
+        &self,
+        query: &[Vec<f32>],
+        train: &[Vec<f32>],
+        train_indices: &[usize],
+    ) -> Vec<DescriptorMatch> {
+        if train_indices.is_empty() || query.is_empty() {
+            return Vec::new();
+        }
+        let Some(dim) = query.first().map(Vec::len).filter(|&dim| dim != 0) else {
+            return Vec::new();
+        };
+        // The GEMM path needs a single uniform dimension on both sides; anything
+        // else falls back to the element-wise reference through the default
+        // subset materialisation.
+        let uniform = query.iter().all(|descriptor| descriptor.len() == dim)
+            && train_indices
+                .iter()
+                .all(|&index| train.get(index).is_some_and(|row| row.len() == dim));
+        if !uniform {
+            let subset: Vec<Vec<f32>> = train_indices
+                .iter()
+                .filter_map(|&index| train.get(index).cloned())
+                .collect();
+            let mut matches = self.match_descriptors_elementwise(query, &subset);
+            for descriptor_match in &mut matches {
+                if let Some(&global) = train_indices.get(descriptor_match.train_index) {
+                    descriptor_match.train_index = global;
+                }
+            }
+            return matches;
+        }
+
+        let q = nalgebra::DMatrix::from_fn(query.len(), dim, |i, k| query[i][k]);
+        let t =
+            nalgebra::DMatrix::from_fn(train_indices.len(), dim, |j, k| train[train_indices[j]][k]);
+        let dots = q * t.transpose();
+        let query_norm_sq: Vec<f32> = query
+            .iter()
+            .map(|descriptor| descriptor.iter().map(|value| value * value).sum())
+            .collect();
+        let train_norm_sq: Vec<f32> = train_indices
+            .iter()
+            .map(|&index| train[index].iter().map(|value| value * value).sum::<f32>())
+            .collect();
+
+        let mut matches = Vec::new();
+        for query_index in 0..query.len() {
+            let mut best: Option<(usize, f32)> = None;
+            let mut second_best: Option<(usize, f32)> = None;
+            for candidate in 0..train_indices.len() {
+                let score = train_norm_sq[candidate] - 2.0 * dots[(query_index, candidate)];
+                if best.is_none_or(|(_, best_score)| score < best_score) {
+                    second_best = best;
+                    best = Some((candidate, score));
+                } else if second_best.is_none_or(|(_, second_score)| score < second_score) {
+                    second_best = Some((candidate, score));
+                }
+            }
+            let Some((candidate, best_score)) = best else {
+                continue;
+            };
+            let distance = (query_norm_sq[query_index] + best_score).max(0.0).sqrt();
+            let second_distance = second_best.map(|(_, second_score)| {
+                (query_norm_sq[query_index] + second_score).max(0.0).sqrt()
+            });
+            if let Some(ratio) = self.ratio {
+                if let Some(second_distance) = second_distance {
+                    if distance >= ratio * second_distance {
+                        continue;
+                    }
+                }
+            }
+            matches.push(DescriptorMatch {
+                query_index,
+                train_index: train_indices[candidate],
+                distance,
+                second_best_distance: second_distance,
+                ratio: second_distance.map(|second_distance| distance / second_distance),
+                confidence: None,
+            });
+        }
         matches
     }
 }
