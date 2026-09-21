@@ -444,20 +444,17 @@ fn compact_group_ids(keys: &[i64]) -> Vec<i64> {
 }
 
 fn build_session(path: &Path, backend: OnnxBackend) -> Result<Session, DpvoOnnxError> {
-    use ort::execution_providers::{CPUExecutionProvider, CUDAExecutionProvider};
+    use ort::ep::{CPU, CUDA};
 
     let providers = match backend {
-        OnnxBackend::CudaThenCpu => vec![
-            CUDAExecutionProvider::default().build(),
-            CPUExecutionProvider::default().build(),
-        ],
-        OnnxBackend::Cuda => vec![CUDAExecutionProvider::default().build().error_on_failure()],
-        OnnxBackend::Cpu => vec![CPUExecutionProvider::default().build()],
+        OnnxBackend::CudaThenCpu => vec![CUDA::default().build(), CPU::default().build()],
+        OnnxBackend::Cuda => vec![CUDA::default().build().error_on_failure()],
+        OnnxBackend::Cpu => vec![CPU::default().build()],
     };
 
     Session::builder()
         .map_err(DpvoOnnxError::from_ort)?
-        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
+        .with_optimization_level(ort::session::builder::GraphOptimizationLevel::All)
         .map_err(DpvoOnnxError::from_ort)?
         .with_execution_providers(providers)
         .map_err(DpvoOnnxError::from_ort)?
