@@ -247,7 +247,7 @@ reduction instead of re-factoring every landmark. Across MH_01/02/03/04/05
 path with byte-identical trajectory and MargData; the rejection-heavy MH_04
 benefits most (4.26x, LM 5.4x).
 
-Full evidence: [lean MargData LM speedup](work/vi_slam_lean_margdata_lm_speedup_20260920.md).
+Full evidence: lean MargData LM speedup, recorded in the PR #153 phase notes.
 This is a pure implementation-path change: no algorithm, window configuration,
 or calibration changed, and the diagnostic/provenance path remains bit-for-bit
 available. The largest remaining LM bucket is the landmark reduction itself
