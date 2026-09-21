@@ -60,10 +60,7 @@ use visloc_vision::two_view::{
 };
 
 use crate::process_memory;
-use crate::{
-    BaConfig, BaError, BaObservation, BaResult, BundleAdjustment, MatrixFreeBaError,
-    MatrixFreeBaOptions, RobustKernel,
-};
+use crate::{BaConfig, BaError, BaObservation, BaResult, BundleAdjustment, RobustKernel};
 
 /// Gate for the mapper's diagnostic `eprintln!`s (seed-sweep reach, growth
 /// stalls/recoveries). Off by default (checking an env var per print site is
@@ -93,59 +90,12 @@ fn sfm_timing_or_debug_enabled() -> bool {
 /// Opt into the matrix-free implicit-Schur PCG backend for the incremental
 /// mapper's pure-visual bundle adjustments.
 ///
-/// This is the environment-variable escape hatch for callers that cannot set
-/// [`BaConfig::matrix_free_ba`] directly; the explicit config field always
-/// wins when it is already set. Ineligible problems fall back to the ordinary
-/// solve (see [`matrix_free_ba_result`]).
+/// [`BaConfig::matrix_free_ba`] always wins; the environment variable is an
+/// escape hatch for callers that cannot set the field directly. Ineligible
+/// problems fall back to the ordinary solve inside
+/// [`BundleAdjustment::optimize_honoring_matrix_free`].
 fn sfm_matrix_free_ba_enabled(config: &BaConfig) -> bool {
     config.matrix_free_ba || std::env::var_os("VISLOC_SFM_BA_MATRIX_FREE").is_some()
-}
-
-/// Run one posed/structure BA through the matrix-free backend, producing the
-/// same [`BaResult`] shape as [`BundleAdjustment::optimize`].
-///
-/// Returns `Ok(None)` when the problem is statically ineligible (validation
-/// happens before any state mutation), so the caller can fall back to the
-/// ordinary optimizer. Any numerical failure is surfaced as an error rather
-/// than silently retried, matching the ordinary path's failure contract.
-fn matrix_free_ba_result(
-    ba: &mut BundleAdjustment,
-    config: &BaConfig,
-) -> Result<Option<BaResult>, BaError> {
-    match ba.optimize_matrix_free(config, MatrixFreeBaOptions::default()) {
-        Ok(result) => Ok(Some(BaResult {
-            initial_cost: result.initial_cost,
-            final_cost: result.final_cost,
-            iterations: result.iterations,
-            converged: result.converged,
-        })),
-        Err(MatrixFreeBaError::Ineligible(reason)) => {
-            if sfm_timing_or_debug_enabled() {
-                eprintln!("sfm-matrix-free: ineligible ({reason}); using the ordinary solve");
-            }
-            Ok(None)
-        }
-        Err(MatrixFreeBaError::InvalidConfiguration(reason)) => {
-            if sfm_timing_or_debug_enabled() {
-                eprintln!(
-                    "sfm-matrix-free: invalid configuration ({reason}); using the ordinary solve"
-                );
-            }
-            Ok(None)
-        }
-        Err(MatrixFreeBaError::Ba(error)) => Err(error),
-        Err(MatrixFreeBaError::LinearSolve {
-            iteration,
-            diagnostic,
-        }) => {
-            if sfm_timing_or_debug_enabled() {
-                eprintln!(
-                    "sfm-matrix-free: reduced solve failed (iteration={iteration}): {diagnostic}"
-                );
-            }
-            Err(BaError::SingularSystem)
-        }
-    }
 }
 
 /// Emit an opt-in process-memory sample for benchmark phase boundaries.
@@ -11644,13 +11594,13 @@ fn run_bundle_adjustment_impl_with_fixed_rotations(
     let pre_optimize_seconds = assembly_started.elapsed().as_secs_f64();
     let optimize_started = std::time::Instant::now();
     let use_matrix_free = sfm_matrix_free_ba_enabled(&ba_config) && fixed_rotation_images.is_none();
-    let result = if let Some(weights) = observation_weights.as_deref() {
+    if use_matrix_free && sfm_timing_or_debug_enabled() && !ba_config.matrix_free_ba {
+        eprintln!("sfm-matrix-free: enabled via VISLOC_SFM_BA_MATRIX_FREE");
+    }
+    let result = if use_matrix_free {
+        ba.optimize_honoring_matrix_free(&ba_config, observation_weights.as_deref())?
+    } else if let Some(weights) = observation_weights.as_deref() {
         ba.optimize_with_observation_weights(&ba_config, weights)?
-    } else if use_matrix_free {
-        match matrix_free_ba_result(&mut ba, &ba_config)? {
-            Some(result) => result,
-            None => ba.optimize(&ba_config)?,
-        }
     } else {
         ba.optimize(&ba_config)?
     };
