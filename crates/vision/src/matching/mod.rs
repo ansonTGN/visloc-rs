@@ -4,6 +4,11 @@ pub mod mutual_softmax;
 pub use ivf::{IvfConfig, IvfMatcher};
 pub use mutual_softmax::{MutualSoftmaxConfig, MutualSoftmaxMatcher};
 
+#[cfg(feature = "gpu-matcher")]
+pub mod gpu;
+#[cfg(feature = "gpu-matcher")]
+pub use gpu::GpuDescriptorMatcher;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DescriptorMatch {
     pub query_index: usize,
