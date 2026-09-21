@@ -171,6 +171,30 @@ Two regimes fall out of the same measurements:
   only +1 frame (565 → 566) at 0.0137 m, confirming the residual is internal
   drift, not missing coverage.
 
+The remaining accuracy gap narrows further with two registration-frontend
+knobs on the same 600-frame input:
+
+| 600-frame variant (visloc-rs `--colmap-style --matrix-free-ba`) | pairs | wall | registered | Sim(3) ATE |
+| --- | ---: | ---: | ---: | ---: |
+| + post-refinement registration (baseline above) | 6,627 | 1,506 s | 584 / 600 | 0.96 cm |
+| + `--next-image-policy visibility --min-pnp-inliers 8` | 6,627 | **972 s** | 592 / 600 | 0.94 cm |
+| + denser candidates (`--retrieval-topk 48 --temporal-pyramid-max-offset 64`) | 18,720 | 1,587 s | **595 / 600** | **0.92 cm** |
+| COLMAP 4.1 CUDA (reference) | 6,627 | 5,375 s | 600 / 600 | **0.87 cm** |
+
+The visibility-first next-image policy plus the looser PnP inlier floor is both
+faster and more accurate, and a denser candidate pool closes the registration
+gap to 595 / 600 while keeping the ATE within ~1.06× of COLMAP at ~3.4× lower
+wall time.
+
+The same matrix-free opt-in is exposed to the online SLAM local-BA stages:
+[`BaConfig::matrix_free_ba`](../pipelines/slam/src/bundle.rs) is honoured by
+`BundleAdjustment::optimize_honoring_matrix_free`, which the covisibility local
+BA now calls, so `--covisibility-local-ba --matrix-free-ba` on
+`euroc_online_slam_vi_demo` routes the pure-visual local window through the
+matrix-free backend. Problems carrying non-visual states (the windowed
+stereo-inertial BA with velocities, biases and IMU factors) are ineligible and
+stay on the ordinary solver; the dispatch is a no-op when the flag is off.
+
 ### Where refinement *does* pull — the observable orbit (measured)
 
 That last claim is now measured, on COLMAP's own **unordered** orbit set

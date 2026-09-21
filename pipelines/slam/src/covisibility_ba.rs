@@ -544,11 +544,13 @@ pub fn refine_visual_map_with_covisibility_ba_and_neighbor_allowlist(
 
     let (mut ba, observation_weights) = build_ba_from_selection(map, &camera, &selection, config)?;
     let mean_reprojection_before_px = mean_reprojection_px(&ba);
-    let ba_result = if let Some(weights) = observation_weights.as_deref() {
-        ba.optimize_with_observation_weights(&config.ba_config, weights)?
-    } else {
-        ba.optimize(&config.ba_config)?
-    };
+    // `optimize_honoring_matrix_free` is a no-op dispatch unless
+    // `ba_config.matrix_free_ba` (or its environment escape hatch) is set; the
+    // default local-BA solve is unchanged. The matrix-free operator rejects the
+    // weighted objective and non-visual states, so it falls back to the
+    // ordinary solve there.
+    let ba_result =
+        ba.optimize_honoring_matrix_free(&config.ba_config, observation_weights.as_deref())?;
     let mean_reprojection_after_px = mean_reprojection_px(&ba);
     let mut max_pose_translation_correction_m = 0.0_f64;
     let mut max_pose_rotation_correction_rad = 0.0_f64;
@@ -1756,6 +1758,33 @@ mod tests {
         assert!(
             anchored_displacement < unanchored_displacement,
             "anchored displacement {anchored_displacement} should be smaller than unanchored {unanchored_displacement}"
+        );
+    }
+
+    #[test]
+    fn matrix_free_opt_in_solves_the_local_window() {
+        let (mut map, _) = synthetic_map();
+        let config = CovisibilityLocalBaConfig {
+            max_neighbor_keyframes: 2,
+            min_shared_landmarks: 1,
+            max_boundary_keyframes: 1,
+            min_boundary_observations: 1,
+            ba_config: BaConfig {
+                matrix_free_ba: true,
+                ..BaConfig::default()
+            },
+            ..CovisibilityLocalBaConfig::default()
+        };
+
+        let result = refine_visual_map_with_covisibility_ba(&mut map, 2, &config)
+            .expect("matrix-free local BA");
+        assert!(result.mean_reprojection_after_px.is_finite());
+        assert!(result.mean_reprojection_before_px.is_finite());
+        assert!(
+            result.mean_reprojection_after_px <= result.mean_reprojection_before_px + 1e-9,
+            "matrix-free local BA should not increase the mean reprojection: {} -> {}",
+            result.mean_reprojection_before_px,
+            result.mean_reprojection_after_px,
         );
     }
 }

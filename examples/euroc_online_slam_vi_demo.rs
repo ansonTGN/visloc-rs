@@ -47,10 +47,11 @@ use visloc_rs::io::euroc::{
 };
 use visloc_rs::slam::OnlineSlamImuConfig;
 use visloc_rs::{
-    umeyama_similarity_transform, BiasReleaseSchedule, LocalMappingPipeline, LocalizationPipeline,
-    LoopClosureConfig, MotionBasedViInitializerConfig, MotionViInitializationEvent,
-    OnlineSlamConfig, OnlineSlamMotionViInitConfig, OnlineSlamPipeline, OnlineSlamViInitConfig,
-    Tracker, TrackingConfig, TrajectorySimilarityTransform, ViInitFallback, ViInitializationEvent,
+    umeyama_similarity_transform, BaConfig, BiasReleaseSchedule, CovisibilityLocalBaConfig,
+    LocalMappingPipeline, LocalizationPipeline, LoopClosureConfig, MotionBasedViInitializerConfig,
+    MotionViInitializationEvent, OnlineSlamConfig, OnlineSlamCovisibilityLocalBaConfig,
+    OnlineSlamMotionViInitConfig, OnlineSlamPipeline, OnlineSlamViInitConfig, Tracker,
+    TrackingConfig, TrajectorySimilarityTransform, ViInitFallback, ViInitializationEvent,
     Viba2Config, VisualInertialInitializerConfig,
 };
 
@@ -109,6 +110,13 @@ struct CliArgs {
     /// and before the staged solve. Off by default. See
     /// `docs/motion_based_vi_alignment.md`'s "Gyro-bias recovery" section.
     motion_vi_init_estimate_gyro_bias: bool,
+    /// Enable the pure-visual covisibility local BA stage (separate from the
+    /// VI windowed BA). Off by default to preserve the existing baseline.
+    covisibility_local_ba_enabled: bool,
+    /// Route the covisibility local BA through the matrix-free implicit-Schur
+    /// PCG backend (`BaConfig::matrix_free_ba`). Requires
+    /// `covisibility_local_ba_enabled`; off by default.
+    matrix_free_ba: bool,
 }
 
 fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
@@ -128,6 +136,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
     let mut motion_vi_init_estimate_gravity: bool = false;
     let mut motion_vi_init_max_gravity_norm_deviation: Option<f64> = None;
     let mut motion_vi_init_estimate_gyro_bias: bool = false;
+    let mut covisibility_local_ba_enabled: bool = false;
+    let mut matrix_free_ba: bool = false;
 
     let mut args: Vec<String> = env::args().skip(1).collect();
     let i = 0;
@@ -205,6 +215,14 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
                 motion_vi_init_estimate_gyro_bias = true;
                 args.remove(i);
             }
+            "--covisibility-local-ba" => {
+                covisibility_local_ba_enabled = true;
+                args.remove(i);
+            }
+            "--matrix-free-ba" => {
+                matrix_free_ba = true;
+                args.remove(i);
+            }
             other => return Err(format!("unknown argument: {other}").into()),
         }
     }
@@ -227,6 +245,8 @@ fn parse_args() -> Result<CliArgs, Box<dyn std::error::Error>> {
         motion_vi_init_estimate_gravity,
         motion_vi_init_max_gravity_norm_deviation,
         motion_vi_init_estimate_gyro_bias,
+        covisibility_local_ba_enabled,
+        matrix_free_ba,
     })
 }
 
@@ -580,7 +600,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             loop_closure: LoopClosureConfig::default(),
             imu: Some(imu_config),
             local_vi_ba: None,
-            covisibility_local_ba: None,
+            covisibility_local_ba: args.covisibility_local_ba_enabled.then(|| {
+                OnlineSlamCovisibilityLocalBaConfig {
+                    ba: CovisibilityLocalBaConfig {
+                        ba_config: BaConfig {
+                            matrix_free_ba: args.matrix_free_ba,
+                            ..CovisibilityLocalBaConfig::default().ba_config
+                        },
+                        ..CovisibilityLocalBaConfig::default()
+                    },
+                    ..OnlineSlamCovisibilityLocalBaConfig::default()
+                }
+            }),
             sparse_factor_graph: None,
             vi_init: Some(vi_init_config),
             vi_motion_init: vi_motion_init_config,

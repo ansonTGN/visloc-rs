@@ -2185,6 +2185,56 @@ impl BundleAdjustment {
         self.optimize_weighted(config, Some(observation_weights))
     }
 
+    /// Run one bundle adjustment, dispatching to the matrix-free implicit-Schur
+    /// PCG backend when `config.matrix_free_ba` is set (or the
+    /// `VISLOC_SFM_BA_MATRIX_FREE` environment variable is present).
+    ///
+    /// This is the one entry point callers should use when they want the
+    /// [`BaConfig::matrix_free_ba`] opt-in to apply: it returns the same
+    /// [`BaResult`] shape as [`Self::optimize`] and transparently falls back to
+    /// the ordinary solve when the problem is statically ineligible
+    /// (intrinsics/distortion refinement, non-visual states or priors, a fully
+    /// fixed pose set, or a missing gauge anchor). A numerical failure of the
+    /// reduced solve is surfaced as an error rather than silently retried,
+    /// matching the ordinary path's failure contract.
+    ///
+    /// External observation weights keep the legacy weighted objective, since
+    /// the matrix-free operator does not consume them.
+    pub fn optimize_honoring_matrix_free(
+        &mut self,
+        config: &BaConfig,
+        observation_weights: Option<&[f64]>,
+    ) -> Result<BaResult, BaError> {
+        let matrix_free_requested =
+            config.matrix_free_ba || std::env::var_os("VISLOC_SFM_BA_MATRIX_FREE").is_some();
+        if matrix_free_requested && observation_weights.is_none() {
+            match self.optimize_matrix_free(config, MatrixFreeBaOptions::default()) {
+                Ok(result) => {
+                    return Ok(BaResult {
+                        initial_cost: result.initial_cost,
+                        final_cost: result.final_cost,
+                        iterations: result.iterations,
+                        converged: result.converged,
+                    })
+                }
+                Err(MatrixFreeBaError::Ineligible(_))
+                | Err(MatrixFreeBaError::InvalidConfiguration(_)) => {
+                    // Statically ineligible: fall through to the ordinary
+                    // solve. The reason text is deliberately not logged here
+                    // so library callers stay quiet; enable
+                    // `VISLOC_SFM_TIMING`/`VISLOC_SFM_DEBUG` for the
+                    // mapper-level diagnostic.
+                }
+                Err(MatrixFreeBaError::Ba(error)) => return Err(error),
+                Err(MatrixFreeBaError::LinearSolve { .. }) => return Err(BaError::SingularSystem),
+            }
+        }
+        match observation_weights {
+            Some(weights) => self.optimize_with_observation_weights(config, weights),
+            None => self.optimize(config),
+        }
+    }
+
     /// Run the opt-in matrix-free pure-visual bundle adjustment backend.
     ///
     /// The method deliberately leaves [`BaConfig`] and [`LinearSolver`]
@@ -11939,6 +11989,61 @@ mod matrix_free_ba_api_tests {
             .unwrap();
         assert_eq!(matrix_result, repeat_result);
         assert_eq!(matrix_free, repeat);
+    }
+
+    #[test]
+    fn honoring_dispatch_selects_the_matrix_free_backend_and_defaults_to_legacy() {
+        let problem = make_problem();
+        let config = matrix_free_config();
+
+        // Off (default): identical to `optimize`.
+        let mut legacy = problem.clone();
+        let mut dispatch_off = problem.clone();
+        let legacy_result = legacy.optimize(&config).unwrap();
+        let off_result = dispatch_off
+            .optimize_honoring_matrix_free(&config, None)
+            .unwrap();
+        assert_eq!(legacy_result, off_result);
+        assert_eq!(legacy, dispatch_off);
+
+        // On: identical to the explicit matrix-free entry point.
+        let mut explicit = problem.clone();
+        let mut dispatch_on = problem.clone();
+        let explicit_result = explicit
+            .optimize_matrix_free(&matrix_free_config(), MatrixFreeBaOptions::default())
+            .unwrap();
+        let on_result = dispatch_on
+            .optimize_honoring_matrix_free(
+                &BaConfig {
+                    matrix_free_ba: true,
+                    ..matrix_free_config()
+                },
+                None,
+            )
+            .unwrap();
+        assert_eq!(explicit_result.initial_cost, on_result.initial_cost);
+        assert_eq!(explicit_result.final_cost, on_result.final_cost);
+        assert_eq!(explicit_result.iterations, on_result.iterations);
+        assert_eq!(explicit, dispatch_on);
+
+        // Observation weights keep the weighted objective (no matrix-free).
+        let weights = vec![1.0; explicit.observations.len()];
+        let mut weighted = problem.clone();
+        let mut weighted_reference = problem.clone();
+        let expected = weighted_reference
+            .optimize_with_observation_weights(&config, &weights)
+            .unwrap();
+        let actual = weighted
+            .optimize_honoring_matrix_free(
+                &BaConfig {
+                    matrix_free_ba: true,
+                    ..config
+                },
+                Some(&weights),
+            )
+            .unwrap();
+        assert_eq!(expected, actual);
+        assert_eq!(weighted_reference, weighted);
     }
 
     #[test]
