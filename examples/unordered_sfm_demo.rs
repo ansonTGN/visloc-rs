@@ -2223,6 +2223,14 @@ struct Args {
     /// Optional Schur-reduced BA linear solver. `None` preserves the dense
     /// historical backend; `sparse` is an explicit large-model experiment.
     ba_linear_solver: Option<LinearSolver>,
+    /// Solve the pure-visual bundle adjustments with the matrix-free
+    /// implicit-Schur PCG backend. The default dense/sparse block-Cholesky
+    /// reduced system fills in when tracks are long, so a large rig or
+    /// temporal-pyramid run spends hours in `linear_solve`; the matrix-free
+    /// operator tracks the observation count instead. Ineligible problems
+    /// (intrinsics refinement, non-visual states, no gauge anchor) fall back
+    /// to the ordinary solver. Default off.
+    matrix_free_ba: bool,
     /// Defer plain-growth periodic BA until this many cameras are registered;
     /// `0` preserves the historical `ba_every` schedule.
     periodic_ba_min_registered_images: usize,
@@ -4786,6 +4794,7 @@ where
     let mut ba_max_iterations: Option<usize> = None;
     let mut ba_huber_delta: Option<f64> = None;
     let mut ba_linear_solver: Option<LinearSolver> = None;
+    let mut matrix_free_ba = false;
     let mut periodic_ba_min_registered_images = 0usize;
     let mut final_ba_polish_iterations = 0usize;
     let mut geometry_weighted_ba = false;
@@ -5442,6 +5451,7 @@ where
                 a.remove(i + 1);
                 ba_linear_solver = Some(parsed);
             }
+            "--matrix-free-ba" => matrix_free_ba = true,
             "--periodic-ba-min-registered-images" => {
                 periodic_ba_min_registered_images =
                     a.remove(i + 1).parse().map_err(|e| format!("{e}"))?;
@@ -6387,6 +6397,7 @@ where
         ba_max_iterations,
         ba_huber_delta,
         ba_linear_solver,
+        matrix_free_ba,
         periodic_ba_min_registered_images,
         final_ba_polish_iterations,
         geometry_weighted_ba,
@@ -6796,6 +6807,7 @@ fn validate_persistent_match_worker_args(args: &Args) -> Result<(), String> {
         || args.pose_guided_track_splitting_iterations.is_some()
         || args.pose_guided_track_merging
         || args.pose_guided_merge_max_reproj.is_some()
+        || args.matrix_free_ba
     {
         return Err(
             "--persistent-match-worker-plan cannot be combined with mapper/refinement options"
@@ -17548,6 +17560,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             linear_solver: args
                 .ba_linear_solver
                 .unwrap_or(default_ba_config.linear_solver),
+            matrix_free_ba: args.matrix_free_ba,
             refine_distortion: args.refine_distortion,
             ..default_ba_config
         },
@@ -18451,7 +18464,7 @@ mod diagnose_cli_tests {
     use std::collections::{BTreeMap, HashSet};
     use std::path::{Path, PathBuf};
     use visloc_rs::vision::features::FeatureSet;
-    use visloc_rs::DescriptorMatch;
+    use visloc_rs::{BaConfig, DescriptorMatch};
 
     fn minimal_args(extra: &[&str]) -> Vec<String> {
         let mut args = [
@@ -20391,6 +20404,11 @@ mod diagnose_cli_tests {
             );
         }
         assert!(parse_args_from(minimal_args(&["--ba-linear-solver"])).is_err());
+        let default_matrix_free = parse_args_from(minimal_args(&[])).unwrap();
+        assert!(!default_matrix_free.matrix_free_ba);
+        assert!(!BaConfig::default().matrix_free_ba);
+        let matrix_free = parse_args_from(minimal_args(&["--matrix-free-ba"])).unwrap();
+        assert!(matrix_free.matrix_free_ba);
         let periodic_deferred =
             parse_args_from(minimal_args(&["--periodic-ba-min-registered-images", "32"])).unwrap();
         assert_eq!(periodic_deferred.periodic_ba_min_registered_images, 32);

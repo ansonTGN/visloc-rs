@@ -314,8 +314,16 @@ def build_commands(
     cross_check: bool = True,
     min_num_inliers: int = 8,
     max_error: float = 4.0,
+    use_gpu: bool = False,
+    current_colmap: bool = False,
 ) -> dict[str, Any]:
     """Build per-camera feature, exact-pair matching, and mapper commands."""
+
+    # COLMAP >= 4.1 grouped the device/thread/image-size knobs under
+    # ``FeatureExtraction``/``FeatureMatching`` instead of ``SiftExtraction``/
+    # ``SiftMatching``. The SIFT-specific knobs kept their 3.9 names.
+    feature_ns = "FeatureExtraction" if current_colmap else "SiftExtraction"
+    match_ns = "FeatureMatching" if current_colmap else "SiftMatching"
 
     if threads <= 0 or max_num_features <= 0 or min_num_inliers <= 0:
         raise ValidationError("threads, max_num_features, and min_num_inliers must be positive")
@@ -341,13 +349,13 @@ def build_commands(
                 "1",
                 "--ImageReader.camera_params",
                 _format_params(camera["params"]),
-                "--SiftExtraction.use_gpu",
-                "0",
-                "--SiftExtraction.num_threads",
+                f"--{feature_ns}.use_gpu",
+                "1" if use_gpu else "0",
+                f"--{feature_ns}.num_threads",
                 str(threads),
                 "--SiftExtraction.max_num_features",
                 str(max_num_features),
-                "--SiftExtraction.max_image_size",
+                f"--{feature_ns}.max_image_size",
                 str(max_image_size),
                 "--SiftExtraction.first_octave",
                 str(first_octave),
@@ -366,9 +374,9 @@ def build_commands(
         str(pair_list),
         "--match_type",
         "pairs",
-        "--SiftMatching.use_gpu",
-        "0",
-        "--SiftMatching.num_threads",
+        f"--{match_ns}.use_gpu",
+        "1" if use_gpu else "0",
+        f"--{match_ns}.num_threads",
         str(threads),
         "--SiftMatching.max_ratio",
         format(max_ratio, ".17g"),
@@ -641,6 +649,8 @@ def make_plan(
     max_error: float = 4.0,
     colmap_library_path: Path | None = None,
     config_path: Path | None = None,
+    use_gpu: bool = False,
+    current_colmap: bool = False,
 ) -> dict[str, Any]:
     if (candidate_index is None) == (candidate_manifest is None):
         raise ValidationError("pass exactly one of --candidate-index and --candidate-manifest")
@@ -698,6 +708,8 @@ def make_plan(
         max_ratio=max_ratio,
         min_num_inliers=min_num_inliers,
         max_error=max_error,
+        use_gpu=use_gpu,
+        current_colmap=current_colmap,
     )
     plan = {
         "schema": PLAN_SCHEMA,
@@ -733,6 +745,8 @@ def make_plan(
                 "first_octave": first_octave,
                 "peak_threshold": peak_threshold,
                 "max_num_orientations": max_num_orientations,
+                "use_gpu": use_gpu,
+                "current_colmap_option_names": current_colmap,
             },
             "matching_settings": {
                 "mode": "matches_importer",
@@ -848,6 +862,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-ratio", type=float, default=0.8)
     parser.add_argument("--min-num-inliers", type=int, default=8)
     parser.add_argument("--max-error", type=float, default=4.0)
+    parser.add_argument(
+        "--use-gpu",
+        action="store_true",
+        help="run SIFT extraction and matching on the GPU (COLMAP CUDA build)",
+    )
+    parser.add_argument(
+        "--current-colmap",
+        action="store_true",
+        help="use the COLMAP >= 4.1 option names (FeatureExtraction/FeatureMatching namespaces)",
+    )
     return parser
 
 
@@ -889,6 +913,8 @@ def main(argv: list[str] | None = None) -> int:
             max_ratio=args.max_ratio,
             min_num_inliers=args.min_num_inliers,
             max_error=args.max_error,
+            use_gpu=args.use_gpu,
+            current_colmap=args.current_colmap,
         )
         print(json.dumps(plan, sort_keys=True, indent=2))
         return 0
