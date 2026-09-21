@@ -1,0 +1,75 @@
+{
+  "schema": "visloc_electro_comparison_ledger_v1",
+  "recorded_at": "2026-09-21",
+  "benchmark": {
+    "id": "eth3d-electro-1200-frozen-12000-pairs-v1",
+    "scene": "electro",
+    "image_count": 1200,
+    "camera_count": 4,
+    "candidate_budget": 12000,
+    "candidate_policy": "temporal-pyramid-v1",
+    "pair_schedule": "one frozen 12000-pair list, consumed unchanged by every engine except COLMAP 3.9.1 which also used the same frozen list",
+    "ground_truth_used_for_selection_or_mapping": false,
+    "host": "Windows 11, GTX 1660 Ti (CUDA 12.8), 8 threads for COLMAP phases"
+  },
+  "engines": {
+    "visloc_rs_matrix_free": {
+      "config": "benchmarks/electro/visloc_1200_v1.json with the default BA schedule and --matrix-free-ba",
+      "binary_flag": "--matrix-free-ba",
+      "mapper_wall_s": 1193.37,
+      "registered": 1182,
+      "tracks": 7552,
+      "observations": 113791,
+      "score": {
+        "rmse_m": 0.037553487064136394,
+        "median_m": 0.022950853390112443,
+        "p95_m": 0.06096096489491951,
+        "relative_rmse": 0.005912444411200844,
+        "sim3_scale": 0.2352488832154103
+      },
+      "note": "The dense/sparse Schur path did not finish in >5 h on this input; the matrix-free backend was required to complete it."
+    },
+    "colmap_3_9_1_cpu": {
+      "config": "benchmarks/electro/colmap_1200_v1.json",
+      "feature_wall_sum_s": 304.12,
+      "matching_wall_s": 471.37,
+      "mapper_wall_s": 4929.56,
+      "registered": 1200,
+      "score": {
+        "rmse_m": 0.0467931596971499,
+        "median_m": 0.031562,
+        "p95_m": 0.096808,
+        "relative_rmse": 0.007367144229811214
+      }
+    },
+    "colmap_4_1_0_cuda": {
+      "config": "benchmarks/electro/colmap_1200_gpu_v1.json",
+      "harness_flags": "--use-gpu --current-colmap",
+      "feature_wall_sum_s": 31.71,
+      "matching_wall_s": 51.29,
+      "mapper_wall_s": 6175.12,
+      "registered": 1200,
+      "score": {
+        "rmse_m": 0.055607559448295645,
+        "median_m": 0.03326045080790841,
+        "p95_m": 0.12224437141352107,
+        "relative_rmse": 0.008754888820819417,
+        "sim3_scale": 0.516670143307659
+      }
+    }
+  },
+  "claims": {
+    "mapper_speedup_vs_colmap_3_9_1_cpu": 4.131,
+    "mapper_speedup_vs_colmap_4_1_0_cuda": 5.175,
+    "end_to_end_speedup_vs_colmap_4_1_0_cuda": 2.844,
+    "rmse_ratio_vs_colmap_3_9_1_cpu": 0.802,
+    "rmse_ratio_vs_colmap_4_1_0_cuda": 0.675,
+    "best_rmse_engine": "visloc_rs_matrix_free"
+  },
+  "notes": [
+    "COLMAP feature wall is the sum of the four per-camera extractions.",
+    "The visloc end-to-end reference is matching 498 s + mapping 1193 s ~= 1691 s; COLMAP 4.1 CUDA end-to-end is 31.71 + 51.29 + 6175.12 ~= 6258 s.",
+    "External dataset and generated artifacts are not stored in the repository; only this ledger and the configs are tracked.",
+    "The post-mapping scorer (scripts/score_electro_model.py) is the only consumer of the official reference poses."
+  ]
+}
