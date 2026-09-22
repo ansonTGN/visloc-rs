@@ -43,3 +43,11 @@ pub fn tile_offsets() -> Kernel {
 pub fn rasterize() -> Kernel {
     build("rasterize", include_str!("shaders/rasterize.wgsl"))
 }
+
+pub fn radix() -> Kernel {
+    build("radix", include_str!("shaders/radix.wgsl"))
+}
+
+pub fn scan() -> Kernel {
+    build("scan", include_str!("shaders/scan.wgsl"))
+}

@@ -262,8 +262,12 @@ pub struct Renderer {
     image_w: u32,
     image_h: u32,
     sh_degree: u32,
-    // Reusable host scratch.
-    host_order: Vec<u32>,
+    // Device-side sorts and prefix scan.
+    sorter: crate::sort::RadixSorter,
+    scanner: crate::scan::PrefixScanner,
+    depth_pairs: [crate::sort::SortBuffers; 2],
+    tile_pairs: [crate::sort::SortBuffers; 2],
+    counts_sorted: wgpu::Buffer,
 }
 
 impl Renderer {
@@ -306,6 +310,8 @@ impl Renderer {
 
         let ro = wgpu::BufferBindingType::Storage { read_only: true };
         let rw = wgpu::BufferBindingType::Storage { read_only: false };
+        // Compact-order tile counts, gathered by `project_visible` for the scan.
+        let counts_sorted = new_storage(dev, "counts_sorted", (n * 4) as u64);
 
         let forward = build_stage(
             dev,
@@ -396,6 +402,16 @@ impl Renderer {
                     binding: 6,
                     ty: rw,
                     buffer: scratch.compact_from_global.clone(),
+                },
+                Binding {
+                    binding: 7,
+                    ty: ro,
+                    buffer: scratch.intersect_counts.clone(),
+                },
+                Binding {
+                    binding: 8,
+                    ty: rw,
+                    buffer: counts_sorted.clone(),
                 },
             ],
         );
@@ -507,6 +523,14 @@ impl Renderer {
             ],
         );
 
+        // Device-side sort/scan scratch. The depth sort and tile sort each need
+        // ping-pong key/value pairs; `counts_sorted` feeds the prefix scan.
+        let sort_capacity = n.max(max_isects).max(1);
+        let sorter = crate::sort::RadixSorter::new(dev, sort_capacity);
+        let scanner = crate::scan::PrefixScanner::new(dev, n.max(1));
+        let depth_pairs = sorter.allocate(dev, "depth");
+        let tile_pairs = sorter.allocate(dev, "tile");
+
         Ok(Self {
             ctx,
             scene: gpu_scene,
@@ -523,7 +547,11 @@ impl Renderer {
             image_w,
             image_h,
             sh_degree: scene.sh_degree,
-            host_order: Vec::new(),
+            sorter,
+            scanner,
+            depth_pairs,
+            tile_pairs,
+            counts_sorted,
         })
     }
 
@@ -601,57 +629,46 @@ impl Renderer {
             .queue
             .write_buffer(&self.proj_uniforms, 0, bytemuck::bytes_of(&u));
 
-        // ----- Host depth sort + tile-count prefix sum. -----
-        self.host_order = read_u32s(
-            &self.ctx.device,
-            &self.ctx.queue,
-            &self.scratch.global_from_compact,
-            nv,
-        );
-        let depths = read_f32s(&self.ctx.device, &self.ctx.queue, &self.scratch.depths, nv);
-        // Sort compact indices by descending depth (back-to-front), matching the
-        // CPU reference's implicit far-to-near accumulation being order
-        // independent only for commutative alpha; we keep the Inria front-to-back
-        // order, so sort ascending depth and composite near-to-far.
-        let mut order: Vec<u32> = (0..nv as u32).collect();
-        order.sort_by(|&a, &b| {
-            depths[a as usize]
-                .partial_cmp(&depths[b as usize])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        // `global_from_compact[i]` must become the globally-ordered id at slot i,
-        // and `compact_from_global` is written by project_visible.
-        let sorted_globals: Vec<u32> = order.iter().map(|&i| self.host_order[i as usize]).collect();
-        self.ctx.queue.write_buffer(
-            &self.scratch.global_from_compact,
-            0,
-            bytemuck::cast_slice(&sorted_globals),
-        );
-
-        let intersect_counts = read_u32s(
-            &self.ctx.device,
-            &self.ctx.queue,
-            &self.scratch.intersect_counts,
-            self.num_gaussians(),
-        );
-        // cum_tiles_hit is indexed by compact (sorted) position, so reorder the
-        // per-gaussian counts into sorted order first.
-        let mut counts_sorted = vec![0u32; nv];
-        for (slot, &i) in order.iter().enumerate() {
-            counts_sorted[slot] = intersect_counts[i as usize];
+        // ----- Device-side depth sort. -----
+        //
+        // Keys are the raw f32 depth bits (monotonic for positive z), values are
+        // the global gaussian ids, so ascending key order is nearest-first
+        // (front-to-back). Eight ping-pong passes leave the result in pair 0.
+        if nv > 0 {
+            copy_buffer(
+                &self.ctx.device,
+                &self.ctx.queue,
+                &self.scratch.depths,
+                &self.depth_pairs[0].keys,
+                nv * 4,
+            );
+            copy_buffer(
+                &self.ctx.device,
+                &self.ctx.queue,
+                &self.scratch.global_from_compact,
+                &self.depth_pairs[0].values,
+                nv * 4,
+            );
+            self.sorter
+                .sort(&self.ctx.device, &self.ctx.queue, &self.depth_pairs, nv);
+            copy_buffer(
+                &self.ctx.device,
+                &self.ctx.queue,
+                &self.depth_pairs[0].values,
+                &self.scratch.global_from_compact,
+                nv * 4,
+            );
+            copy_buffer(
+                &self.ctx.device,
+                &self.ctx.queue,
+                &self.depth_pairs[0].keys,
+                &self.scratch.depths,
+                nv * 4,
+            );
         }
-        let mut cum = vec![0u32; nv];
-        let mut running = 0u32;
-        for i in 0..nv {
-            running += counts_sorted[i];
-            cum[i] = running;
-        }
-        self.ctx
-            .queue
-            .write_buffer(&self.scratch.cum_tiles_hit, 0, bytemuck::cast_slice(&cum));
 
-        // ----- Pass 2: project_visible + map_gaussians. -----
-        {
+        // ----- Pass 2a: project_visible (also gathers tile counts). -----
+        if nv > 0 {
             let mut encoder = self
                 .ctx
                 .device
@@ -659,41 +676,67 @@ impl Renderer {
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
                 dispatch(&mut pass, &self.visible, (nv as u32).div_ceil(256));
+            }
+            self.ctx.queue.submit(Some(encoder.finish()));
+        }
+
+        // ----- Device-side prefix scan of the compact-order tile counts. -----
+        if nv > 0 {
+            self.scanner.scan(
+                &self.ctx.device,
+                &self.ctx.queue,
+                &self.counts_sorted,
+                &self.scratch.cum_tiles_hit,
+                nv,
+            );
+        }
+
+        // ----- Pass 2b: map_gaussians. -----
+        if nv > 0 {
+            let mut encoder = self
+                .ctx
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("map") });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
                 dispatch(&mut pass, &self.map, (nv as u32).div_ceil(256));
             }
             self.ctx.queue.submit(Some(encoder.finish()));
         }
 
-        // ----- Host tile-id sort over the isect list. -----
-        let tile_ids = read_u32s(
-            &self.ctx.device,
-            &self.ctx.queue,
-            &self.scratch.tile_id_from_isect,
-            ni,
-        );
-        let isect_gids = read_u32s(
-            &self.ctx.device,
-            &self.ctx.queue,
-            &self.scratch.compact_gid_from_isect,
-            ni,
-        );
-        let mut isect_order: Vec<u32> = (0..ni as u32).collect();
-        isect_order.sort_by_key(|&i| tile_ids[i as usize]);
-        let sorted_tile_ids: Vec<u32> = isect_order.iter().map(|&i| tile_ids[i as usize]).collect();
-        let sorted_isect_gids: Vec<u32> = isect_order
-            .iter()
-            .map(|&i| isect_gids[i as usize])
-            .collect();
-        self.ctx.queue.write_buffer(
-            &self.scratch.tile_id_from_isect,
-            0,
-            bytemuck::cast_slice(&sorted_tile_ids),
-        );
-        self.ctx.queue.write_buffer(
-            &self.scratch.compact_gid_from_isect,
-            0,
-            bytemuck::cast_slice(&sorted_isect_gids),
-        );
+        // ----- Device-side tile-id sort over the isect list. -----
+        if ni > 0 {
+            copy_buffer(
+                &self.ctx.device,
+                &self.ctx.queue,
+                &self.scratch.tile_id_from_isect,
+                &self.tile_pairs[0].keys,
+                ni * 4,
+            );
+            copy_buffer(
+                &self.ctx.device,
+                &self.ctx.queue,
+                &self.scratch.compact_gid_from_isect,
+                &self.tile_pairs[0].values,
+                ni * 4,
+            );
+            self.sorter
+                .sort(&self.ctx.device, &self.ctx.queue, &self.tile_pairs, ni);
+            copy_buffer(
+                &self.ctx.device,
+                &self.ctx.queue,
+                &self.tile_pairs[0].keys,
+                &self.scratch.tile_id_from_isect,
+                ni * 4,
+            );
+            copy_buffer(
+                &self.ctx.device,
+                &self.ctx.queue,
+                &self.tile_pairs[0].values,
+                &self.scratch.compact_gid_from_isect,
+                ni * 4,
+            );
+        }
 
         // ----- Pass 3: tile_offsets + rasterize. -----
         {
@@ -726,18 +769,19 @@ impl Renderer {
     }
 }
 
-/// Read `count` `u32`s from `buffer` (blocking).
-fn read_u32s(
+/// Device-side buffer-to-buffer copy of `len` bytes.
+fn copy_buffer(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    buffer: &wgpu::Buffer,
-    count: usize,
-) -> Vec<u32> {
-    if count == 0 {
-        return Vec::new();
-    }
-    let raw = read_bytes(device, queue, buffer, count * 4);
-    bytemuck::cast_slice(&raw).to_vec()
+    src: &wgpu::Buffer,
+    dst: &wgpu::Buffer,
+    len: usize,
+) {
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("copy"),
+    });
+    encoder.copy_buffer_to_buffer(src, 0, dst, 0, len as u64);
+    queue.submit(Some(encoder.finish()));
 }
 
 fn read_f32s(

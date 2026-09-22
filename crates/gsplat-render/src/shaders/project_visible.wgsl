@@ -11,6 +11,10 @@
 @group(0) @binding(4) var<storage, read> global_from_compact: array<u32>;
 @group(0) @binding(5) var<storage, read_write> projected_splats: array<f32>;
 @group(0) @binding(6) var<storage, read_write> compact_from_global: array<u32>;
+// Per-gaussian tile counts (indexed by global id) and the compact-order gather
+// that the prefix scan consumes.
+@group(0) @binding(7) var<storage, read> intersect_counts: array<u32>;
+@group(0) @binding(8) var<storage, read_write> counts_sorted: array<u32>;
 
 @compute @workgroup_size(256)
 fn project_visible(@builtin(global_invocation_id) gid3: vec3<u32>) {
@@ -20,6 +24,8 @@ fn project_visible(@builtin(global_invocation_id) gid3: vec3<u32>) {
     }
     let gid = global_from_compact[compact];
     compact_from_global[gid] = compact;
+    // Gather the tile count into compact order for the prefix scan.
+    counts_sorted[compact] = intersect_counts[gid];
 
     let base = gid * 10u;
     let mean = vec3<f32>(transforms[base], transforms[base + 1u], transforms[base + 2u]);
