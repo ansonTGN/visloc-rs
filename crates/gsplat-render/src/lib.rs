@@ -13,44 +13,53 @@
 //! subgroup-free device-side radix sort is a planned follow-up. All shaders use
 //! only baseline WebGPU features (no subgroups, only `u32` atomics).
 //!
+//! # Feature flags
+//!
+//! The GPU path is behind the **`gpu`** feature (off by default). wgpu 30 pulls
+//! `naga`, whose `indexmap` dependency needs edition2024 (Rust >= 1.85), so
+//! enabling `gpu` requires a current toolchain. The pure host-side packing and
+//! camera math always compile, so the default build keeps the workspace MSRV.
+//!
 //! # Example
 //!
 //! ```no_run
+//! # #[cfg(feature = "gpu")] {
 //! use visloc_gsplat_core::splat;
 //! use visloc_gsplat_render::{GpuContext, Renderer};
 //!
 //! let scene = splat::load_splat("scene.splat")?;
 //! let ctx = GpuContext::new()?;
 //! let mut renderer = Renderer::new(ctx, &scene, 640, 480)?;
+//! # }
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-pub mod gpu;
 pub mod packing;
+
+#[cfg(feature = "gpu")]
+pub mod gpu;
+#[cfg(feature = "gpu")]
 pub mod renderer;
+#[cfg(feature = "gpu")]
 pub mod shaders;
+#[cfg(feature = "gpu")]
 pub mod uniforms;
 
-pub use gpu::{try_context, GpuContext, GpuError};
 pub use packing::{PackedScene, TRANSFORM_FLOATS};
+
+#[cfg(feature = "gpu")]
+pub use gpu::{try_context, GpuContext, GpuError};
+#[cfg(feature = "gpu")]
 pub use renderer::{GpuScene, Renderer};
+#[cfg(feature = "gpu")]
 pub use uniforms::{tile_bounds, ProjectUniforms, RasterUniforms, TILE_SIZE, TILE_WIDTH};
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "gpu")))]
 mod tests {
+    // The host-side packing is pure and testable without a GPU or wgpu.
     use super::*;
-    use nalgebra::{Matrix3, Quaternion, Vector3};
-    use visloc_gsplat_core::camera::PinholeCamera;
-    use visloc_gsplat_core::cpu_render;
+    use nalgebra::{Quaternion, Vector3};
     use visloc_gsplat_core::gaussian::{Gaussian, Scene};
-
-    fn front_camera() -> visloc_gsplat_core::camera::CameraView {
-        visloc_gsplat_core::camera::CameraView::new(
-            Matrix3::identity(),
-            Vector3::zeros(),
-            PinholeCamera::new(64, 64, 50.0, 50.0, 32.0, 32.0),
-        )
-    }
 
     fn solid_gaussian(mean: Vector3<f32>, scale: f32, color: [f32; 3]) -> Gaussian {
         Gaussian {
@@ -81,6 +90,40 @@ mod tests {
         let p = PackedScene::from_scene(&scene);
         assert_eq!(p.num_gaussians, 1);
         assert_eq!(p.sh_coeffs_per_channel, 1);
+    }
+}
+
+#[cfg(all(test, feature = "gpu"))]
+mod gpu_tests {
+    use nalgebra::{Matrix3, Quaternion, Vector3};
+    use visloc_gsplat_core::camera::{CameraView, PinholeCamera};
+    use visloc_gsplat_core::cpu_render;
+    use visloc_gsplat_core::gaussian::{Gaussian, Scene};
+
+    use crate::{try_context, Renderer};
+
+    fn front_camera() -> CameraView {
+        CameraView::new(
+            Matrix3::identity(),
+            Vector3::zeros(),
+            PinholeCamera::new(64, 64, 50.0, 50.0, 32.0, 32.0),
+        )
+    }
+
+    fn solid_gaussian(mean: Vector3<f32>, scale: f32, color: [f32; 3]) -> Gaussian {
+        Gaussian {
+            mean,
+            scale_log: Vector3::new(scale.ln(), scale.ln(), scale.ln()),
+            rotation: Quaternion::new(1.0, 0.0, 0.0, 0.0),
+            opacity_logit: 10.0,
+            sh_dc: [
+                (color[0] - 0.5) / visloc_gsplat_core::sh::SH_C0,
+                (color[1] - 0.5) / visloc_gsplat_core::sh::SH_C0,
+                (color[2] - 0.5) / visloc_gsplat_core::sh::SH_C0,
+            ],
+            sh_rest: Vec::new(),
+            sh_degree: 0,
+        }
     }
 
     #[test]
@@ -121,7 +164,6 @@ mod tests {
 
     #[test]
     fn gpu_matches_cpu_reference() {
-        // Skip gracefully on machines with no adapter.
         let Some(ctx) = try_context() else {
             eprintln!("skipping gpu_matches_cpu_reference: no GPU adapter");
             return;
