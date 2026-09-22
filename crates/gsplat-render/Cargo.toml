@@ -1,0 +1,40 @@
+[package]
+name = "visloc-gsplat-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "wgpu compute forward rasterizer for 3D Gaussian Splatting (visloc-rs 3DGS stage 1)."
+readme.workspace = true
+documentation = "https://docs.rs/visloc-gsplat-render"
+homepage.workspace = true
+repository.workspace = true
+keywords = ["gaussian-splatting", "3dgs", "wgpu", "gpu", "rendering"]
+categories = ["computer-vision", "graphics", "science::robotics"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+
+[dependencies]
+bytemuck = { workspace = true }
+nalgebra = { workspace = true }
+pollster = { workspace = true }
+thiserror = { workspace = true }
+visloc-gsplat-core = { path = "../gsplat-core", version = "0.2.0" }
+wgpu = { workspace = true }
+
+[dev-dependencies]
+image = { version = "=0.25.5", default-features = false, features = ["png"] }
+
+[[example]]
+name = "gsplat_gpu_render"
+path = "examples/gsplat_gpu_render.rs"
+
+[lib]
+doctest = false
+
+[lints.rust]
+unsafe_code = "deny"
