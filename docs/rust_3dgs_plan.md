@@ -135,12 +135,30 @@ outlier prune) at 640x480: mean abs error 0.003 on a 1/104 subsample; the
 residual is faint boundary floaters. Native forward timing on a GTX 1660 Ti:
 ~79 ms/frame at 640x480, ~119 ms/frame at 1920x1080 for 419k gaussians.
 
-**Known limitation (next PR).** The two per-frame sorts (depth, then tile id)
-and the compaction prefix sum currently run on the host, which forces several
-blocking GPU→CPU readbacks per frame; those readbacks dominate the frame time.
-Moving the sort/scan to subgroup-free device-side radix sort + scan is the
-next PR and removes the readbacks entirely. Until then the renderer is
-correctness-first, not yet real-time.
+**Device-side sort + scan (implemented).** The two per-frame sorts and the
+compact-order tile-count prefix sum now run on the GPU:
+
+- `shaders/radix.wgsl` — subgroup-free LSD radix sort (4 bits/pass, 8 passes),
+  with a **stable** in-block per-digit exclusive scan so LSD correctness holds.
+  Per-pass: `radix_histogram` → `radix_scan` (O(BINS·blocks)) → `radix_scatter`.
+  A dedicated test (`gpu_radix_sort_is_correct_and_stable`) checks 5,000 keys
+  with duplicates against a stable host sort.
+- `shaders/scan.wgsl` — subgroup-free blocked inclusive scan, used for the
+  compact-order tile counts that `map_gaussians` consumes.
+
+This removes every large GPU→CPU readback from the frame (depth array, id
+array, counts array, both isect arrays); only the 8-byte `num_visible` /
+`num_intersections` counters and the output image still come back.
+`gpu_matches_cpu_reference` still passes on the fully device-side pipeline.
+
+**Honest performance.** With the sorts on the device the frame time is
+unchanged (~79 ms at 640x480, ~114 ms at 1920x1080 for 419k gaussians): it is
+now dominated by the **blocking counter readback** (one `device.poll` per
+frame, needed because baseline WebGPU has no indirect dispatch) and submit
+overhead, not by the sort. Eliminating that needs either indirect dispatch
+(a non-baseline feature) or a persistent viewer loop that pipelines frames.
+The renderer is therefore architecturally ready for a viewer but not yet
+frame-pipelined.
 
 ### Stage 2 — Burn + CubeCL differentiable rasterizer
 - Port the forward rasterizer to CubeCL kernels; add the **analytic backward**

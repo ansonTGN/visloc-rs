@@ -41,7 +41,11 @@ pub mod gpu;
 #[cfg(feature = "gpu")]
 pub mod renderer;
 #[cfg(feature = "gpu")]
+pub mod scan;
+#[cfg(feature = "gpu")]
 pub mod shaders;
+#[cfg(feature = "gpu")]
+pub mod sort;
 #[cfg(feature = "gpu")]
 pub mod uniforms;
 
@@ -51,6 +55,8 @@ pub use packing::{PackedScene, TRANSFORM_FLOATS};
 pub use gpu::{try_context, GpuContext, GpuError};
 #[cfg(feature = "gpu")]
 pub use renderer::{GpuScene, Renderer};
+#[cfg(feature = "gpu")]
+pub use sort::{RadixParams, RadixSorter, SortBuffers};
 #[cfg(feature = "gpu")]
 pub use uniforms::{tile_bounds, ProjectUniforms, RasterUniforms, TILE_SIZE, TILE_WIDTH};
 
@@ -100,7 +106,34 @@ mod gpu_tests {
     use visloc_gsplat_core::cpu_render;
     use visloc_gsplat_core::gaussian::{Gaussian, Scene};
 
-    use crate::{try_context, Renderer};
+    use crate::{try_context, RadixSorter, Renderer};
+
+    /// Blocking read of `count` `u32`s from `buffer`.
+    fn read_back_u32(ctx: &crate::GpuContext, buffer: &wgpu::Buffer, count: usize) -> Vec<u32> {
+        let staging = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("test_staging"),
+            size: (count * 4) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, (count * 4) as u64);
+        ctx.queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        ctx.device.poll(wgpu::PollType::wait_indefinitely()).ok();
+        let _ = rx.recv();
+        let data = slice.get_mapped_range().expect("map");
+        let out = bytemuck::cast_slice(&data).to_vec();
+        drop(data);
+        staging.unmap();
+        out
+    }
 
     fn front_camera() -> CameraView {
         CameraView::new(
@@ -160,6 +193,44 @@ mod gpu_tests {
             }
         }
         assert!(max_err < 0.02, "single gaussian max abs error {max_err}");
+    }
+
+    #[test]
+    fn gpu_radix_sort_is_correct_and_stable() {
+        let Some(ctx) = try_context() else {
+            eprintln!("skipping gpu_radix_sort_is_correct_and_stable: no GPU adapter");
+            return;
+        };
+        // Keys with many duplicates so stability is observable: values are the
+        // original indices (mod small) and must be non-decreasing within a key.
+        let n = 5000usize;
+        let mut state = 0x1234_5678u32;
+        let mut keys = Vec::with_capacity(n);
+        for _ in 0..n {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            keys.push(state % 17);
+        }
+        let values: Vec<u32> = (0..n as u32).collect();
+
+        let sorter = RadixSorter::new(&ctx.device, n);
+        let pairs = sorter.allocate(&ctx.device, "test");
+        ctx.queue
+            .write_buffer(&pairs[0].keys, 0, bytemuck::cast_slice(&keys));
+        ctx.queue
+            .write_buffer(&pairs[0].values, 0, bytemuck::cast_slice(&values));
+        sorter.sort(&ctx.device, &ctx.queue, &pairs, n);
+
+        let gpu_keys: Vec<u32> = read_back_u32(&ctx, &pairs[0].keys, n);
+        let gpu_values: Vec<u32> = read_back_u32(&ctx, &pairs[0].values, n);
+
+        // Reference: stable host sort.
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by_key(|&i| keys[i]);
+        let expect_keys: Vec<u32> = order.iter().map(|&i| keys[i]).collect();
+        let expect_values: Vec<u32> = order.iter().map(|&i| values[i]).collect();
+
+        assert_eq!(gpu_keys, expect_keys, "sorted keys differ from host sort");
+        assert_eq!(gpu_values, expect_values, "sort is not stable");
     }
 
     #[test]
