@@ -110,6 +110,15 @@ Both writers return a structured `ColmapError::InvalidExportInput` for inputs th
 
 Cross-format equivalence (same input → maps that re-read to the same camera intrinsics, keyframe poses, and landmark world positions within `1e-9`) is pinned by `crates/io/tests/colmap_export.rs::write_colmap_text_and_binary_models_for_3dgs_emit_equivalent_maps`. Real-data parity on a small KITTI stride-4 subset is exercised by `scripts/run_kitti_3dgs_smoke.sh`, which runs `examples/inspect_colmap_text_model` and `examples/inspect_colmap_binary_model` against the live writer output and aborts on any per-format count disagreement.
 
+### Consuming a COLMAP model in Rust (3DGS)
+
+The `visloc-gsplat-core` crate reads a COLMAP model back into a 3DGS scene seed:
+`load_colmap_scene(dir, seed_log_scale)` turns the sparse landmarks into degree-0
+gaussians and each registered image into a render camera, and its CPU reference
+rasterizer renders a frame without a GPU. This is the stage-0 foundation of the
+Rust 3DGS effort; the plan and staged roadmap are in
+[rust_3dgs_plan.md](rust_3dgs_plan.md).
+
 ## Validation
 
 Use map validation before localization:
