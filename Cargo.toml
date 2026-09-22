@@ -21,6 +21,7 @@ members = [
     "crates/core",
     "crates/vision",
     "crates/io",
+    "crates/gsplat-core",
     "crates/dpvo-cuda-runtime",
     "pipelines/localization",
     "pipelines/tracking",

@@ -885,6 +885,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "visloc-gsplat-core"
+version = "0.2.0"
+dependencies = [
+ "image",
+ "nalgebra",
+ "thiserror",
+ "visloc-core",
+ "visloc-io",
+]
+
+[[package]]
 name = "visloc-io"
 version = "0.2.0"
 dependencies = [
