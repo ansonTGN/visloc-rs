@@ -22,6 +22,7 @@ members = [
     "crates/vision",
     "crates/io",
     "crates/gsplat-core",
+    "crates/gsplat-render",
     "crates/dpvo-cuda-runtime",
     "pipelines/localization",
     "pipelines/tracking",
@@ -53,6 +54,9 @@ rayon = "1"
 # 0.11, which breaks MSRV 1.83. Hold at 0.10 until the MSRV is bumped.
 sha2 = "0.10"
 thiserror = "2"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "1"
+wgpu = "30"
 
 [features]
 default = []

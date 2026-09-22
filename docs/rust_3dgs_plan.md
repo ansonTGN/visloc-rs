@@ -114,12 +114,33 @@ Staged so each stage is useful on its own:
   (`--colmap`) renders its sparse cloud from a registered camera. Round-trip
   `.splat`/`.ply` pinned by tests.
 
-### Stage 1 — wgpu forward renderer (real-time)
-- wgpu 30 compute rasterizer: project gaussians, tile bin, per-tile depth sort
-  (hierarchical radix sort, no global atomics), alpha-composite.
-- Shared WGSL/cubecl kernels so the same code targets native and wasm later.
-- Deliverable: native window (winit) real-time viewer for `.splat`/`.ply`;
-  WASD + mouse. This satisfies "リアルタイム render" before training exists.
+### Stage 1 — wgpu forward renderer — IMPLEMENTED
+- `crates/gsplat-render`: wgpu 30 compute rasterizer. Five dispatches run the
+  whole forward pass on the GPU — `project_forward` (project + compact visible
+  gaussians + tile counts), `project_visible` (SH colour + projected splats),
+  `map_gaussians` (tile expansion), `get_tile_offsets` (per-tile ranges), and
+  `rasterize` (one workgroup per 16x16 tile, front-to-back transmittance).
+- All shaders use **only baseline WebGPU**: `u32` storage atomics, workgroup
+  barriers, no subgroups. This keeps the wasm path open.
+- The CPU reference in `gsplat-core` was corrected to the same physically
+  correct front-to-back transmittance compositing (it previously applied an
+  "over" operator in scene order), so GPU and CPU agree by construction.
+- Deliverable met: `gsplat_gpu_render` renders a real 422,860-gaussian
+  `.splat` on the GPU and writes a PNG.
+
+**Measured.** Synthetic 3-gaussian scene at 64x64: GPU vs CPU **max abs error
+0.006, mean 0.000014, no pixel over 0.1** (pinned by
+`gpu_matches_cpu_reference`). Real `euroc_v101.splat` (418k gaussians after
+outlier prune) at 640x480: mean abs error 0.003 on a 1/104 subsample; the
+residual is faint boundary floaters. Native forward timing on a GTX 1660 Ti:
+~79 ms/frame at 640x480, ~119 ms/frame at 1920x1080 for 419k gaussians.
+
+**Known limitation (next PR).** The two per-frame sorts (depth, then tile id)
+and the compaction prefix sum currently run on the host, which forces several
+blocking GPU→CPU readbacks per frame; those readbacks dominate the frame time.
+Moving the sort/scan to subgroup-free device-side radix sort + scan is the
+next PR and removes the readbacks entirely. Until then the renderer is
+correctness-first, not yet real-time.
 
 ### Stage 2 — Burn + CubeCL differentiable rasterizer
 - Port the forward rasterizer to CubeCL kernels; add the **analytic backward**

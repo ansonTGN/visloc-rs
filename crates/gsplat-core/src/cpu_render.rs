@@ -57,35 +57,44 @@ impl Image {
     }
 }
 
+/// A projected Gaussian ready for rasterization.
+struct Projected {
+    depth: f32,
+    u: f32,
+    v: f32,
+    inv_cov: Matrix2<f32>,
+    radius: f32,
+    opacity: f32,
+    color: [f32; 3],
+}
+
 /// Render `scene` from `view` on the CPU.
 ///
-/// `bg` is the background colour in linear RGB.
+/// Gaussians are composited **front-to-back** (nearest first) with per-pixel
+/// transmittance, matching the Inria CUDA rasterizer and the GPU renderer in
+/// `visloc-gsplat-render`. `bg` is the background colour in linear RGB.
 pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
     let w = view.camera.width;
     let h = view.camera.height;
-    let mut image = Image::new(w, h);
-    for px in image.rgb.iter_mut() {
-        *px = bg;
-    }
+    let mut image = Image::new(w, h); // zero-initialized; background added at the end
 
-    // Precompute the world-to-camera rotation once.
+    // World-to-camera rotation, reused for every Gaussian.
     let rot_wc = view.rotation;
 
+    // Phase 1: project every Gaussian and discard the ones that cannot
+    // contribute.
+    let mut projected: Vec<Projected> = Vec::with_capacity(scene.len());
     for g in &scene.gaussians {
-        // Linear scale and opacity.
         let scale = g.scale();
         let opacity = g.opacity();
         if opacity < 1e-4 {
             continue;
         }
-
-        // Camera-space mean.
         let p_cam = view.world_to_camera_point(g.mean);
         if p_cam.z <= 0.1 {
-            continue; // behind the camera
+            continue;
         }
 
-        // 3D covariance Σ = R S Sᵀ Rᵀ (S is diagonal, so this is R diag(s²) Rᵀ).
         use nalgebra::UnitQuaternion;
         let r_mat = UnitQuaternion::from_quaternion(g.unit_rotation())
             .to_rotation_matrix()
@@ -93,13 +102,9 @@ pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
         let s2 = Vector3::new(scale.x * scale.x, scale.y * scale.y, scale.z * scale.z);
         let sigma = r_mat * Matrix3::from_diagonal(&s2) * r_mat.transpose();
 
-        // Screen-space covariance Σ' = J W Σ Wᵀ Jᵀ.
         let (u, v, _z) = view.camera.project(p_cam);
         let fx = view.camera.fx;
         let fy = view.camera.fy;
-        // Jacobian of the projection at the mean (affine part):
-        //   J = [[fx/z,   0,  -fx*x/z²],
-        //        [  0,  fy/z, -fy*y/z²]]
         let inv_z = 1.0 / p_cam.z;
         let inv_z2 = inv_z * inv_z;
         let j = Matrix3::new(
@@ -113,10 +118,8 @@ pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
             0.0,
             0.0,
         );
-        let w_mat = rot_wc;
-        let cov_cam = w_mat * sigma * w_mat.transpose();
+        let cov_cam = rot_wc * sigma * rot_wc.transpose();
         let cov2 = j * cov_cam * j.transpose();
-        // Take the top-left 2x2 block and add the standard 0.3 px low-pass.
         let a = cov2[(0, 0)] + 0.3;
         let b = cov2[(0, 1)];
         let c = cov2[(1, 1)] + 0.3;
@@ -126,7 +129,7 @@ pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
             continue;
         }
         let inv_cov = cov.try_inverse().unwrap_or_else(Matrix2::zeros);
-        // Eigenvalues give the 3-sigma radius along each screen axis.
+
         let mid = 0.5 * (a + c);
         let rad = (mid * mid - det).max(0.0).sqrt();
         let lambda1 = mid + rad;
@@ -134,27 +137,17 @@ pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
         if lambda2 <= 0.0 {
             continue;
         }
-        // 3-sigma extent uses the largest eigenvalue's standard deviation.
         let radius = 3.0 * lambda1.max(lambda2).sqrt();
         if !radius.is_finite() {
             continue;
         }
-        // Skip primitives whose footprint is larger than the whole image: they
-        // are either near-plane blowups or outlier scales, and scanning every
-        // pixel for them dominates the reference cost without adding signal.
         let max_radius = (w.max(h) as f32) * 2.0;
         let radius = radius.min(max_radius);
 
-        // View-dependent colour.
         let dir = view.view_direction(g.mean);
         let mut color = [0.0f32; 3];
         eval_sh_color(g.sh_degree, dir, &g.sh_dc, &g.sh_rest, &mut color);
 
-        // Pixel bounding box (clamped), then per-pixel Gaussian weight.
-        let x0 = ((u - radius).floor().max(0.0)) as u32;
-        let y0 = ((v - radius).floor().max(0.0)) as u32;
-        let x1 = ((u + radius).ceil().min((w - 1) as f32).max(0.0)) as u32;
-        let y1 = ((v + radius).ceil().min((h - 1) as f32).max(0.0)) as u32;
         if u + radius < 0.0
             || v + radius < 0.0
             || u - radius > (w - 1) as f32
@@ -163,24 +156,64 @@ pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
             continue;
         }
 
+        projected.push(Projected {
+            depth: p_cam.z,
+            u,
+            v,
+            inv_cov,
+            radius,
+            opacity,
+            color,
+        });
+    }
+
+    // Phase 2: composite front-to-back (nearest first) with transmittance.
+    projected.sort_by(|a, b| {
+        a.depth
+            .partial_cmp(&b.depth)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut trans = vec![1.0f32; (w * h) as usize];
+    for p in &projected {
+        let x0 = ((p.u - p.radius).floor().max(0.0)) as u32;
+        let y0 = ((p.v - p.radius).floor().max(0.0)) as u32;
+        let x1 = ((p.u + p.radius).ceil().min((w - 1) as f32).max(0.0)) as u32;
+        let y1 = ((p.v + p.radius).ceil().min((h - 1) as f32).max(0.0)) as u32;
+
         for py in y0..=y1 {
             for pxi in x0..=x1 {
-                let dx = pxi as f32 + 0.5 - u;
-                let dy = py as f32 + 0.5 - v;
+                let dx = pxi as f32 + 0.5 - p.u;
+                let dy = py as f32 + 0.5 - p.v;
                 let d = Vector2::new(dx, dy);
-                let power = -0.5 * (d.transpose() * inv_cov * d)[(0, 0)];
+                let power = -0.5 * (d.transpose() * p.inv_cov * d)[(0, 0)];
                 if power > 0.0 {
                     continue;
                 }
-                let alpha = (opacity * power.exp()).min(0.99);
+                let alpha = (p.opacity * power.exp()).min(0.99);
                 if alpha < 1.0 / 255.0 {
                     continue;
                 }
-                let px = &mut image.rgb[(py * w + pxi) as usize];
-                for c in 0..3 {
-                    px[c] += alpha * (color[c].max(0.0) - px[c]);
+                let idx = (py * w + pxi) as usize;
+                let t = trans[idx];
+                if t <= 1e-4 {
+                    continue;
                 }
+                let contrib = t * alpha;
+                let px = &mut image.rgb[idx];
+                for (dst, src) in px.iter_mut().zip(p.color.iter()) {
+                    *dst += contrib * src.max(0.0);
+                }
+                trans[idx] = t * (1.0 - alpha);
             }
+        }
+    }
+
+    // Add the background through the remaining transmittance.
+    for (i, px) in image.rgb.iter_mut().enumerate() {
+        let t = trans[i];
+        for (dst, bg_c) in px.iter_mut().zip(bg.iter()) {
+            *dst += t * bg_c;
         }
     }
     image

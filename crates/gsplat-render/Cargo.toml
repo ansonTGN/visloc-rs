@@ -1,0 +1,47 @@
+[package]
+name = "visloc-gsplat-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "wgpu compute forward rasterizer for 3D Gaussian Splatting (visloc-rs 3DGS stage 1)."
+readme.workspace = true
+documentation = "https://docs.rs/visloc-gsplat-render"
+homepage.workspace = true
+repository.workspace = true
+keywords = ["gaussian-splatting", "3dgs", "wgpu", "gpu", "rendering"]
+categories = ["computer-vision", "graphics", "science::robotics"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+# The GPU renderer. Opt-in so the default/`image-io` MSRV 1.83 build does not
+# pull wgpu 30, whose `naga` dependency needs `indexmap >= 2.11.4`
+# (edition2024, Rust >= 1.85). Build the GPU path on a current toolchain:
+#   cargo build -p visloc-gsplat-render --features gpu
+# Same toolchain-boundary pattern as the root `onnx-inference` feature.
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck"]
+
+[dependencies]
+bytemuck = { workspace = true, optional = true }
+nalgebra = { workspace = true }
+pollster = { workspace = true, optional = true }
+thiserror = { workspace = true }
+visloc-gsplat-core = { path = "../gsplat-core", version = "0.2.0" }
+wgpu = { workspace = true, optional = true }
+
+[dev-dependencies]
+image = { version = "=0.25.5", default-features = false, features = ["png"] }
+
+[[example]]
+name = "gsplat_gpu_render"
+path = "examples/gsplat_gpu_render.rs"
+required-features = ["gpu"]
+
+[lib]
+doctest = false
+
+[lints.rust]
+unsafe_code = "deny"

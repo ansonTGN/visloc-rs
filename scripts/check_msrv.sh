@@ -14,4 +14,9 @@ fi
 # runtime tracks its own toolchain floor; keeping it out of this check confines
 # that requirement to the feature boundary instead of leaking it into the core
 # MSRV. Build the ONNX path on a current stable toolchain instead.
+#
+# The same applies to the opt-in `gpu` feature of `visloc-gsplat-render`: wgpu
+# 30 depends on naga, which needs `indexmap >= 2.11.4` (edition2024, Rust >=
+# 1.85). The feature is off by default, so this build never pulls it; build the
+# GPU renderer with `--features gpu` on a current stable toolchain.
 cargo +1.83.0 check --workspace --all-targets --features image-io
