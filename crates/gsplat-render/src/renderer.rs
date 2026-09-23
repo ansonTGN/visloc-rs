@@ -268,6 +268,8 @@ pub struct Renderer {
     depth_pairs: [crate::sort::SortBuffers; 2],
     tile_pairs: [crate::sort::SortBuffers; 2],
     counts_sorted: wgpu::Buffer,
+    /// Skip the output-image readback (for GPU-only timing / viewer use).
+    skip_readback: bool,
 }
 
 impl Renderer {
@@ -552,7 +554,16 @@ impl Renderer {
             depth_pairs,
             tile_pairs,
             counts_sorted,
+            skip_readback: false,
         })
+    }
+
+    /// Render without reading the output image back to the CPU.
+    ///
+    /// A native viewer presents the output buffer directly, so this is the
+    /// per-frame cost that matters; use it to measure the true GPU frame time.
+    pub fn set_skip_readback(&mut self, skip: bool) {
+        self.skip_readback = skip;
     }
 
     pub fn num_gaussians(&self) -> usize {
@@ -609,6 +620,7 @@ impl Renderer {
         }
 
         // ----- Host readback of compaction counts. -----
+        let t_sync = std::time::Instant::now();
         let (num_visible, num_intersections) = read_counters(
             &self.ctx.device,
             &self.ctx.queue,
@@ -616,6 +628,9 @@ impl Renderer {
             &self.scratch.num_intersections,
             &self.scratch.readback,
         );
+        if std::env::var("GSPLAT_PROFILE").is_ok() {
+            eprintln!("[profile] counter readback: {:?}", t_sync.elapsed());
+        }
         let nv = (num_visible as usize).min(self.num_gaussians());
         let ni = (num_intersections as usize).min(self.scratch.max_isects);
 
@@ -754,12 +769,26 @@ impl Renderer {
             self.ctx.queue.submit(Some(encoder.finish()));
         }
 
+        // A viewer renders to a surface and never reads the image back; this
+        // path exists so the true GPU frame cost can be measured.
+        if self.skip_readback {
+            return Image {
+                width: self.image_w,
+                height: self.image_h,
+                rgb: Vec::new(),
+            };
+        }
+
+        let t_read = std::time::Instant::now();
         let rgb = read_f32s(
             &self.ctx.device,
             &self.ctx.queue,
             &self.out_img,
             (self.image_w as usize) * (self.image_h as usize) * 3,
         );
+        if std::env::var("GSPLAT_PROFILE").is_ok() {
+            eprintln!("[profile] image readback: {:?}", t_read.elapsed());
+        }
         let rgb = rgb.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
         Image {
             width: self.image_w,

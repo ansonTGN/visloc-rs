@@ -151,14 +151,26 @@ array, counts array, both isect arrays); only the 8-byte `num_visible` /
 `num_intersections` counters and the output image still come back.
 `gpu_matches_cpu_reference` still passes on the fully device-side pipeline.
 
-**Honest performance.** With the sorts on the device the frame time is
-unchanged (~79 ms at 640x480, ~114 ms at 1920x1080 for 419k gaussians): it is
-now dominated by the **blocking counter readback** (one `device.poll` per
-frame, needed because baseline WebGPU has no indirect dispatch) and submit
-overhead, not by the sort. Eliminating that needs either indirect dispatch
-(a non-baseline feature) or a persistent viewer loop that pipelines frames.
-The renderer is therefore architecturally ready for a viewer but not yet
-frame-pipelined.
+**Honest performance.** The end-to-end PNG path is ~80 ms at 640x480 and
+~114 ms at 1920x1080 for 419k gaussians — but almost all of that is the
+**output-image readback** (~90 ms at 1920x1080), not the render. Timing the
+GPU-only path (no image readback, which is what a viewer pays) gives:
+
+| resolution | GPU-only | full PNG path |
+| --- | --- | --- |
+| 640x480 | 49 ms | 80 ms |
+| 1920x1080 | 26 ms | 114 ms |
+
+So the renderer is already near-real-time (~40 fps at 1080p for 419k
+gaussians); the counter readback is only ~0.4 ms. Two costs remain:
+
+1. The **output-image readback** (~90 ms at 1080p), which a viewer avoids by
+   presenting the output buffer directly.
+2. **CPU submit overhead**: 640x480 is *slower* than 1920x1080 for the same
+   scene because the ~25 `queue.submit` calls per frame are resolution
+   independent. Consolidating frames onto a few encoders is the next change.
+
+`Renderer::set_skip_readback(true)` exposes the GPU-only path for measurement.
 
 ### Stage 2 — Burn + CubeCL differentiable rasterizer
 - Port the forward rasterizer to CubeCL kernels; add the **analytic backward**

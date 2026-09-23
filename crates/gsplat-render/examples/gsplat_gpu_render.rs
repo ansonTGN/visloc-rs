@@ -102,7 +102,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ctx = GpuContext::new()?;
     println!("using adapter: {}", ctx.adapter_info.name);
     let mut renderer = Renderer::new(ctx, &scene, width, height)?;
-    // Warm up, then time a few renders.
+    let gaussians = scene.len();
+
+    // Time the full path (with the output-image readback), which is what an
+    // offline PNG render costs.
     let _ = renderer.render(&view, [0.0, 0.0, 0.0]);
     let iters = 20;
     let start = std::time::Instant::now();
@@ -111,12 +114,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         image = renderer.render(&view, [0.0, 0.0, 0.0]);
     }
     let per_frame = start.elapsed().as_secs_f64() / iters as f64;
-    let gaussians = scene.len();
     println!(
-        "render: {:.1} ms/frame at {width}x{height} ({} gaussians, {:.1} M splats/s)",
+        "render+readback: {:.1} ms/frame at {width}x{height} ({} gaussians, {:.1} M splats/s)",
         per_frame * 1e3,
         gaussians,
         gaussians as f64 / per_frame / 1e6
+    );
+
+    // Time the GPU-only path (no image readback): this is the per-frame cost a
+    // native viewer would pay.
+    renderer.set_skip_readback(true);
+    let _ = renderer.render(&view, [0.0, 0.0, 0.0]);
+    let start = std::time::Instant::now();
+    for _ in 0..iters {
+        let _ = renderer.render(&view, [0.0, 0.0, 0.0]);
+    }
+    let gpu_frame = start.elapsed().as_secs_f64() / iters as f64;
+    renderer.set_skip_readback(false);
+    println!(
+        "gpu-only:       {:.1} ms/frame at {width}x{height} ({} gaussians, {:.1} M splats/s)",
+        gpu_frame * 1e3,
+        gaussians,
+        gaussians as f64 / gpu_frame / 1e6
     );
 
     let bytes = image.to_rgb8();
