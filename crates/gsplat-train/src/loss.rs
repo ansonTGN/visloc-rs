@@ -1,28 +1,22 @@
-//! Device-side D-SSIM loss term (see `shaders/ssim.wgsl`), shared by the
+//! Device-side D-SSIM loss term (tiled, see `shaders/ssim.wgsl`), shared by the
 //! trainer and the GPU-vs-CPU gradient test.
 
-/// The four SSIM passes plus their scratch buffers for one image size.
+/// The two tiled SSIM kernels plus their scratch buffers for one image size.
 pub struct SsimKernels {
     width: u32,
     height: u32,
-    blur_h: wgpu::ComputePipeline,
-    stats: wgpu::ComputePipeline,
-    grad_h: wgpu::ComputePipeline,
-    grad_v: wgpu::ComputePipeline,
+    fwd: wgpu::ComputePipeline,
+    bwd: wgpu::ComputePipeline,
     uniforms: wgpu::Buffer,
-    tmp5: wgpu::Buffer,
     abc: wgpu::Buffer,
-    tmp3: wgpu::Buffer,
     /// Sum of SSIM over pixels and channels (fixed point, 1e-3 units).
     pub acc: wgpu::Buffer,
 }
 
 /// Bind groups for one (render, ground truth, d_image) triple.
 pub struct SsimBinds {
-    blur_h: wgpu::BindGroup,
-    stats: wgpu::BindGroup,
-    grad_h: wgpu::BindGroup,
-    grad_v: wgpu::BindGroup,
+    fwd: wgpu::BindGroup,
+    bwd: wgpu::BindGroup,
 }
 
 fn storage(dev: &wgpu::Device, label: &str, bytes: u64) -> wgpu::Buffer {
@@ -75,19 +69,15 @@ impl SsimKernels {
         Self {
             width,
             height,
-            blur_h: mk("ssim_blur_h"),
-            stats: mk("ssim_stats"),
-            grad_h: mk("ssim_grad_h"),
-            grad_v: mk("ssim_grad_v"),
+            fwd: mk("ssim_fwd"),
+            bwd: mk("ssim_bwd"),
             uniforms: dev.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("ssim_uniforms"),
                 size: 16,
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
-            tmp5: storage(dev, "ssim_tmp5", npix * 15 * 4),
             abc: storage(dev, "ssim_abc", npix * 9 * 4),
-            tmp3: storage(dev, "ssim_tmp3", npix * 9 * 4),
             acc: storage(dev, "ssim_acc", 4),
         }
     }
@@ -110,44 +100,26 @@ impl SsimKernels {
     ) -> SsimBinds {
         let u = &self.uniforms;
         SsimBinds {
-            blur_h: bind_at(
+            fwd: bind_at(
                 dev,
-                &self.blur_h,
-                &[(0, u), (1, render), (2, gt), (3, &self.tmp5)],
+                &self.fwd,
+                &[(0, u), (1, render), (2, gt), (4, &self.abc), (7, &self.acc)],
             ),
-            stats: bind_at(
+            bwd: bind_at(
                 dev,
-                &self.stats,
-                &[(0, u), (3, &self.tmp5), (4, &self.abc), (7, &self.acc)],
-            ),
-            grad_h: bind_at(
-                dev,
-                &self.grad_h,
-                &[(0, u), (4, &self.abc), (5, &self.tmp3)],
-            ),
-            grad_v: bind_at(
-                dev,
-                &self.grad_v,
-                &[(0, u), (1, render), (2, gt), (5, &self.tmp3), (6, d_image)],
+                &self.bwd,
+                &[(0, u), (1, render), (2, gt), (4, &self.abc), (6, d_image)],
             ),
         }
     }
 
-    /// Record the four passes (each needs the previous one's output; wgpu
-    /// orders dispatches within a pass).
+    /// Record the two passes (wgpu orders dispatches within a pass).
     pub fn encode(&self, pass: &mut wgpu::ComputePass<'_>, binds: &SsimBinds) {
-        let g = (self.width * self.height).div_ceil(256).max(1);
-        let x = g.min(65535);
-        let y = g.div_ceil(x);
-        for (p, b) in [
-            (&self.blur_h, &binds.blur_h),
-            (&self.stats, &binds.stats),
-            (&self.grad_h, &binds.grad_h),
-            (&self.grad_v, &binds.grad_v),
-        ] {
+        let tiles = self.width.div_ceil(16) * self.height.div_ceil(16);
+        for (p, b) in [(&self.fwd, &binds.fwd), (&self.bwd, &binds.bwd)] {
             pass.set_pipeline(p);
             pass.set_bind_group(0, b, &[]);
-            pass.dispatch_workgroups(x, y, 1);
+            pass.dispatch_workgroups(tiles, 1, 1);
         }
     }
 }

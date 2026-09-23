@@ -46,7 +46,11 @@ fn new_storage(device: &wgpu::Device, label: &str, bytes: u64) -> wgpu::Buffer {
 
 impl GpuScene {
     pub fn upload(ctx: &GpuContext, scene: &Scene) -> Self {
-        let packed = PackedScene::from_scene(scene);
+        Self::upload_packed(ctx, PackedScene::from_scene(scene))
+    }
+
+    /// Upload an already packed scene (e.g. a trainer's parameter arrays).
+    pub fn upload_packed(ctx: &GpuContext, packed: PackedScene) -> Self {
         let transforms = new_storage(
             &ctx.device,
             "transforms",
@@ -499,8 +503,36 @@ impl Renderer {
         image_h: u32,
         initial_isects: Option<usize>,
     ) -> Result<Self, GpuError> {
-        let gpu_scene = GpuScene::upload(&ctx, scene);
-        let n = scene.len();
+        Self::build(
+            ctx,
+            PackedScene::from_scene(scene),
+            image_w,
+            image_h,
+            initial_isects,
+        )
+    }
+
+    /// [`Renderer::new`] from an already packed scene (no per-gaussian
+    /// conversion; used by the trainer after densification).
+    pub fn from_packed(
+        ctx: GpuContext,
+        packed: PackedScene,
+        image_w: u32,
+        image_h: u32,
+    ) -> Result<Self, GpuError> {
+        Self::build(ctx, packed, image_w, image_h, None)
+    }
+
+    fn build(
+        ctx: GpuContext,
+        packed: PackedScene,
+        image_w: u32,
+        image_h: u32,
+        initial_isects: Option<usize>,
+    ) -> Result<Self, GpuError> {
+        let sh_degree = packed.sh_degree;
+        let gpu_scene = GpuScene::upload_packed(&ctx, packed);
+        let n = gpu_scene.packed.num_gaussians;
         let (tbw, tbh) = tile_bounds(image_w, image_h);
         let num_tiles = (tbw * tbh) as usize;
         // Per-intersection buffers hold one u32 each. Start from a guess and
@@ -707,7 +739,7 @@ impl Renderer {
             residuals,
             image_w,
             image_h,
-            sh_degree: scene.sh_degree,
+            sh_degree,
             sorter,
             scanner,
             depth_pairs,

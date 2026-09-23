@@ -9,7 +9,7 @@
 use visloc_gsplat_core::camera::CameraView;
 use visloc_gsplat_core::cpu_render::Image;
 use visloc_gsplat_core::gaussian::{Gaussian, Scene};
-use visloc_gsplat_render::{GpuContext, GpuError, Renderer};
+use visloc_gsplat_render::{GpuContext, GpuError, PackedScene, Renderer};
 
 use crate::dataset::{load_view_rgb, Dataset, DatasetError, View};
 use crate::densify::{densify, reset_opacity, DensifyConfig, DensifyReport, Group, Population};
@@ -383,7 +383,7 @@ impl Trainer {
                 .then(StageTimes::default),
         };
         trainer.order = (0..trainer.views.len()).collect();
-        trainer.build_state(ctx, init, None)?;
+        trainer.build_state(ctx, PackedScene::from_scene(init), None)?;
         Ok(trainer)
     }
 
@@ -392,10 +392,12 @@ impl Trainer {
     fn build_state(
         &mut self,
         ctx: GpuContext,
-        scene: &Scene,
+        packed: PackedScene,
         moments: Option<&Population>,
     ) -> Result<(), TrainError> {
-        let mut renderer = Renderer::new(ctx, scene, self.width, self.height)?;
+        let n = packed.num_gaussians as u32;
+        let cpc2 = (packed.sh_degree + 1) * (packed.sh_degree + 1);
+        let mut renderer = Renderer::from_packed(ctx, packed, self.width, self.height)?;
         renderer.set_skip_readback(true);
         let dev = renderer.ctx.device.clone();
         let queue = renderer.ctx.queue.clone();
@@ -432,8 +434,6 @@ impl Trainer {
             grads.opacity.clone(),
             grads.sh.clone(),
         );
-        let n = scene.len() as u32;
-        let cpc2 = (scene.sh_degree + 1) * (scene.sh_degree + 1);
         let mk_group = |label: &str,
                         p: &wgpu::Buffer,
                         g: &wgpu::Buffer,
@@ -695,7 +695,9 @@ impl Trainer {
         grow: bool,
         reset: bool,
     ) -> Result<(), TrainError> {
+        let t0 = std::time::Instant::now();
         let mut pop = self.download();
+        let t_download = t0.elapsed();
         let n = pop.len();
         if grow {
             let st = self.st();
@@ -711,14 +713,35 @@ impl Trainer {
         if reset {
             reset_opacity(&mut pop, 0.01);
         }
-        let scene = population_to_scene(&pop, self.sh_degree);
+        let degree = self.sh_degree;
+        let cpc = (degree + 1) as usize;
+        let packed = PackedScene {
+            num_gaussians: pop.len(),
+            transforms: std::mem::take(&mut pop.transforms.values),
+            opacity: std::mem::take(&mut pop.opacity.values),
+            sh: std::mem::take(&mut pop.sh.values),
+            sh_coeffs_per_channel: cpc * cpc,
+            sh_degree: degree,
+        };
+        let n_after = packed.num_gaussians;
+        let t_cpu = t0.elapsed();
         let ctx = self
             .state
             .take()
             .expect("trainer state")
             .renderer
             .into_context();
-        self.build_state(ctx, &scene, Some(&pop))
+        self.build_state(ctx, packed, Some(&pop))?;
+        if self.profile.is_some() && self.step % 1000 == 0 {
+            eprintln!(
+                "[densify] n={} download {:.0} ms, cpu {:.0} ms, rebuild {:.0} ms",
+                n_after,
+                t_download.as_secs_f64() * 1e3,
+                (t_cpu - t_download).as_secs_f64() * 1e3,
+                (t0.elapsed() - t_cpu).as_secs_f64() * 1e3
+            );
+        }
+        Ok(())
     }
 
     /// Mean L1 loss over the steps since the last call (reads the device).
