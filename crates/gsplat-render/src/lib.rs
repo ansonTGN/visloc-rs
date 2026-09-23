@@ -202,35 +202,52 @@ mod gpu_tests {
             return;
         };
         // Keys with many duplicates so stability is observable: values are the
-        // original indices (mod small) and must be non-decreasing within a key.
+        // original indices and must be increasing within a key. Cover the full
+        // 32-bit sort plus reduced-bit sorts with an even (2) and odd (3) pass
+        // count, since an odd count leaves the result in `pairs[1]`.
         let n = 5000usize;
-        let mut state = 0x1234_5678u32;
-        let mut keys = Vec::with_capacity(n);
-        for _ in 0..n {
-            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            keys.push(state % 17);
-        }
-        let values: Vec<u32> = (0..n as u32).collect();
-
         let sorter = RadixSorter::new(&ctx.device, n);
         let pairs = sorter.allocate(&ctx.device, "test");
-        ctx.queue
-            .write_buffer(&pairs[0].keys, 0, bytemuck::cast_slice(&keys));
-        ctx.queue
-            .write_buffer(&pairs[0].values, 0, bytemuck::cast_slice(&values));
-        sorter.sort(&ctx.device, &ctx.queue, &pairs, n);
+        for (modulus, key_bits) in [(17u32, 32u32), (17, 5), (4000, 12)] {
+            let mut state = 0x1234_5678u32;
+            let mut keys = Vec::with_capacity(n);
+            for _ in 0..n {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                keys.push(state % modulus);
+            }
+            let values: Vec<u32> = (0..n as u32).collect();
 
-        let gpu_keys: Vec<u32> = read_back_u32(&ctx, &pairs[0].keys, n);
-        let gpu_values: Vec<u32> = read_back_u32(&ctx, &pairs[0].values, n);
+            ctx.queue
+                .write_buffer(&pairs[0].keys, 0, bytemuck::cast_slice(&keys));
+            ctx.queue
+                .write_buffer(&pairs[0].values, 0, bytemuck::cast_slice(&values));
+            sorter.prepare(&ctx.queue, n, key_bits);
+            let mut encoder = ctx
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("sort"),
+                });
+            let out = sorter.encode(&ctx.device, &mut encoder, &pairs, n, key_bits);
+            ctx.queue.submit(Some(encoder.finish()));
 
-        // Reference: stable host sort.
-        let mut order: Vec<usize> = (0..n).collect();
-        order.sort_by_key(|&i| keys[i]);
-        let expect_keys: Vec<u32> = order.iter().map(|&i| keys[i]).collect();
-        let expect_values: Vec<u32> = order.iter().map(|&i| values[i]).collect();
+            let gpu_keys: Vec<u32> = read_back_u32(&ctx, &pairs[out].keys, n);
+            let gpu_values: Vec<u32> = read_back_u32(&ctx, &pairs[out].values, n);
 
-        assert_eq!(gpu_keys, expect_keys, "sorted keys differ from host sort");
-        assert_eq!(gpu_values, expect_values, "sort is not stable");
+            // Reference: stable host sort.
+            let mut order: Vec<usize> = (0..n).collect();
+            order.sort_by_key(|&i| keys[i]);
+            let expect_keys: Vec<u32> = order.iter().map(|&i| keys[i]).collect();
+            let expect_values: Vec<u32> = order.iter().map(|&i| values[i]).collect();
+
+            assert_eq!(
+                gpu_keys, expect_keys,
+                "{key_bits}-bit: keys differ from host sort"
+            );
+            assert_eq!(
+                gpu_values, expect_values,
+                "{key_bits}-bit: sort is not stable"
+            );
+        }
     }
 
     #[test]

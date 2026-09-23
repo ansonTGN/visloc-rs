@@ -2,7 +2,9 @@
 //
 // One workgroup per tile; thread `tid` owns pixel `(tid % 16, tid / 16)`.
 // Splats are processed in batches of 256 so the whole batch can be staged in
-// shared memory before each pixel walks it (front-to-back).
+// shared memory before each pixel walks it (front-to-back). Once every pixel in
+// the tile is saturated (transmittance <= 1e-4) the workgroup stops loading
+// batches, so a dense tile costs only as many batches as it takes to go opaque.
 
 @group(0) @binding(0) var<uniform> u: RasterUniforms;
 @group(0) @binding(1) var<storage, read> projected_splats: array<f32>;
@@ -16,7 +18,10 @@ const TILE_H: u32 = 16u;
 const BATCH: u32 = 256u;
 
 var<workgroup> batch: array<f32, BATCH * 9u>;
-var<workgroup> lane_done: array<u32, 1u>;
+// Pixels in this tile that are finished (saturated or outside the image).
+var<workgroup> done_count: atomic<u32>;
+// 1 once every pixel is finished; read back uniformly to break the batch loop.
+var<workgroup> all_done: u32;
 
 @compute @workgroup_size(256)
 fn rasterize(
@@ -41,7 +46,7 @@ fn rasterize(
     let end = tile_offsets[tile * 2u + 1u];
 
     if (tid == 0u) {
-        lane_done[0] = 0u;
+        atomicStore(&done_count, 0u);
     }
     workgroupBarrier();
 
@@ -65,7 +70,7 @@ fn rasterize(
         if (in_image && trans > 1e-4) {
             var s = 0u;
             loop {
-                if (s >= load_count) { break; }
+                if (s >= load_count || trans <= 1e-4) { break; }
                 let alpha_i = batch[s * 9u + 5u];
                 let dx = sample_x - batch[s * 9u + 0u];
                 let dy = sample_y - batch[s * 9u + 1u];
@@ -86,7 +91,16 @@ fn rasterize(
                 s = s + 1u;
             }
         }
+        if (!in_image || trans <= 1e-4) {
+            atomicAdd(&done_count, 1u);
+        }
         workgroupBarrier();
+        if (tid == 0u) {
+            all_done = select(0u, 1u, atomicLoad(&done_count) == 256u);
+            atomicStore(&done_count, 0u);
+        }
+        // Also the barrier that protects `batch` before the next load.
+        if (workgroupUniformLoad(&all_done) == 1u) { break; }
         batch_start = batch_end;
     }
 
