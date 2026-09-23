@@ -273,9 +273,15 @@ test gave the same list but cost 6.7 ms in `project_forward` at 1080p.)
 | 640x480 | 2.8M → 1.9M | 12 ms | **9.0 ms** |
 | 1920x1080 | 14.8M → 8.8M | 54 ms | **33.5 ms** |
 
-At 1080p the tile sort is now 21.5 of 36 ms (4 passes over 8.8M pairs,
-~7x off memory bandwidth: the scatter writes are uncoalesced), then
-`map_gaussians` (6 ms, per-thread imbalance for frame-sized splats).
+At 1080p the tile sort is now ~22 of 36 ms (4 passes over 8.8M pairs), then
+`map_gaussians` (6 ms, per-thread imbalance for frame-sized splats). Skipping
+one radix kernel at a time attributes the tile sort as: `radix_scatter` ~16 ms
+(4 ms/pass), `radix_histogram` ~6.4, `radix_scan` ~2.6, `radix_clear` ~1.3,
+copies ~1.7. Staging the scatter through shared memory so the global writes
+coalesce gave **no gain** (33.5 → 35 ms, reverted): the cost is the in-block
+ranking (16-digit Hillis-Steele over 256 threads, runtime-indexed register
+arrays that spill), not the stores. Cheaper ranking (e.g. 1-bit split passes
+on packed digit|index keys) is the next sort lever.
 
 **DX12 startup.** `Renderer::new` used to take ~10 minutes on Windows: wgpu's
 `Auto` shader-compiler choice falls back to FXC when `dxcompiler.dll` is not
