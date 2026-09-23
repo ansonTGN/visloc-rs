@@ -774,6 +774,12 @@ impl Renderer {
         self.skip_readback = skip;
     }
 
+    /// Give the GPU context back (e.g. to rebuild the renderer for a scene
+    /// with a different number of gaussians).
+    pub fn into_context(self) -> GpuContext {
+        self.ctx
+    }
+
     pub fn num_gaussians(&self) -> usize {
         self.scene.packed.num_gaussians
     }

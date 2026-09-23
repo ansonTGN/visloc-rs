@@ -9,13 +9,17 @@
 //! - [`metrics`]: image-quality metrics (PSNR) computed on display-space RGB in
 //!   `[0, 1]`, the space 3DGS trainers optimise in.
 //! - [`init`]: initial gaussians from coloured SfM points.
+//! - [`densify`]: Inria-style clone / split / prune on the host.
 //! - `trainer` (feature `gpu`): the on-device training loop.
 //!
 //! Scoring every method's splat with the same renderer, split and metric keeps
 //! comparisons (e.g. against brush) apples to apples.
 
 pub mod dataset;
+pub mod densify;
 pub mod init;
+#[cfg(feature = "gpu")]
+pub mod loss;
 pub mod metrics;
 #[cfg(feature = "gpu")]
 pub mod trainer;

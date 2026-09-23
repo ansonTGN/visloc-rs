@@ -1,9 +1,10 @@
-//! GPU trainer (M2): render -> loss gradient -> backward -> Adam, all on the
-//! device, with no per-step image transfer.
+//! GPU trainer: render -> loss gradient -> backward -> Adam, all on the
+//! device, with no per-step image transfer, plus Inria-style adaptive density
+//! control every `densify.interval` steps (on the host, see [`crate::densify`]).
 //!
-//! This first version optimises a fixed set of gaussians (no densification)
-//! with an L1 loss and per-group Adam learning rates (Inria defaults; the
-//! mean's rate is scaled by the scene extent and decays exponentially).
+//! Loss is `(1 - ssim_weight) * L1 + ssim_weight * (1 - SSIM)` (the Inria
+//! loss); per-group Adam learning rates follow the Inria defaults (the mean's
+//! rate is scaled by the scene extent and decays exponentially).
 
 use visloc_gsplat_core::camera::CameraView;
 use visloc_gsplat_core::cpu_render::Image;
@@ -11,6 +12,8 @@ use visloc_gsplat_core::gaussian::{Gaussian, Scene};
 use visloc_gsplat_render::{GpuContext, GpuError, Renderer};
 
 use crate::dataset::{load_view_rgb, Dataset, DatasetError, View};
+use crate::densify::{densify, reset_opacity, DensifyConfig, DensifyReport, Group, Population};
+use crate::loss::{SsimBinds, SsimKernels};
 
 /// Training hyper-parameters.
 #[derive(Debug, Clone)]
@@ -26,6 +29,10 @@ pub struct TrainConfig {
     pub lr_sh_rest: f32,
     pub background: [f32; 3],
     pub seed: u64,
+    /// Weight of the D-SSIM term (0 = pure L1).
+    pub ssim_weight: f32,
+    /// `None` keeps the initial gaussians fixed in number.
+    pub densify: Option<DensifyConfig>,
 }
 
 impl Default for TrainConfig {
@@ -41,6 +48,8 @@ impl Default for TrainConfig {
             lr_sh_rest: 2.5e-3 / 20.0,
             background: [0.0; 3],
             seed: 42,
+            ssim_weight: 0.2,
+            densify: Some(DensifyConfig::default()),
         }
     }
 }
@@ -61,6 +70,8 @@ pub enum TrainError {
 struct AdamGroup {
     uniforms: wgpu::Buffer,
     bind: wgpu::BindGroup,
+    m1: wgpu::Buffer,
+    m2: wgpu::Buffer,
     n: u32,
     stride: u32,
     split_a: u32,
@@ -84,23 +95,48 @@ struct AdamUniforms {
     bc2: f32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct StatsUniforms {
+    num_visible: u32,
+    half_w: f32,
+    half_h: f32,
+    pad0: u32,
+}
+
+/// Everything sized by the gaussian count; rebuilt after densification.
+struct SceneState {
+    renderer: Renderer,
+    loss_binds: Vec<wgpu::BindGroup>,
+    ssim_binds: Vec<SsimBinds>,
+    adam: [AdamGroup; 3],
+    grad_accum: wgpu::Buffer,
+    grad_count: wgpu::Buffer,
+    stats_bind: wgpu::BindGroup,
+}
+
 /// The trainer. Owns the renderer (and so the scene on the GPU).
 pub struct Trainer {
-    renderer: Renderer,
+    state: Option<SceneState>,
     cfg: TrainConfig,
     views: Vec<View>,
     width: u32,
     height: u32,
     extent: f32,
+    sh_degree: u32,
+    gt: Vec<wgpu::Buffer>,
     loss_pipeline: wgpu::ComputePipeline,
-    loss_binds: Vec<wgpu::BindGroup>,
+    loss_uniforms: wgpu::Buffer,
     loss_acc: wgpu::Buffer,
     loss_steps: usize,
+    ssim: SsimKernels,
     adam_pipeline: wgpu::ComputePipeline,
-    adam: [AdamGroup; 3],
+    stats_pipeline: wgpu::ComputePipeline,
+    stats_uniforms: wgpu::Buffer,
     step: usize,
     order: Vec<usize>,
     rng: u64,
+    last_densify: Option<DensifyReport>,
 }
 
 fn storage(dev: &wgpu::Device, label: &str, bytes: u64) -> wgpu::Buffer {
@@ -176,6 +212,55 @@ fn pack_rgba8(rgb: &[[f32; 3]]) -> Vec<u32> {
         .collect()
 }
 
+/// Blocking read of `len` f32 values from a device buffer.
+fn read_f32(dev: &wgpu::Device, queue: &wgpu::Queue, buf: &wgpu::Buffer, len: usize) -> Vec<f32> {
+    if len == 0 {
+        return Vec::new();
+    }
+    let bytes = (len * 4) as u64;
+    let staging = dev.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("read_f32"),
+        size: bytes,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    enc.copy_buffer_to_buffer(buf, 0, &staging, 0, bytes);
+    queue.submit(Some(enc.finish()));
+    let slice = staging.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    dev.poll(wgpu::PollType::wait_indefinitely()).ok();
+    let _ = rx.recv();
+    let out = bytemuck::cast_slice(&slice.get_mapped_range().expect("map")).to_vec();
+    staging.unmap();
+    out
+}
+
+/// Gaussians from a population (the device parameter layouts).
+fn population_to_scene(pop: &Population, degree: u32) -> Scene {
+    let cpc2 = ((degree + 1) * (degree + 1)) as usize;
+    let (t, o, sh) = (&pop.transforms.values, &pop.opacity.values, &pop.sh.values);
+    let gaussians = (0..o.len())
+        .map(|i| {
+            let r = &t[i * 10..i * 10 + 10];
+            let s = &sh[i * 3 * cpc2..(i + 1) * 3 * cpc2];
+            Gaussian {
+                mean: nalgebra::Vector3::new(r[0], r[1], r[2]),
+                rotation: nalgebra::Quaternion::new(r[3], r[4], r[5], r[6]),
+                scale_log: nalgebra::Vector3::new(r[7], r[8], r[9]),
+                opacity_logit: o[i],
+                sh_dc: [s[0], s[1], s[2]],
+                sh_rest: s[3..].to_vec(),
+                sh_degree: degree,
+            }
+        })
+        .collect();
+    Scene::new(gaussians, degree)
+}
+
 impl Trainer {
     /// Upload `init` and the dataset's training images and build the kernels.
     pub fn new(
@@ -206,14 +291,15 @@ impl Trainer {
                 .fold(0.0f32, f32::max)
                 .max(1e-3);
 
-        let mut renderer = Renderer::new(ctx, init, width, height)?;
-        renderer.set_skip_readback(true);
+        let dev = ctx.device.clone();
+        let queue = ctx.queue.clone();
         let npix = (width * height) as u64;
-
-        let dev = renderer.ctx.device.clone();
-        let queue = renderer.ctx.queue.clone();
-
-        // Loss: one bind group per training view (its ground-truth buffer).
+        let mut gt = Vec::with_capacity(views.len());
+        for v in &views {
+            let b = storage(&dev, "gt", npix * 4);
+            queue.write_buffer(&b, 0, bytemuck::cast_slice(&pack_rgba8(&load_view_rgb(v)?)));
+            gt.push(b);
+        }
         let loss_pipeline = pipeline(
             &dev,
             "loss_l1",
@@ -221,32 +307,84 @@ impl Trainer {
             "loss_l1",
         );
         let loss_uniforms = uniform(&dev, "loss_uniforms", 16);
+        let l1_weight = 1.0 - cfg.ssim_weight;
         queue.write_buffer(
             &loss_uniforms,
             0,
-            bytemuck::cast_slice(&[npix as u32, 0u32, 0, 0]),
+            bytemuck::cast_slice(&[npix as u32, l1_weight.to_bits(), 0, 0]),
         );
         let loss_acc = storage(&dev, "loss_acc", 4);
+        let ssim = SsimKernels::new(&dev, width, height);
+        ssim.set_weight(&queue, cfg.ssim_weight);
+        let adam_pipeline = pipeline(&dev, "adam", include_str!("shaders/adam.wgsl"), "adam");
+        let stats_pipeline = pipeline(
+            &dev,
+            "densify_stats",
+            include_str!("shaders/densify_stats.wgsl"),
+            "densify_stats",
+        );
+        let stats_uniforms = uniform(&dev, "stats_uniforms", 16);
+
+        let mut trainer = Self {
+            state: None,
+            views,
+            width,
+            height,
+            extent,
+            sh_degree: init.sh_degree,
+            gt,
+            loss_pipeline,
+            loss_uniforms,
+            loss_acc,
+            loss_steps: 0,
+            ssim,
+            adam_pipeline,
+            stats_pipeline,
+            stats_uniforms,
+            step: 0,
+            order: Vec::new(),
+            rng: cfg.seed.max(1),
+            cfg,
+            last_densify: None,
+        };
+        trainer.order = (0..trainer.views.len()).collect();
+        trainer.build_state(ctx, init, None)?;
+        Ok(trainer)
+    }
+
+    /// (Re)build everything sized by the gaussian count. `moments` carries
+    /// Adam state across densification (zeros when `None`).
+    fn build_state(
+        &mut self,
+        ctx: GpuContext,
+        scene: &Scene,
+        moments: Option<&Population>,
+    ) -> Result<(), TrainError> {
+        let mut renderer = Renderer::new(ctx, scene, self.width, self.height)?;
+        renderer.set_skip_readback(true);
+        let dev = renderer.ctx.device.clone();
+        let queue = renderer.ctx.queue.clone();
+
         let out_img = renderer.output_buffer().clone();
         let d_image = renderer.d_image_buffer()?.clone();
-        let mut loss_binds = Vec::with_capacity(views.len());
-        for v in &views {
-            let gt = storage(&dev, "gt", npix * 4);
-            queue.write_buffer(
-                &gt,
-                0,
-                bytemuck::cast_slice(&pack_rgba8(&load_view_rgb(v)?)),
-            );
-            loss_binds.push(bind(
-                &dev,
-                &loss_pipeline,
-                "loss",
-                &[&loss_uniforms, &out_img, &gt, &d_image, &loss_acc],
-            ));
-        }
+        let loss_binds = self
+            .gt
+            .iter()
+            .map(|g| {
+                bind(
+                    &dev,
+                    &self.loss_pipeline,
+                    "loss",
+                    &[&self.loss_uniforms, &out_img, g, &d_image, &self.loss_acc],
+                )
+            })
+            .collect();
+        let ssim_binds = self
+            .gt
+            .iter()
+            .map(|g| self.ssim.bind(&dev, &out_img, g, &d_image))
+            .collect();
 
-        // Adam: moments per parameter buffer.
-        let adam_pipeline = pipeline(&dev, "adam", include_str!("shaders/adam.wgsl"), "adam");
         let params = renderer.param_buffers();
         let (pt, po, ps) = (
             params.transforms.clone(),
@@ -259,16 +397,29 @@ impl Trainer {
             grads.opacity.clone(),
             grads.sh.clone(),
         );
-        let n = init.len() as u32;
-        let cpc2 = (init.sh_degree + 1) * (init.sh_degree + 1);
-        let mk_group = |label: &str, p: &wgpu::Buffer, g: &wgpu::Buffer, len: u32, stride, a, b| {
+        let n = scene.len() as u32;
+        let cpc2 = (scene.sh_degree + 1) * (scene.sh_degree + 1);
+        let mk_group = |label: &str,
+                        p: &wgpu::Buffer,
+                        g: &wgpu::Buffer,
+                        stride: u32,
+                        a: u32,
+                        b: u32,
+                        init: Option<&Group>| {
+            let len = n * stride;
             let m1 = storage(&dev, label, len as u64 * 4);
             let m2 = storage(&dev, label, len as u64 * 4);
+            if let Some(src) = init {
+                queue.write_buffer(&m1, 0, bytemuck::cast_slice(&src.m1));
+                queue.write_buffer(&m2, 0, bytemuck::cast_slice(&src.m2));
+            }
             let u = uniform(&dev, label, std::mem::size_of::<AdamUniforms>() as u64);
-            let bg = bind(&dev, &adam_pipeline, label, &[&u, p, g, &m1, &m2]);
+            let bg = bind(&dev, &self.adam_pipeline, label, &[&u, p, g, &m1, &m2]);
             AdamGroup {
                 uniforms: u,
                 bind: bg,
+                m1,
+                m2,
                 n: len,
                 stride,
                 split_a: a,
@@ -277,30 +428,43 @@ impl Trainer {
         };
         let adam = [
             // mean | quat | log-scale
-            mk_group("adam_transforms", &pt, &gt, n * 10, 10, 3, 7),
-            mk_group("adam_opacity", &po, &go, n, 1, 1, 1),
+            mk_group("adam_t", &pt, &gt, 10, 3, 7, moments.map(|m| &m.transforms)),
+            mk_group("adam_o", &po, &go, 1, 1, 1, moments.map(|m| &m.opacity)),
             // DC | rest
-            mk_group("adam_sh", &ps, &gs, n * 3 * cpc2, 3 * cpc2, 3, 3 * cpc2),
+            mk_group(
+                "adam_sh",
+                &ps,
+                &gs,
+                3 * cpc2,
+                3,
+                3 * cpc2,
+                moments.map(|m| &m.sh),
+            ),
         ];
 
-        let order: Vec<usize> = (0..views.len()).collect();
-        Ok(Self {
+        let grad_accum = storage(&dev, "grad_accum", n as u64 * 4);
+        let grad_count = storage(&dev, "grad_count", n as u64 * 4);
+        let (gfc, screen, _) = renderer.screen_grad_buffers()?;
+        let stats_bind = bind(
+            &dev,
+            &self.stats_pipeline,
+            "stats",
+            &[&self.stats_uniforms, gfc, screen, &grad_accum, &grad_count],
+        );
+        self.state = Some(SceneState {
             renderer,
-            views,
-            width,
-            height,
-            extent,
-            loss_pipeline,
             loss_binds,
-            loss_acc,
-            loss_steps: 0,
-            adam_pipeline,
+            ssim_binds,
             adam,
-            step: 0,
-            order,
-            rng: cfg.seed.max(1),
-            cfg,
-        })
+            grad_accum,
+            grad_count,
+            stats_bind,
+        });
+        Ok(())
+    }
+
+    fn st(&self) -> &SceneState {
+        self.state.as_ref().expect("trainer state")
     }
 
     /// Steps taken so far.
@@ -308,9 +472,19 @@ impl Trainer {
         self.step
     }
 
+    /// Current number of gaussians.
+    pub fn num_gaussians(&self) -> usize {
+        self.st().renderer.num_gaussians()
+    }
+
     /// Scene extent used to scale the mean learning rate.
     pub fn extent(&self) -> f32 {
         self.extent
+    }
+
+    /// The report of the densification run by the last [`Trainer::step`], if any.
+    pub fn take_densify_report(&mut self) -> Option<DensifyReport> {
+        self.last_densify.take()
     }
 
     fn next_view(&mut self) -> usize {
@@ -332,11 +506,19 @@ impl Trainer {
     pub fn step(&mut self) -> Result<(), TrainError> {
         let vi = self.next_view();
         let view = self.views[vi].camera;
-        let _ = self.renderer.render(&view, self.cfg.background);
-
-        let dev = self.renderer.ctx.device.clone();
-        let queue = self.renderer.ctx.queue.clone();
+        let bg = self.cfg.background;
+        let densifying = self
+            .cfg
+            .densify
+            .as_ref()
+            .is_some_and(|d| self.step < d.stop);
         let npix = self.width * self.height;
+        let (half_w, half_h) = (self.width as f32 * 0.5, self.height as f32 * 0.5);
+
+        let st = self.state.as_mut().expect("trainer state");
+        let _ = st.renderer.render(&view, bg);
+        let dev = st.renderer.ctx.device.clone();
+        let queue = st.renderer.ctx.queue.clone();
         {
             let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("loss"),
@@ -344,17 +526,20 @@ impl Trainer {
             {
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
                 pass.set_pipeline(&self.loss_pipeline);
-                pass.set_bind_group(0, &self.loss_binds[vi], &[]);
+                pass.set_bind_group(0, &st.loss_binds[vi], &[]);
                 let (x, y) = groups_2d(npix);
                 pass.dispatch_workgroups(x, y, 1);
+                if self.cfg.ssim_weight > 0.0 {
+                    self.ssim.encode(&mut pass, &st.ssim_binds[vi]);
+                }
             }
             queue.submit(Some(enc.finish()));
         }
         self.loss_steps += 1;
 
-        self.renderer.backward_on_device()?;
+        st.renderer.backward_on_device()?;
 
-        // Adam with bias correction; exponential mean-LR decay.
+        // Densification statistics, then Adam (bias-corrected, mean-LR decay).
         let t = (self.step + 1) as f32;
         let (beta1, beta2) = (0.9f32, 0.999f32);
         let frac = (self.step as f32 / self.cfg.steps.max(1) as f32).min(1.0);
@@ -370,13 +555,26 @@ impl Trainer {
             ),
             (self.cfg.lr_sh_dc, self.cfg.lr_sh_rest, self.cfg.lr_sh_rest),
         ];
+        let nv = st.renderer.screen_grad_buffers()?.2 as u32;
         let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("adam"),
         });
         {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            if densifying && nv > 0 {
+                let su = StatsUniforms {
+                    num_visible: nv,
+                    half_w,
+                    half_h,
+                    pad0: 0,
+                };
+                queue.write_buffer(&self.stats_uniforms, 0, bytemuck::bytes_of(&su));
+                pass.set_pipeline(&self.stats_pipeline);
+                pass.set_bind_group(0, &st.stats_bind, &[]);
+                pass.dispatch_workgroups(nv.div_ceil(256), 1, 1);
+            }
             pass.set_pipeline(&self.adam_pipeline);
-            for (g, (a, b, c)) in self.adam.iter().zip(lrs) {
+            for (g, (a, b, c)) in st.adam.iter().zip(lrs) {
                 let u = AdamUniforms {
                     n: g.n,
                     stride: g.stride,
@@ -399,69 +597,110 @@ impl Trainer {
         }
         queue.submit(Some(enc.finish()));
         self.step += 1;
+
+        if let Some(d) = self.cfg.densify.clone() {
+            let s = self.step;
+            let at_densify = s >= d.start && s <= d.stop && s % d.interval == 0;
+            let at_reset = s < d.stop && s % d.opacity_reset_interval == 0;
+            if at_densify || at_reset {
+                self.densify_now(&d, at_densify, at_reset)?;
+            }
+        }
         Ok(())
+    }
+
+    /// Download the population with its Adam moments.
+    fn download(&self) -> Population {
+        let st = self.st();
+        let r = &st.renderer;
+        let (dev, queue) = (&r.ctx.device, &r.ctx.queue);
+        let (t, o, sh) = r.read_params();
+        let group = |values: Vec<f32>, g: &AdamGroup| Group {
+            stride: g.stride as usize,
+            m1: read_f32(dev, queue, &g.m1, values.len()),
+            m2: read_f32(dev, queue, &g.m2, values.len()),
+            values,
+        };
+        Population {
+            transforms: group(t, &st.adam[0]),
+            opacity: group(o, &st.adam[1]),
+            sh: group(sh, &st.adam[2]),
+        }
+    }
+
+    fn densify_now(
+        &mut self,
+        d: &DensifyConfig,
+        grow: bool,
+        reset: bool,
+    ) -> Result<(), TrainError> {
+        let mut pop = self.download();
+        let n = pop.len();
+        if grow {
+            let st = self.st();
+            let (dev, queue) = (&st.renderer.ctx.device, &st.renderer.ctx.queue);
+            let accum = read_f32(dev, queue, &st.grad_accum, n);
+            let count = read_f32(dev, queue, &st.grad_count, n);
+            let prune_large = self.step > d.opacity_reset_interval;
+            let seed = self.cfg.seed ^ (self.step as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            let (next, report) = densify(&pop, &accum, &count, self.extent, d, prune_large, seed);
+            pop = next;
+            self.last_densify = Some(report);
+        }
+        if reset {
+            reset_opacity(&mut pop, 0.01);
+        }
+        let scene = population_to_scene(&pop, self.sh_degree);
+        let ctx = self
+            .state
+            .take()
+            .expect("trainer state")
+            .renderer
+            .into_context();
+        self.build_state(ctx, &scene, Some(&pop))
     }
 
     /// Mean L1 loss over the steps since the last call (reads the device).
     pub fn take_mean_loss(&mut self) -> f32 {
-        let dev = &self.renderer.ctx.device;
-        let queue = &self.renderer.ctx.queue;
-        let staging = dev.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("loss_read"),
-            size: 4,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let st = self.st();
+        let (dev, queue) = (&st.renderer.ctx.device, &st.renderer.ctx.queue);
+        let v = read_f32(dev, queue, &self.loss_acc, 1);
+        let bits = v.first().map(|x| x.to_bits()).unwrap_or(0);
         let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        enc.copy_buffer_to_buffer(&self.loss_acc, 0, &staging, 0, 4);
         enc.clear_buffer(&self.loss_acc, 0, None);
         queue.submit(Some(enc.finish()));
-        let slice = staging.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        dev.poll(wgpu::PollType::wait_indefinitely()).ok();
-        let _ = rx.recv();
-        let v = {
-            let data = slice.get_mapped_range().expect("map");
-            u32::from_le_bytes([data[0], data[1], data[2], data[3]])
-        };
-        staging.unmap();
         let steps = self.loss_steps.max(1);
         self.loss_steps = 0;
-        v as f32 * 1e-6 / steps as f32
+        bits as f32 * 1e-6 / steps as f32
     }
 
     /// Render a view (with image readback), e.g. for evaluation.
     pub fn render(&mut self, view: &CameraView) -> Image {
-        self.renderer.set_skip_readback(false);
-        let img = self.renderer.render(view, self.cfg.background);
-        self.renderer.set_skip_readback(true);
+        let bg = self.cfg.background;
+        let r = &mut self.state.as_mut().expect("trainer state").renderer;
+        r.set_skip_readback(false);
+        let img = r.render(view, bg);
+        r.set_skip_readback(true);
         img
     }
 
     /// Download the current gaussians as a [`Scene`].
     pub fn scene(&self) -> Scene {
-        let (t, o, sh) = self.renderer.read_params();
-        let degree = self.renderer.scene.packed.sh_degree;
-        let cpc2 = ((degree + 1) * (degree + 1)) as usize;
-        let n = o.len();
-        let gaussians = (0..n)
-            .map(|i| {
-                let r = &t[i * 10..i * 10 + 10];
-                let s = &sh[i * 3 * cpc2..(i + 1) * 3 * cpc2];
-                Gaussian {
-                    mean: nalgebra::Vector3::new(r[0], r[1], r[2]),
-                    rotation: nalgebra::Quaternion::new(r[3], r[4], r[5], r[6]),
-                    scale_log: nalgebra::Vector3::new(r[7], r[8], r[9]),
-                    opacity_logit: o[i],
-                    sh_dc: [s[0], s[1], s[2]],
-                    sh_rest: s[3..].to_vec(),
-                    sh_degree: degree,
-                }
-            })
-            .collect();
-        Scene::new(gaussians, degree)
+        let (t, o, sh) = self.st().renderer.read_params();
+        let group = |stride: usize, values: Vec<f32>| Group {
+            stride,
+            m1: Vec::new(),
+            m2: Vec::new(),
+            values,
+        };
+        let cpc2 = ((self.sh_degree + 1) * (self.sh_degree + 1)) as usize;
+        population_to_scene(
+            &Population {
+                transforms: group(10, t),
+                opacity: group(1, o),
+                sh: group(3 * cpc2, sh),
+            },
+            self.sh_degree,
+        )
     }
 }

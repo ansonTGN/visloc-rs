@@ -1,10 +1,11 @@
-// L1 photometric loss gradient: d_image = sign(render - gt) / (3 * npix),
-// the gradient of mean |render - gt| over all pixels and channels. Also
-// accumulates the loss (fixed point, 1e-6 units) for logging.
+// L1 photometric loss gradient: d_image = weight * sign(render - gt) /
+// (3 * npix), the gradient of weight * mean |render - gt| over all pixels and
+// channels (the SSIM term, if any, is added afterwards). Also accumulates the
+// unweighted mean L1 (fixed point, 1e-6 units) for logging.
 
 struct LossUniforms {
     npix: u32,
-    pad0: u32,
+    weight: f32,
     pad1: u32,
     pad2: u32,
 };
@@ -35,7 +36,7 @@ fn loss_l1(
     let r = vec3<f32>(render[i * 3u], render[i * 3u + 1u], render[i * 3u + 2u]);
     let diff = r - g;
     let scale = 1.0 / (3.0 * f32(lu.npix));
-    let d = sign(diff) * scale;
+    let d = sign(diff) * (lu.weight * scale);
     d_image[i * 3u] = d.x;
     d_image[i * 3u + 1u] = d.y;
     d_image[i * 3u + 2u] = d.z;

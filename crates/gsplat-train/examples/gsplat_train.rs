@@ -32,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--out" => out = PathBuf::from(next()?),
             "--steps" => cfg.steps = next()?.parse()?,
             "--eval-every" => eval_every = next()?.parse()?,
+            "--no-densify" => cfg.densify = None,
             other => return Err(format!("unknown argument {other}").into()),
         }
     }
@@ -77,14 +78,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     for step in 1..=cfg.steps {
         trainer.step()?;
+        if let Some(r) = trainer.take_densify_report() {
+            if step % 1000 == 0 {
+                println!(
+                    "  densify @{step}: {} -> {} (+{} clone, +{} split, -{} prune)",
+                    r.before, r.after, r.cloned, r.split, r.pruned
+                );
+            }
+        }
         if step % 100 == 0 {
             let loss = trainer.take_mean_loss();
             if step % eval_every == 0 || step == cfg.steps {
                 let train_s = train_start.elapsed().as_secs_f64();
                 let p = eval(&mut trainer);
-                println!("step {step:6}  l1 {loss:.4}  eval psnr {p:.3}  ({train_s:.0}s)");
+                println!(
+                    "step {step:6}  l1 {loss:.4}  eval psnr {p:.3}  gaussians {}  ({train_s:.0}s)",
+                    trainer.num_gaussians()
+                );
             } else if step % 500 == 0 {
-                println!("step {step:6}  l1 {loss:.4}");
+                println!(
+                    "step {step:6}  l1 {loss:.4}  gaussians {}",
+                    trainer.num_gaussians()
+                );
             }
         }
     }
