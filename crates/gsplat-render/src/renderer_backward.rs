@@ -195,19 +195,23 @@ impl Renderer {
         Ok(())
     }
 
-    /// Run the backward kernels for the last rendered frame.
-    fn run_backward(&mut self, d_image: &[[f32; 3]]) -> Result<(), GpuError> {
-        assert_eq!(
-            d_image.len(),
-            (self.image_w * self.image_h) as usize,
-            "d_image must match the render size"
-        );
+    /// Run the backward kernels for the last rendered frame, uploading
+    /// `d_image` first unless it is `None` (already written on the device, e.g.
+    /// by a loss kernel into [`Renderer::d_image_buffer`]).
+    fn run_backward(&mut self, d_image: Option<&[[f32; 3]]>) -> Result<(), GpuError> {
         self.ensure_backward()?;
         let frame = self.last_frame;
         let st = self.backward.as_ref().expect("ensured above");
         let dev = &self.ctx.device;
         let queue = &self.ctx.queue;
-        queue.write_buffer(&st.d_image, 0, bytemuck::cast_slice(d_image));
+        if let Some(d_image) = d_image {
+            assert_eq!(
+                d_image.len(),
+                (self.image_w * self.image_h) as usize,
+                "d_image must match the render size"
+            );
+            queue.write_buffer(&st.d_image, 0, bytemuck::cast_slice(d_image));
+        }
         let mut encoder = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("backward"),
         });
@@ -248,7 +252,7 @@ impl Renderer {
         &mut self,
         d_image: &[[f32; 3]],
     ) -> Result<Vec<[f32; SCREEN_GRAD_FLOATS]>, GpuError> {
-        self.run_backward(d_image)?;
+        self.run_backward(Some(d_image))?;
         let frame = self.last_frame;
         let mut out = vec![[0.0f32; SCREEN_GRAD_FLOATS]; self.num_gaussians()];
         if frame.nv == 0 {
@@ -277,7 +281,7 @@ impl Renderer {
     /// Parameter gradients of `L = sum_px dot(d_image[px], C[px])` for the last
     /// rendered frame (see [`ParamGrads`]), read back to the host.
     pub fn backward(&mut self, d_image: &[[f32; 3]]) -> Result<ParamGrads, GpuError> {
-        self.run_backward(d_image)?;
+        self.run_backward(Some(d_image))?;
         let st = self.backward.as_ref().expect("ensured above");
         let dev = &self.ctx.device;
         let queue = &self.ctx.queue;
@@ -291,4 +295,82 @@ impl Renderer {
             sh: read(&st.grad_sh, self.scene.packed.sh.len()),
         })
     }
+    /// Run the backward pass with `dL/dC` already on the device in
+    /// [`Renderer::d_image_buffer`]; gradients stay on the device in
+    /// [`Renderer::grad_buffers`] (for an on-device optimizer).
+    pub fn backward_on_device(&mut self) -> Result<(), GpuError> {
+        self.run_backward(None)
+    }
+
+    /// The scene's parameter buffers (forward inputs; an optimizer updates
+    /// them in place).
+    pub fn param_buffers(&self) -> DeviceParams<'_> {
+        DeviceParams {
+            transforms: &self.scene.transforms,
+            opacity: &self.scene.opacity,
+            sh: &self.scene.sh,
+        }
+    }
+
+    /// Gradient buffers written by the backward pass (same layouts as
+    /// [`Renderer::param_buffers`]).
+    pub fn grad_buffers(&mut self) -> Result<DeviceParams<'_>, GpuError> {
+        self.ensure_backward()?;
+        let st = self.backward.as_ref().expect("ensured above");
+        Ok(DeviceParams {
+            transforms: &st.grad_transforms,
+            opacity: &st.grad_opacity,
+            sh: &st.grad_sh,
+        })
+    }
+
+    /// `dL/dC` input of the backward pass: row-major RGB `f32`, render size.
+    pub fn d_image_buffer(&mut self) -> Result<&wgpu::Buffer, GpuError> {
+        self.ensure_backward()?;
+        Ok(&self.backward.as_ref().expect("ensured above").d_image)
+    }
+
+    /// The rendered image of the last frame: row-major RGB `f32` (valid after
+    /// [`Renderer::render`] even with `set_skip_readback(true)`).
+    pub fn output_buffer(&self) -> &wgpu::Buffer {
+        &self.out_img
+    }
+
+    /// Per visible gaussian of the last frame (compact order): its scene index
+    /// and the screen-space gradient record, as device buffers, plus the
+    /// visible count. For densification statistics.
+    pub fn screen_grad_buffers(
+        &mut self,
+    ) -> Result<(&wgpu::Buffer, &wgpu::Buffer, usize), GpuError> {
+        self.ensure_backward()?;
+        let st = self.backward.as_ref().expect("ensured above");
+        Ok((
+            &self.scratch.global_from_compact,
+            &st.screen_grads,
+            self.last_frame.nv,
+        ))
+    }
+
+    /// Read the current parameters back into a [`crate::packing::PackedScene`]
+    /// layout: `(transforms, opacity, sh)`.
+    pub fn read_params(&self) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        let dev = &self.ctx.device;
+        let queue = &self.ctx.queue;
+        let p = &self.scene.packed;
+        let read = |buf: &wgpu::Buffer, len: usize| -> Vec<f32> {
+            bytemuck::cast_slice(&read_bytes(dev, queue, buf, len * 4)).to_vec()
+        };
+        (
+            read(&self.scene.transforms, p.transforms.len()),
+            read(&self.scene.opacity, p.opacity.len()),
+            read(&self.scene.sh, p.sh.len()),
+        )
+    }
+}
+
+/// Borrowed device buffers of one parameter set (see [`ParamGrads`] layouts).
+pub struct DeviceParams<'a> {
+    pub transforms: &'a wgpu::Buffer,
+    pub opacity: &'a wgpu::Buffer,
+    pub sh: &'a wgpu::Buffer,
 }

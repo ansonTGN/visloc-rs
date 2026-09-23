@@ -54,7 +54,7 @@ pub use packing::{PackedScene, TRANSFORM_FLOATS};
 #[cfg(feature = "gpu")]
 pub use gpu::{try_context, GpuContext, GpuError};
 #[cfg(feature = "gpu")]
-pub use renderer::{GpuScene, Renderer};
+pub use renderer::{DeviceParams, GpuScene, ParamGrads, Renderer, SCREEN_GRAD_FLOATS};
 #[cfg(feature = "gpu")]
 pub use sort::{RadixParams, RadixSorter, SortBuffers};
 #[cfg(feature = "gpu")]

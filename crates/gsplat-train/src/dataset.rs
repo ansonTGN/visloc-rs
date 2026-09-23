@@ -7,7 +7,8 @@
 //! <root>/sparse/0/cameras.txt   (or sparse/, text or binary)
 //! ```
 //!
-//! Views are sorted by image name and every `eval_every`-th one (index 0, N,
+//! Image names come from the text `images.txt` (the visloc map keeps only
+//! ids). Views are sorted by image name and every `eval_every`-th one (index 0, N,
 //! 2N, ...) is held out, matching brush's and the Inria code's split so scores
 //! are comparable. Cameras must be pinhole: undistort first.
 
@@ -24,6 +25,13 @@ use visloc_gsplat_core::gaussian::Scene;
 pub enum DatasetError {
     #[error("no COLMAP model under {0} (looked in sparse/0 and sparse)")]
     NoModel(PathBuf),
+    #[error("reading {path}: {source}")]
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("image id {0} has no name in images.txt")]
+    UnnamedImage(u64),
     #[error(transparent)]
     Colmap(#[from] ColmapSceneError),
     #[error("image {path}: {source}")]
@@ -70,17 +78,20 @@ pub fn load_colmap_dataset(
         .find(|d| d.join("cameras.txt").exists() || d.join("cameras.bin").exists())
         .ok_or_else(|| DatasetError::NoModel(root.to_path_buf()))?;
     let colmap = load_colmap_scene(&model_dir, DEFAULT_SEED_LOG_SCALE)?;
+    let names = read_image_names(&model_dir.join("images.txt"))?;
 
-    let mut views: Vec<View> = colmap
-        .image_names
-        .iter()
-        .zip(colmap.views)
-        .map(|(name, camera)| View {
-            name: name.clone(),
+    let mut views = Vec::with_capacity(colmap.views.len());
+    for (id, camera) in colmap.image_ids.iter().zip(colmap.views) {
+        let name = names
+            .get(id)
+            .ok_or(DatasetError::UnnamedImage(*id))?
+            .clone();
+        views.push(View {
+            image_path: root.join("images").join(&name),
+            name,
             camera,
-            image_path: root.join("images").join(name),
-        })
-        .collect();
+        });
+    }
     views.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut train = Vec::new();
@@ -96,6 +107,32 @@ pub fn load_colmap_dataset(
         train,
         eval,
     })
+}
+
+/// `IMAGE_ID -> NAME` from a COLMAP text `images.txt` (pose lines are
+/// `ID QW QX QY QZ TX TY TZ CAMERA_ID NAME`, each followed by a points line).
+fn read_image_names(path: &Path) -> Result<std::collections::HashMap<u64, String>, DatasetError> {
+    let text = std::fs::read_to_string(path).map_err(|source| DatasetError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut names = std::collections::HashMap::new();
+    let mut pose_line = true;
+    for line in text.lines() {
+        if line.starts_with('#') {
+            continue;
+        }
+        if pose_line {
+            let t: Vec<&str> = line.split_whitespace().collect();
+            if t.len() >= 10 {
+                if let Ok(id) = t[0].parse::<u64>() {
+                    names.insert(id, t[9..].join(" "));
+                }
+            }
+        }
+        pose_line = !pose_line;
+    }
+    Ok(names)
 }
 
 /// Load a view's image as row-major RGB in `[0, 1]`, checking it matches the

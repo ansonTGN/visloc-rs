@@ -35,8 +35,12 @@ pub enum ColmapSceneError {
 pub struct ColmapScene {
     pub scene: Scene,
     pub views: Vec<CameraView>,
-    /// Image names in the same order as `views` (for matching training images).
+    /// Placeholder names `frame_{id:06}.png` in the same order as `views`
+    /// (the visloc map does not keep COLMAP image names; use `image_ids` with
+    /// the model's `images.txt` to recover them).
     pub image_names: Vec<String>,
+    /// COLMAP `IMAGE_ID` of each view, in the same order as `views`.
+    pub image_ids: Vec<u64>,
 }
 
 /// Initial isotropic log-scale for the seed gaussians.
@@ -99,6 +103,7 @@ pub fn scene_from_visual_map(
     keyframe_ids.sort_unstable();
     let mut views = Vec::with_capacity(keyframe_ids.len());
     let mut image_names = Vec::with_capacity(keyframe_ids.len());
+    let mut image_ids = Vec::with_capacity(keyframe_ids.len());
     for id in keyframe_ids {
         let kf = &map.keyframes[&id];
         let Some(pose) = kf.frame.pose.as_ref() else {
@@ -111,6 +116,7 @@ pub fn scene_from_visual_map(
         let view = camera_view_from(camera, pose)?;
         views.push(view);
         image_names.push(format!("frame_{id:06}.png"));
+        image_ids.push(id);
     }
     if views.is_empty() {
         return Err(ColmapSceneError::NoImages);
@@ -120,6 +126,7 @@ pub fn scene_from_visual_map(
         scene: Scene::new(gaussians, 0),
         views,
         image_names,
+        image_ids,
     })
 }
 

@@ -8,9 +8,14 @@
 //!   view is held out).
 //! - [`metrics`]: image-quality metrics (PSNR) computed on display-space RGB in
 //!   `[0, 1]`, the space 3DGS trainers optimise in.
+//! - [`init`]: initial gaussians from coloured SfM points.
+//! - `trainer` (feature `gpu`): the on-device training loop.
 //!
 //! Scoring every method's splat with the same renderer, split and metric keeps
 //! comparisons (e.g. against brush) apples to apples.
 
 pub mod dataset;
+pub mod init;
 pub mod metrics;
+#[cfg(feature = "gpu")]
+pub mod trainer;

@@ -1144,3 +1144,4 @@ impl StageTimer {
 
 #[path = "renderer_backward.rs"]
 mod backward;
+pub use backward::{DeviceParams, ParamGrads, SCREEN_GRAD_FLOATS};
