@@ -26,6 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg = TrainConfig::default();
     let mut eval_every = 1000usize;
     let mut export_steps: Vec<usize> = Vec::new();
+    let mut init_ply: Option<PathBuf> = None;
     while let Some(a) = args.next() {
         let mut next = || args.next().ok_or(format!("{a} needs a value"));
         match a.as_str() {
@@ -34,6 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--steps" => cfg.steps = next()?.parse()?,
             "--eval-every" => eval_every = next()?.parse()?,
             "--no-densify" => cfg.densify = None,
+            "--init-ply" => init_ply = Some(PathBuf::from(next()?)),
             "--export-steps" => {
                 export_steps = next()?
                     .split(',')
@@ -51,7 +53,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .find(|d| d.join("points3D.txt").exists())
         .ok_or("no sparse/0/points3D.txt")?;
     let points = read_points3d_txt(model.join("points3D.txt"))?;
-    let init = seed_scene(&points, 3);
+    let init = match &init_ply {
+        Some(p) => visloc_gsplat_core::ply::load_ply(p)?,
+        None => seed_scene(&points, 3),
+    };
     println!(
         "{} points, {} train / {} eval views",
         points.len(),
@@ -103,6 +108,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if step % 100 == 0 {
             let loss = trainer.take_mean_loss();
+            if let Some(p) = trainer.take_profile() {
+                let line: Vec<String> = p
+                    .stages
+                    .iter()
+                    .map(|(n, ms, c)| format!("{n} {:.1}", ms / *c as f64))
+                    .collect();
+                println!("  profile (ms/step): {}", line.join("  "));
+            }
             if step % eval_every == 0 || step == cfg.steps {
                 let train_s = train_start.elapsed().as_secs_f64();
                 let p = eval(&mut trainer);

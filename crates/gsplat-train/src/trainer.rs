@@ -137,6 +137,38 @@ pub struct Trainer {
     order: Vec<usize>,
     rng: u64,
     last_densify: Option<DensifyReport>,
+    /// Per-stage wall time (ms) and count, when `GSPLAT_TRAIN_PROFILE` is set.
+    profile: Option<StageTimes>,
+}
+
+/// Accumulated per-stage wall time of [`Trainer::step`] (profiling only: each
+/// mark waits for the GPU, so stages are serialised).
+#[derive(Debug, Default, Clone)]
+pub struct StageTimes {
+    last: Option<std::time::Instant>,
+    pub stages: Vec<(&'static str, f64, usize)>,
+}
+
+impl StageTimes {
+    fn start(&mut self) {
+        self.last = Some(std::time::Instant::now());
+    }
+    fn mark(&mut self, dev: &wgpu::Device, name: &'static str) {
+        dev.poll(wgpu::PollType::wait_indefinitely()).ok();
+        let now = std::time::Instant::now();
+        let ms = self
+            .last
+            .map(|t| (now - t).as_secs_f64() * 1e3)
+            .unwrap_or(0.0);
+        self.last = Some(now);
+        match self.stages.iter_mut().find(|s| s.0 == name) {
+            Some(s) => {
+                s.1 += ms;
+                s.2 += 1;
+            }
+            None => self.stages.push((name, ms, 1)),
+        }
+    }
 }
 
 fn storage(dev: &wgpu::Device, label: &str, bytes: u64) -> wgpu::Buffer {
@@ -346,6 +378,9 @@ impl Trainer {
             rng: cfg.seed.max(1),
             cfg,
             last_densify: None,
+            profile: std::env::var("GSPLAT_TRAIN_PROFILE")
+                .is_ok()
+                .then(StageTimes::default),
         };
         trainer.order = (0..trainer.views.len()).collect();
         trainer.build_state(ctx, init, None)?;
@@ -467,6 +502,12 @@ impl Trainer {
         self.state.as_ref().expect("trainer state")
     }
 
+    /// Per-stage times accumulated so far (`GSPLAT_TRAIN_PROFILE` only), and
+    /// reset them.
+    pub fn take_profile(&mut self) -> Option<StageTimes> {
+        self.profile.as_mut().map(std::mem::take)
+    }
+
     /// Steps taken so far.
     pub fn steps_done(&self) -> usize {
         self.step
@@ -516,8 +557,15 @@ impl Trainer {
         let (half_w, half_h) = (self.width as f32 * 0.5, self.height as f32 * 0.5);
 
         let st = self.state.as_mut().expect("trainer state");
-        let _ = st.renderer.render(&view, bg);
         let dev = st.renderer.ctx.device.clone();
+        if let Some(p) = self.profile.as_mut() {
+            dev.poll(wgpu::PollType::wait_indefinitely()).ok();
+            p.start();
+        }
+        let _ = st.renderer.render(&view, bg);
+        if let Some(p) = self.profile.as_mut() {
+            p.mark(&dev, "forward");
+        }
         let queue = st.renderer.ctx.queue.clone();
         {
             let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -536,8 +584,14 @@ impl Trainer {
             queue.submit(Some(enc.finish()));
         }
         self.loss_steps += 1;
+        if let Some(p) = self.profile.as_mut() {
+            p.mark(&dev, "loss");
+        }
 
         st.renderer.backward_on_device()?;
+        if let Some(p) = self.profile.as_mut() {
+            p.mark(&dev, "backward");
+        }
 
         // Densification statistics, then Adam (bias-corrected, mean-LR decay).
         let t = (self.step + 1) as f32;
@@ -596,6 +650,9 @@ impl Trainer {
             }
         }
         queue.submit(Some(enc.finish()));
+        if let Some(p) = self.profile.as_mut() {
+            p.mark(&dev, "adam");
+        }
         self.step += 1;
 
         if let Some(d) = self.cfg.densify.clone() {
@@ -604,6 +661,10 @@ impl Trainer {
             let at_reset = s < d.stop && s % d.opacity_reset_interval == 0;
             if at_densify || at_reset {
                 self.densify_now(&d, at_densify, at_reset)?;
+                let dev = self.st().renderer.ctx.device.clone();
+                if let Some(p) = self.profile.as_mut() {
+                    p.mark(&dev, "densify");
+                }
             }
         }
         Ok(())

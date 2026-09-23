@@ -1,6 +1,6 @@
 // Backward of the projection: chain each visible gaussian's screen-space
-// gradient (grad_reduce: du, dv, dA, dB, dC, dopacity, dr, dg, db) to its
-// parameters, written in the same layouts as the forward inputs:
+// gradient (rasterize_backward: du, dv, dA, dB, dC, dopacity, dr, dg, db) to
+// its parameters, written in the same layouts as the forward inputs:
 //   grad_transforms[gid * 10 + ..] = d(mean xyz, quat wxyz (un-normalised),
 //                                      log-scale xyz)
 //   grad_opacity[gid]             = d(opacity logit)
@@ -14,7 +14,9 @@
 //   [a b; b c] = J Sc J^T + 0.3 I;  conic Q = [a b; b c]^-1 = [A B; B C]
 //   (u, v) = (fx x/z + cx, fy y/z + cy);  opacity = sigmoid(logit)
 //   colour = max(0, SH(dir) + 0.5),  dir = (m - camera centre) / |.|
-// All matrices below are row-major arrays (r[i][j] = row i, column j).
+//
+// Matrices are WGSL mat3x3 (column-major: m[c][r]); everything stays in
+// registers -- no runtime-indexed local arrays, which spill to local memory.
 
 @group(0) @binding(0) var<uniform> u: ProjectUniforms;
 @group(0) @binding(1) var<storage, read> transforms: array<f32>;
@@ -26,37 +28,18 @@
 @group(0) @binding(7) var<storage, read_write> grad_opacity: array<f32>;
 @group(0) @binding(8) var<storage, read_write> grad_sh: array<f32>;
 
-// d(basis[k]) / d(dir) for the real SH basis of `eval_sh_basis`.
-fn sh_basis_grad(d: vec3<f32>) -> array<vec3<f32>, 16> {
-    let x = d.x;
-    let y = d.y;
-    let z = d.z;
-    let c = array<f32, 15>(
-        0.4886025, 0.4886025, 0.4886025,
-        1.0925485, 1.0925485, 0.3153916, 1.0925485, 1.0925485,
-        0.3731762, 2.8906113, 1.843772, 0.5900436, 1.843772, 2.8906113, 0.3731762,
-    );
-    let xx = x * x;
-    let yy = y * y;
-    let zz = z * z;
-    var g: array<vec3<f32>, 16>;
-    g[0] = vec3<f32>(0.0, 0.0, 0.0);
-    g[1] = vec3<f32>(0.0, -c[0], 0.0);
-    g[2] = vec3<f32>(0.0, 0.0, c[1]);
-    g[3] = vec3<f32>(-c[2], 0.0, 0.0);
-    g[4] = vec3<f32>(c[3] * y, c[3] * x, 0.0);
-    g[5] = vec3<f32>(0.0, -c[4] * z, -c[4] * y);
-    g[6] = vec3<f32>(-2.0 * c[5] * x, -2.0 * c[5] * y, 4.0 * c[5] * z);
-    g[7] = vec3<f32>(-c[6] * z, 0.0, -c[6] * x);
-    g[8] = vec3<f32>(2.0 * c[7] * x, -2.0 * c[7] * y, 0.0);
-    g[9] = vec3<f32>(-6.0 * c[8] * x * y, -c[8] * (3.0 * xx - 3.0 * yy), 0.0);
-    g[10] = vec3<f32>(c[9] * y * z, c[9] * x * z, c[9] * x * y);
-    g[11] = vec3<f32>(2.0 * c[10] * x * y, -c[10] * (4.0 * zz - xx - 3.0 * yy), -8.0 * c[10] * y * z);
-    g[12] = vec3<f32>(-6.0 * c[11] * x * z, -6.0 * c[11] * y * z, c[11] * (6.0 * zz - 3.0 * xx - 3.0 * yy));
-    g[13] = vec3<f32>(-c[12] * (4.0 * zz - 3.0 * xx - yy), 2.0 * c[12] * x * y, -8.0 * c[12] * x * z);
-    g[14] = vec3<f32>(2.0 * c[13] * x * z, -2.0 * c[13] * y * z, c[13] * (xx - yy));
-    g[15] = vec3<f32>(-c[14] * (3.0 * xx - 3.0 * yy), 6.0 * c[14] * x * y, 0.0);
-    return g;
+// Outer product a b^T as a mat3x3 (column c = a * b[c]).
+fn outer3(a: vec3<f32>, b: vec3<f32>) -> mat3x3<f32> {
+    return mat3x3<f32>(a * b.x, a * b.y, a * b.z);
+}
+
+// SH rest coefficient k (0-based, after DC) of channel ch, or 0 past the
+// scene's degree.
+fn sh_rest(sh_base: u32, rest_pc: u32, ch: u32, k: u32) -> f32 {
+    if (k >= rest_pc) {
+        return 0.0;
+    }
+    return sh_in[sh_base + 3u + ch * rest_pc + k];
 }
 
 @compute @workgroup_size(256)
@@ -80,15 +63,8 @@ fn project_backward(@builtin(global_invocation_id) gid3: vec3<u32>) {
     let q = vec4<f32>(transforms[base + 3u], transforms[base + 4u], transforms[base + 5u], transforms[base + 6u]);
     let ls = vec3<f32>(transforms[base + 7u], transforms[base + 8u], transforms[base + 9u]);
 
-    // View rotation W (row-major) and camera-space mean.
-    var wr: array<array<f32, 3>, 3>;
-    wr[0] = array<f32, 3>(u.view_rot_0.x, u.view_rot_0.y, u.view_rot_0.z);
-    wr[1] = array<f32, 3>(u.view_rot_1.x, u.view_rot_1.y, u.view_rot_1.z);
-    wr[2] = array<f32, 3>(u.view_rot_2.x, u.view_rot_2.y, u.view_rot_2.z);
-    var p: array<f32, 3>;
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        p[i] = wr[i][0] * m.x + wr[i][1] * m.y + wr[i][2] * m.z + u.view_t[i];
-    }
+    let w = view_rot(u);
+    let p = w * m + u.view_t.xyz;
 
     // Normalised quaternion and Rg (same as rot_from_quat).
     let n2 = dot(q, q);
@@ -98,59 +74,27 @@ fn project_backward(@builtin(global_invocation_id) gid3: vec3<u32>) {
         inv_n = inverseSqrt(n2);
         qn = q * inv_n;
     }
-    let w = qn.x;
-    let x = qn.y;
-    let y = qn.z;
-    let z = qn.w;
-    var rg: array<array<f32, 3>, 3>;
-    rg[0] = array<f32, 3>(1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y));
-    rg[1] = array<f32, 3>(2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x));
-    rg[2] = array<f32, 3>(2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y));
+    let rg = rot_from_quat(qn.x, qn.y, qn.z, qn.w);
     let s = exp(ls);
-    var m3: array<array<f32, 3>, 3>;
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        m3[i] = array<f32, 3>(rg[i][0] * s.x, rg[i][1] * s.y, rg[i][2] * s.z);
-    }
-    // Sigma = M3 M3^T, Sc = W Sigma W^T.
-    var sig: array<array<f32, 3>, 3>;
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        for (var j = 0u; j < 3u; j = j + 1u) {
-            sig[i][j] = m3[i][0] * m3[j][0] + m3[i][1] * m3[j][1] + m3[i][2] * m3[j][2];
-        }
-    }
-    var ws: array<array<f32, 3>, 3>;
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        for (var j = 0u; j < 3u; j = j + 1u) {
-            ws[i][j] = wr[i][0] * sig[0][j] + wr[i][1] * sig[1][j] + wr[i][2] * sig[2][j];
-        }
-    }
-    var sc: array<array<f32, 3>, 3>;
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        for (var j = 0u; j < 3u; j = j + 1u) {
-            sc[i][j] = ws[i][0] * wr[j][0] + ws[i][1] * wr[j][1] + ws[i][2] * wr[j][2];
-        }
-    }
+    let m3 = mat3x3<f32>(rg[0] * s.x, rg[1] * s.y, rg[2] * s.z);
+    let sigma = m3 * transpose(m3);
+    let sc = w * sigma * transpose(w);
 
     // EWA Jacobian with the 1.3x frustum clamp.
-    let inv_z = 1.0 / p[2];
+    let inv_z = 1.0 / p.z;
     let inv_z2 = inv_z * inv_z;
     let lim_x = 1.3 * 0.5 * f32(u.img_w) / u.fx;
     let lim_y = 1.3 * 0.5 * f32(u.img_h) / u.fy;
-    let rx = p[0] * inv_z;
-    let ry = p[1] * inv_z;
+    let rx = p.x * inv_z;
+    let ry = p.y * inv_z;
     let clamped_x = rx < -lim_x || rx > lim_x;
     let clamped_y = ry < -lim_y || ry > lim_y;
-    let tx = clamp(rx, -lim_x, lim_x) * p[2];
-    let ty = clamp(ry, -lim_y, lim_y) * p[2];
+    let tx = clamp(rx, -lim_x, lim_x) * p.z;
+    let ty = clamp(ry, -lim_y, lim_y) * p.z;
     let j0 = vec3<f32>(u.fx * inv_z, 0.0, -u.fx * tx * inv_z2);
     let j1 = vec3<f32>(0.0, u.fy * inv_z, -u.fy * ty * inv_z2);
-    // Sc j0, Sc j1.
-    var sj0 = vec3<f32>(0.0, 0.0, 0.0);
-    var sj1 = vec3<f32>(0.0, 0.0, 0.0);
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        sj0[i] = sc[i][0] * j0.x + sc[i][1] * j0.y + sc[i][2] * j0.z;
-        sj1[i] = sc[i][0] * j1.x + sc[i][1] * j1.y + sc[i][2] * j1.z;
-    }
+    let sj0 = sc * j0;
+    let sj1 = sc * j1;
     let ca = dot(j0, sj0) + 0.3;
     let cb = dot(j0, sj1);
     let cc = dot(j1, sj1) + 0.3;
@@ -161,97 +105,65 @@ fn project_backward(@builtin(global_invocation_id) gid3: vec3<u32>) {
 
     // Conic -> 2D covariance: dL/dM = -Q GQ Q with GQ = [gA gB/2; gB/2 gC].
     let gq01 = 0.5 * g_cb;
-    // T = GQ Q
     let t00 = g_ca * qa + gq01 * qb;
     let t01 = g_ca * qb + gq01 * qc;
     let t10 = gq01 * qa + g_cc * qb;
     let t11 = gq01 * qb + g_cc * qc;
-    // GM = -Q T
-    let gm00 = -(qa * t00 + qb * t10);
-    let gm01 = -(qa * t01 + qb * t11);
-    let gm11 = -(qb * t01 + qc * t11);
-    let g_a = gm00;
-    let g_b = 2.0 * gm01;
-    let g_c = gm11;
+    let g_a = -(qa * t00 + qb * t10);
+    let g_b = 2.0 * -(qa * t01 + qb * t11);
+    let g_c = -(qb * t01 + qc * t11);
 
-    // 2D covariance -> Sc (general 3x3 gradient) and J.
-    var gsc: array<array<f32, 3>, 3>;
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        for (var j = 0u; j < 3u; j = j + 1u) {
-            gsc[i][j] = g_a * j0[i] * j0[j] + g_b * j0[i] * j1[j] + g_c * j1[i] * j1[j];
-        }
-    }
+    // 2D covariance -> Sc (general gradient) and J.
+    let gsc = outer3(j0, j0) * g_a + outer3(j0, j1) * g_b + outer3(j1, j1) * g_c;
     let gj0 = 2.0 * g_a * sj0 + g_b * sj1;
     let gj1 = 2.0 * g_c * sj1 + g_b * sj0;
 
     // J and the screen mean -> camera-space point.
     var gp = vec3<f32>(0.0, 0.0, 0.0);
-    gp.z = gp.z + gj0.x * (-u.fx * inv_z2) + gj1.y * (-u.fy * inv_z2);
+    gp.z = gj0.x * (-u.fx * inv_z2) + gj1.y * (-u.fy * inv_z2);
     if (clamped_x) {
         gp.z = gp.z + gj0.z * u.fx * clamp(rx, -lim_x, lim_x) * inv_z2;
     } else {
         gp.x = gp.x + gj0.z * (-u.fx * inv_z2);
-        gp.z = gp.z + gj0.z * 2.0 * u.fx * p[0] * inv_z2 * inv_z;
+        gp.z = gp.z + gj0.z * 2.0 * u.fx * p.x * inv_z2 * inv_z;
     }
     if (clamped_y) {
         gp.z = gp.z + gj1.z * u.fy * clamp(ry, -lim_y, lim_y) * inv_z2;
     } else {
         gp.y = gp.y + gj1.z * (-u.fy * inv_z2);
-        gp.z = gp.z + gj1.z * 2.0 * u.fy * p[1] * inv_z2 * inv_z;
+        gp.z = gp.z + gj1.z * 2.0 * u.fy * p.y * inv_z2 * inv_z;
     }
     gp.x = gp.x + g_u * u.fx * inv_z;
     gp.y = gp.y + g_v * u.fy * inv_z;
-    gp.z = gp.z - (g_u * u.fx * p[0] + g_v * u.fy * p[1]) * inv_z2;
+    gp.z = gp.z - (g_u * u.fx * p.x + g_v * u.fy * p.y) * inv_z2;
 
     // p = W m + t  ->  dL/dm = W^T gp.
-    var gmean = vec3<f32>(0.0, 0.0, 0.0);
-    for (var j = 0u; j < 3u; j = j + 1u) {
-        gmean[j] = wr[0][j] * gp.x + wr[1][j] * gp.y + wr[2][j] * gp.z;
-    }
+    var gmean = transpose(w) * gp;
 
-    // Sc = W Sigma W^T  ->  GSigma = W^T GSc W.
-    var tmp: array<array<f32, 3>, 3>;
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        for (var j = 0u; j < 3u; j = j + 1u) {
-            tmp[i][j] = wr[0][i] * gsc[0][j] + wr[1][i] * gsc[1][j] + wr[2][i] * gsc[2][j];
-        }
-    }
-    var gsig: array<array<f32, 3>, 3>;
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        for (var j = 0u; j < 3u; j = j + 1u) {
-            gsig[i][j] = tmp[i][0] * wr[0][j] + tmp[i][1] * wr[1][j] + tmp[i][2] * wr[2][j];
-        }
-    }
-    // Sigma = M3 M3^T  ->  GM3 = (GSigma + GSigma^T) M3.
-    var gm3: array<array<f32, 3>, 3>;
-    for (var i = 0u; i < 3u; i = i + 1u) {
-        for (var k = 0u; k < 3u; k = k + 1u) {
-            var acc = 0.0;
-            for (var j = 0u; j < 3u; j = j + 1u) {
-                acc = acc + (gsig[i][j] + gsig[j][i]) * m3[j][k];
-            }
-            gm3[i][k] = acc;
-        }
-    }
-    // M3 = Rg diag(s): scale and rotation gradients.
-    var gls = vec3<f32>(0.0, 0.0, 0.0);
-    var gr: array<array<f32, 3>, 3>;
-    for (var k = 0u; k < 3u; k = k + 1u) {
-        var gs = 0.0;
-        for (var i = 0u; i < 3u; i = i + 1u) {
-            gs = gs + gm3[i][k] * rg[i][k];
-            gr[i][k] = gm3[i][k] * s[k];
-        }
-        gls[k] = gs * s[k];
-    }
-    // Rg(qn) -> normalised quaternion.
-    let gw = 2.0 * (-z * gr[0][1] + y * gr[0][2] + z * gr[1][0] - x * gr[1][2] - y * gr[2][0] + x * gr[2][1]);
-    let gx = 2.0 * (y * gr[0][1] + z * gr[0][2] + y * gr[1][0] - 2.0 * x * gr[1][1] - w * gr[1][2]
-        + z * gr[2][0] + w * gr[2][1] - 2.0 * x * gr[2][2]);
-    let gy = 2.0 * (-2.0 * y * gr[0][0] + x * gr[0][1] + w * gr[0][2] + x * gr[1][0] + z * gr[1][2]
-        - w * gr[2][0] + z * gr[2][1] - 2.0 * y * gr[2][2]);
-    let gz = 2.0 * (-2.0 * z * gr[0][0] - w * gr[0][1] + x * gr[0][2] + w * gr[1][0] - 2.0 * z * gr[1][1]
-        + y * gr[1][2] + x * gr[2][0] + y * gr[2][1]);
+    // Sc = W Sigma W^T -> GSigma = W^T GSc W; Sigma = M3 M3^T -> GM3.
+    let gsig = transpose(w) * gsc * w;
+    let gm3 = (gsig + transpose(gsig)) * m3;
+    // M3 = Rg diag(s): column k of M3 is s_k * column k of Rg.
+    let gls = vec3<f32>(dot(gm3[0], rg[0]) * s.x, dot(gm3[1], rg[1]) * s.y, dot(gm3[2], rg[2]) * s.z);
+    let gr = mat3x3<f32>(gm3[0] * s.x, gm3[1] * s.y, gm3[2] * s.z);
+    // Rg(qn) -> normalised quaternion; R(i, k) = gr[k][i].
+    let qw = qn.x;
+    let qx = qn.y;
+    let qy = qn.z;
+    let qz = qn.w;
+    let r00 = gr[0][0];
+    let r01 = gr[1][0];
+    let r02 = gr[2][0];
+    let r10 = gr[0][1];
+    let r11 = gr[1][1];
+    let r12 = gr[2][1];
+    let r20 = gr[0][2];
+    let r21 = gr[1][2];
+    let r22 = gr[2][2];
+    let gw = 2.0 * (-qz * r01 + qy * r02 + qz * r10 - qx * r12 - qy * r20 + qx * r21);
+    let gx = 2.0 * (qy * r01 + qz * r02 + qy * r10 - 2.0 * qx * r11 - qw * r12 + qz * r20 + qw * r21 - 2.0 * qx * r22);
+    let gy = 2.0 * (-2.0 * qy * r00 + qx * r01 + qw * r02 + qx * r10 + qz * r12 - qw * r20 + qz * r21 - 2.0 * qy * r22);
+    let gz = 2.0 * (-2.0 * qz * r00 - qw * r01 + qx * r02 + qw * r10 - 2.0 * qz * r11 + qy * r12 + qx * r20 + qy * r21);
     let gqn = vec4<f32>(gw, gx, gy, gz);
     // qn = q / |q|  ->  gq = (gqn - qn (qn . gqn)) / |q|.
     let gq = (gqn - qn * dot(qn, gqn)) * inv_n;
@@ -261,6 +173,8 @@ fn project_backward(@builtin(global_invocation_id) gid3: vec3<u32>) {
     grad_opacity[gid] = g_op * op * (1.0 - op);
 
     // Colour -> SH coefficients, and -> mean through the view direction.
+    // Basis and its direction derivative are written out term by term (no
+    // runtime-indexed arrays); coefficients past the scene degree read as 0.
     let cpc = u.sh_degree + 1u;
     let cpc2 = cpc * cpc;
     let rest_pc = cpc2 - 1u;
@@ -271,25 +185,101 @@ fn project_backward(@builtin(global_invocation_id) gid3: vec3<u32>) {
     if (dn > 1e-6) {
         dir = dir_raw / dn;
     }
-    let basis = eval_sh_basis(dir);
-    let dbasis = sh_basis_grad(dir);
+    let x = dir.x;
+    let y = dir.y;
+    let z = dir.z;
+    let xx = x * x;
+    let yy = y * y;
+    let zz = z * z;
+    let c0 = 0.4886025;
+    let c3 = 1.0925485;
+    let c5 = 0.3153916;
+    let c8 = 0.3731762;
+    let c9 = 2.8906113;
+    let c10 = 1.843772;
+    let c11 = 0.5900436;
+    // Basis values b1..b15 (b0 = C0 is the DC term).
+    let b1 = -c0 * y;
+    let b2 = c0 * z;
+    let b3 = -c0 * x;
+    let b4 = c3 * x * y;
+    let b5 = -c3 * y * z;
+    let b6 = c5 * (2.0 * zz - xx - yy);
+    let b7 = -c3 * x * z;
+    let b8 = c3 * (xx - yy);
+    let b9 = -c8 * y * (3.0 * xx - yy);
+    let b10 = c9 * x * y * z;
+    let b11 = -c10 * y * (4.0 * zz - xx - yy);
+    let b12 = c11 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy);
+    let b13 = -c10 * x * (4.0 * zz - xx - yy);
+    let b14 = c9 * z * (xx - yy);
+    let b15 = -c8 * x * (xx - 3.0 * yy);
     var gdir = vec3<f32>(0.0, 0.0, 0.0);
     for (var ch = 0u; ch < 3u; ch = ch + 1u) {
-        var raw = 0.2820948 * sh_in[sh_base + ch];
-        for (var k = 0u; k < rest_pc; k = k + 1u) {
-            raw = raw + basis[k + 1u] * sh_in[sh_base + 3u + ch * rest_pc + k];
-        }
-        raw = raw + 0.5;
+        let r1 = sh_rest(sh_base, rest_pc, ch, 0u);
+        let r2 = sh_rest(sh_base, rest_pc, ch, 1u);
+        let r3 = sh_rest(sh_base, rest_pc, ch, 2u);
+        let r4 = sh_rest(sh_base, rest_pc, ch, 3u);
+        let r5 = sh_rest(sh_base, rest_pc, ch, 4u);
+        let r6 = sh_rest(sh_base, rest_pc, ch, 5u);
+        let r7 = sh_rest(sh_base, rest_pc, ch, 6u);
+        let r8 = sh_rest(sh_base, rest_pc, ch, 7u);
+        let r9 = sh_rest(sh_base, rest_pc, ch, 8u);
+        let r10 = sh_rest(sh_base, rest_pc, ch, 9u);
+        let r11 = sh_rest(sh_base, rest_pc, ch, 10u);
+        let r12 = sh_rest(sh_base, rest_pc, ch, 11u);
+        let r13 = sh_rest(sh_base, rest_pc, ch, 12u);
+        let r14 = sh_rest(sh_base, rest_pc, ch, 13u);
+        let r15 = sh_rest(sh_base, rest_pc, ch, 14u);
+        let raw = 0.2820948 * sh_in[sh_base + ch]
+            + b1 * r1 + b2 * r2 + b3 * r3 + b4 * r4 + b5 * r5 + b6 * r6 + b7 * r7 + b8 * r8
+            + b9 * r9 + b10 * r10 + b11 * r11 + b12 * r12 + b13 * r13 + b14 * r14 + b15 * r15
+            + 0.5;
         var gc = g_col[ch];
         if (raw < 0.0) {
             gc = 0.0;
         }
         grad_sh[sh_base + ch] = gc * 0.2820948;
-        for (var k = 0u; k < rest_pc; k = k + 1u) {
-            let coef = sh_in[sh_base + 3u + ch * rest_pc + k];
-            grad_sh[sh_base + 3u + ch * rest_pc + k] = gc * basis[k + 1u];
-            gdir = gdir + gc * coef * dbasis[k + 1u];
+        let rb = sh_base + 3u + ch * rest_pc;
+        if (rest_pc >= 3u) {
+            grad_sh[rb + 0u] = gc * b1;
+            grad_sh[rb + 1u] = gc * b2;
+            grad_sh[rb + 2u] = gc * b3;
         }
+        if (rest_pc >= 8u) {
+            grad_sh[rb + 3u] = gc * b4;
+            grad_sh[rb + 4u] = gc * b5;
+            grad_sh[rb + 5u] = gc * b6;
+            grad_sh[rb + 6u] = gc * b7;
+            grad_sh[rb + 7u] = gc * b8;
+        }
+        if (rest_pc >= 15u) {
+            grad_sh[rb + 8u] = gc * b9;
+            grad_sh[rb + 9u] = gc * b10;
+            grad_sh[rb + 10u] = gc * b11;
+            grad_sh[rb + 11u] = gc * b12;
+            grad_sh[rb + 12u] = gc * b13;
+            grad_sh[rb + 13u] = gc * b14;
+            grad_sh[rb + 14u] = gc * b15;
+        }
+        // d(colour)/d(dir) = sum_k coef_k * d(b_k)/d(dir).
+        var dd = vec3<f32>(0.0, -c0, 0.0) * r1
+            + vec3<f32>(0.0, 0.0, c0) * r2
+            + vec3<f32>(-c0, 0.0, 0.0) * r3
+            + vec3<f32>(c3 * y, c3 * x, 0.0) * r4
+            + vec3<f32>(0.0, -c3 * z, -c3 * y) * r5
+            + vec3<f32>(-2.0 * c5 * x, -2.0 * c5 * y, 4.0 * c5 * z) * r6
+            + vec3<f32>(-c3 * z, 0.0, -c3 * x) * r7
+            + vec3<f32>(2.0 * c3 * x, -2.0 * c3 * y, 0.0) * r8;
+        dd = dd
+            + vec3<f32>(-6.0 * c8 * x * y, -c8 * (3.0 * xx - 3.0 * yy), 0.0) * r9
+            + vec3<f32>(c9 * y * z, c9 * x * z, c9 * x * y) * r10
+            + vec3<f32>(2.0 * c10 * x * y, -c10 * (4.0 * zz - xx - 3.0 * yy), -8.0 * c10 * y * z) * r11
+            + vec3<f32>(-6.0 * c11 * x * z, -6.0 * c11 * y * z, c11 * (6.0 * zz - 3.0 * xx - 3.0 * yy)) * r12
+            + vec3<f32>(-c10 * (4.0 * zz - 3.0 * xx - yy), 2.0 * c10 * x * y, -8.0 * c10 * x * z) * r13
+            + vec3<f32>(2.0 * c9 * x * z, -2.0 * c9 * y * z, c9 * (xx - yy)) * r14
+            + vec3<f32>(-c8 * (3.0 * xx - 3.0 * yy), 6.0 * c8 * x * y, 0.0) * r15;
+        gdir = gdir + gc * dd;
     }
     if (dn > 1e-6) {
         gmean = gmean + (gdir - dir * dot(dir, gdir)) / dn;

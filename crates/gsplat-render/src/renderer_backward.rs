@@ -183,6 +183,38 @@ impl Renderer {
                 0,
                 Some((frame.nv * SCREEN_GRAD_FLOATS * 4) as u64),
             );
+            if std::env::var("GSPLAT_PROFILE").is_ok() {
+                // Profiling: time the two kernels separately.
+                {
+                    let mut pass =
+                        encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                    if frame.ni > 0 {
+                        super::dispatch(&mut pass, &st.raster_bwd, frame.num_tiles);
+                    }
+                }
+                queue.submit(Some(encoder.finish()));
+                let t0 = std::time::Instant::now();
+                dev.poll(wgpu::PollType::wait_indefinitely()).ok();
+                let t_raster = t0.elapsed();
+                let mut enc2 = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("backward_project"),
+                });
+                {
+                    let mut pass = enc2.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                    super::dispatch(&mut pass, &st.project_bwd, (frame.nv as u32).div_ceil(256));
+                }
+                queue.submit(Some(enc2.finish()));
+                let t1 = std::time::Instant::now();
+                dev.poll(wgpu::PollType::wait_indefinitely()).ok();
+                eprintln!(
+                    "[profile] backward: rasterize_backward {:.2} ms, project_backward {:.2} ms (nv {}, ni {})",
+                    t_raster.as_secs_f64() * 1e3,
+                    t1.elapsed().as_secs_f64() * 1e3,
+                    frame.nv,
+                    frame.ni
+                );
+                return Ok(());
+            }
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             if frame.ni > 0 {
                 super::dispatch(&mut pass, &st.raster_bwd, frame.num_tiles);

@@ -130,10 +130,16 @@ fn rasterize_backward(
             if (s == 0u) { break; }
             s = s - 1u;
             let j = bstart + s;
-            var gr: array<f32, 9>;
-            for (var k = 0u; k < 9u; k = k + 1u) {
-                gr[k] = 0.0;
-            }
+            // Per-lane gradient as scalars (a runtime-indexed array would be
+            // spilled to local memory).
+            var g_u = 0.0;
+            var g_v = 0.0;
+            var g_a = 0.0;
+            var g_b = 0.0;
+            var g_c = 0.0;
+            var g_o = 0.0;
+            var g_col = vec3<f32>(0.0, 0.0, 0.0);
+            var hit = false;
             if (in_image && j < last) {
                 let opac = bsplat[s * 9u + 5u];
                 let dx = sample_x - bsplat[s * 9u + 0u];
@@ -148,35 +154,47 @@ fn rasterize_backward(
                     let raw = opac * e;
                     let a = min(0.99, raw);
                     if (a >= 1.0 / 255.0) {
+                        hit = true;
                         let t_before = t_cur / (1.0 - a);
                         let col = max(
                             vec3<f32>(bsplat[s * 9u + 6u], bsplat[s * 9u + 7u], bsplat[s * 9u + 8u]),
                             vec3<f32>(0.0, 0.0, 0.0),
                         );
-                        let dcol = a * t_before * g;
+                        g_col = a * t_before * g;
                         let d_alpha = t_before * dot(col - behind, g);
                         behind = a * col + (1.0 - a) * behind;
                         t_cur = t_before;
                         if (raw <= 0.99) {
                             let d_sigma = -d_alpha * a;
-                            gr[0] = d_sigma * -(c00 * dx + c01 * dy);
-                            gr[1] = d_sigma * -(c01 * dx + c11 * dy);
-                            gr[2] = d_sigma * 0.5 * dx * dx;
-                            gr[3] = d_sigma * dx * dy;
-                            gr[4] = d_sigma * 0.5 * dy * dy;
-                            gr[5] = d_alpha * e;
+                            g_u = d_sigma * -(c00 * dx + c01 * dy);
+                            g_v = d_sigma * -(c01 * dx + c11 * dy);
+                            g_a = d_sigma * 0.5 * dx * dx;
+                            g_b = d_sigma * dx * dy;
+                            g_c = d_sigma * 0.5 * dy * dy;
+                            g_o = d_alpha * e;
                         }
-                        gr[6] = dcol.x;
-                        gr[7] = dcol.y;
-                        gr[8] = dcol.z;
                     }
                 }
             }
-            // Uniform control flow: every lane of every subgroup reaches this.
-            for (var k = 0u; k < 9u; k = k + 1u) {
-                let tot = subgroupAdd(gr[k]);
-                if (lane == 0u && tot != 0.0) {
-                    gacc_add(s * NG + k, tot);
+            // Most splats cover only part of a tile: skip the reductions when
+            // no lane of this subgroup blended it. The condition is
+            // subgroup-uniform, so the subgroup ops stay in uniform flow.
+            if (subgroupAny(hit)) {
+                let t_uv = subgroupAdd(vec2<f32>(g_u, g_v));
+                let t_abc = subgroupAdd(vec3<f32>(g_a, g_b, g_c));
+                let t_o = subgroupAdd(g_o);
+                let t_col = subgroupAdd(g_col);
+                if (lane == 0u) {
+                    let base = s * NG;
+                    gacc_add(base + 0u, t_uv.x);
+                    gacc_add(base + 1u, t_uv.y);
+                    gacc_add(base + 2u, t_abc.x);
+                    gacc_add(base + 3u, t_abc.y);
+                    gacc_add(base + 4u, t_abc.z);
+                    gacc_add(base + 5u, t_o);
+                    gacc_add(base + 6u, t_col.x);
+                    gacc_add(base + 7u, t_col.y);
+                    gacc_add(base + 8u, t_col.z);
                 }
             }
         }
