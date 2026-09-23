@@ -325,49 +325,57 @@ fn compute_projected(
     return p;
 }
 
-// Minimum of q(d) = c00 dx^2 + 2 c01 dx dy + c11 dy^2 over the box
-// [x0, x1] x [y0, y1] (offsets from the splat centre). q is convex, so the
-// minimum is 0 if the box holds the centre, else on one of the four edges,
-// where it is a clamped 1D quadratic minimum.
-fn conic_min_on_box(conic: vec3<f32>, x0: f32, x1: f32, y0: f32, y1: f32) -> f32 {
-    if (x0 <= 0.0 && 0.0 <= x1 && y0 <= 0.0 && 0.0 <= y1) {
-        return 0.0;
+// Tiles of row `ty` holding a pixel `rasterize` could blend for `p`, as an
+// inclusive column range (empty when x > y).
+//
+// The footprint q(d) = c00 dx^2 + 2 c01 dx dy + c11 dy^2 <= k is convex, so its
+// hit tiles in a row are contiguous and the row's x-extent is analytic: over
+// the band of the row's pixel-centre y offsets, the right boundary
+// xr(y) = (-c01 y + sqrt(D(y))) / c00 is concave with its peak at the
+// ellipse's rightmost point y_r = -c01 x_max / c11, so the band maximum is at
+// y_r clamped to the band (mirror for the left boundary). The extent is then
+// snapped to pixel centres. y stays continuous, so this never drops a pixel;
+// the small slack on k only ever keeps a borderline tile. project_forward
+// (count) and map_gaussians (write) call it with identical inputs.
+fn tile_row_span(p: Projected, ty: u32, img_w: u32, img_h: u32) -> vec2<i32> {
+    let empty = vec2<i32>(1, 0);
+    let c00 = p.conic.x;
+    let c01 = p.conic.y;
+    let c11 = p.conic.z;
+    let det = c00 * c11 - c01 * c01;
+    if (!(det > 0.0) || !(c00 > 0.0) || !(c11 > 0.0)) {
+        return empty;
     }
-    let c00 = conic.x;
-    let c01 = conic.y;
-    let c11 = conic.z;
-    var m = 3.0e38;
-    for (var e = 0u; e < 2u; e = e + 1u) {
-        let x = select(x0, x1, e == 1u);
-        let y = clamp(-c01 * x / c11, y0, y1);
-        m = min(m, c00 * x * x + 2.0 * c01 * x * y + c11 * y * y);
-        let yy = select(y0, y1, e == 1u);
-        let xx = clamp(-c01 * yy / c00, x0, x1);
-        m = min(m, c00 * xx * xx + 2.0 * c01 * xx * yy + c11 * yy * yy);
+    let k = p.extent_k * 1.001 + 1e-3;
+    let y0 = f32(ty * 16u) + 0.5 - p.proj_v;
+    let y1 = f32(min(ty * 16u + 15u, img_h - 1u)) + 0.5 - p.proj_v;
+    // Half-width of the ellipse in x (sqrt(k * cov00), cov = conic^-1).
+    let x_max = sqrt(k * c11 / det);
+    let yr = clamp(-c01 * x_max / c11, y0, y1);
+    let yl = clamp(c01 * x_max / c11, y0, y1);
+    let dr = k * c00 - yr * yr * det;
+    if (dr < 0.0) {
+        return empty;
     }
-    return m;
+    let dl = max(k * c00 - yl * yl * det, 0.0);
+    let xr = (-c01 * yr + sqrt(dr)) / c00;
+    let xl = (-c01 * yl - sqrt(dl)) / c00;
+    // Pixel px is inside when px + 0.5 - proj_u is in [xl, xr].
+    let px_lo = max(ceil(p.proj_u + xl - 0.5), f32(p.tx0 * 16u));
+    let px_hi = min(floor(p.proj_u + xr - 0.5), f32(min(p.tx1 * 16u + 15u, img_w - 1u)));
+    if (px_hi < px_lo) {
+        return empty;
+    }
+    return vec2<i32>(i32(px_lo) / 16, i32(px_hi) / 16);
 }
 
-// Whether tile (tx, ty) holds any pixel `rasterize` could blend for `p`: the
-// tile's in-image pixel centres must reach the footprint ellipse. Called with
-// identical inputs by project_forward (count) and map_gaussians (write), so
-// both agree exactly. The small slack only ever keeps a borderline tile.
-fn tile_hit(p: Projected, tx: u32, ty: u32, img_w: u32, img_h: u32) -> bool {
-    let px0 = f32(tx * 16u) + 0.5 - p.proj_u;
-    let px1 = f32(min(tx * 16u + 15u, img_w - 1u)) + 0.5 - p.proj_u;
-    let py0 = f32(ty * 16u) + 0.5 - p.proj_v;
-    let py1 = f32(min(ty * 16u + 15u, img_h - 1u)) + 0.5 - p.proj_v;
-    return conic_min_on_box(p.conic, px0, px1, py0, py1) <= p.extent_k * 1.001 + 1e-3;
-}
-
-// Number of tiles in p's rect that pass `tile_hit`.
+// Number of tiles `map_gaussians` will emit for `p`.
 fn tile_hits(p: Projected, img_w: u32, img_h: u32) -> u32 {
     var n = 0u;
     for (var ty = p.ty0; ty <= p.ty1; ty = ty + 1u) {
-        for (var tx = p.tx0; tx <= p.tx1; tx = tx + 1u) {
-            if (tile_hit(p, tx, ty, img_w, img_h)) {
-                n = n + 1u;
-            }
+        let span = tile_row_span(p, ty, img_w, img_h);
+        if (span.y >= span.x) {
+            n = n + u32(span.y - span.x + 1);
         }
     }
     return n;

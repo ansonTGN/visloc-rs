@@ -256,7 +256,26 @@ the circle for elongated splats. CPU reference and GPU use the same extent.
 
 Output vs. the 3-sigma circle: max 4/255, mean 0.1/255 (8-bit); the only
 differences are tails the circle used to cut above the 1/255 cutoff. Real-pose
-CPU/GPU parity is now max 1e-5. At 1080p the tile sort (35 ms of 57) is next.
+CPU/GPU parity is now max 1e-5.
+
+**Exact tile coverage.** The bounding box still lists corner tiles of large
+or diagonal splats that hold no blendable pixel. The footprint ellipse is
+convex, so its tiles in each tile row are contiguous with an analytic
+x-extent (the concave right boundary peaks at the ellipse's rightmost point
+clamped to the row's band; mirror for the left), snapped to pixel centres.
+`project_forward` counts and `map_gaussians` writes per-row spans with the same
+function, so they agree, and only tiles without a pixel above the cutoff are
+dropped: renders are **bit-identical** to the bounding-box version. (A per-tile
+test gave the same list but cost 6.7 ms in `project_forward` at 1080p.)
+
+| resolution | isects | bbox | exact rows |
+| --- | --- | --- | --- |
+| 640x480 | 2.8M → 1.9M | 12 ms | **9.0 ms** |
+| 1920x1080 | 14.8M → 8.8M | 54 ms | **33.5 ms** |
+
+At 1080p the tile sort is now 21.5 of 36 ms (4 passes over 8.8M pairs,
+~7x off memory bandwidth: the scatter writes are uncoalesced), then
+`map_gaussians` (6 ms, per-thread imbalance for frame-sized splats).
 
 **DX12 startup.** `Renderer::new` used to take ~10 minutes on Windows: wgpu's
 `Auto` shader-compiler choice falls back to FXC when `dxcompiler.dll` is not
