@@ -1544,6 +1544,7 @@ dependencies = [
  "visloc-gsplat-core",
  "visloc-gsplat-render",
  "visloc-io",
+ "visloc-sift-gpu",
  "visloc-slam",
  "visloc-vision",
  "wgpu",
@@ -1601,6 +1602,20 @@ dependencies = [
  "visloc-slam",
  "visloc-tracking",
  "visloc-vision",
+]
+
+[[package]]
+name = "visloc-sift-gpu"
+version = "0.2.0"
+dependencies = [
+ "bytemuck",
+ "image",
+ "nalgebra",
+ "pollster",
+ "thiserror",
+ "visloc-gsplat-render",
+ "visloc-vision",
+ "wgpu",
 ]
 
 [[package]]

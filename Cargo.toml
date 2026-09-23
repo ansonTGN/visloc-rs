@@ -24,6 +24,7 @@ members = [
     "crates/gsplat-core",
     "crates/gsplat-render",
     "crates/gsplat-train",
+    "crates/sift-gpu",
     "crates/dpvo-cuda-runtime",
     "pipelines/localization",
     "pipelines/tracking",

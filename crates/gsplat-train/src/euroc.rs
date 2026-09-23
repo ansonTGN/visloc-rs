@@ -46,6 +46,10 @@ pub struct EurocSfmConfig {
     pub sift_max_keypoints: usize,
     /// Hold out every `eval_every`-th registered view.
     pub eval_every: usize,
+    /// Extract SIFT on the GPU (`visloc-sift-gpu`, needs the `gpu` feature);
+    /// same detector/descriptor path as the CPU extractor, validated by
+    /// keypoint agreement rather than bytes.
+    pub gpu_sift: bool,
 }
 
 impl Default for EurocSfmConfig {
@@ -58,6 +62,7 @@ impl Default for EurocSfmConfig {
             min_matches: 30,
             sift_max_keypoints: 4000,
             eval_every: 8,
+            gpu_sift: false,
         }
     }
 }
@@ -207,6 +212,18 @@ pub fn build_euroc_dataset(
         max_keypoints: cfg.sift_max_keypoints,
         ..SiftConfig::default()
     };
+    #[cfg(feature = "gpu")]
+    let mut gpu_sift = if cfg.gpu_sift {
+        let ctx = visloc_sift_gpu::GpuContext::new()
+            .map_err(|e| EurocError::Sift(format!("gpu: {e}")))?;
+        Some(visloc_sift_gpu::SiftGpu::new(ctx))
+    } else {
+        None
+    };
+    #[cfg(not(feature = "gpu"))]
+    if cfg.gpu_sift {
+        return Err(EurocError::Sift("gpu_sift needs the `gpu` feature".into()));
+    }
     let mut grays: Vec<Vec<u8>> = Vec::with_capacity(frames.len());
     let mut names: Vec<String> = Vec::with_capacity(frames.len());
     let mut features: Vec<FeatureSet> = Vec::with_capacity(frames.len());
@@ -231,8 +248,17 @@ pub fn build_euroc_dataset(
         let pixels: Vec<f32> = und.iter().map(|&b| b as f32).collect();
         let gray = GrayImage::new(width as usize, height as usize, &pixels)
             .map_err(|e| EurocError::Sift(format!("{e}")))?;
-        let (kps, desc) =
-            extract_sift(&gray, &sift_cfg).map_err(|e| EurocError::Sift(format!("{e}")))?;
+        #[cfg(feature = "gpu")]
+        let extracted = match gpu_sift.as_mut() {
+            Some(g) => g
+                .extract(&gray, &sift_cfg)
+                .map_err(|e| EurocError::Sift(format!("{e}"))),
+            None => extract_sift(&gray, &sift_cfg).map_err(|e| EurocError::Sift(format!("{e}"))),
+        };
+        #[cfg(not(feature = "gpu"))]
+        let extracted =
+            extract_sift(&gray, &sift_cfg).map_err(|e| EurocError::Sift(format!("{e}")));
+        let (kps, desc) = extracted?;
         features.push(FeatureSet {
             keypoints: kps.iter().map(|k| Point2::new(k.x, k.y)).collect(),
             descriptors: desc,
