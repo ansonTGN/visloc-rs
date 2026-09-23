@@ -1533,6 +1533,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "visloc-gsplat-train"
+version = "0.2.0"
+dependencies = [
+ "image",
+ "nalgebra",
+ "thiserror",
+ "visloc-gsplat-core",
+ "visloc-gsplat-render",
+]
+
+[[package]]
 name = "visloc-io"
 version = "0.2.0"
 dependencies = [

@@ -40,12 +40,17 @@ impl Image {
         }
     }
 
-    /// Convert to 8-bit sRGB-ish bytes (linear → gamma 2.2, clamped).
+    /// Convert to 8-bit RGB bytes (clamped to `[0, 1]`).
+    ///
+    /// Splat colours (`0.5 + SH_C0 * dc` plus higher SH) live in the same
+    /// display space as the training images, as in the Inria and brush
+    /// trainers, so no transfer curve is applied. (An earlier gamma-2.2
+    /// encode here washed every render out.)
     pub fn to_rgb8(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.rgb.len() * 3);
         for px in &self.rgb {
             for c in px {
-                let v = c.max(0.0).powf(1.0 / 2.2).min(1.0);
+                let v = c.clamp(0.0, 1.0);
                 out.push((v * 255.0).round() as u8);
             }
         }

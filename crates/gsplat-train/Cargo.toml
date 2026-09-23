@@ -1,0 +1,40 @@
+[package]
+name = "visloc-gsplat-train"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "3D Gaussian Splatting training and evaluation for visloc-rs (datasets, metrics, trainer)."
+readme.workspace = true
+documentation = "https://docs.rs/visloc-gsplat-train"
+homepage.workspace = true
+repository.workspace = true
+keywords = ["gaussian-splatting", "3dgs", "training", "colmap", "wgpu"]
+categories = ["computer-vision", "graphics", "science::robotics"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+# GPU rendering / training (wgpu). Same toolchain boundary as
+# `visloc-gsplat-render/gpu`: needs Rust >= 1.85, so it is opt-in.
+gpu = ["visloc-gsplat-render/gpu"]
+
+[dependencies]
+image = { version = "=0.25.5", default-features = false, features = ["png", "jpeg"] }
+nalgebra = { workspace = true }
+thiserror = { workspace = true }
+visloc-gsplat-core = { path = "../gsplat-core", version = "0.2.0", features = ["colmap-io"] }
+visloc-gsplat-render = { path = "../gsplat-render", version = "0.2.0" }
+
+[[example]]
+name = "gsplat_eval"
+path = "examples/gsplat_eval.rs"
+required-features = ["gpu"]
+
+[lib]
+doctest = false
+
+[lints.rust]
+unsafe_code = "deny"
