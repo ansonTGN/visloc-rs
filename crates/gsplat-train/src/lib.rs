@@ -17,6 +17,8 @@
 
 pub mod dataset;
 pub mod densify;
+#[cfg(feature = "euroc")]
+pub mod euroc;
 pub mod init;
 #[cfg(feature = "gpu")]
 pub mod loss;

@@ -25,6 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut out = PathBuf::from("gsplat_train.ply");
     let mut cfg = TrainConfig::default();
     let mut eval_every = 1000usize;
+    let mut export_steps: Vec<usize> = Vec::new();
     while let Some(a) = args.next() {
         let mut next = || args.next().ok_or(format!("{a} needs a value"));
         match a.as_str() {
@@ -33,6 +34,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--steps" => cfg.steps = next()?.parse()?,
             "--eval-every" => eval_every = next()?.parse()?,
             "--no-densify" => cfg.densify = None,
+            "--export-steps" => {
+                export_steps = next()?
+                    .split(',')
+                    .map(|s| s.trim().parse())
+                    .collect::<Result<_, _>>()?
+            }
             other => return Err(format!("unknown argument {other}").into()),
         }
     }
@@ -78,6 +85,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     for step in 1..=cfg.steps {
         trainer.step()?;
+        if export_steps.contains(&step) {
+            let p = out.with_file_name(format!(
+                "{}_{step:05}.ply",
+                out.file_stem().unwrap_or_default().to_string_lossy()
+            ));
+            save_ply(&trainer.scene(), &p)?;
+            println!("  exported {}", p.display());
+        }
         if let Some(r) = trainer.take_densify_report() {
             if step % 1000 == 0 {
                 println!(

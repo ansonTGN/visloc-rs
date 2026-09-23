@@ -1540,8 +1540,12 @@ dependencies = [
  "image",
  "nalgebra",
  "thiserror",
+ "visloc-core",
  "visloc-gsplat-core",
  "visloc-gsplat-render",
+ "visloc-io",
+ "visloc-slam",
+ "visloc-vision",
  "wgpu",
 ]
 

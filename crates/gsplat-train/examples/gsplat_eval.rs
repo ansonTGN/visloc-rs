@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use visloc_gsplat_core::ply::load_ply;
 use visloc_gsplat_render::{GpuContext, Renderer};
 use visloc_gsplat_train::dataset::{load_colmap_dataset, load_view_rgb};
-use visloc_gsplat_train::metrics::psnr;
+use visloc_gsplat_train::metrics::{psnr, ssim};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
@@ -55,6 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut renderer: Option<(u32, u32, Renderer)> = None;
     let mut sum = 0.0f64;
+    let mut ssim_sum = 0.0f64;
     let bg = [0.0, 0.0, 0.0];
     for view in &dataset.eval {
         let (w, h) = (view.camera.camera.width, view.camera.camera.height);
@@ -70,8 +71,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let image = r.render(&view.camera, bg);
         let gt = load_view_rgb(view)?;
         let score = psnr(&image.rgb, &gt);
+        let s = ssim(&image.rgb, &gt, w as usize, h as usize);
+        ssim_sum += s;
         sum += score;
-        println!("{:<24} psnr {score:6.2}", view.name);
+        println!("{:<24} psnr {score:6.2}  ssim {s:.4}", view.name);
         if let Some(dir) = &save_dir {
             let bytes: Vec<u8> = image
                 .rgb
@@ -92,6 +95,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let n = dataset.eval.len().max(1) as f64;
-    println!("mean psnr {:.3} over {} views", sum / n, dataset.eval.len());
+    println!(
+        "mean psnr {:.3}  ssim {:.4} over {} views",
+        sum / n,
+        ssim_sum / n,
+        dataset.eval.len()
+    );
     Ok(())
 }
