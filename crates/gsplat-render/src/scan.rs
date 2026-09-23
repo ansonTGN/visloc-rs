@@ -38,6 +38,7 @@ fn entry(binding: u32, ty: wgpu::BufferBindingType) -> wgpu::BindGroupLayoutEntr
 /// A reusable inclusive-scan pipeline and its block-sum scratch.
 pub struct PrefixScanner {
     scan_blocks: wgpu::ComputePipeline,
+    scan_block_sums: wgpu::ComputePipeline,
     scan_apply: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
     params: wgpu::Buffer,
@@ -92,6 +93,7 @@ impl PrefixScanner {
         });
         Self {
             scan_blocks: mk("scan_blocks"),
+            scan_block_sums: mk("scan_block_sums"),
             scan_apply: mk("scan_apply"),
             layout,
             params,
@@ -148,6 +150,9 @@ impl PrefixScanner {
             cp.set_bind_group(0, &bind, &[]);
             cp.set_pipeline(&self.scan_blocks);
             cp.dispatch_workgroups(nblocks, 1, 1);
+            // Single workgroup: the block-sum scan rewrites in place.
+            cp.set_pipeline(&self.scan_block_sums);
+            cp.dispatch_workgroups(1, 1, 1);
             cp.set_pipeline(&self.scan_apply);
             cp.dispatch_workgroups(nblocks, 1, 1);
         }

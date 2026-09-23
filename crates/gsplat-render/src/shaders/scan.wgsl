@@ -1,13 +1,13 @@
 // Subgroup-free inclusive prefix sum over `u32` values, device-side.
 //
-// Two kernels:
-//   scan_blocks  : each workgroup inclusively scans one BLOCK and writes its
-//                  block total to block_sums
-//   scan_apply   : scans the small `block_sums` array (single workgroup) and
-//                  adds the exclusive prefix of block totals to each block
+// Three kernels, dispatched in order:
+//   scan_blocks     : each workgroup inclusively scans one BLOCK and writes its
+//                     block total to block_sums
+//   scan_block_sums : ONE workgroup turns block_sums into its exclusive prefix
+//                     (in place; must not run concurrently with any reader)
+//   scan_apply      : adds block_sums[wg] (the exclusive prefix) to each block
 //
-// After both, `output[i] = sum(input[0..=i])`. Use `scan_apply`'s block-sum
-// scan to derive the exclusive prefix if needed (subtract the element).
+// After all three, `output[i] = sum(input[0..=i])`.
 
 const WG: u32 = 256u;
 const ELEMENTS_PER_THREAD: u32 = 8u;
@@ -81,14 +81,12 @@ fn scan_blocks(
     }
 }
 
+// Exclusive prefix of block_sums, in place. Dispatch exactly one workgroup:
+// with more, workgroups would race on the in-place rewrite (workgroupBarrier
+// does not synchronise across workgroups). Thread 0 walks it serially
+// (num_blocks is small: n / 2048).
 @compute @workgroup_size(256)
-fn scan_apply(
-    @builtin(workgroup_id) wid: vec3<u32>,
-    @builtin(local_invocation_id) lid: vec3<u32>,
-) {
-    // exclusive prefix of block_sums: thread 0 serially scans (num_blocks is
-    // small), using shared memory to broadcast.
-    // We store the exclusive offsets in `tile` (reuse).
+fn scan_block_sums(@builtin(local_invocation_id) lid: vec3<u32>) {
     if (lid.x == 0u) {
         var acc = 0u;
         let nb = params.num_blocks;
@@ -98,12 +96,18 @@ fn scan_apply(
             acc = acc + s;
         }
     }
-    workgroupBarrier();
-    let carry = select(0u, block_sums[wid.x - 1u], wid.x > 0u);
+}
+
+@compute @workgroup_size(256)
+fn scan_apply(
+    @builtin(workgroup_id) wid: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let carry = block_sums[wid.x];
     let base = wid.x * BLOCK;
     for (var e = 0u; e < ELEMENTS_PER_THREAD; e = e + 1u) {
         let i = base + lid.x + e * WG;
-        if (base + lid.x + e * WG < params.num_elements) {
+        if (i < params.num_elements) {
             output[i] = output[i] + carry;
         }
     }

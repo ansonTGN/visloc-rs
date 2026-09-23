@@ -234,6 +234,50 @@ mod gpu_tests {
     }
 
     #[test]
+    fn gpu_prefix_scan_matches_host_across_many_blocks() {
+        let Some(ctx) = try_context() else {
+            eprintln!("skipping gpu_prefix_scan_matches_host_across_many_blocks: no GPU adapter");
+            return;
+        };
+        // Many 2048-element blocks, so the block-sum carry path is exercised
+        // (a single-block scan never touches it).
+        let n = 300_000usize;
+        let mut state = 0x9e37_79b9u32;
+        let input: Vec<u32> = (0..n)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                state % 50
+            })
+            .collect();
+        let mk = |label| {
+            ctx.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: (n * 4) as u64,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            })
+        };
+        let (inb, outb) = (mk("scan_in"), mk("scan_out"));
+        ctx.queue
+            .write_buffer(&inb, 0, bytemuck::cast_slice(&input));
+        let scanner = crate::scan::PrefixScanner::new(&ctx.device, n);
+        scanner.scan(&ctx.device, &ctx.queue, &inb, &outb, n);
+        let gpu = read_back_u32(&ctx, &outb, n);
+        let mut acc = 0u32;
+        let expect: Vec<u32> = input
+            .iter()
+            .map(|&v| {
+                acc += v;
+                acc
+            })
+            .collect();
+        let first_bad = gpu.iter().zip(&expect).position(|(a, b)| a != b);
+        assert_eq!(first_bad, None, "inclusive scan differs from host");
+    }
+
+    #[test]
     fn gpu_matches_cpu_reference() {
         let Some(ctx) = try_context() else {
             eprintln!("skipping gpu_matches_cpu_reference: no GPU adapter");
