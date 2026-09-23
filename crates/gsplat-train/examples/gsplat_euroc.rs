@@ -4,7 +4,7 @@
 //! ```text
 //! cargo run --release -p visloc-gsplat-train --features gpu,euroc --example gsplat_euroc -- \
 //!     --euroc E:/datasets/euroc_mav/all11/V1_01_easy --work out_dir \
-//!     [--stride 4] [--max-frames 200] [--steps 7000] [--export-steps 7000] [--gpu-sift]
+//!     [--stride 4] [--max-frames 200] [--steps 7000] [--export-steps 7000] [--gpu-sift] [--gpu-ba]
 //! ```
 //!
 //! `--euroc` is the directory containing `mav0/`. Undistorted frames go to
@@ -36,6 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--stride" => sfm.stride = next()?.parse()?,
             "--max-frames" => sfm.max_frames = next()?.parse()?,
             "--gpu-sift" => sfm.gpu_sift = true,
+            "--gpu-ba" => sfm.gpu_ba = true,
             "--steps" => cfg.steps = next()?.parse()?,
             "--export-steps" => {
                 export_steps = next()?

@@ -15,6 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use nalgebra::{Point2, Vector3};
+use rayon::prelude::*;
 use visloc_core::types::Camera;
 use visloc_gsplat_core::colmap_scene::camera_view_from;
 use visloc_gsplat_core::gaussian::Scene;
@@ -50,6 +51,9 @@ pub struct EurocSfmConfig {
     /// same detector/descriptor path as the CPU extractor, validated by
     /// keypoint agreement rather than bytes.
     pub gpu_sift: bool,
+    /// Run the SfM's global bundle adjustments on the GPU (`visloc-ba-gpu`,
+    /// needs the `gpu` feature); local BA stays on the CPU.
+    pub gpu_ba: bool,
 }
 
 impl Default for EurocSfmConfig {
@@ -63,6 +67,7 @@ impl Default for EurocSfmConfig {
             sift_max_keypoints: 4000,
             eval_every: 8,
             gpu_sift: false,
+            gpu_ba: false,
         }
     }
 }
@@ -225,8 +230,19 @@ pub fn build_euroc_dataset(
         None
     };
     #[cfg(not(feature = "gpu"))]
-    if cfg.gpu_sift {
-        return Err(EurocError::Sift("gpu_sift needs the `gpu` feature".into()));
+    if cfg.gpu_sift || cfg.gpu_ba {
+        return Err(EurocError::Sift(
+            "gpu_sift / gpu_ba need the `gpu` feature".into(),
+        ));
+    }
+    #[cfg(feature = "gpu")]
+    if cfg.gpu_ba {
+        let ctx =
+            visloc_ba_gpu::GpuContext::new().map_err(|e| EurocError::Sfm(format!("gpu: {e}")))?;
+        // Process-wide: the first registration wins.
+        visloc_slam::set_global_ba_accelerator(Box::new(visloc_ba_gpu::GpuBundleAdjuster::new(
+            ctx,
+        )));
     }
     let mut grays: Vec<Vec<u8>> = Vec::with_capacity(frames.len());
     let mut names: Vec<String> = Vec::with_capacity(frames.len());
@@ -311,27 +327,28 @@ pub fn build_euroc_dataset(
     #[cfg(not(feature = "gpu"))]
     let all_matches: Option<Vec<Vec<DescriptorMatch>>> = None;
     log(&format!("matched {} candidate pairs", candidates.len()));
-    let mut pairwise = Vec::new();
-    for (c, &(i, j)) in candidates.iter().enumerate() {
-        {
+    // Geometric verification is independent per pair (seeded RANSAC), so it
+    // runs in parallel; results keep the candidate order.
+    let pairwise: Vec<PairwiseMatches> = candidates
+        .par_iter()
+        .enumerate()
+        .filter_map(|(c, &(i, j))| {
             let dm = match &all_matches {
                 Some(all) => std::borrow::Cow::Borrowed(&all[c]),
                 None => std::borrow::Cow::Owned(cpu_matches(&features[i], &features[j])),
             };
-            if let Some(matches) =
-                verify_pair(&camera, &features[i], &features[j], &dm, cfg.min_matches)
-            {
-                pairwise.push(PairwiseMatches {
+            verify_pair(&camera, &features[i], &features[j], &dm, cfg.min_matches).map(|matches| {
+                PairwiseMatches {
                     image_i: i,
                     image_j: j,
                     matches,
                     two_view_config: None,
                     essential_matches: None,
                     essential_matrix: None,
-                });
-            }
-        }
-    }
+                }
+            })
+        })
+        .collect();
     log(&format!("{} verified pairs", pairwise.len()));
 
     let sfm_cfg = IncrementalSfmConfig {

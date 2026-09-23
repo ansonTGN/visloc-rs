@@ -1471,6 +1471,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "visloc-ba-gpu"
+version = "0.2.0"
+dependencies = [
+ "bytemuck",
+ "nalgebra",
+ "pollster",
+ "rayon",
+ "thiserror",
+ "visloc-core",
+ "visloc-gsplat-render",
+ "visloc-slam",
+ "wgpu",
+]
+
+[[package]]
 name = "visloc-basalt"
 version = "0.2.0"
 dependencies = [
@@ -1539,7 +1554,9 @@ dependencies = [
  "bytemuck",
  "image",
  "nalgebra",
+ "rayon",
  "thiserror",
+ "visloc-ba-gpu",
  "visloc-core",
  "visloc-gsplat-core",
  "visloc-gsplat-render",
