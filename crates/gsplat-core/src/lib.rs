@@ -24,6 +24,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod backward;
 pub mod camera;
 pub mod cpu_render;
 pub mod gaussian;
