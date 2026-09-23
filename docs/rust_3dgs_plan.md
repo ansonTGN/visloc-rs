@@ -238,10 +238,25 @@ V1_01 GT pose, GTX 1660 Ti, GPU-only per frame:
 | 640x480 | 5.3M | 41 ms | **21 ms** |
 | 1920x1080 | 31M | crash | 117 ms |
 
-At 1080p the frame is dominated by the tile sort (72 ms), `map_gaussians`
+At 1080p the frame was dominated by the tile sort (72 ms), `map_gaussians`
 (22 ms) and `rasterize` (19 ms) over 31M intersections: large near-camera
-gaussians each cover hundreds of tiles. Tighter per-gaussian tile culling
-(e.g. an opacity-aware extent instead of 3 sigma) is the next lever.
+gaussians each cover hundreds of tiles.
+
+**Tight tile extents.** A splat's tiles came from a 3-sigma circle of its major
+axis. `rasterize` only blends pixels where `opacity * exp(-sigma) >= 1/255`, so
+the footprint that matters is the ellipse `d^T C^-1 d <= 2 ln(255 * opacity)`
+(3.33 sigma at full opacity, smaller for faint splats, empty below 1/255), and
+its per-axis bounding box `sqrt(k * C00) x sqrt(k * C11)` is much tighter than
+the circle for elongated splats. CPU reference and GPU use the same extent.
+
+| resolution | isects | before | after |
+| --- | --- | --- | --- |
+| 640x480 | 5.3M → 2.8M | 21 ms | **12 ms** |
+| 1920x1080 | 31M → 14.8M | 117 ms | **54 ms** |
+
+Output vs. the 3-sigma circle: max 4/255, mean 0.1/255 (8-bit); the only
+differences are tails the circle used to cut above the 1/255 cutoff. Real-pose
+CPU/GPU parity is now max 1e-5. At 1080p the tile sort (35 ms of 57) is next.
 
 **DX12 startup.** `Renderer::new` used to take ~10 minutes on Windows: wgpu's
 `Auto` shader-compiler choice falls back to FXC when `dxcompiler.dll` is not

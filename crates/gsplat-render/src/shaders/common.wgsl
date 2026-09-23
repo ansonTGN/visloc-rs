@@ -271,10 +271,22 @@ fn compute_projected(
     if (lambda1 <= 0.0) {
         return p;
     }
-    var radius = 3.0 * sqrt(lambda1);
-    if (!(radius == radius)) {
+    // Tile extent: exactly the pixels `rasterize` can blend. It skips a pixel
+    // when opacity * exp(-sigma) < 1/255, with sigma = 0.5 * d^T C^-1 d, so
+    // only d^T C^-1 d <= k = 2 ln(255 * opacity) matters (k <= 11.08, i.e.
+    // 3.33 sigma at full opacity; faint splats shrink). The bounding box of
+    // that ellipse is |dx| <= sqrt(k * C00), |dy| <= sqrt(k * C11) -- tighter
+    // than a circle of the major axis for elongated splats.
+    let k = 2.0 * log(255.0 * opacity);
+    if (!(k > 0.0)) {
         return p;
     }
+    let ext_x = sqrt(k * a);
+    let ext_y = sqrt(k * c);
+    if (!(ext_x == ext_x) || !(ext_y == ext_y)) {
+        return p;
+    }
+    let radius = max(ext_x, ext_y);
     // No footprint cap: capping cuts large primitives off at a tile-aligned
     // rectangle (hard edges). The frustum clamp above bounds near-plane blow-ups
     // and the tile rect below is clipped to the image.
@@ -283,14 +295,14 @@ fn compute_projected(
     let proj_v = p_cam.y * j11 + u.cy;
     let w = f32(u.img_w);
     let h = f32(u.img_h);
-    if (proj_u + radius < 0.0 || proj_v + radius < 0.0 ||
-        proj_u - radius > w - 1.0 || proj_v - radius > h - 1.0) {
+    if (proj_u + ext_x < 0.0 || proj_v + ext_y < 0.0 ||
+        proj_u - ext_x > w - 1.0 || proj_v - ext_y > h - 1.0) {
         return p;
     }
-    let x0f = max(proj_u - radius, 0.0);
-    let y0f = max(proj_v - radius, 0.0);
-    let x1f = min(proj_u + radius, w - 1.0);
-    let y1f = min(proj_v + radius, h - 1.0);
+    let x0f = max(proj_u - ext_x, 0.0);
+    let y0f = max(proj_v - ext_y, 0.0);
+    let x1f = min(proj_u + ext_x, w - 1.0);
+    let y1f = min(proj_v + ext_y, h - 1.0);
     if (x1f < x0f || y1f < y0f) {
         return p;
     }
