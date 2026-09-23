@@ -1,17 +1,15 @@
 // Subgroup-free LSD radix sort (4 bits per pass) for a (key: u32, value: u32)
 // pair, fully on the device (no per-pass readback).
 //
-// Four kernels per pass:
-//   radix_clear     : zero hist[wg * 16 + d] on device (no host write_buffer)
+// Three kernels per pass:
 //   radix_histogram : per-workgroup digit histogram -> hist[wg * 16 + d]
 //   radix_scan      : exclusive scan of hist in digit-major order
 //                     -> base[d * num_blocks + wg] (start offset)
 //   radix_scatter   : stable scatter of each element to its new slot
 //
 // Stability is what makes LSD radix correct: elements with the same digit must
-// keep their relative order. Each workgroup computes a *stable* per-element rank
-// within its block with an in-block per-digit exclusive scan (double-buffered,
-// no atomics, no subgroups).
+// keep their relative order. radix_scatter ranks the block with stable 1-bit
+// splits in shared memory (no atomics, no subgroups).
 //
 // Block layout: 256 threads, ITEMS consecutive elements per thread (thread t
 // owns elements t*ITEMS .. t*ITEMS+ITEMS).
@@ -33,7 +31,7 @@ struct RadixParams {
 @group(0) @binding(2) var<storage, read> values_in: array<u32>;
 @group(0) @binding(3) var<storage, read_write> keys_out: array<u32>;
 @group(0) @binding(4) var<storage, read_write> values_out: array<u32>;
-// hist[wg * BINS + d]; zeroed on device by `radix_clear` before each pass.
+// hist[wg * BINS + d]; fully rewritten by `radix_histogram` every pass.
 @group(0) @binding(5) var<storage, read_write> hist: array<atomic<u32>>;
 // base[d * num_blocks + wg] exclusive start offset for this (digit, block).
 @group(0) @binding(6) var<storage, read_write> base: array<u32>;
@@ -47,42 +45,46 @@ var<workgroup> partial: array<u32, WG>;
 // Per-block digit totals and their exclusive prefix, used by `radix_scatter`.
 var<workgroup> block_digit_total: array<u32, BINS>;
 var<workgroup> block_digit_start: array<u32, BINS>;
+// The block's digit counts, accumulated by `radix_histogram`.
+var<workgroup> block_hist: array<atomic<u32>, BINS>;
 // Entries of the digit-major histogram each thread handles per scan chunk.
 const SCAN_ITEMS: u32 = 16u;
 
-// Pass 0: zero every histogram entry for this pass. One invocation per entry;
-// the dispatch covers num_blocks * BINS entries.
-@compute @workgroup_size(256)
-fn radix_clear(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
-    if (i < params.num_blocks * BINS) {
-        atomicStore(&hist[i], 0u);
-    }
-}
-
-// Pass 1: count each digit in the workgroup's block.
+// Pass 1: count each digit in the workgroup's block and store the block's
+// histogram row (every entry is written, so no separate clear pass).
+//
+// Per-thread counts are packed 8 bits per digit into a vec4 (a thread sees
+// at most ITEMS = 16 keys), which avoids a runtime-indexed array that would
+// spill to local memory; the workgroup then combines them with shared
+// atomics instead of global ones.
 @compute @workgroup_size(256)
 fn radix_histogram(
     @builtin(workgroup_id) wid: vec3<u32>,
     @builtin(local_invocation_id) lid: vec3<u32>,
 ) {
-    var local: array<u32, 16>;
-    for (var b = 0u; b < 16u; b = b + 1u) {
-        local[b] = 0u;
+    if (lid.x < BINS) {
+        atomicStore(&block_hist[lid.x], 0u);
     }
+    workgroupBarrier();
+    var packed = vec4<u32>(0u, 0u, 0u, 0u);
     let block_base = wid.x * BLOCK;
     let n = params.num_elements;
     for (var e = lid.x; e < BLOCK; e = e + WG) {
         let i = block_base + e;
         if (i < n) {
             let d = (keys_in[i] >> params.shift) & 0xFu;
-            local[d] = local[d] + 1u;
+            packed[d >> 2u] = packed[d >> 2u] + (1u << ((d & 3u) * 8u));
         }
     }
-    for (var b = 0u; b < 16u; b = b + 1u) {
-        if (local[b] > 0u) {
-            atomicAdd(&hist[wid.x * BINS + b], local[b]);
+    for (var d = 0u; d < BINS; d = d + 1u) {
+        let c = (packed[d >> 2u] >> ((d & 3u) * 8u)) & 0xFFu;
+        if (c > 0u) {
+            atomicAdd(&block_hist[d], c);
         }
+    }
+    workgroupBarrier();
+    if (lid.x < BINS) {
+        atomicStore(&hist[wid.x * BINS + lid.x], atomicLoad(&block_hist[lid.x]));
     }
 }
 

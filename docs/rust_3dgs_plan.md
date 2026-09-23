@@ -280,8 +280,26 @@ one radix kernel at a time attributes the tile sort as: `radix_scatter` ~16 ms
 copies ~1.7. Staging the scatter through shared memory so the global writes
 coalesce gave **no gain** (33.5 → 35 ms, reverted): the cost is the in-block
 ranking (16-digit Hillis-Steele over 256 threads, runtime-indexed register
-arrays that spill), not the stores. Cheaper ranking (e.g. 1-bit split passes
-on packed digit|index keys) is the next sort lever.
+arrays that spill), not the stores.
+
+**Cheaper radix kernels.**
+- `radix_scatter` now packs `(digit << 12 | index)` per element in shared
+  memory and ranks with four stable 1-bit splits (one 256-wide scan of zero
+  counts each), then writes each digit run contiguously, gathering key/value
+  from the original index.
+- `radix_histogram` packs per-thread counts 8 bits per digit in a `vec4`,
+  combines them with shared (not global) atomics and *stores* the block's row,
+  so the `radix_clear` pass is gone.
+
+| resolution | tile_sort | frame (GPU-only) |
+| --- | --- | --- |
+| 1920x1080 | ~22 → 16.4 (scatter) → **11.5 ms** | 33.5 → 28 → **22.9 ms** |
+| 640x480 | ~4.5 → 2.7 ms | 9.0 → 8.0 → **6.7 ms** |
+
+Renders stay bit-identical. From `main` before this series the 1080p real view
+went 117 → 22.9 ms (~5x) and 640x480 21 → 6.7 ms. Remaining at 1080p: tile sort
+11.5, `map_gaussians` 5.9 (one thread writes every tile of a frame-sized splat),
+`rasterize` 3.9.
 
 **DX12 startup.** `Renderer::new` used to take ~10 minutes on Windows: wgpu's
 `Auto` shader-compiler choice falls back to FXC when `dxcompiler.dll` is not
