@@ -166,11 +166,54 @@ gaussians); the counter readback is only ~0.4 ms. Two costs remain:
 
 1. The **output-image readback** (~90 ms at 1080p), which a viewer avoids by
    presenting the output buffer directly.
-2. **CPU submit overhead**: 640x480 is *slower* than 1920x1080 for the same
-   scene because the ~25 `queue.submit` calls per frame are resolution
-   independent. Consolidating frames onto a few encoders is the next change.
+2. ~~CPU submit overhead~~ — **falsified**, see below.
 
 `Renderer::set_skip_readback(true)` exposes the GPU-only path for measurement.
+
+**Per-stage profile and two correctness fixes.** `GSPLAT_PROFILE=1` now makes
+`render` block after every stage and print per-stage wall time, the raw
+counters, and per-tile list-length statistics. What it showed (GTX 1660 Ti,
+419k gaussians):
+
+- *Submit overhead is not the cost.* Folding each radix sort into one submit
+  (24 → 2 submits/frame) left GPU-only time unchanged (640x480: 48.6 → 47.7
+  ms; 1080p within noise).
+- *The auto-framed benchmark view is unrepresentative.* It puts the camera far
+  outside the scene, so ~57% of visible gaussians land in a single tile and
+  `rasterize` (one workgroup per tile) is bound by that one tile. The example
+  now takes `--pose-cw qw,qx,qy,qz,tx,ty,tz` (world-to-camera); a V1_01
+  ground-truth cam0 pose (`T_WC = T_WB · T_BS`) renders the room correctly,
+  confirming `euroc_v101.splat` is in the EuRoC GT frame.
+- *Bug: prefix-scan race.* `scan_apply` had every workgroup rewrite
+  `block_sums` in place, racing across workgroups, so `cum_tiles_hit` was wrong
+  whenever the scan spanned more than one 2048-element block and isects landed
+  in other gaussians' slots (blocky tiles). The block-sum scan is now its own
+  single-workgroup kernel; `gpu_prefix_scan_matches_host_across_many_blocks`
+  fails on the old code at element 2048.
+- *Bug: footprint cap.* CPU and GPU both capped the projected radius at
+  `2 * max(w, h)`, cutting large near-camera gaussians off at a rectangle (hard
+  tile-aligned edges). Both now use the Inria 1.3x-frustum Jacobian clamp and
+  no cap. Real-pose parity (1/104 subsample): max error 0.63 → **0.0077**,
+  pixels over 0.1: 5798 → **0**.
+
+From the real pose (640x480, 5.3M intersections) the frame is sort-bound:
+
+| stage | ms |
+| --- | --- |
+| tile_sort | 17.2 |
+| tile_offsets | 6.4 |
+| map_gaussians | 4.3 |
+| rasterize | 3.6 |
+| depth_sort | 2.8 |
+| rest | 2.5 |
+| **total** | **36.8** |
+
+The tile sort now runs only `ceil(log2(num_tiles) / 4)` radix passes (tile ids
+are small; the LSD sort is stable so depth order survives): 3 passes at
+640x480, 4 at 1080p, versus 8. `rasterize` also stops loading batches once
+every pixel in its tile is saturated. Next targets: the tile sort and
+`tile_offsets` on real views, and `Renderer::new`, which takes ~10 minutes on
+DX12 (shader compilation) and dominates every benchmark run.
 
 ### Stage 2 — Burn + CubeCL differentiable rasterizer
 - Port the forward rasterizer to CubeCL kernels; add the **analytic backward**
