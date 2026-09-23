@@ -369,6 +369,28 @@ differentiating against). Structure:
 - `gsplat-cli train` from a COLMAP model, and from raw EuRoC via visloc-rs
   SfM/VIO poses (no COLMAP, no Python), exporting `.ply` / `.splat`.
 
+### Status (2026-09-23)
+
+- **M0**: `visloc-gsplat-train` with the brush-compatible evaluator
+  (`gsplat_eval`: PSNR + SSIM, black background, every 8th view held out).
+  brush v0.3.0 baselines on the undistorted COLMAP sample scenes (1024 px,
+  30k steps, GTX 1660 Ti): south-building 21.68 dB (7k: 21.57) in 2379 s,
+  1.05M splats; gerrard-hall in 2147 s. Getting there fixed three bugs:
+  a gamma-2.2 encode in `Image::to_rgb8` (all PNGs were washed out), a PLY
+  reader that assumed contiguous properties (brush writes them sorted), and
+  `sh_rest_coeffs_per_channel` returning 3x the per-channel count (every
+  standard degree 1-3 PLY was rejected and the GPU read wrong SH for
+  degree > 0).
+- **M1**: done. CPU f64 oracle (`gsplat_core::backward`, FD-checked); GPU
+  backward (`Renderer::backward`) matches it to < 1e-6 relative on degree 2
+  and 3 scenes.
+- **M2**: on-device trainer (`trainer::Trainer`): L1 + 0.2 D-SSIM (GPU SSIM
+  gradient matches the CPU one to 1e-6), Adam with Inria learning rates,
+  Inria densification on the host with the Adam state carried across.
+- **M3**: `gsplat_euroc` example (feature `euroc`): raw EuRoC -> undistort
+  -> SIFT -> verified temporal matches -> visloc-rs incremental SfM ->
+  trainer, no COLMAP or Python.
+
 ### Stage 4 — Browser (optional, non-blocking)
 - wasm + WebGPU build of the renderer; training only if stage 2/3 land cleanly.
 - Explicitly deferred so it cannot slow the native path.

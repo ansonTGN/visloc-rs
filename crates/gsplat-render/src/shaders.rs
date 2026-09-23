@@ -34,10 +34,6 @@ pub fn project_backward() -> Kernel {
     )
 }
 
-pub fn grad_reduce() -> Kernel {
-    build("grad_reduce", include_str!("shaders/grad_reduce.wgsl"))
-}
-
 pub fn project_forward() -> Kernel {
     build(
         "project_forward",

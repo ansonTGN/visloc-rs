@@ -2,9 +2,16 @@
 //!
 //! Differentiates the **last rendered frame**: after [`Renderer::render`], the
 //! screen-space gradients of `L = sum_px dot(d_image[px], C[px])` are computed
-//! per gaussian by `rasterize_backward` (per-isect, no global atomics) and
-//! `grad_reduce` (deterministic per-gaussian sum). Needs the `SUBGROUP` device
-//! feature.
+//! per gaussian by `rasterize_backward` (per-tile sums, then one float atomic
+//! add per (tile, splat) into the gaussian's record) and chained to the
+//! parameters by `project_backward`. Needs the `SUBGROUP` device feature.
+//!
+//! An earlier version wrote each (tile, splat) sum to its own isect slot and
+//! reduced them deterministically, but that costs 36 bytes per intersection:
+//! a 1024 px training view with ~900k gaussians needed ~60M intersections,
+//! past wgpu's 2 GiB buffer limit and most of a 6 GB GPU. The atomic version
+//! needs no per-intersection storage; the summation order (and so the last
+//! float bits) can vary between runs.
 
 use super::{build_stage, new_storage, read_bytes, Binding, Renderer, Stage, RO, RW};
 use crate::gpu::GpuError;
@@ -28,22 +35,18 @@ pub struct ParamGrads {
 
 pub(super) struct BackwardState {
     raster_bwd: Stage,
-    reduce: Stage,
     project_bwd: Stage,
     d_image: wgpu::Buffer,
-    isect_grads: wgpu::Buffer,
     screen_grads: wgpu::Buffer,
     grad_transforms: wgpu::Buffer,
     grad_opacity: wgpu::Buffer,
     grad_sh: wgpu::Buffer,
-    /// Isect capacity `isect_grads` (and the bind groups) were built for.
-    isect_capacity: usize,
 }
 
 fn raster_bwd_bindings(
     r: &Renderer,
     d_image: &wgpu::Buffer,
-    isect_grads: &wgpu::Buffer,
+    screen_grads: &wgpu::Buffer,
 ) -> Vec<Binding> {
     let b = |binding, ty, buffer: &wgpu::Buffer| Binding {
         binding,
@@ -55,29 +58,10 @@ fn raster_bwd_bindings(
         b(1, RO, &r.scratch.projected_splats),
         b(2, RO, &r.scratch.compact_sorted),
         b(3, RO, &r.tile_offsets),
-        b(4, RO, &r.scratch.isect_id),
         b(5, RO, &r.residuals.final_t),
         b(6, RO, &r.residuals.last_idx),
         b(7, RO, d_image),
-        b(8, RW, isect_grads),
-    ]
-}
-
-fn reduce_bindings(
-    r: &Renderer,
-    isect_grads: &wgpu::Buffer,
-    screen_grads: &wgpu::Buffer,
-) -> Vec<Binding> {
-    let b = |binding, ty, buffer: &wgpu::Buffer| Binding {
-        binding,
-        ty,
-        buffer: buffer.clone(),
-    };
-    vec![
-        b(0, wgpu::BufferBindingType::Uniform, &r.proj_uniforms),
-        b(1, RO, &r.scratch.cum_tiles_hit),
-        b(2, RO, isect_grads),
-        b(3, RW, screen_grads),
+        b(8, RW, screen_grads),
     ]
 }
 
@@ -107,57 +91,33 @@ fn project_bwd_bindings(
 }
 
 impl Renderer {
-    /// Build (or, after isect-buffer growth, re-point) the backward state.
+    /// Build the backward state on first use; afterwards re-point the
+    /// rasterize-backward bind group (the forward may have grown its buffers).
     fn ensure_backward(&mut self) -> Result<(), GpuError> {
         if !self.ctx.features.contains(wgpu::Features::SUBGROUP) {
             return Err(GpuError::MissingFeature("SUBGROUP"));
         }
-        let cap = self.scratch.max_isects;
-        let isect_bytes = (cap * SCREEN_GRAD_FLOATS * 4) as u64;
         match self.backward.take() {
             Some(mut st) => {
-                if st.isect_capacity != cap {
-                    let dev = &self.ctx.device;
-                    st.isect_grads = new_storage(dev, "isect_grads", isect_bytes);
-                    st.isect_capacity = cap;
-                    let rb = raster_bwd_bindings(self, &st.d_image, &st.isect_grads);
-                    st.raster_bwd.rebind(dev, "rasterize_backward", &rb);
-                    let red = reduce_bindings(self, &st.isect_grads, &st.screen_grads);
-                    st.reduce.rebind(dev, "grad_reduce", &red);
-                } else {
-                    // The forward may have re-pointed its own buffers; rebind
-                    // cheaply every frame so the backward never reads stale ones.
-                    let dev = &self.ctx.device;
-                    let rb = raster_bwd_bindings(self, &st.d_image, &st.isect_grads);
-                    st.raster_bwd.rebind(dev, "rasterize_backward", &rb);
-                }
+                let dev = &self.ctx.device;
+                let rb = raster_bwd_bindings(self, &st.d_image, &st.screen_grads);
+                st.raster_bwd.rebind(dev, "rasterize_backward", &rb);
                 self.backward = Some(st);
             }
             None => {
                 let dev = &self.ctx.device;
                 let pixels = self.image_w as u64 * self.image_h as u64;
                 let d_image = new_storage(dev, "d_image", pixels * 3 * 4);
-                let isect_grads = new_storage(dev, "isect_grads", isect_bytes);
-                let screen_grads = new_storage(
-                    dev,
-                    "screen_grads",
-                    (self.num_gaussians().max(1) * SCREEN_GRAD_FLOATS * 4) as u64,
-                );
+                let n = self.num_gaussians().max(1) as u64;
+                let screen_grads =
+                    new_storage(dev, "screen_grads", n * SCREEN_GRAD_FLOATS as u64 * 4);
                 let raster_bwd = build_stage(
                     dev,
                     "rasterize_backward",
                     "rasterize_backward",
                     shaders::rasterize_backward().source,
-                    &raster_bwd_bindings(self, &d_image, &isect_grads),
+                    &raster_bwd_bindings(self, &d_image, &screen_grads),
                 );
-                let reduce = build_stage(
-                    dev,
-                    "grad_reduce",
-                    "grad_reduce",
-                    shaders::grad_reduce().source,
-                    &reduce_bindings(self, &isect_grads, &screen_grads),
-                );
-                let n = self.num_gaussians().max(1) as u64;
                 let grad_transforms = new_storage(dev, "grad_transforms", n * 10 * 4);
                 let grad_opacity = new_storage(dev, "grad_opacity", n * 4);
                 let grad_sh = new_storage(
@@ -180,15 +140,12 @@ impl Renderer {
                 );
                 self.backward = Some(BackwardState {
                     raster_bwd,
-                    reduce,
                     project_bwd,
                     d_image,
-                    isect_grads,
                     screen_grads,
                     grad_transforms,
                     grad_opacity,
                     grad_sh,
-                    isect_capacity: cap,
                 });
             }
         }
@@ -219,23 +176,18 @@ impl Renderer {
         encoder.clear_buffer(&st.grad_transforms, 0, None);
         encoder.clear_buffer(&st.grad_opacity, 0, None);
         encoder.clear_buffer(&st.grad_sh, 0, None);
-        if frame.ni > 0 {
-            // Slots of isects past a tile's last blended entry are never
-            // written; clear so grad_reduce sums zeros for them.
-            encoder.clear_buffer(
-                &st.isect_grads,
-                0,
-                Some((frame.ni * SCREEN_GRAD_FLOATS * 4) as u64),
-            );
-        }
         if frame.nv > 0 {
+            // rasterize_backward accumulates into these with atomics.
+            encoder.clear_buffer(
+                &st.screen_grads,
+                0,
+                Some((frame.nv * SCREEN_GRAD_FLOATS * 4) as u64),
+            );
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             if frame.ni > 0 {
                 super::dispatch(&mut pass, &st.raster_bwd, frame.num_tiles);
             }
-            let groups = (frame.nv as u32).div_ceil(256);
-            super::dispatch(&mut pass, &st.reduce, groups);
-            super::dispatch(&mut pass, &st.project_bwd, groups);
+            super::dispatch(&mut pass, &st.project_bwd, (frame.nv as u32).div_ceil(256));
         }
         queue.submit(Some(encoder.finish()));
         Ok(())

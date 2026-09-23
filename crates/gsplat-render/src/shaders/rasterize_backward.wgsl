@@ -12,21 +12,22 @@
 // conic or mean.
 //
 // The 256 per-pixel contributions of a splat are summed with subgroupAdd and
-// a shared-memory float add (CAS on u32 bits) across subgroups, then written
-// to the splat's own isect slot: no global atomics, and a gaussian's gradient
-// is the deterministic sum of its isect slots (grad_reduce).
+// a shared-memory float add (CAS on u32 bits) across subgroups; the tile's
+// total is then added to the gaussian's record in screen_grads with one
+// global CAS float add per component (no per-intersection storage).
 //
-// Slot layout (9 floats): du, dv, dA, dB, dC, dopacity, dr, dg, db.
+// Record layout (9 floats, per compact id): du, dv, dA, dB, dC, dopacity,
+// dr, dg, db.
 
 @group(0) @binding(0) var<uniform> u: RasterUniforms;
 @group(0) @binding(1) var<storage, read> projected_splats: array<f32>;
 @group(0) @binding(2) var<storage, read> compact_sorted: array<u32>;
 @group(0) @binding(3) var<storage, read> tile_offsets: array<u32>;
-@group(0) @binding(4) var<storage, read> isect_id: array<u32>;
 @group(0) @binding(5) var<storage, read> final_t: array<f32>;
 @group(0) @binding(6) var<storage, read> last_idx: array<u32>;
 @group(0) @binding(7) var<storage, read> d_image: array<f32>;
-@group(0) @binding(8) var<storage, read_write> isect_grads: array<f32>;
+// f32 bits, accumulated with CAS (no float atomics in wgpu here).
+@group(0) @binding(8) var<storage, read_write> screen_grads: array<atomic<u32>>;
 
 const TILE_W: u32 = 16u;
 const TILE_H: u32 = 16u;
@@ -34,7 +35,7 @@ const BB: u32 = 128u;
 const NG: u32 = 9u;
 
 var<workgroup> bsplat: array<f32, BB * 9u>;
-var<workgroup> bslot: array<u32, BB>;
+var<workgroup> bcompact: array<u32, BB>;
 var<workgroup> gacc: array<atomic<u32>, BB * NG>;
 var<workgroup> tile_last: atomic<u32>;
 var<workgroup> tile_last_u: u32;
@@ -43,6 +44,17 @@ fn gacc_add(i: u32, v: f32) {
     var old = atomicLoad(&gacc[i]);
     loop {
         let r = atomicCompareExchangeWeak(&gacc[i], old, bitcast<u32>(bitcast<f32>(old) + v));
+        if (r.exchanged) {
+            break;
+        }
+        old = r.old_value;
+    }
+}
+
+fn global_add(i: u32, v: f32) {
+    var old = atomicLoad(&screen_grads[i]);
+    loop {
+        let r = atomicCompareExchangeWeak(&screen_grads[i], old, bitcast<u32>(bitcast<f32>(old) + v));
         if (r.exchanged) {
             break;
         }
@@ -101,11 +113,12 @@ fn rasterize_backward(
         let cnt = bend - bstart;
         if (tid < cnt) {
             let j = bstart + tid;
-            let src = compact_sorted[j] * 9u;
+            let cg = compact_sorted[j];
+            let src = cg * 9u;
             for (var k = 0u; k < 9u; k = k + 1u) {
                 bsplat[tid * 9u + k] = projected_splats[src + k];
             }
-            bslot[tid] = isect_id[j];
+            bcompact[tid] = cg;
         }
         for (var i = tid; i < BB * NG; i = i + 256u) {
             atomicStore(&gacc[i], 0u);
@@ -169,9 +182,12 @@ fn rasterize_backward(
         }
         workgroupBarrier();
         for (var i = tid; i < cnt * NG; i = i + 256u) {
-            isect_grads[bslot[i / NG] * NG + i % NG] = bitcast<f32>(atomicLoad(&gacc[i]));
+            let v = bitcast<f32>(atomicLoad(&gacc[i]));
+            if (v != 0.0) {
+                global_add(bcompact[i / NG] * NG + i % NG, v);
+            }
         }
-        // bsplat / bslot / gacc are reused by the next batch.
+        // bsplat / bcompact / gacc are reused by the next batch.
         workgroupBarrier();
         bend = bstart;
     }
