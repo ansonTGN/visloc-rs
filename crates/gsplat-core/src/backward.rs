@@ -503,23 +503,21 @@ struct ScreenGrad {
     color: [f64; 3],
 }
 
-/// Reference backward pass: see the module docs.
-pub fn render_backward(
-    scene: &Scene,
+/// Per projected splat, the pixel-summed gradient of its screen parameters.
+fn screen_grads(
+    projected: &[Proj],
     view: &CameraView,
     bg: [f64; 3],
     d_image: &[[f64; 3]],
-) -> Grads {
+) -> Vec<ScreenGrad> {
     let (w, h) = (view.camera.width, view.camera.height);
     assert_eq!(d_image.len(), (w * h) as usize, "d_image size");
-    let projected = project_all(scene, view);
     let mut screen = vec![ScreenGrad::default(); projected.len()];
 
     for py in 0..h {
         for px in 0..w {
             let g = d_image[(py * w + px) as usize];
-            let (hits, t_final) = walk_pixel(&projected, px, py);
-            let _ = t_final;
+            let (hits, _t_final) = walk_pixel(projected, px, py);
             // Colour composited behind the current splat (background first).
             let mut behind = bg;
             for hit in hits.iter().rev() {
@@ -553,6 +551,47 @@ pub fn render_backward(
         }
     }
 
+    screen
+}
+
+/// Screen-space gradients per gaussian (scene order; zeros when culled):
+/// `[du, dv, dA, dB, dC, dopacity, dr, dg, db]` for the projected mean, conic
+/// `[A, B, C]`, opacity value and clamped colour. The GPU backward's
+/// `backward_screen` returns the same records.
+pub fn render_backward_screen(
+    scene: &Scene,
+    view: &CameraView,
+    bg: [f64; 3],
+    d_image: &[[f64; 3]],
+) -> Vec<[f64; 9]> {
+    let projected = project_all(scene, view);
+    let screen = screen_grads(&projected, view, bg, d_image);
+    let mut out = vec![[0.0; 9]; scene.len()];
+    for (p, sg) in projected.iter().zip(&screen) {
+        out[p.index] = [
+            sg.u,
+            sg.v,
+            sg.conic[0],
+            sg.conic[1],
+            sg.conic[2],
+            sg.opacity,
+            sg.color[0],
+            sg.color[1],
+            sg.color[2],
+        ];
+    }
+    out
+}
+
+/// Reference backward pass: see the module docs.
+pub fn render_backward(
+    scene: &Scene,
+    view: &CameraView,
+    bg: [f64; 3],
+    d_image: &[[f64; 3]],
+) -> Grads {
+    let projected = project_all(scene, view);
+    let screen = screen_grads(&projected, view, bg, d_image);
     let mut grads = Grads::zeros(scene);
     for (p, sg) in projected.iter().zip(&screen) {
         let mut dp = [0.0f64; NP];

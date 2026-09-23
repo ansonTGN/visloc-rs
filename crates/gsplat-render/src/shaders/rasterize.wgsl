@@ -8,10 +8,15 @@
 
 @group(0) @binding(0) var<uniform> u: RasterUniforms;
 @group(0) @binding(1) var<storage, read> projected_splats: array<f32>;
-@group(0) @binding(2) var<storage, read> compact_gid_from_isect: array<u32>;
+// Compact gaussian id of each tile-sorted list entry.
+@group(0) @binding(2) var<storage, read> compact_sorted: array<u32>;
 @group(0) @binding(3) var<storage, read> tile_offsets: array<u32>;
 @group(0) @binding(4) var<storage, read_write> out_img: array<f32>;
 @group(0) @binding(5) var<storage, read> global_from_compact: array<u32>;
+// Residuals for the backward pass, per pixel: final transmittance, and one
+// past the list index of the last splat that was blended (0 = none).
+@group(0) @binding(6) var<storage, read_write> final_t: array<f32>;
+@group(0) @binding(7) var<storage, read_write> last_idx: array<u32>;
 
 const TILE_W: u32 = 16u;
 const TILE_H: u32 = 16u;
@@ -41,6 +46,7 @@ fn rasterize(
 
     var accum = vec3<f32>(0.0, 0.0, 0.0);
     var trans = 1.0;
+    var last = 0u;
 
     let start = tile_offsets[tile * 2u];
     let end = tile_offsets[tile * 2u + 1u];
@@ -58,7 +64,7 @@ fn rasterize(
         let load_count = batch_end - batch_start;
         for (var s = tid; s < BATCH; s = s + 256u) {
             if (s < load_count) {
-                let cg = compact_gid_from_isect[batch_start + s];
+                let cg = compact_sorted[batch_start + s];
                 let src = cg * 9u;
                 for (var k = 0u; k < 9u; k = k + 1u) {
                     batch[s * 9u + k] = projected_splats[src + k];
@@ -86,6 +92,7 @@ fn rasterize(
                         let cb = max(batch[s * 9u + 8u], 0.0);
                         accum = accum + trans * a * vec3<f32>(cr, cg, cb);
                         trans = trans * (1.0 - a);
+                        last = batch_start + s + 1u;
                     }
                 }
                 s = s + 1u;
@@ -109,5 +116,8 @@ fn rasterize(
         out_img[idx + 0u] = accum.r + trans * u.bg_r;
         out_img[idx + 1u] = accum.g + trans * u.bg_g;
         out_img[idx + 2u] = accum.b + trans * u.bg_b;
+        let pix = py * u.img_w + px;
+        final_t[pix] = trans;
+        last_idx[pix] = last;
     }
 }

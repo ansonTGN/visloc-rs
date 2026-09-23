@@ -204,6 +204,10 @@ struct Scratch {
     projected_splats: wgpu::Buffer,
     tile_id_from_isect: wgpu::Buffer,
     compact_gid_from_isect: wgpu::Buffer,
+    /// Isect index, permuted by the tile sort (list position -> isect slot).
+    isect_id: wgpu::Buffer,
+    /// Compact gaussian id per tile-sorted list entry (rasterize's input).
+    compact_sorted: wgpu::Buffer,
     num_visible: wgpu::Buffer,
     num_intersections: wgpu::Buffer,
     readback: wgpu::Buffer,
@@ -226,6 +230,8 @@ impl Scratch {
                 "compact_gid_from_isect",
                 (max_isects * 4) as u64,
             ),
+            isect_id: new_storage(device, "isect_id", (max_isects * 4) as u64),
+            compact_sorted: new_storage(device, "compact_sorted", (max_isects * 4) as u64),
             num_visible: new_storage(device, "num_visible", 4),
             num_intersections: new_storage(device, "num_intersections", 4),
             readback: device.create_buffer(&wgpu::BufferDescriptor {
@@ -313,6 +319,36 @@ fn map_bindings(
             ty: RW,
             buffer: scratch.compact_gid_from_isect.clone(),
         },
+        Binding {
+            binding: 7,
+            ty: RW,
+            buffer: scratch.isect_id.clone(),
+        },
+    ]
+}
+
+fn gather_bindings(proj_uniforms: &wgpu::Buffer, scratch: &Scratch) -> Vec<Binding> {
+    vec![
+        Binding {
+            binding: 0,
+            ty: wgpu::BufferBindingType::Uniform,
+            buffer: proj_uniforms.clone(),
+        },
+        Binding {
+            binding: 1,
+            ty: RO,
+            buffer: scratch.compact_gid_from_isect.clone(),
+        },
+        Binding {
+            binding: 2,
+            ty: RO,
+            buffer: scratch.isect_id.clone(),
+        },
+        Binding {
+            binding: 3,
+            ty: RW,
+            buffer: scratch.compact_sorted.clone(),
+        },
     ]
 }
 
@@ -345,6 +381,7 @@ fn raster_bindings(
     scratch: &Scratch,
     tile_offsets: &wgpu::Buffer,
     out_img: &wgpu::Buffer,
+    residuals: &PixelResiduals,
 ) -> Vec<Binding> {
     vec![
         Binding {
@@ -360,7 +397,7 @@ fn raster_bindings(
         Binding {
             binding: 2,
             ty: RO,
-            buffer: scratch.compact_gid_from_isect.clone(),
+            buffer: scratch.compact_sorted.clone(),
         },
         Binding {
             binding: 3,
@@ -377,7 +414,25 @@ fn raster_bindings(
             ty: RO,
             buffer: scratch.global_from_compact.clone(),
         },
+        Binding {
+            binding: 6,
+            ty: RW,
+            buffer: residuals.final_t.clone(),
+        },
+        Binding {
+            binding: 7,
+            ty: RW,
+            buffer: residuals.last_idx.clone(),
+        },
     ]
+}
+
+/// Per-pixel forward residuals kept for the backward pass.
+pub(crate) struct PixelResiduals {
+    /// Transmittance left after the last blended splat.
+    pub(crate) final_t: wgpu::Buffer,
+    /// One past the tile-list index of the last blended splat (0 = none).
+    pub(crate) last_idx: wgpu::Buffer,
 }
 
 /// The forward renderer.
@@ -390,10 +445,12 @@ pub struct Renderer {
     map: Stage,
     offsets: Stage,
     raster: Stage,
+    gather: Stage,
     proj_uniforms: wgpu::Buffer,
     raster_uniforms: wgpu::Buffer,
     tile_offsets: wgpu::Buffer,
     out_img: wgpu::Buffer,
+    residuals: PixelResiduals,
     image_w: u32,
     image_h: u32,
     sh_degree: u32,
@@ -407,6 +464,18 @@ pub struct Renderer {
     max_isects_limit: usize,
     /// Skip the output-image readback (for GPU-only timing / viewer use).
     skip_readback: bool,
+    /// Counts of the last rendered frame (what the backward pass differentiates).
+    last_frame: FrameCounts,
+    /// Backward-pass pipelines and buffers, built on first use.
+    backward: Option<backward::BackwardState>,
+}
+
+/// Visible gaussians, intersections and tiles of a rendered frame.
+#[derive(Clone, Copy, Default)]
+struct FrameCounts {
+    nv: usize,
+    ni: usize,
+    num_tiles: u32,
 }
 
 impl Renderer {
@@ -461,6 +530,11 @@ impl Renderer {
         });
         let tile_offsets = new_storage(dev, "tile_offsets", (num_tiles * 2 * 4) as u64);
         let out_img = new_storage(dev, "out_img", (image_w as u64) * (image_h as u64) * 3 * 4);
+        let pixels = image_w as u64 * image_h as u64;
+        let residuals = PixelResiduals {
+            final_t: new_storage(dev, "final_t", pixels * 4),
+            last_idx: new_storage(dev, "last_idx", pixels * 4),
+        };
 
         let ro = wgpu::BufferBindingType::Storage { read_only: true };
         let rw = wgpu::BufferBindingType::Storage { read_only: false };
@@ -591,7 +665,21 @@ impl Renderer {
             "rasterize",
             "rasterize",
             shaders::rasterize().source,
-            &raster_bindings(&raster_uniforms, &scratch, &tile_offsets, &out_img),
+            &raster_bindings(
+                &raster_uniforms,
+                &scratch,
+                &tile_offsets,
+                &out_img,
+                &residuals,
+            ),
+        );
+
+        let gather = build_stage(
+            dev,
+            "gather_compact",
+            "gather_compact",
+            shaders::gather_compact().source,
+            &gather_bindings(&proj_uniforms, &scratch),
         );
 
         // Device-side sort/scan scratch. The depth sort and tile sort each need
@@ -611,10 +699,12 @@ impl Renderer {
             map,
             offsets,
             raster,
+            gather,
             proj_uniforms,
             raster_uniforms,
             tile_offsets,
             out_img,
+            residuals,
             image_w,
             image_h,
             sh_degree: scene.sh_degree,
@@ -625,6 +715,8 @@ impl Renderer {
             counts_sorted,
             max_isects_limit,
             skip_readback: false,
+            last_frame: FrameCounts::default(),
+            backward: None,
         })
     }
 
@@ -641,6 +733,8 @@ impl Renderer {
         self.scratch.tile_id_from_isect = new_storage(dev, "tile_id_from_isect", (cap * 4) as u64);
         self.scratch.compact_gid_from_isect =
             new_storage(dev, "compact_gid_from_isect", (cap * 4) as u64);
+        self.scratch.isect_id = new_storage(dev, "isect_id", (cap * 4) as u64);
+        self.scratch.compact_sorted = new_storage(dev, "compact_sorted", (cap * 4) as u64);
         self.scratch.max_isects = cap;
         self.sorter.reserve(dev, cap);
         self.tile_pairs = self.sorter.allocate(dev, "tile");
@@ -662,7 +756,13 @@ impl Renderer {
                 &self.scratch,
                 &self.tile_offsets,
                 &self.out_img,
+                &self.residuals,
             ),
+        );
+        self.gather.rebind(
+            dev,
+            "gather_compact",
+            &gather_bindings(&self.proj_uniforms, &self.scratch),
         );
     }
 
@@ -748,6 +848,7 @@ impl Renderer {
         let nv = (num_visible as usize).min(self.num_gaussians());
         // Only truncates if the device's storage-binding limit is exceeded.
         let ni = (num_intersections as usize).min(self.scratch.max_isects);
+        self.last_frame = FrameCounts { nv, ni, num_tiles };
 
         // Re-upload the uniforms with the now-known compaction counts.
         let u = ProjectUniforms {
@@ -819,7 +920,7 @@ impl Renderer {
         if ni > 0 {
             self.sort_in_place(
                 &self.scratch.tile_id_from_isect,
-                &self.scratch.compact_gid_from_isect,
+                &self.scratch.isect_id,
                 &self.tile_pairs,
                 ni,
                 // Keys are tile ids < num_tiles; the LSD sort is stable, so the
@@ -839,6 +940,7 @@ impl Renderer {
                     });
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                dispatch_threads(&mut pass, &self.gather, ni as u32);
                 dispatch_threads(&mut pass, &self.offsets, ni as u32);
             }
             self.ctx.queue.submit(Some(encoder.finish()));
@@ -1039,3 +1141,6 @@ impl StageTimer {
         );
     }
 }
+
+#[path = "renderer_backward.rs"]
+mod backward;

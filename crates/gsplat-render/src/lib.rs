@@ -348,6 +348,231 @@ mod gpu_tests {
         }
     }
 
+    /// Deterministic pseudo-random scene: `n` anisotropic, rotated,
+    /// semi-transparent splats with degree-`degree` SH in front of the camera.
+    fn random_scene(n: usize, seed: u32, degree: u32) -> Scene {
+        let mut st = seed;
+        let mut rnd = move || {
+            st = st.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (st >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let gaussians = (0..n)
+            .map(|_| {
+                let z = 3.0 + 4.0 * rnd();
+                Gaussian {
+                    mean: Vector3::new((rnd() - 0.5) * z * 0.9, (rnd() - 0.5) * z * 0.7, z),
+                    scale_log: Vector3::new(
+                        (0.05 + 0.3 * rnd()).ln(),
+                        (0.05 + 0.3 * rnd()).ln(),
+                        (0.05 + 0.3 * rnd()).ln(),
+                    ),
+                    rotation: Quaternion::new(0.5 + rnd(), rnd() - 0.5, rnd() - 0.5, rnd() - 0.5),
+                    opacity_logit: (rnd() - 0.5) * 3.0,
+                    sh_dc: [rnd() * 2.0 - 1.0, rnd() * 2.0 - 1.0, rnd() * 2.0 - 1.0],
+                    sh_rest: (0..3 * visloc_gsplat_core::gaussian::sh_rest_coeffs_per_channel(
+                        degree,
+                    ))
+                        .map(|_| (rnd() - 0.5) * 0.2)
+                        .collect(),
+                    sh_degree: degree,
+                }
+            })
+            .collect();
+        Scene::new(gaussians, degree)
+    }
+
+    /// GPU screen-space gradients (rasterize_backward + grad_reduce) against
+    /// the f64 CPU reference, per gaussian and component.
+    fn check_screen_grads(scene: &Scene, w: u32, h: u32) {
+        let Some(ctx) = try_context() else {
+            eprintln!("skipping screen-grad check: no GPU adapter");
+            return;
+        };
+        if !ctx.features.contains(wgpu::Features::SUBGROUP) {
+            eprintln!("skipping screen-grad check: no SUBGROUP support");
+            return;
+        }
+        let view = CameraView::new(
+            nalgebra::Rotation3::from_euler_angles(0.05, -0.08, 0.03).into_inner(),
+            Vector3::new(0.1, -0.05, 0.2),
+            PinholeCamera::new(
+                w,
+                h,
+                w as f32 * 1.1,
+                w as f32 * 1.1,
+                w as f32 * 0.5,
+                h as f32 * 0.5,
+            ),
+        );
+        let bg = [0.1f32, 0.2, 0.3];
+        let d_image: Vec<[f32; 3]> = (0..(w * h) as usize)
+            .map(|i| {
+                let f = i as f32;
+                [
+                    (f * 0.37).sin(),
+                    (f * 0.91).cos(),
+                    (f * 0.13).sin() * 0.5 + 0.2,
+                ]
+            })
+            .collect();
+        let d64: Vec<[f64; 3]> = d_image.iter().map(|p| p.map(|x| x as f64)).collect();
+        let cpu = visloc_gsplat_core::backward::render_backward_screen(
+            scene,
+            &view,
+            bg.map(|x| x as f64),
+            &d64,
+        );
+        let mut renderer = Renderer::new(ctx, scene, w, h).expect("renderer");
+        let _ = renderer.render(&view, bg);
+        let gpu = renderer.backward_screen(&d_image).expect("backward");
+
+        // Scale tolerances per component by its largest magnitude, since
+        // f32 vs f64 and alpha-gate ties at footprint edges add absolute noise.
+        let mut worst = 0.0f64;
+        for k in 0..9 {
+            let scale = cpu.iter().map(|g| g[k].abs()).fold(0.0, f64::max).max(1e-9);
+            for (i, (c, g)) in cpu.iter().zip(&gpu).enumerate() {
+                let err = (c[k] - g[k] as f64).abs() / scale;
+                worst = worst.max(err);
+                assert!(
+                    err < 2e-3,
+                    "gaussian {i} component {k}: cpu {:.6e} gpu {:.6e} (rel to max {err:.2e})",
+                    c[k],
+                    g[k]
+                );
+            }
+        }
+        eprintln!("screen grads: worst error {worst:.2e} of each component's max");
+    }
+
+    /// GPU parameter gradients (full backward) against the f64 CPU reference.
+    fn check_param_grads(scene: &Scene, w: u32, h: u32) {
+        let Some(ctx) = try_context() else {
+            eprintln!("skipping param-grad check: no GPU adapter");
+            return;
+        };
+        if !ctx.features.contains(wgpu::Features::SUBGROUP) {
+            eprintln!("skipping param-grad check: no SUBGROUP support");
+            return;
+        }
+        let view = CameraView::new(
+            nalgebra::Rotation3::from_euler_angles(0.05, -0.08, 0.03).into_inner(),
+            Vector3::new(0.1, -0.05, 0.2),
+            PinholeCamera::new(
+                w,
+                h,
+                w as f32 * 1.1,
+                w as f32 * 1.1,
+                w as f32 * 0.5,
+                h as f32 * 0.5,
+            ),
+        );
+        let bg = [0.1f32, 0.2, 0.3];
+        let d_image: Vec<[f32; 3]> = (0..(w * h) as usize)
+            .map(|i| {
+                let f = i as f32;
+                [
+                    (f * 0.37).sin(),
+                    (f * 0.91).cos(),
+                    (f * 0.13).sin() * 0.5 + 0.2,
+                ]
+            })
+            .collect();
+        let d64: Vec<[f64; 3]> = d_image.iter().map(|p| p.map(|x| x as f64)).collect();
+        let cpu =
+            visloc_gsplat_core::backward::render_backward(scene, &view, bg.map(|x| x as f64), &d64);
+        let mut renderer = Renderer::new(ctx, scene, w, h).expect("renderer");
+        let _ = renderer.render(&view, bg);
+        let gpu = renderer.backward(&d_image).expect("backward");
+
+        let n = scene.len();
+        let cpc2 = ((scene.sh_degree + 1) * (scene.sh_degree + 1)) as usize;
+        let rest_pc = cpc2 - 1;
+        // (name, cpu values, gpu values) per parameter group, gaussian-major.
+        let mut groups: Vec<(&str, Vec<f64>, Vec<f64>)> = Vec::new();
+        let gsh = &gpu.sh;
+        let gt = |i: usize, k: usize| gpu.transforms[i * 10 + k] as f64;
+        groups.push((
+            "mean",
+            (0..n).flat_map(|i| cpu.mean[i]).collect(),
+            (0..n).flat_map(|i| (0..3).map(move |k| gt(i, k))).collect(),
+        ));
+        groups.push((
+            "rotation",
+            (0..n).flat_map(|i| cpu.rotation[i]).collect(),
+            (0..n).flat_map(|i| (3..7).map(move |k| gt(i, k))).collect(),
+        ));
+        groups.push((
+            "scale_log",
+            (0..n).flat_map(|i| cpu.scale_log[i]).collect(),
+            (0..n)
+                .flat_map(|i| (7..10).map(move |k| gt(i, k)))
+                .collect(),
+        ));
+        groups.push((
+            "opacity_logit",
+            cpu.opacity_logit.clone(),
+            gpu.opacity.iter().map(|&x| x as f64).collect(),
+        ));
+        groups.push((
+            "sh_dc",
+            (0..n).flat_map(|i| cpu.sh_dc[i]).collect(),
+            (0..n)
+                .flat_map(|i| (0..3).map(move |c| gsh[i * 3 * cpc2 + c] as f64))
+                .collect(),
+        ));
+        groups.push((
+            "sh_rest",
+            (0..n).flat_map(|i| cpu.sh_rest[i].clone()).collect(),
+            (0..n)
+                .flat_map(|i| {
+                    let gs = gsh;
+                    (0..3 * rest_pc).map(move |k| gs[i * 3 * cpc2 + 3 + k] as f64)
+                })
+                .collect(),
+        ));
+        for (name, c, g) in &groups {
+            assert_eq!(c.len(), g.len(), "{name}: length");
+            let scale = c.iter().map(|x| x.abs()).fold(0.0, f64::max).max(1e-9);
+            let worst = c
+                .iter()
+                .zip(g)
+                .map(|(a, b)| (a - b).abs() / scale)
+                .fold(0.0, f64::max);
+            eprintln!("{name:<14} worst error {worst:.2e} of max {scale:.3e}");
+            for (k, (a, b)) in c.iter().zip(g).enumerate() {
+                assert!(
+                    (a - b).abs() / scale < 3e-3,
+                    "{name}[{k}]: cpu {a:.6e} gpu {b:.6e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gpu_param_grads_match_cpu_small() {
+        let scene = random_scene(3, 7, 2);
+        check_param_grads(&scene, 40, 32);
+    }
+
+    #[test]
+    fn gpu_param_grads_match_cpu_many_tiles() {
+        let scene = random_scene(64, 11, 3);
+        check_param_grads(&scene, 96, 80);
+    }
+
+    #[test]
+    fn gpu_screen_grads_match_cpu_small() {
+        let scene = random_scene(3, 7, 2);
+        check_screen_grads(&scene, 40, 32);
+    }
+
+    #[test]
+    fn gpu_screen_grads_match_cpu_many_tiles() {
+        let scene = random_scene(64, 11, 3);
+        check_screen_grads(&scene, 96, 80);
+    }
+
     #[test]
     fn gpu_matches_cpu_reference() {
         let Some(ctx) = try_context() else {
