@@ -387,6 +387,22 @@ differentiating against). Structure:
 - **M2**: on-device trainer (`trainer::Trainer`): L1 + 0.2 D-SSIM (GPU SSIM
   gradient matches the CPU one to 1e-6), Adam with Inria learning rates,
   Inria densification on the host with the Adam state carried across.
+- **M2 result** (same evaluator, split, 1024 px, GTX 1660 Ti; our run used
+  DXC and atomic backward accumulation):
+
+  | scene | method | steps | PSNR | SSIM | gaussians | train time |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | south-building | brush 0.3.0 | 30k | 21.684 | 0.7875 | 1.05M | 2379 s |
+  | south-building | ours | 30k | 21.672 | 0.7872 | 1.20M | 5319 s |
+  | gerrard-hall | brush 0.3.0 | 30k | 19.022 | 0.6934 | 0.83M | 2147 s |
+  | gerrard-hall | ours | 30k | 19.686 | 0.7070 | 0.64M | 3533 s |
+  | south-building | brush / ours | 7k | 21.574 / 20.696 | 0.726 / 0.685 | | |
+  | gerrard-hall | brush / ours | 7k | 19.191 / 19.555 | 0.671 / 0.659 | | |
+
+  Quality bar met (parity on south-building, +0.66 dB on gerrard-hall at
+  30k). Speed bar not met: 1.6-2.2x brush's wall time (~190 ms/step at 1.2M
+  gaussians after densification stops, plus a host round-trip and renderer
+  rebuild every 100 steps while densifying).
 - **M3**: `gsplat_euroc` example (feature `euroc`): raw EuRoC -> undistort
   -> SIFT -> verified temporal matches -> visloc-rs incremental SfM ->
   trainer, no COLMAP or Python.
