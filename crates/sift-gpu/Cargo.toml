@@ -43,3 +43,8 @@ doctest = false
 
 [lints.rust]
 unsafe_code = "deny"
+
+[[example]]
+name = "match_gpu_bench"
+path = "examples/match_gpu_bench.rs"
+required-features = ["gpu"]

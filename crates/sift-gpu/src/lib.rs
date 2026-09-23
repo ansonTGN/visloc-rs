@@ -14,9 +14,13 @@
 
 #[cfg(feature = "gpu")]
 mod extractor;
+#[cfg(feature = "gpu")]
+mod matcher;
 
 #[cfg(feature = "gpu")]
 pub use extractor::{SiftGpu, SiftGpuError};
+#[cfg(feature = "gpu")]
+pub use matcher::{FeatureBank, GpuMatcher};
 #[cfg(feature = "gpu")]
 pub use visloc_gsplat_render::{try_context, GpuContext, GpuError};
 
@@ -101,5 +105,67 @@ mod tests {
             normalization: SiftNormalization::L1Root,
             ..SiftConfig::default()
         });
+    }
+
+    #[test]
+    fn matcher_matches_cpu_cross_check() {
+        use visloc_vision::matching::{BruteForceMatcher, CrossCheckMatcher, Matcher};
+        let Some(ctx) = try_context() else {
+            eprintln!("no GPU adapter; skipping");
+            return;
+        };
+        // Deterministic pseudo-random unit descriptors; image b is a noisy
+        // permuted copy of a, so there are true matches plus distractors.
+        let mut state = 0x2545F4914F6CDD1Du64;
+        let mut rnd = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 40) as f32 / (1u64 << 24) as f32
+        };
+        let unit = |v: Vec<f32>| {
+            let n = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+            v.into_iter().map(|x| x / n).collect::<Vec<f32>>()
+        };
+        let a: Vec<Vec<f32>> = (0..300)
+            .map(|_| unit((0..128).map(|_| rnd()).collect()))
+            .collect();
+        let mut b: Vec<Vec<f32>> = a
+            .iter()
+            .rev()
+            .take(200)
+            .map(|d| unit(d.iter().map(|x| x + 0.05 * rnd()).collect()))
+            .collect();
+        b.extend((0..77).map(|_| unit((0..128).map(|_| rnd()).collect())));
+        let c: Vec<Vec<f32>> = (0..5)
+            .map(|_| unit((0..128).map(|_| rnd()).collect()))
+            .collect();
+
+        let bank = FeatureBank::upload(&ctx, &[&a, &b, &c]).unwrap();
+        let matcher = GpuMatcher::new(&ctx);
+        let pairs = [(0usize, 1usize), (1, 0), (0, 2), (2, 1)];
+        let sets = [&a, &b, &c];
+        for cross in [false, true] {
+            for ratio in [None, Some(0.8)] {
+                let gpu = matcher.match_pairs(&ctx, &bank, &pairs, ratio, cross);
+                for (p, &(i, j)) in pairs.iter().enumerate() {
+                    let bf = BruteForceMatcher { ratio };
+                    let cpu = if cross {
+                        CrossCheckMatcher::new(bf).match_descriptors(sets[i], sets[j])
+                    } else {
+                        bf.match_descriptors(sets[i], sets[j])
+                    };
+                    let key = |m: &visloc_vision::matching::DescriptorMatch| {
+                        (m.query_index, m.train_index)
+                    };
+                    let g: Vec<_> = gpu[p].iter().map(key).collect();
+                    let c: Vec<_> = cpu.iter().map(key).collect();
+                    assert_eq!(g, c, "pair {i}->{j} ratio {ratio:?} cross {cross}");
+                    for (gm, cm) in gpu[p].iter().zip(&cpu) {
+                        assert!((gm.distance - cm.distance).abs() < 1e-3);
+                    }
+                }
+            }
+        }
     }
 }

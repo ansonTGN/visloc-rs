@@ -23,7 +23,7 @@ use visloc_slam::{incremental_sfm, IncrementalSfmConfig, PairwiseMatches};
 use visloc_vision::distortion::RadialTangential;
 use visloc_vision::features::sift::{extract_sift, GrayImage, SiftConfig};
 use visloc_vision::features::FeatureSet;
-use visloc_vision::matching::{BruteForceMatcher, CrossCheckMatcher, Matcher};
+use visloc_vision::matching::{BruteForceMatcher, CrossCheckMatcher, DescriptorMatch, Matcher};
 use visloc_vision::two_view::{
     ConfigurationType, TwoViewCorrespondence, TwoViewGeometryOptions, TwoViewGeometryVerifier,
 };
@@ -135,14 +135,18 @@ pub fn undistort_gray(
     out
 }
 
+fn cpu_matches(fi: &FeatureSet, fj: &FeatureSet) -> Vec<DescriptorMatch> {
+    CrossCheckMatcher::new(BruteForceMatcher { ratio: Some(0.8) })
+        .match_descriptors(&fi.descriptors, &fj.descriptors)
+}
+
 fn verify_pair(
     camera: &Camera,
     fi: &FeatureSet,
     fj: &FeatureSet,
+    dm: &[DescriptorMatch],
     min_matches: usize,
 ) -> Option<Vec<(usize, usize)>> {
-    let dm = CrossCheckMatcher::new(BruteForceMatcher { ratio: Some(0.8) })
-        .match_descriptors(&fi.descriptors, &fj.descriptors);
     if dm.len() < min_matches {
         return None;
     }
@@ -272,17 +276,50 @@ pub fn build_euroc_dataset(
     ));
 
     // Temporal-neighbour pairs, verified.
-    let mut pairwise = Vec::new();
     let n = features.len();
+    let mut candidates: Vec<(usize, usize)> = Vec::new();
     for i in 0..n {
         let mut offsets: Vec<usize> = (1..=cfg.window).collect();
         offsets.extend(cfg.skip_offsets.iter().copied());
         for d in offsets {
-            let j = i + d;
-            if j >= n {
-                continue;
+            if i + d < n {
+                candidates.push((i, i + d));
             }
-            if let Some(matches) = verify_pair(&camera, &features[i], &features[j], cfg.min_matches)
+        }
+    }
+    // Cross-checked ratio matches for every candidate pair: one batched GPU
+    // pass over a device-resident descriptor bank, or per pair on the CPU.
+    #[cfg(feature = "gpu")]
+    let all_matches: Option<Vec<Vec<DescriptorMatch>>> = gpu_sift.as_ref().map(|g| {
+        let ctx = g.context();
+        let sets: Vec<&[Vec<f32>]> = features.iter().map(|f| f.descriptors.as_slice()).collect();
+        let bank = visloc_sift_gpu::FeatureBank::upload(ctx, &sets);
+        match bank {
+            Ok(bank) => visloc_sift_gpu::GpuMatcher::new(ctx).match_pairs(
+                ctx,
+                &bank,
+                &candidates,
+                Some(0.8),
+                true,
+            ),
+            Err(_) => candidates
+                .iter()
+                .map(|&(i, j)| cpu_matches(&features[i], &features[j]))
+                .collect(),
+        }
+    });
+    #[cfg(not(feature = "gpu"))]
+    let all_matches: Option<Vec<Vec<DescriptorMatch>>> = None;
+    log(&format!("matched {} candidate pairs", candidates.len()));
+    let mut pairwise = Vec::new();
+    for (c, &(i, j)) in candidates.iter().enumerate() {
+        {
+            let dm = match &all_matches {
+                Some(all) => std::borrow::Cow::Borrowed(&all[c]),
+                None => std::borrow::Cow::Owned(cpu_matches(&features[i], &features[j])),
+            };
+            if let Some(matches) =
+                verify_pair(&camera, &features[i], &features[j], &dm, cfg.min_matches)
             {
                 pairwise.push(PairwiseMatches {
                     image_i: i,

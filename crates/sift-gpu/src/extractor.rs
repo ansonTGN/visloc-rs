@@ -70,7 +70,7 @@ fn gaussian_kernel(sigma: f64) -> Vec<f32> {
     raw.iter().map(|v| (v / sum) as f32).collect()
 }
 
-fn read_bytes(
+pub(crate) fn read_bytes(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     buffer: &wgpu::Buffer,
@@ -102,7 +102,12 @@ fn read_bytes(
     data
 }
 
-fn storage(dev: &wgpu::Device, label: &str, bytes: u64, extra: wgpu::BufferUsages) -> wgpu::Buffer {
+pub(crate) fn storage(
+    dev: &wgpu::Device,
+    label: &str,
+    bytes: u64,
+    extra: wgpu::BufferUsages,
+) -> wgpu::Buffer {
     dev.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: bytes.max(16).div_ceil(4) * 4,
