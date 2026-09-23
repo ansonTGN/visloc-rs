@@ -1,9 +1,8 @@
 //! Device-side LSD radix sort over `(key, value)` `u32` pairs.
 //!
 //! One 4-bit pass per nibble of the key (eight for full 32-bit keys, fewer when
-//! the caller bounds the key width), each pass: device-side histogram clear,
-//! histogram per workgroup, a device-side exclusive scan of the histograms,
-//! then a stable scatter. Buffers ping-pong between passes, so an odd pass
+//! the caller bounds the key width), each pass: histogram per workgroup, a
+//! device-side exclusive scan of the histograms, then a stable scatter. Buffers ping-pong between passes, so an odd pass
 //! count leaves the result in the second buffer pair.
 //!
 //! This removes the host round-trips that the stage-1 renderer needed for its
@@ -78,7 +77,6 @@ const PARAMS_STRIDE: u64 = 256;
 
 /// A reusable radix sort: pipelines plus histogram/base scratch.
 pub struct RadixSorter {
-    clear: wgpu::ComputePipeline,
     histogram: wgpu::ComputePipeline,
     scan: wgpu::ComputePipeline,
     scatter: wgpu::ComputePipeline,
@@ -155,7 +153,6 @@ impl RadixSorter {
         );
 
         Self {
-            clear: mk("radix_clear"),
             histogram: mk("radix_histogram"),
             scan: mk("radix_scan"),
             scatter: mk("radix_scatter"),
@@ -286,8 +283,8 @@ impl RadixSorter {
     }
 
     /// Record the sort passes (4 bits each, enough to cover `key_bits`) into
-    /// `encoder`, one compute pass each. The histogram is zeroed on-device by
-    /// the `radix_clear` kernel, so no host `write_buffer` is needed per pass.
+    /// `encoder`, one compute pass each. `radix_histogram` rewrites the whole
+    /// histogram, so no clear or host `write_buffer` is needed per pass.
     /// [`RadixSorter::prepare`] must have been called with the same `n` and
     /// `key_bits`. `pairs` must come from [`RadixSorter::allocate`], with the
     /// input in `pairs[0]`; keys must be zero above `key_bits`. Returns the
@@ -312,8 +309,6 @@ impl RadixSorter {
             let offset = (PARAMS_STRIDE * pass as u64) as u32;
             let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             cp.set_bind_group(0, &bind, &[offset]);
-            cp.set_pipeline(&self.clear);
-            cp.dispatch_workgroups((nblocks * BINS).div_ceil(WORKGROUP), 1, 1);
             cp.set_pipeline(&self.histogram);
             cp.dispatch_workgroups(nblocks, 1, 1);
             cp.set_pipeline(&self.scan);

@@ -39,7 +39,9 @@ fn map_gaussians(@builtin(global_invocation_id) gid3: vec3<u32>) {
     }
     var base_isect = cum_tiles_hit[compact] - count;
     for (var ty = p.ty0; ty <= p.ty1; ty = ty + 1u) {
-        for (var tx = p.tx0; tx <= p.tx1; tx = tx + 1u) {
+        let span = tile_row_span(p, ty, u.img_w, u.img_h);
+        for (var txi = span.x; txi <= span.y; txi = txi + 1) {
+            let tx = u32(txi);
             // `count == 0`: this gaussian is done. The capacity check only
             // trips if the frame exceeded the device's storage-binding limit
             // and the host truncated `num_intersections`.

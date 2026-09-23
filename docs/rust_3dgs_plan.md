@@ -238,10 +238,68 @@ V1_01 GT pose, GTX 1660 Ti, GPU-only per frame:
 | 640x480 | 5.3M | 41 ms | **21 ms** |
 | 1920x1080 | 31M | crash | 117 ms |
 
-At 1080p the frame is dominated by the tile sort (72 ms), `map_gaussians`
+At 1080p the frame was dominated by the tile sort (72 ms), `map_gaussians`
 (22 ms) and `rasterize` (19 ms) over 31M intersections: large near-camera
-gaussians each cover hundreds of tiles. Tighter per-gaussian tile culling
-(e.g. an opacity-aware extent instead of 3 sigma) is the next lever.
+gaussians each cover hundreds of tiles.
+
+**Tight tile extents.** A splat's tiles came from a 3-sigma circle of its major
+axis. `rasterize` only blends pixels where `opacity * exp(-sigma) >= 1/255`, so
+the footprint that matters is the ellipse `d^T C^-1 d <= 2 ln(255 * opacity)`
+(3.33 sigma at full opacity, smaller for faint splats, empty below 1/255), and
+its per-axis bounding box `sqrt(k * C00) x sqrt(k * C11)` is much tighter than
+the circle for elongated splats. CPU reference and GPU use the same extent.
+
+| resolution | isects | before | after |
+| --- | --- | --- | --- |
+| 640x480 | 5.3M → 2.8M | 21 ms | **12 ms** |
+| 1920x1080 | 31M → 14.8M | 117 ms | **54 ms** |
+
+Output vs. the 3-sigma circle: max 4/255, mean 0.1/255 (8-bit); the only
+differences are tails the circle used to cut above the 1/255 cutoff. Real-pose
+CPU/GPU parity is now max 1e-5.
+
+**Exact tile coverage.** The bounding box still lists corner tiles of large
+or diagonal splats that hold no blendable pixel. The footprint ellipse is
+convex, so its tiles in each tile row are contiguous with an analytic
+x-extent (the concave right boundary peaks at the ellipse's rightmost point
+clamped to the row's band; mirror for the left), snapped to pixel centres.
+`project_forward` counts and `map_gaussians` writes per-row spans with the same
+function, so they agree, and only tiles without a pixel above the cutoff are
+dropped: renders are **bit-identical** to the bounding-box version. (A per-tile
+test gave the same list but cost 6.7 ms in `project_forward` at 1080p.)
+
+| resolution | isects | bbox | exact rows |
+| --- | --- | --- | --- |
+| 640x480 | 2.8M → 1.9M | 12 ms | **9.0 ms** |
+| 1920x1080 | 14.8M → 8.8M | 54 ms | **33.5 ms** |
+
+At 1080p the tile sort is now ~22 of 36 ms (4 passes over 8.8M pairs), then
+`map_gaussians` (6 ms, per-thread imbalance for frame-sized splats). Skipping
+one radix kernel at a time attributes the tile sort as: `radix_scatter` ~16 ms
+(4 ms/pass), `radix_histogram` ~6.4, `radix_scan` ~2.6, `radix_clear` ~1.3,
+copies ~1.7. Staging the scatter through shared memory so the global writes
+coalesce gave **no gain** (33.5 → 35 ms, reverted): the cost is the in-block
+ranking (16-digit Hillis-Steele over 256 threads, runtime-indexed register
+arrays that spill), not the stores.
+
+**Cheaper radix kernels.**
+- `radix_scatter` now packs `(digit << 12 | index)` per element in shared
+  memory and ranks with four stable 1-bit splits (one 256-wide scan of zero
+  counts each), then writes each digit run contiguously, gathering key/value
+  from the original index.
+- `radix_histogram` packs per-thread counts 8 bits per digit in a `vec4`,
+  combines them with shared (not global) atomics and *stores* the block's row,
+  so the `radix_clear` pass is gone.
+
+| resolution | tile_sort | frame (GPU-only) |
+| --- | --- | --- |
+| 1920x1080 | ~22 → 16.4 (scatter) → **11.5 ms** | 33.5 → 28 → **22.9 ms** |
+| 640x480 | ~4.5 → 2.7 ms | 9.0 → 8.0 → **6.7 ms** |
+
+Renders stay bit-identical. From `main` before this series the 1080p real view
+went 117 → 22.9 ms (~5x) and 640x480 21 → 6.7 ms. Remaining at 1080p: tile sort
+11.5, `map_gaussians` 5.9 (one thread writes every tile of a frame-sized splat),
+`rasterize` 3.9.
 
 **DX12 startup.** `Renderer::new` used to take ~10 minutes on Windows: wgpu's
 `Auto` shader-compiler choice falls back to FXC when `dxcompiler.dll` is not

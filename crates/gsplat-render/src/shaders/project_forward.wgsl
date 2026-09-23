@@ -35,7 +35,7 @@ fn project_forward(@builtin(global_invocation_id) gid3: vec3<u32>) {
         return;
     }
 
-    let tile_count = tile_span(p);
+    let tile_count = tile_hits(p, u.img_w, u.img_h);
     intersect_counts[gid] = tile_count;
     atomicAdd(&num_intersections, tile_count);
     let slot = atomicAdd(&num_visible, 1u);

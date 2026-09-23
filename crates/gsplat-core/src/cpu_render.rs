@@ -63,7 +63,9 @@ struct Projected {
     u: f32,
     v: f32,
     inv_cov: Matrix2<f32>,
-    radius: f32,
+    /// Half-extent in pixels along x / y of the blendable footprint.
+    ext_x: f32,
+    ext_y: f32,
     opacity: f32,
     color: [f32; 3],
 }
@@ -139,13 +141,20 @@ pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
 
         let mid = 0.5 * (a + c);
         let rad = (mid * mid - det).max(0.0).sqrt();
-        let lambda1 = mid + rad;
         let lambda2 = mid - rad;
         if lambda2 <= 0.0 {
             continue;
         }
-        let radius = 3.0 * lambda1.max(lambda2).sqrt();
-        if !radius.is_finite() {
+        // Only pixels with opacity * exp(-power) >= 1/255 are blended, i.e.
+        // d^T C^-1 d <= k = 2 ln(255 * opacity); bound that ellipse per axis
+        // (same extent as the GPU `compute_projected`).
+        let k = 2.0 * (255.0 * opacity).ln();
+        if !k.is_finite() || k <= 0.0 {
+            continue;
+        }
+        let ext_x = (k * a).sqrt();
+        let ext_y = (k * c).sqrt();
+        if !ext_x.is_finite() || !ext_y.is_finite() {
             continue;
         }
 
@@ -153,10 +162,10 @@ pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
         let mut color = [0.0f32; 3];
         eval_sh_color(g.sh_degree, dir, &g.sh_dc, &g.sh_rest, &mut color);
 
-        if u + radius < 0.0
-            || v + radius < 0.0
-            || u - radius > (w - 1) as f32
-            || v - radius > (h - 1) as f32
+        if u + ext_x < 0.0
+            || v + ext_y < 0.0
+            || u - ext_x > (w - 1) as f32
+            || v - ext_y > (h - 1) as f32
         {
             continue;
         }
@@ -166,7 +175,8 @@ pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
             u,
             v,
             inv_cov,
-            radius,
+            ext_x,
+            ext_y,
             opacity,
             color,
         });
@@ -181,10 +191,10 @@ pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
 
     let mut trans = vec![1.0f32; (w * h) as usize];
     for p in &projected {
-        let x0 = ((p.u - p.radius).floor().max(0.0)) as u32;
-        let y0 = ((p.v - p.radius).floor().max(0.0)) as u32;
-        let x1 = ((p.u + p.radius).ceil().min((w - 1) as f32).max(0.0)) as u32;
-        let y1 = ((p.v + p.radius).ceil().min((h - 1) as f32).max(0.0)) as u32;
+        let x0 = ((p.u - p.ext_x).floor().max(0.0)) as u32;
+        let y0 = ((p.v - p.ext_y).floor().max(0.0)) as u32;
+        let x1 = ((p.u + p.ext_x).ceil().min((w - 1) as f32).max(0.0)) as u32;
+        let y1 = ((p.v + p.ext_y).ceil().min((h - 1) as f32).max(0.0)) as u32;
 
         for py in y0..=y1 {
             for pxi in x0..=x1 {

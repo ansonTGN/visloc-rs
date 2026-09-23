@@ -171,8 +171,10 @@ struct Projected {
     // Inverse 2D covariance [c00, c01, c11] (sort key is depth separately).
     conic: vec3<f32>,
     opacity: f32,
-    // 3-sigma screen extent in pixels.
+    // Largest half-extent (pixels) of the blendable footprint.
     radius: f32,
+    // Footprint is d^T conic d <= extent_k (see compute_projected).
+    extent_k: f32,
     // Camera-space depth (positive in front).
     depth: f32,
     // Screen tile range [tx0, tx1] x [ty0, ty1], inclusive, clamped to image.
@@ -196,6 +198,7 @@ fn compute_projected(
     p.conic = vec3<f32>(0.0, 0.0, 0.0);
     p.opacity = 0.0;
     p.radius = 0.0;
+    p.extent_k = 0.0;
     p.depth = 0.0;
     p.tx0 = 0u;
     p.ty0 = 0u;
@@ -271,10 +274,22 @@ fn compute_projected(
     if (lambda1 <= 0.0) {
         return p;
     }
-    var radius = 3.0 * sqrt(lambda1);
-    if (!(radius == radius)) {
+    // Tile extent: exactly the pixels `rasterize` can blend. It skips a pixel
+    // when opacity * exp(-sigma) < 1/255, with sigma = 0.5 * d^T C^-1 d, so
+    // only d^T C^-1 d <= k = 2 ln(255 * opacity) matters (k <= 11.08, i.e.
+    // 3.33 sigma at full opacity; faint splats shrink). The bounding box of
+    // that ellipse is |dx| <= sqrt(k * C00), |dy| <= sqrt(k * C11) -- tighter
+    // than a circle of the major axis for elongated splats.
+    let k = 2.0 * log(255.0 * opacity);
+    if (!(k > 0.0)) {
         return p;
     }
+    let ext_x = sqrt(k * a);
+    let ext_y = sqrt(k * c);
+    if (!(ext_x == ext_x) || !(ext_y == ext_y)) {
+        return p;
+    }
+    let radius = max(ext_x, ext_y);
     // No footprint cap: capping cuts large primitives off at a tile-aligned
     // rectangle (hard edges). The frustum clamp above bounds near-plane blow-ups
     // and the tile rect below is clipped to the image.
@@ -283,14 +298,14 @@ fn compute_projected(
     let proj_v = p_cam.y * j11 + u.cy;
     let w = f32(u.img_w);
     let h = f32(u.img_h);
-    if (proj_u + radius < 0.0 || proj_v + radius < 0.0 ||
-        proj_u - radius > w - 1.0 || proj_v - radius > h - 1.0) {
+    if (proj_u + ext_x < 0.0 || proj_v + ext_y < 0.0 ||
+        proj_u - ext_x > w - 1.0 || proj_v - ext_y > h - 1.0) {
         return p;
     }
-    let x0f = max(proj_u - radius, 0.0);
-    let y0f = max(proj_v - radius, 0.0);
-    let x1f = min(proj_u + radius, w - 1.0);
-    let y1f = min(proj_v + radius, h - 1.0);
+    let x0f = max(proj_u - ext_x, 0.0);
+    let y0f = max(proj_v - ext_y, 0.0);
+    let x1f = min(proj_u + ext_x, w - 1.0);
+    let y1f = min(proj_v + ext_y, h - 1.0);
     if (x1f < x0f || y1f < y0f) {
         return p;
     }
@@ -301,6 +316,7 @@ fn compute_projected(
     p.conic = cov2d_conic(a, b, c);
     p.opacity = opacity;
     p.radius = radius;
+    p.extent_k = k;
     p.depth = p_cam.z;
     p.tx0 = u32(floor(x0f)) / 16u;
     p.ty0 = u32(floor(y0f)) / 16u;
@@ -309,6 +325,58 @@ fn compute_projected(
     return p;
 }
 
-fn tile_span(p: Projected) -> u32 {
-    return (p.tx1 - p.tx0 + 1u) * (p.ty1 - p.ty0 + 1u);
+// Tiles of row `ty` holding a pixel `rasterize` could blend for `p`, as an
+// inclusive column range (empty when x > y).
+//
+// The footprint q(d) = c00 dx^2 + 2 c01 dx dy + c11 dy^2 <= k is convex, so its
+// hit tiles in a row are contiguous and the row's x-extent is analytic: over
+// the band of the row's pixel-centre y offsets, the right boundary
+// xr(y) = (-c01 y + sqrt(D(y))) / c00 is concave with its peak at the
+// ellipse's rightmost point y_r = -c01 x_max / c11, so the band maximum is at
+// y_r clamped to the band (mirror for the left boundary). The extent is then
+// snapped to pixel centres. y stays continuous, so this never drops a pixel;
+// the small slack on k only ever keeps a borderline tile. project_forward
+// (count) and map_gaussians (write) call it with identical inputs.
+fn tile_row_span(p: Projected, ty: u32, img_w: u32, img_h: u32) -> vec2<i32> {
+    let empty = vec2<i32>(1, 0);
+    let c00 = p.conic.x;
+    let c01 = p.conic.y;
+    let c11 = p.conic.z;
+    let det = c00 * c11 - c01 * c01;
+    if (!(det > 0.0) || !(c00 > 0.0) || !(c11 > 0.0)) {
+        return empty;
+    }
+    let k = p.extent_k * 1.001 + 1e-3;
+    let y0 = f32(ty * 16u) + 0.5 - p.proj_v;
+    let y1 = f32(min(ty * 16u + 15u, img_h - 1u)) + 0.5 - p.proj_v;
+    // Half-width of the ellipse in x (sqrt(k * cov00), cov = conic^-1).
+    let x_max = sqrt(k * c11 / det);
+    let yr = clamp(-c01 * x_max / c11, y0, y1);
+    let yl = clamp(c01 * x_max / c11, y0, y1);
+    let dr = k * c00 - yr * yr * det;
+    if (dr < 0.0) {
+        return empty;
+    }
+    let dl = max(k * c00 - yl * yl * det, 0.0);
+    let xr = (-c01 * yr + sqrt(dr)) / c00;
+    let xl = (-c01 * yl - sqrt(dl)) / c00;
+    // Pixel px is inside when px + 0.5 - proj_u is in [xl, xr].
+    let px_lo = max(ceil(p.proj_u + xl - 0.5), f32(p.tx0 * 16u));
+    let px_hi = min(floor(p.proj_u + xr - 0.5), f32(min(p.tx1 * 16u + 15u, img_w - 1u)));
+    if (px_hi < px_lo) {
+        return empty;
+    }
+    return vec2<i32>(i32(px_lo) / 16, i32(px_hi) / 16);
+}
+
+// Number of tiles `map_gaussians` will emit for `p`.
+fn tile_hits(p: Projected, img_w: u32, img_h: u32) -> u32 {
+    var n = 0u;
+    for (var ty = p.ty0; ty <= p.ty1; ty = ty + 1u) {
+        let span = tile_row_span(p, ty, img_w, img_h);
+        if (span.y >= span.x) {
+            n = n + u32(span.y - span.x + 1);
+        }
+    }
+    return n;
 }
