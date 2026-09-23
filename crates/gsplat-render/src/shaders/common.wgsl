@@ -236,10 +236,16 @@ fn compute_projected(
 
     let inv_z = 1.0 / p_cam.z;
     let inv_z2 = inv_z * inv_z;
+    // Linearise at a point clamped to 1.3x the frustum (Inria rasterizer; same
+    // as the CPU reference) so off-screen near primitives do not explode.
+    let lim_x = 1.3 * 0.5 * f32(u.img_w) / u.fx;
+    let lim_y = 1.3 * 0.5 * f32(u.img_h) / u.fy;
+    let tx = clamp(p_cam.x * inv_z, -lim_x, lim_x) * p_cam.z;
+    let ty = clamp(p_cam.y * inv_z, -lim_y, lim_y) * p_cam.z;
     let j00 = u.fx * inv_z;
-    let j02 = -u.fx * p_cam.x * inv_z2;
+    let j02 = -u.fx * tx * inv_z2;
     let j11 = u.fy * inv_z;
-    let j12 = -u.fy * p_cam.y * inv_z2;
+    let j12 = -u.fy * ty * inv_z2;
     let j0 = vec3<f32>(j00, 0.0, j02);
     let j1 = vec3<f32>(0.0, j11, j12);
     let cj0 = vec3<f32>(
@@ -269,10 +275,9 @@ fn compute_projected(
     if (!(radius == radius)) {
         return p;
     }
-    // Cap the footprint the way the CPU reference does: primitives larger than a
-    // couple of frames are near-plane blow-ups or outlier scales.
-    let max_radius = max(f32(u.img_w), f32(u.img_h)) * 2.0;
-    radius = min(radius, max_radius);
+    // No footprint cap: capping cuts large primitives off at a tile-aligned
+    // rectangle (hard edges). The frustum clamp above bounds near-plane blow-ups
+    // and the tile rect below is clipped to the image.
 
     let proj_u = p_cam.x * j00 + u.cx;
     let proj_v = p_cam.y * j11 + u.cy;

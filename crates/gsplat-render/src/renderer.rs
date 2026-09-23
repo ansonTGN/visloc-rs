@@ -580,6 +580,7 @@ impl Renderer {
             view.camera.height, self.image_h,
             "view height matches renderer"
         );
+        let mut prof = StageTimer::from_env();
         let u = ProjectUniforms::from_view(view, self.sh_degree, self.num_gaussians() as u32);
         let num_tiles = u.num_tiles();
         let raster_u = RasterUniforms::new(&u, bg);
@@ -618,9 +619,9 @@ impl Renderer {
             }
             self.ctx.queue.submit(Some(encoder.finish()));
         }
+        prof.mark(&self.ctx.device, "project_fwd");
 
         // ----- Host readback of compaction counts. -----
-        let t_sync = std::time::Instant::now();
         let (num_visible, num_intersections) = read_counters(
             &self.ctx.device,
             &self.ctx.queue,
@@ -628,8 +629,12 @@ impl Renderer {
             &self.scratch.num_intersections,
             &self.scratch.readback,
         );
-        if std::env::var("GSPLAT_PROFILE").is_ok() {
-            eprintln!("[profile] counter readback: {:?}", t_sync.elapsed());
+        prof.mark(&self.ctx.device, "counters");
+        if prof.enabled() {
+            eprintln!(
+                "[profile] counters raw: visible={num_visible} isects={num_intersections} (cap {})",
+                self.scratch.max_isects
+            );
         }
         let nv = (num_visible as usize).min(self.num_gaussians());
         let ni = (num_intersections as usize).min(self.scratch.max_isects);
@@ -648,39 +653,17 @@ impl Renderer {
         //
         // Keys are the raw f32 depth bits (monotonic for positive z), values are
         // the global gaussian ids, so ascending key order is nearest-first
-        // (front-to-back). Eight ping-pong passes leave the result in pair 0.
+        // (front-to-back). Full 32-bit keys: eight ping-pong passes.
         if nv > 0 {
-            copy_buffer(
-                &self.ctx.device,
-                &self.ctx.queue,
+            self.sort_in_place(
                 &self.scratch.depths,
-                &self.depth_pairs[0].keys,
-                nv * 4,
-            );
-            copy_buffer(
-                &self.ctx.device,
-                &self.ctx.queue,
                 &self.scratch.global_from_compact,
-                &self.depth_pairs[0].values,
-                nv * 4,
-            );
-            self.sorter
-                .sort(&self.ctx.device, &self.ctx.queue, &self.depth_pairs, nv);
-            copy_buffer(
-                &self.ctx.device,
-                &self.ctx.queue,
-                &self.depth_pairs[0].values,
-                &self.scratch.global_from_compact,
-                nv * 4,
-            );
-            copy_buffer(
-                &self.ctx.device,
-                &self.ctx.queue,
-                &self.depth_pairs[0].keys,
-                &self.scratch.depths,
-                nv * 4,
+                &self.depth_pairs,
+                nv,
+                32,
             );
         }
+        prof.mark(&self.ctx.device, "depth_sort");
 
         // ----- Pass 2a: project_visible (also gathers tile counts). -----
         if nv > 0 {
@@ -694,6 +677,7 @@ impl Renderer {
             }
             self.ctx.queue.submit(Some(encoder.finish()));
         }
+        prof.mark(&self.ctx.device, "project_vis");
 
         // ----- Device-side prefix scan of the compact-order tile counts. -----
         if nv > 0 {
@@ -705,6 +689,7 @@ impl Renderer {
                 nv,
             );
         }
+        prof.mark(&self.ctx.device, "scan");
 
         // ----- Pass 2b: map_gaussians. -----
         if nv > 0 {
@@ -718,40 +703,21 @@ impl Renderer {
             }
             self.ctx.queue.submit(Some(encoder.finish()));
         }
+        prof.mark(&self.ctx.device, "map");
 
         // ----- Device-side tile-id sort over the isect list. -----
         if ni > 0 {
-            copy_buffer(
-                &self.ctx.device,
-                &self.ctx.queue,
+            self.sort_in_place(
                 &self.scratch.tile_id_from_isect,
-                &self.tile_pairs[0].keys,
-                ni * 4,
-            );
-            copy_buffer(
-                &self.ctx.device,
-                &self.ctx.queue,
                 &self.scratch.compact_gid_from_isect,
-                &self.tile_pairs[0].values,
-                ni * 4,
-            );
-            self.sorter
-                .sort(&self.ctx.device, &self.ctx.queue, &self.tile_pairs, ni);
-            copy_buffer(
-                &self.ctx.device,
-                &self.ctx.queue,
-                &self.tile_pairs[0].keys,
-                &self.scratch.tile_id_from_isect,
-                ni * 4,
-            );
-            copy_buffer(
-                &self.ctx.device,
-                &self.ctx.queue,
-                &self.tile_pairs[0].values,
-                &self.scratch.compact_gid_from_isect,
-                ni * 4,
+                &self.tile_pairs,
+                ni,
+                // Keys are tile ids < num_tiles; the LSD sort is stable, so the
+                // depth order from the first sort survives within each tile.
+                crate::sort::key_bits_for(num_tiles.saturating_sub(1)),
             );
         }
+        prof.mark(&self.ctx.device, "tile_sort");
 
         // ----- Pass 3: tile_offsets + rasterize. -----
         {
@@ -764,9 +730,27 @@ impl Renderer {
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
                 dispatch(&mut pass, &self.offsets, (ni as u32).div_ceil(256));
+            }
+            self.ctx.queue.submit(Some(encoder.finish()));
+        }
+        prof.mark(&self.ctx.device, "tile_offsets");
+        {
+            let mut encoder =
+                self.ctx
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("raster"),
+                    });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
                 dispatch(&mut pass, &self.raster, num_tiles);
             }
             self.ctx.queue.submit(Some(encoder.finish()));
+        }
+        prof.mark(&self.ctx.device, "rasterize");
+        if prof.enabled() {
+            prof.report(nv, ni, num_tiles);
+            eprintln!("[profile] {}", self.tile_list_stats(num_tiles));
         }
 
         // A viewer renders to a surface and never reads the image back; this
@@ -786,7 +770,7 @@ impl Renderer {
             &self.out_img,
             (self.image_w as usize) * (self.image_h as usize) * 3,
         );
-        if std::env::var("GSPLAT_PROFILE").is_ok() {
+        if prof.enabled() {
             eprintln!("[profile] image readback: {:?}", t_read.elapsed());
         }
         let rgb = rgb.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect();
@@ -796,21 +780,65 @@ impl Renderer {
             rgb,
         }
     }
-}
 
-/// Device-side buffer-to-buffer copy of `len` bytes.
-fn copy_buffer(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    src: &wgpu::Buffer,
-    dst: &wgpu::Buffer,
-    len: usize,
-) {
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("copy"),
-    });
-    encoder.copy_buffer_to_buffer(src, 0, dst, 0, len as u64);
-    queue.submit(Some(encoder.finish()));
+    /// Per-tile isect list length statistics (profiling only): a long tail
+    /// means `rasterize` (one workgroup per tile) is load-imbalanced.
+    fn tile_list_stats(&self, num_tiles: u32) -> String {
+        let raw = read_bytes(
+            &self.ctx.device,
+            &self.ctx.queue,
+            &self.tile_offsets,
+            num_tiles as usize * 2 * 4,
+        );
+        let ranges: &[u32] = bytemuck::cast_slice(&raw);
+        let mut lens: Vec<u32> = ranges
+            .chunks_exact(2)
+            .map(|r| if r[0] == u32::MAX { 0 } else { r[1] - r[0] })
+            .collect();
+        lens.sort_unstable();
+        let total: u64 = lens.iter().map(|&l| l as u64).sum();
+        let pct = |q: f64| lens[((lens.len() - 1) as f64 * q) as usize];
+        format!(
+            "tile lists: tiles={} mean={:.0} p50={} p90={} p99={} max={} (max/mean={:.1})",
+            lens.len(),
+            total as f64 / lens.len() as f64,
+            pct(0.5),
+            pct(0.9),
+            pct(0.99),
+            pct(1.0),
+            pct(1.0) as f64 / (total as f64 / lens.len() as f64).max(1.0)
+        )
+    }
+
+    /// Sort `n` (key, value) pairs held in `keys`/`values` in place, using
+    /// `pairs` as ping-pong scratch; keys must fit in `key_bits` bits. Copy-in,
+    /// the radix passes and copy-out are recorded into a single command buffer
+    /// (one submit).
+    fn sort_in_place(
+        &self,
+        keys: &wgpu::Buffer,
+        values: &wgpu::Buffer,
+        pairs: &[crate::sort::SortBuffers; 2],
+        n: usize,
+        key_bits: u32,
+    ) {
+        let len = (n * 4) as u64;
+        self.sorter.prepare(&self.ctx.queue, n, key_bits);
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("sort"),
+            });
+        encoder.copy_buffer_to_buffer(keys, 0, &pairs[0].keys, 0, len);
+        encoder.copy_buffer_to_buffer(values, 0, &pairs[0].values, 0, len);
+        let out = self
+            .sorter
+            .encode(&self.ctx.device, &mut encoder, pairs, n, key_bits);
+        encoder.copy_buffer_to_buffer(&pairs[out].keys, 0, keys, 0, len);
+        encoder.copy_buffer_to_buffer(&pairs[out].values, 0, values, 0, len);
+        self.ctx.queue.submit(Some(encoder.finish()));
+    }
 }
 
 fn read_f32s(
@@ -853,4 +881,51 @@ fn read_bytes(
     let data = slice.get_mapped_range().expect("map range").to_vec();
     staging.unmap();
     data
+}
+
+/// Opt-in (`GSPLAT_PROFILE`) per-stage wall-clock timer. Each `mark` blocks
+/// until the GPU is idle, so stages are serialised and their costs separable;
+/// when disabled it is a no-op and the frame stays pipelined.
+struct StageTimer {
+    last: Option<std::time::Instant>,
+    stages: Vec<(&'static str, std::time::Duration)>,
+}
+
+impl StageTimer {
+    fn from_env() -> Self {
+        Self {
+            last: std::env::var("GSPLAT_PROFILE")
+                .is_ok()
+                .then(std::time::Instant::now),
+            stages: Vec::new(),
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        self.last.is_some()
+    }
+
+    fn mark(&mut self, device: &wgpu::Device, stage: &'static str) {
+        let Some(last) = self.last else {
+            return;
+        };
+        device.poll(wgpu::PollType::wait_indefinitely()).ok();
+        let now = std::time::Instant::now();
+        self.stages.push((stage, now - last));
+        self.last = Some(now);
+    }
+
+    fn report(&self, nv: usize, ni: usize, num_tiles: u32) {
+        let total: std::time::Duration = self.stages.iter().map(|s| s.1).sum();
+        let parts: Vec<String> = self
+            .stages
+            .iter()
+            .map(|(name, d)| format!("{name}={:.2}", d.as_secs_f64() * 1e3))
+            .collect();
+        eprintln!(
+            "[profile] ms: {} total={:.2} | visible={nv} isects={ni} tiles={num_tiles}",
+            parts.join(" "),
+            total.as_secs_f64() * 1e3
+        );
+    }
 }

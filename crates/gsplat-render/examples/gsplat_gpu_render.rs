@@ -4,10 +4,15 @@
 //! cargo run -p visloc-gsplat-render --example gsplat_gpu_render -- \
 //!     --splat docs/euroc_splat/euroc_v101.splat --out frame.png --width 640 --height 480
 //! ```
+//!
+//! By default the camera auto-frames the whole scene from outside, which packs
+//! most gaussians into a few tiles. `--pose-cw qw,qx,qy,qz,tx,ty,tz` instead
+//! renders from a real camera pose (world-to-camera, COLMAP `images.txt`
+//! convention) with EuRoC cam0-like intrinsics (fx = fy = 0.61 * width).
 
 use std::path::PathBuf;
 
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::{Matrix3, Quaternion, UnitQuaternion, Vector3};
 use visloc_gsplat_core::camera::{CameraView, PinholeCamera};
 use visloc_gsplat_core::gaussian::{Gaussian, Scene};
 use visloc_gsplat_core::splat;
@@ -19,12 +24,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut out: Option<PathBuf> = None;
     let mut width = 640u32;
     let mut height = 480u32;
+    let mut pose_cw: Option<Vec<f32>> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--splat" => splat_path = args.next().map(PathBuf::from),
             "--out" => out = args.next().map(PathBuf::from),
             "--width" => width = args.next().and_then(|v| v.parse().ok()).unwrap_or(width),
             "--height" => height = args.next().and_then(|v| v.parse().ok()).unwrap_or(height),
+            "--pose-cw" => {
+                let v: Vec<f32> = args
+                    .next()
+                    .ok_or("--pose-cw needs qw,qx,qy,qz,tx,ty,tz")?
+                    .split(',')
+                    .map(|x| x.trim().parse::<f32>())
+                    .collect::<Result<_, _>>()?;
+                if v.len() != 7 {
+                    return Err("--pose-cw needs 7 comma-separated values".into());
+                }
+                pose_cw = Some(v);
+            }
             other => return Err(format!("unknown argument {other}").into()),
         }
     }
@@ -47,7 +65,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Frame the scene from a robustly estimated viewpoint (median centre,
     // 75th-percentile extent) so floaters do not dominate the view.
-    let view = frame_view(&scene, width, height);
+    let view = match &pose_cw {
+        Some(p) => pose_view(p, width, height),
+        None => frame_view(&scene, width, height),
+    };
 
     if std::env::var("GSPLAT_CPU_COMPARE").is_ok() {
         // The CPU reference is O(gaussians * footprint); validate it against the
@@ -142,6 +163,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     image::save_buffer(&out, &bytes, width, height, image::ColorType::Rgb8)?;
     println!("wrote {}", out.display());
     Ok(())
+}
+
+/// Camera at a world-to-camera pose `[qw, qx, qy, qz, tx, ty, tz]`.
+fn pose_view(p: &[f32], width: u32, height: u32) -> CameraView {
+    let q = UnitQuaternion::from_quaternion(Quaternion::new(p[0], p[1], p[2], p[3]));
+    let f = 0.61 * width as f32;
+    CameraView::new(
+        *q.to_rotation_matrix().matrix(),
+        Vector3::new(p[4], p[5], p[6]),
+        PinholeCamera::new(width, height, f, f, width as f32 * 0.5, height as f32 * 0.5),
+    )
 }
 
 fn frame_view(scene: &Scene, width: u32, height: u32) -> CameraView {

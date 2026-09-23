@@ -1,7 +1,8 @@
 // Subgroup-free LSD radix sort (4 bits per pass) for a (key: u32, value: u32)
 // pair, fully on the device (no per-pass readback).
 //
-// Three kernels per pass:
+// Four kernels per pass:
+//   radix_clear     : zero hist[wg * 16 + d] on device (no host write_buffer)
 //   radix_histogram : per-workgroup digit histogram -> hist[wg * 16 + d]
 //   radix_scan      : exclusive scan of hist in digit-major order
 //                     -> base[d * num_blocks + wg] (start offset)
@@ -32,7 +33,7 @@ struct RadixParams {
 @group(0) @binding(2) var<storage, read> values_in: array<u32>;
 @group(0) @binding(3) var<storage, read_write> keys_out: array<u32>;
 @group(0) @binding(4) var<storage, read_write> values_out: array<u32>;
-// hist[wg * BINS + d]; zeroed by the host before each histogram pass.
+// hist[wg * BINS + d]; zeroed on device by `radix_clear` before each pass.
 @group(0) @binding(5) var<storage, read_write> hist: array<atomic<u32>>;
 // base[d * num_blocks + wg] exclusive start offset for this (digit, block).
 @group(0) @binding(6) var<storage, read_write> base: array<u32>;
@@ -42,6 +43,16 @@ var<workgroup> scan_cur: array<u32, BINS * WG>;
 // Per-digit totals and exclusive digit prefix, used by `radix_scan`.
 var<workgroup> digit_totals: array<u32, BINS>;
 var<workgroup> digit_prefix: array<u32, BINS>;
+
+// Pass 0: zero every histogram entry for this pass. One invocation per entry;
+// the dispatch covers num_blocks * BINS entries.
+@compute @workgroup_size(256)
+fn radix_clear(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i < params.num_blocks * BINS) {
+        atomicStore(&hist[i], 0u);
+    }
+}
 
 // Pass 1: count each digit in the workgroup's block.
 @compute @workgroup_size(256)

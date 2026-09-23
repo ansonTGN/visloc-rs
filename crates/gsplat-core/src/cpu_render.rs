@@ -107,13 +107,20 @@ pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
         let fy = view.camera.fy;
         let inv_z = 1.0 / p_cam.z;
         let inv_z2 = inv_z * inv_z;
+        // Linearise the projection at a point clamped to 1.3x the frustum (as
+        // the Inria rasterizer does): outside it the Jacobian blows up and
+        // near-camera primitives would otherwise explode to huge footprints.
+        let lim_x = 1.3 * 0.5 * w as f32 / fx;
+        let lim_y = 1.3 * 0.5 * h as f32 / fy;
+        let tx = (p_cam.x * inv_z).clamp(-lim_x, lim_x) * p_cam.z;
+        let ty = (p_cam.y * inv_z).clamp(-lim_y, lim_y) * p_cam.z;
         let j = Matrix3::new(
             fx * inv_z,
             0.0,
-            -fx * p_cam.x * inv_z2,
+            -fx * tx * inv_z2,
             0.0,
             fy * inv_z,
-            -fy * p_cam.y * inv_z2,
+            -fy * ty * inv_z2,
             0.0,
             0.0,
             0.0,
@@ -141,8 +148,6 @@ pub fn render(scene: &Scene, view: &CameraView, bg: [f32; 3]) -> Image {
         if !radius.is_finite() {
             continue;
         }
-        let max_radius = (w.max(h) as f32) * 2.0;
-        let radius = radius.min(max_radius);
 
         let dir = view.view_direction(g.mean);
         let mut color = [0.0f32; 3];

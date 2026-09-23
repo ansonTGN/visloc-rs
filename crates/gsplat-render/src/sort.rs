@@ -1,9 +1,10 @@
 //! Device-side LSD radix sort over `(key, value)` `u32` pairs.
 //!
-//! Eight 4-bit passes (32-bit keys), each pass: histogram per workgroup, a
-//! device-side exclusive scan of the histograms, then a stable scatter. Buffers
-//! ping-pong between passes; with eight (even) passes the sorted result ends up
-//! back in the input buffers.
+//! One 4-bit pass per nibble of the key (eight for full 32-bit keys, fewer when
+//! the caller bounds the key width), each pass: device-side histogram clear,
+//! histogram per workgroup, a device-side exclusive scan of the histograms,
+//! then a stable scatter. Buffers ping-pong between passes, so an odd pass
+//! count leaves the result in the second buffer pair.
 //!
 //! This removes the host round-trips that the stage-1 renderer needed for its
 //! sorts.
@@ -69,8 +70,15 @@ fn entry(binding: u32, ty: wgpu::BufferBindingType) -> wgpu::BindGroupLayoutEntr
     }
 }
 
+/// One `RadixParams` slot per pass (up to 8 for 32-bit keys), addressed by a
+/// dynamic uniform offset.
+const NUM_PASSES: usize = 8;
+/// Uniform dynamic offsets must be aligned to this; each pass gets one slot.
+const PARAMS_STRIDE: u64 = 256;
+
 /// A reusable radix sort: pipelines plus histogram/base scratch.
 pub struct RadixSorter {
+    clear: wgpu::ComputePipeline,
     histogram: wgpu::ComputePipeline,
     scan: wgpu::ComputePipeline,
     scatter: wgpu::ComputePipeline,
@@ -92,10 +100,16 @@ impl RadixSorter {
         let ro = wgpu::BufferBindingType::Storage { read_only: true };
         let rw = wgpu::BufferBindingType::Storage { read_only: false };
         let uni = wgpu::BufferBindingType::Uniform;
+        let mut params_entry = entry(0, uni);
+        params_entry.ty = wgpu::BindingType::Buffer {
+            ty: uni,
+            has_dynamic_offset: true,
+            min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<RadixParams>() as u64),
+        };
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("radix"),
             entries: &[
-                entry(0, uni),
+                params_entry,
                 entry(1, ro),
                 entry(2, ro),
                 entry(3, rw),
@@ -123,7 +137,7 @@ impl RadixSorter {
         let max_blocks = block_count(max_elements) as usize;
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("radix_params"),
-            size: std::mem::size_of::<RadixParams>() as u64,
+            size: PARAMS_STRIDE * NUM_PASSES as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -141,6 +155,7 @@ impl RadixSorter {
         );
 
         Self {
+            clear: mk("radix_clear"),
             histogram: mk("radix_histogram"),
             scan: mk("radix_scan"),
             scatter: mk("radix_scatter"),
@@ -184,7 +199,12 @@ impl RadixSorter {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: self.params.as_entire_binding(),
+                    // Bind one slot; the pass is selected by the dynamic offset.
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &self.params,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(std::mem::size_of::<RadixParams>() as u64),
+                    }),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -214,53 +234,75 @@ impl RadixSorter {
         })
     }
 
-    /// Sort `n` pairs from `pairs[0]`, leaving the result in the buffer pair
-    /// returned. `pairs` must come from [`RadixSorter::allocate`].
-    pub fn sort(
+    /// Write the per-pass uniforms for sorting `n` pairs whose keys fit in the
+    /// low `key_bits` bits. Must be called before the command buffer recorded by
+    /// [`RadixSorter::encode`] is submitted.
+    pub fn prepare(&self, queue: &wgpu::Queue, n: usize, key_bits: u32) {
+        if n == 0 {
+            return;
+        }
+        let nblocks = block_count(n);
+        for pass in 0..pass_count(key_bits) {
+            let params = RadixParams {
+                shift: pass as u32 * 4,
+                num_elements: n as u32,
+                num_blocks: nblocks,
+                _pad: 0,
+            };
+            queue.write_buffer(
+                &self.params,
+                PARAMS_STRIDE * pass as u64,
+                bytemuck::bytes_of(&params),
+            );
+        }
+    }
+
+    /// Record the sort passes (4 bits each, enough to cover `key_bits`) into
+    /// `encoder`, one compute pass each. The histogram is zeroed on-device by
+    /// the `radix_clear` kernel, so no host `write_buffer` is needed per pass.
+    /// [`RadixSorter::prepare`] must have been called with the same `n` and
+    /// `key_bits`. `pairs` must come from [`RadixSorter::allocate`], with the
+    /// input in `pairs[0]`; keys must be zero above `key_bits`. Returns the
+    /// index of the pair holding the sorted result (1 for an odd pass count).
+    pub fn encode(
         &self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
         pairs: &[SortBuffers; 2],
         n: usize,
+        key_bits: u32,
     ) -> usize {
         if n == 0 {
             return 0;
         }
         let nblocks = block_count(n);
-        // 8 passes of 4 bits; even number, so the result lands in pair 0.
-        for pass in 0..8u32 {
-            let shift = pass * 4;
-            let params = RadixParams {
-                shift,
-                num_elements: n as u32,
-                num_blocks: nblocks,
-                _pad: 0,
-            };
-            queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
-            // Zero the histogram for this pass.
-            queue.write_buffer(
-                &self.hist,
-                0,
-                &vec![0u8; nblocks as usize * BINS as usize * 4],
-            );
-            let src = if pass % 2 == 0 { 0 } else { 1 };
+        let passes = pass_count(key_bits);
+        for pass in 0..passes {
+            let src = pass % 2;
             let dst = 1 - src;
             let bind = self.bind(device, &pairs[src], &pairs[dst]);
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("radix_pass"),
-            });
-            {
-                let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-                cp.set_bind_group(0, &bind, &[]);
-                cp.set_pipeline(&self.histogram);
-                cp.dispatch_workgroups(nblocks, 1, 1);
-                cp.set_pipeline(&self.scan);
-                cp.dispatch_workgroups(1, 1, 1);
-                cp.set_pipeline(&self.scatter);
-                cp.dispatch_workgroups(nblocks, 1, 1);
-            }
-            queue.submit(Some(encoder.finish()));
+            let offset = (PARAMS_STRIDE * pass as u64) as u32;
+            let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            cp.set_bind_group(0, &bind, &[offset]);
+            cp.set_pipeline(&self.clear);
+            cp.dispatch_workgroups((nblocks * BINS).div_ceil(WORKGROUP), 1, 1);
+            cp.set_pipeline(&self.histogram);
+            cp.dispatch_workgroups(nblocks, 1, 1);
+            cp.set_pipeline(&self.scan);
+            cp.dispatch_workgroups(1, 1, 1);
+            cp.set_pipeline(&self.scatter);
+            cp.dispatch_workgroups(nblocks, 1, 1);
         }
-        0
+        passes % 2
     }
+}
+
+/// Number of 4-bit passes needed to sort keys of `key_bits` significant bits.
+fn pass_count(key_bits: u32) -> usize {
+    key_bits.clamp(1, 32).div_ceil(4) as usize
+}
+
+/// Significant bits of the largest key `max_key` (at least 1).
+pub fn key_bits_for(max_key: u32) -> u32 {
+    (32 - max_key.leading_zeros()).max(1)
 }
