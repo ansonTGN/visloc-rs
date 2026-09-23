@@ -214,6 +214,35 @@ are small; the LSD sort is stable so depth order survives): 3 passes at
 every pixel in its tile is saturated. Next targets: the tile sort and
 `tile_offsets` on real views.
 
+**Sort, offsets and capacity (after the DXC switch).** Re-profiled with DXC
+(which made the old tile sort *slower*, 17 → 24.6 ms), then:
+
+- `radix_scan` was 16 threads each walking every block serially; it is now a
+  chunked parallel scan of the digit-major histogram (tile_sort 24.6 → 17.7).
+- 16 keys per radix thread instead of 4 amortises the in-block digit scan
+  (17.7 → 10.8; 32 spills registers and doubles it).
+- `get_tile_offsets` did an atomicMin/atomicMax per isect on the tile's two
+  counters; the list is sorted, so only run boundaries now write, with plain
+  stores (6.4 → 0.6 ms), dispatched in 2D past the 65535-workgroup limit.
+- Isect buffers were sized once at `64 * n` (26.8M for this scene) and
+  silently truncated beyond it; a 1080p view from inside the room needs 31M,
+  and its `tile_offsets` dispatch then exceeded 65535 workgroups and panicked
+  (also before this branch). The renderer now grows the isect buffers, the tile
+  sort scratch and the affected bind groups on demand after reading the
+  counters. `projected_splats` is per visible gaussian and now sized by `n`.
+
+V1_01 GT pose, GTX 1660 Ti, GPU-only per frame:
+
+| resolution | isects | before (FXC build) | now |
+| --- | --- | --- | --- |
+| 640x480 | 5.3M | 41 ms | **21 ms** |
+| 1920x1080 | 31M | crash | 117 ms |
+
+At 1080p the frame is dominated by the tile sort (72 ms), `map_gaussians`
+(22 ms) and `rasterize` (19 ms) over 31M intersections: large near-camera
+gaussians each cover hundreds of tiles. Tighter per-gaussian tile culling
+(e.g. an opacity-aware extent instead of 3 sigma) is the next lever.
+
 **DX12 startup.** `Renderer::new` used to take ~10 minutes on Windows: wgpu's
 `Auto` shader-compiler choice falls back to FXC when `dxcompiler.dll` is not
 on the DLL search path, and FXC is extremely slow on these compute shaders.

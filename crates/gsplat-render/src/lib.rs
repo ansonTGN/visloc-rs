@@ -303,6 +303,52 @@ mod gpu_tests {
     }
 
     #[test]
+    fn gpu_grows_isect_buffers_past_initial_capacity() {
+        let Some(ctx) = try_context() else {
+            eprintln!("skipping gpu_grows_isect_buffers_past_initial_capacity: no GPU adapter");
+            return;
+        };
+        // 40 faint gaussians covering all 16 tiles of a 64x64 frame: 640
+        // intersections against an initial capacity of 100, so the renderer
+        // must grow its isect buffers (and re-point the map/offsets/raster
+        // bind groups) mid-frame. Before on-demand growth the excess was
+        // truncated and the far gaussians silently dropped.
+        let count = 40;
+        let gaussians: Vec<Gaussian> = (0..count)
+            .map(|i| {
+                let t = i as f32 / count as f32;
+                let mut g = solid_gaussian(
+                    Vector3::new(0.0, 0.0, 4.0 + 4.0 * t),
+                    30.0,
+                    [t, 1.0 - t, 0.5],
+                );
+                g.opacity_logit = -3.0; // ~5% each, so every layer shows
+                g
+            })
+            .collect();
+        let scene = Scene::new(gaussians, 0);
+        let view = front_camera();
+        let bg = [0.1, 0.2, 0.3];
+        let cpu = cpu_render::render(&scene, &view, bg);
+        let mut renderer = Renderer::with_initial_isect_capacity(ctx, &scene, 64, 64, Some(100))
+            .expect("renderer");
+        // Twice: the first frame grows, the second runs on the grown buffers.
+        for frame in 0..2 {
+            let gpu = renderer.render(&view, bg);
+            let mut max_err = 0.0f32;
+            for (a, b) in cpu.rgb.iter().zip(gpu.rgb.iter()) {
+                for c in 0..3 {
+                    max_err = max_err.max((a[c] - b[c]).abs());
+                }
+            }
+            assert!(
+                max_err < 0.02,
+                "frame {frame}: max abs error {max_err} vs CPU"
+            );
+        }
+    }
+
+    #[test]
     fn gpu_matches_cpu_reference() {
         let Some(ctx) = try_context() else {
             eprintln!("skipping gpu_matches_cpu_reference: no GPU adapter");

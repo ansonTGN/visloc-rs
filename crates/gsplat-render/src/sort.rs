@@ -167,6 +167,34 @@ impl RadixSorter {
         }
     }
 
+    /// Capacity in (key, value) pairs of buffers from [`RadixSorter::allocate`].
+    pub fn max_elements(&self) -> usize {
+        self.max_elements
+    }
+
+    /// Grow the histogram/base scratch to sort up to `max_elements` pairs
+    /// (no-op if already large enough). Pipelines are kept; ping-pong pairs
+    /// from [`RadixSorter::allocate`] must be re-allocated by the caller.
+    pub fn reserve(&mut self, device: &wgpu::Device, max_elements: usize) {
+        if max_elements <= self.max_elements {
+            return;
+        }
+        let max_blocks = block_count(max_elements) as usize;
+        self.hist = storage(
+            device,
+            "radix_hist",
+            (max_blocks * BINS as usize * 4) as u64,
+            wgpu::BufferUsages::empty(),
+        );
+        self.base = storage(
+            device,
+            "radix_base",
+            (BINS as usize * max_blocks * 4) as u64,
+            wgpu::BufferUsages::empty(),
+        );
+        self.max_elements = max_elements;
+    }
+
     /// Allocate a pair of ping-pong buffers for up to `max_elements` pairs.
     pub fn allocate(&self, device: &wgpu::Device, label: &str) -> [SortBuffers; 2] {
         let bytes = (self.max_elements * 4) as u64;
