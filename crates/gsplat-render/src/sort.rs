@@ -16,7 +16,7 @@ use crate::shaders;
 const WORKGROUP: u32 = 256;
 const BINS: u32 = 16;
 /// Elements (key, value pairs) processed per workgroup per pass.
-const ELEMENTS_PER_THREAD: u32 = 4;
+const ELEMENTS_PER_THREAD: u32 = 16;
 const BLOCK: u32 = WORKGROUP * ELEMENTS_PER_THREAD;
 
 /// Uniform block for the three radix kernels.

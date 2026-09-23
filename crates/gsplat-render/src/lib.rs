@@ -205,10 +205,18 @@ mod gpu_tests {
         // original indices and must be increasing within a key. Cover the full
         // 32-bit sort plus reduced-bit sorts with an even (2) and odd (3) pass
         // count, since an odd count leaves the result in `pairs[1]`.
-        let n = 5000usize;
-        let sorter = RadixSorter::new(&ctx.device, n);
+        //
+        // The 1.2M case has 293 blocks (16 * 293 = 4688 digit-major entries),
+        // so `radix_scan` spans more than one of its 4096-entry chunks.
+        let max_n = 1_200_000usize;
+        let sorter = RadixSorter::new(&ctx.device, max_n);
         let pairs = sorter.allocate(&ctx.device, "test");
-        for (modulus, key_bits) in [(17u32, 32u32), (17, 5), (4000, 12)] {
+        for (n, modulus, key_bits) in [
+            (5000usize, 17u32, 32u32),
+            (5000, 17, 5),
+            (5000, 4000, 12),
+            (max_n, 1 << 20, 20),
+        ] {
             let mut state = 0x1234_5678u32;
             let mut keys = Vec::with_capacity(n);
             for _ in 0..n {
