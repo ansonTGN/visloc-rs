@@ -14,14 +14,10 @@ use nalgebra::{Quaternion, Vector3};
 /// Number of spherical-harmonics coefficients per colour channel for a given
 /// SH degree: `(degree + 1)^2` total coefficients, minus the degree-0 term
 /// which is stored separately as the DC component.
+///
+/// 0, 3, 8, 15 for degrees 0..3 (so `sh_rest` holds 0, 9, 24, 45 values).
 pub const fn sh_rest_coeffs_per_channel(degree: u32) -> usize {
-    match degree {
-        0 => 0,
-        1 => 9,
-        2 => 24,
-        3 => 45,
-        other => ((other + 1) * (other + 1)) as usize - 1,
-    }
+    ((degree + 1) * (degree + 1)) as usize - 1
 }
 
 /// One anisotropic 3D Gaussian primitive.
@@ -175,9 +171,9 @@ mod tests {
     #[test]
     fn sh_coeff_counts() {
         assert_eq!(sh_rest_coeffs_per_channel(0), 0);
-        assert_eq!(sh_rest_coeffs_per_channel(1), 9);
-        assert_eq!(sh_rest_coeffs_per_channel(2), 24);
-        assert_eq!(sh_rest_coeffs_per_channel(3), 45);
+        assert_eq!(sh_rest_coeffs_per_channel(1), 3);
+        assert_eq!(sh_rest_coeffs_per_channel(2), 8);
+        assert_eq!(sh_rest_coeffs_per_channel(3), 15);
     }
 
     #[test]

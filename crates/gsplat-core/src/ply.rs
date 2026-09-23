@@ -13,7 +13,7 @@
 //! rot_0..3                f32   quaternion (w, x, y, z), unnormalized
 //! ```
 //!
-//! `K = sh_rest_coeffs_per_channel(degree)` (0, 9, 24, 45 for degrees 0..3).
+//! `K = sh_rest_coeffs_per_channel(degree)` (0, 3, 8, 15 for degrees 0..3).
 //! Unlike `.splat`, `.ply` stores the raw (pre-activation) values and the full
 //! SH, so it is the lossless interop format used for training.
 
@@ -153,9 +153,9 @@ pub fn scene_from_ply(bytes: &[u8]) -> Result<Scene, PlyError> {
     let coeffs_per_channel = rest_total / 3;
     let sh_degree = match coeffs_per_channel {
         0 => 0,
-        9 => 1,
-        24 => 2,
-        45 => 3,
+        3 => 1,
+        8 => 2,
+        15 => 3,
         _ => {
             return Err(PlyError::MissingProperty(format!(
                 "unsupported f_rest count {rest_total}"

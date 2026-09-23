@@ -119,20 +119,20 @@ mod tests {
             &[1.0, 2.0, 3.0, 1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0]
         );
         assert_eq!(p.opacity, vec![2.0]);
-        // Degree 1: 1 + 9 = 10 coefficients per channel.
-        assert_eq!(p.sh_coeffs_per_channel, 10);
-        // 3 dc + 3 channels * 9 rest = 30.
-        assert_eq!(p.sh.len(), 30);
+        // Degree 1: (1 + 1)^2 = 4 coefficients per channel.
+        assert_eq!(p.sh_coeffs_per_channel, 4);
+        // 3 dc + 3 channels * 3 rest = 12 (the GPU's 3 * cpc^2 stride).
+        assert_eq!(p.sh.len(), 12);
     }
 
     #[test]
     fn promotes_lower_degree_to_scene_degree() {
         let scene = Scene::new(vec![gaussian(0)], 2);
         let p = PackedScene::from_scene(&scene);
-        // Degree 2: 1 + 24 = 25 coefficients per channel.
-        assert_eq!(p.sh_coeffs_per_channel, 25);
-        // 3 dc + 3 * 24 rest, all rest zeros.
-        assert_eq!(p.sh.len(), 3 + 3 * 24);
+        // Degree 2: (2 + 1)^2 = 9 coefficients per channel.
+        assert_eq!(p.sh_coeffs_per_channel, 9);
+        // 3 dc + 3 * 8 rest, all rest zeros.
+        assert_eq!(p.sh.len(), 3 + 3 * 8);
         assert!(p.sh[3..].iter().all(|&v| v == 0.0));
     }
 
