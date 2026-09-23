@@ -9,10 +9,10 @@
 use visloc_gsplat_core::camera::CameraView;
 use visloc_gsplat_core::cpu_render::Image;
 use visloc_gsplat_core::gaussian::{Gaussian, Scene};
-use visloc_gsplat_render::{GpuContext, GpuError, PackedScene, Renderer};
+use visloc_gsplat_render::{GpuContext, GpuError, GpuScene, PackedScene, PrefixScanner, Renderer};
 
 use crate::dataset::{load_view_rgb, Dataset, DatasetError, View};
-use crate::densify::{densify, reset_opacity, DensifyConfig, DensifyReport, Group, Population};
+use crate::densify::{DensifyConfig, DensifyReport, Group, Population};
 use crate::loss::{SsimBinds, SsimKernels};
 
 /// Training hyper-parameters.
@@ -133,6 +133,10 @@ pub struct Trainer {
     adam_pipeline: wgpu::ComputePipeline,
     stats_pipeline: wgpu::ComputePipeline,
     stats_uniforms: wgpu::Buffer,
+    classify_pipeline: wgpu::ComputePipeline,
+    scatter_pipeline: wgpu::ComputePipeline,
+    /// Prefix scanner for the densify row counts, with its capacity.
+    scanner: Option<(PrefixScanner, usize)>,
     step: usize,
     order: Vec<usize>,
     rng: u64,
@@ -271,6 +275,32 @@ fn read_f32(dev: &wgpu::Device, queue: &wgpu::Queue, buf: &wgpu::Buffer, len: us
     out
 }
 
+/// Blocking read of the `index`-th u32 of a device buffer.
+fn read_u32_at(dev: &wgpu::Device, queue: &wgpu::Queue, buf: &wgpu::Buffer, index: usize) -> u32 {
+    let staging = dev.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("read_u32_at"),
+        size: 4,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    enc.copy_buffer_to_buffer(buf, (index * 4) as u64, &staging, 0, 4);
+    queue.submit(Some(enc.finish()));
+    let slice = staging.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |r| {
+        let _ = tx.send(r);
+    });
+    dev.poll(wgpu::PollType::wait_indefinitely()).ok();
+    let _ = rx.recv();
+    let v = {
+        let data = slice.get_mapped_range().expect("map");
+        u32::from_le_bytes([data[0], data[1], data[2], data[3]])
+    };
+    staging.unmap();
+    v
+}
+
 /// Gaussians from a population (the device parameter layouts).
 fn population_to_scene(pop: &Population, degree: u32) -> Scene {
     let cpc2 = ((degree + 1) * (degree + 1)) as usize;
@@ -356,6 +386,18 @@ impl Trainer {
             "densify_stats",
         );
         let stats_uniforms = uniform(&dev, "stats_uniforms", 16);
+        let classify_pipeline = pipeline(
+            &dev,
+            "densify_classify",
+            include_str!("shaders/densify_classify.wgsl"),
+            "densify_classify",
+        );
+        let scatter_pipeline = pipeline(
+            &dev,
+            "densify_scatter",
+            include_str!("shaders/densify_scatter.wgsl"),
+            "densify_scatter",
+        );
 
         let mut trainer = Self {
             state: None,
@@ -373,6 +415,9 @@ impl Trainer {
             adam_pipeline,
             stats_pipeline,
             stats_uniforms,
+            classify_pipeline,
+            scatter_pipeline,
+            scanner: None,
             step: 0,
             order: Vec::new(),
             rng: cfg.seed.max(1),
@@ -383,24 +428,23 @@ impl Trainer {
                 .then(StageTimes::default),
         };
         trainer.order = (0..trainer.views.len()).collect();
-        trainer.build_state(ctx, PackedScene::from_scene(init), None)?;
+        let renderer = Renderer::from_packed(ctx, PackedScene::from_scene(init), width, height)?;
+        trainer.build_state(renderer, None)?;
         Ok(trainer)
     }
 
-    /// (Re)build everything sized by the gaussian count. `moments` carries
-    /// Adam state across densification (zeros when `None`).
+    /// (Re)build everything sized by the gaussian count around `renderer`.
+    /// `moments` carries the Adam state (m1, m2 per group, already on the
+    /// device) across densification; `None` starts from zero.
     fn build_state(
         &mut self,
-        ctx: GpuContext,
-        packed: PackedScene,
-        moments: Option<&Population>,
+        mut renderer: Renderer,
+        moments: Option<[(wgpu::Buffer, wgpu::Buffer); 3]>,
     ) -> Result<(), TrainError> {
-        let n = packed.num_gaussians as u32;
-        let cpc2 = (packed.sh_degree + 1) * (packed.sh_degree + 1);
-        let mut renderer = Renderer::from_packed(ctx, packed, self.width, self.height)?;
+        let n = renderer.num_gaussians() as u32;
+        let cpc2 = (self.sh_degree + 1) * (self.sh_degree + 1);
         renderer.set_skip_readback(true);
         let dev = renderer.ctx.device.clone();
-        let queue = renderer.ctx.queue.clone();
 
         let out_img = renderer.output_buffer().clone();
         let d_image = renderer.d_image_buffer()?.clone();
@@ -440,14 +484,14 @@ impl Trainer {
                         stride: u32,
                         a: u32,
                         b: u32,
-                        init: Option<&Group>| {
+                        init: Option<(wgpu::Buffer, wgpu::Buffer)>| {
             let len = n * stride;
-            let m1 = storage(&dev, label, len as u64 * 4);
-            let m2 = storage(&dev, label, len as u64 * 4);
-            if let Some(src) = init {
-                queue.write_buffer(&m1, 0, bytemuck::cast_slice(&src.m1));
-                queue.write_buffer(&m2, 0, bytemuck::cast_slice(&src.m2));
-            }
+            let (m1, m2) = init.unwrap_or_else(|| {
+                (
+                    storage(&dev, label, len as u64 * 4),
+                    storage(&dev, label, len as u64 * 4),
+                )
+            });
             let u = uniform(&dev, label, std::mem::size_of::<AdamUniforms>() as u64);
             let bg = bind(&dev, &self.adam_pipeline, label, &[&u, p, g, &m1, &m2]);
             AdamGroup {
@@ -461,20 +505,16 @@ impl Trainer {
                 split_b: b,
             }
         };
+        let [mt, mo, ms] = match moments {
+            Some([a, b, c]) => [Some(a), Some(b), Some(c)],
+            None => [None, None, None],
+        };
         let adam = [
             // mean | quat | log-scale
-            mk_group("adam_t", &pt, &gt, 10, 3, 7, moments.map(|m| &m.transforms)),
-            mk_group("adam_o", &po, &go, 1, 1, 1, moments.map(|m| &m.opacity)),
+            mk_group("adam_t", &pt, &gt, 10, 3, 7, mt),
+            mk_group("adam_o", &po, &go, 1, 1, 1, mo),
             // DC | rest
-            mk_group(
-                "adam_sh",
-                &ps,
-                &gs,
-                3 * cpc2,
-                3,
-                3 * cpc2,
-                moments.map(|m| &m.sh),
-            ),
+            mk_group("adam_sh", &ps, &gs, 3 * cpc2, 3, 3 * cpc2, ms),
         ];
 
         let grad_accum = storage(&dev, "grad_accum", n as u64 * 4);
@@ -670,25 +710,10 @@ impl Trainer {
         Ok(())
     }
 
-    /// Download the population with its Adam moments.
-    fn download(&self) -> Population {
-        let st = self.st();
-        let r = &st.renderer;
-        let (dev, queue) = (&r.ctx.device, &r.ctx.queue);
-        let (t, o, sh) = r.read_params();
-        let group = |values: Vec<f32>, g: &AdamGroup| Group {
-            stride: g.stride as usize,
-            m1: read_f32(dev, queue, &g.m1, values.len()),
-            m2: read_f32(dev, queue, &g.m2, values.len()),
-            values,
-        };
-        Population {
-            transforms: group(t, &st.adam[0]),
-            opacity: group(o, &st.adam[1]),
-            sh: group(sh, &st.adam[2]),
-        }
-    }
-
+    /// Densify (and/or reset opacity) on the device: classify every gaussian,
+    /// prefix-sum the output row counts, scatter parameters and Adam moments
+    /// into new buffers, and rebuild the renderer around them. No host copy of
+    /// the scene is made.
     fn densify_now(
         &mut self,
         d: &DensifyConfig,
@@ -696,49 +721,150 @@ impl Trainer {
         reset: bool,
     ) -> Result<(), TrainError> {
         let t0 = std::time::Instant::now();
-        let mut pop = self.download();
-        let t_download = t0.elapsed();
-        let n = pop.len();
-        if grow {
-            let st = self.st();
-            let (dev, queue) = (&st.renderer.ctx.device, &st.renderer.ctx.queue);
-            let accum = read_f32(dev, queue, &st.grad_accum, n);
-            let count = read_f32(dev, queue, &st.grad_count, n);
-            let prune_large = self.step > d.opacity_reset_interval;
-            let seed = self.cfg.seed ^ (self.step as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-            let (next, report) = densify(&pop, &accum, &count, self.extent, d, prune_large, seed);
-            pop = next;
-            self.last_densify = Some(report);
+        let st = self.state.as_ref().expect("trainer state");
+        let dev = st.renderer.ctx.device.clone();
+        let queue = st.renderer.ctx.queue.clone();
+        let n = st.renderer.num_gaussians();
+        let params = st.renderer.param_buffers();
+        let src = [
+            params.transforms.clone(),
+            params.opacity.clone(),
+            params.sh.clone(),
+        ];
+
+        // 1. Classify.
+        let actions = storage(&dev, "densify_actions", n as u64 * 4);
+        let counts = storage(&dev, "densify_counts", n as u64 * 4);
+        let cum = storage(&dev, "densify_cum", n as u64 * 4);
+        let tallies = storage(&dev, "densify_tallies", 12);
+        let cu = uniform(&dev, "densify_classify_u", 32);
+        let words: [u32; 8] = [
+            n as u32,
+            grow as u32,
+            (self.step > d.opacity_reset_interval) as u32,
+            0,
+            d.grad_threshold.to_bits(),
+            (d.percent_dense * self.extent).to_bits(),
+            d.min_opacity.to_bits(),
+            (d.max_world_scale * self.extent).to_bits(),
+        ];
+        queue.write_buffer(&cu, 0, bytemuck::cast_slice(&words));
+        let cb = bind(
+            &dev,
+            &self.classify_pipeline,
+            "densify_classify",
+            &[
+                &cu,
+                &src[0],
+                &src[1],
+                &st.grad_accum,
+                &st.grad_count,
+                &actions,
+                &counts,
+                &tallies,
+            ],
+        );
+        let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            pass.set_pipeline(&self.classify_pipeline);
+            pass.set_bind_group(0, &cb, &[]);
+            let (x, y) = groups_2d(n as u32);
+            pass.dispatch_workgroups(x, y, 1);
         }
-        if reset {
-            reset_opacity(&mut pop, 0.01);
+        queue.submit(Some(enc.finish()));
+
+        // 2. Prefix sum of the row counts -> output offsets and the new count.
+        if self.scanner.as_ref().is_none_or(|(_, cap)| *cap < n) {
+            self.scanner = Some((PrefixScanner::new(&dev, n.max(1)), n));
         }
-        let degree = self.sh_degree;
-        let cpc = (degree + 1) as usize;
-        let packed = PackedScene {
-            num_gaussians: pop.len(),
-            transforms: std::mem::take(&mut pop.transforms.values),
-            opacity: std::mem::take(&mut pop.opacity.values),
-            sh: std::mem::take(&mut pop.sh.values),
-            sh_coeffs_per_channel: cpc * cpc,
-            sh_degree: degree,
+        let (scanner, _) = self.scanner.as_ref().expect("scanner");
+        scanner.scan(&dev, &queue, &counts, &cum, n);
+        let n_after = if n > 0 {
+            read_u32_at(&dev, &queue, &cum, n - 1) as usize
+        } else {
+            0
         };
-        let n_after = packed.num_gaussians;
-        let t_cpu = t0.elapsed();
+        let t: Vec<u32> = read_f32(&dev, &queue, &tallies, 3)
+            .iter()
+            .map(|x| x.to_bits())
+            .collect();
+        if grow {
+            self.last_densify = Some(DensifyReport {
+                cloned: t[0] as usize,
+                split: t[1] as usize,
+                pruned: t[2] as usize,
+                before: n,
+                after: n_after,
+            });
+        }
+
+        // 3. Scatter every group into new buffers.
+        let st = self.state.as_ref().expect("trainer state");
+        let cpc2 = (self.sh_degree + 1) * (self.sh_degree + 1);
+        let strides = [10u32, 1, 3 * cpc2];
+        let reset_cap = (0.01f32 / 0.99).ln();
+        let seed = (self.cfg.seed as u32) ^ (self.step as u32).wrapping_mul(0x9E37_79B9);
+        let mut out: Vec<(wgpu::Buffer, wgpu::Buffer, wgpu::Buffer)> = Vec::with_capacity(3);
+        let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let mut keep_alive = Vec::new();
+        for (kind, stride) in strides.iter().enumerate() {
+            let len = (n_after as u64) * (*stride as u64) * 4;
+            let dp = storage(&dev, "params", len);
+            let dm1 = storage(&dev, "adam_m1", len);
+            let dm2 = storage(&dev, "adam_m2", len);
+            let su = uniform(&dev, "densify_scatter_u", 32);
+            let words: [u32; 8] = [
+                n as u32,
+                *stride,
+                kind as u32,
+                (reset && kind == 1) as u32,
+                reset_cap.to_bits(),
+                seed,
+                0,
+                0,
+            ];
+            queue.write_buffer(&su, 0, bytemuck::cast_slice(&words));
+            let g = &st.adam[kind];
+            let sb = bind(
+                &dev,
+                &self.scatter_pipeline,
+                "densify_scatter",
+                &[
+                    &su, &actions, &cum, &src[kind], &g.m1, &g.m2, &dp, &dm1, &dm2,
+                ],
+            );
+            {
+                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                pass.set_pipeline(&self.scatter_pipeline);
+                pass.set_bind_group(0, &sb, &[]);
+                let (x, y) = groups_2d(n as u32);
+                pass.dispatch_workgroups(x, y, 1);
+            }
+            keep_alive.push((su, sb));
+            out.push((dp, dm1, dm2));
+        }
+        queue.submit(Some(enc.finish()));
+        drop(keep_alive);
+
+        // 4. Rebuild around the new buffers (no upload).
         let ctx = self
             .state
             .take()
             .expect("trainer state")
             .renderer
             .into_context();
-        self.build_state(ctx, packed, Some(&pop))?;
+        let mut it = out.into_iter();
+        let (pt, mt1, mt2) = it.next().expect("transforms");
+        let (po, mo1, mo2) = it.next().expect("opacity");
+        let (ps, ms1, ms2) = it.next().expect("sh");
+        let scene = GpuScene::from_buffers(pt, po, ps, n_after, self.sh_degree);
+        let renderer = Renderer::from_gpu_scene(ctx, scene, self.width, self.height)?;
+        self.build_state(renderer, Some([(mt1, mt2), (mo1, mo2), (ms1, ms2)]))?;
         if self.profile.is_some() && self.step % 1000 == 0 {
             eprintln!(
-                "[densify] n={} download {:.0} ms, cpu {:.0} ms, rebuild {:.0} ms",
-                n_after,
-                t_download.as_secs_f64() * 1e3,
-                (t_cpu - t_download).as_secs_f64() * 1e3,
-                (t0.elapsed() - t_cpu).as_secs_f64() * 1e3
+                "[densify] {n} -> {n_after} on device in {:.0} ms",
+                t0.elapsed().as_secs_f64() * 1e3
             );
         }
         Ok(())

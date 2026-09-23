@@ -120,11 +120,8 @@ impl Renderer {
                 );
                 let grad_transforms = new_storage(dev, "grad_transforms", n * 10 * 4);
                 let grad_opacity = new_storage(dev, "grad_opacity", n * 4);
-                let grad_sh = new_storage(
-                    dev,
-                    "grad_sh",
-                    (self.scene.packed.sh.len().max(1) * 4) as u64,
-                );
+                let grad_sh =
+                    new_storage(dev, "grad_sh", (self.scene.sh_floats().max(1) * 4) as u64);
                 let project_bwd = build_stage(
                     dev,
                     "project_backward",
@@ -276,7 +273,7 @@ impl Renderer {
         Ok(ParamGrads {
             transforms: read(&st.grad_transforms, n * 10),
             opacity: read(&st.grad_opacity, n),
-            sh: read(&st.grad_sh, self.scene.packed.sh.len()),
+            sh: read(&st.grad_sh, self.scene.sh_floats()),
         })
     }
     /// Run the backward pass with `dL/dC` already on the device in
@@ -340,14 +337,14 @@ impl Renderer {
     pub fn read_params(&self) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
         let dev = &self.ctx.device;
         let queue = &self.ctx.queue;
-        let p = &self.scene.packed;
+        let n = self.scene.packed.num_gaussians;
         let read = |buf: &wgpu::Buffer, len: usize| -> Vec<f32> {
             bytemuck::cast_slice(&read_bytes(dev, queue, buf, len * 4)).to_vec()
         };
         (
-            read(&self.scene.transforms, p.transforms.len()),
-            read(&self.scene.opacity, p.opacity.len()),
-            read(&self.scene.sh, p.sh.len()),
+            read(&self.scene.transforms, n * 10),
+            read(&self.scene.opacity, n),
+            read(&self.scene.sh, self.scene.sh_floats()),
         )
     }
 }

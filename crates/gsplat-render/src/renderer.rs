@@ -26,6 +26,9 @@ use crate::shaders;
 use crate::uniforms::{tile_bounds, ProjectUniforms, RasterUniforms};
 
 /// A scene uploaded to the GPU once.
+///
+/// `packed` keeps the scene's metadata (count, SH degree); its host arrays
+/// are dropped after upload so a large scene is not held twice.
 pub struct GpuScene {
     pub packed: PackedScene,
     transforms: wgpu::Buffer,
@@ -65,11 +68,46 @@ impl GpuScene {
         ctx.queue
             .write_buffer(&sh, 0, bytemuck::cast_slice(&packed.sh));
         Self {
-            packed,
+            packed: PackedScene {
+                transforms: Vec::new(),
+                opacity: Vec::new(),
+                sh: Vec::new(),
+                ..packed
+            },
             transforms,
             opacity,
             sh,
         }
+    }
+
+    /// Wrap parameter buffers that already live on the device (e.g. written by
+    /// a trainer's on-device densification) in the forward input layouts.
+    pub fn from_buffers(
+        transforms: wgpu::Buffer,
+        opacity: wgpu::Buffer,
+        sh: wgpu::Buffer,
+        num_gaussians: usize,
+        sh_degree: u32,
+    ) -> Self {
+        let cpc = (sh_degree + 1) as usize;
+        Self {
+            packed: PackedScene {
+                transforms: Vec::new(),
+                opacity: Vec::new(),
+                sh: Vec::new(),
+                sh_coeffs_per_channel: cpc * cpc,
+                num_gaussians,
+                sh_degree,
+            },
+            transforms,
+            opacity,
+            sh,
+        }
+    }
+
+    /// Floats in the SH buffer (3 channels x (degree + 1)^2 per gaussian).
+    pub fn sh_floats(&self) -> usize {
+        self.packed.num_gaussians * 3 * self.packed.sh_coeffs_per_channel
     }
 
     /// Re-upload the packed arrays (used when the host mutates the scene).
@@ -503,13 +541,8 @@ impl Renderer {
         image_h: u32,
         initial_isects: Option<usize>,
     ) -> Result<Self, GpuError> {
-        Self::build(
-            ctx,
-            PackedScene::from_scene(scene),
-            image_w,
-            image_h,
-            initial_isects,
-        )
+        let gpu_scene = GpuScene::upload(&ctx, scene);
+        Self::build(ctx, gpu_scene, image_w, image_h, initial_isects)
     }
 
     /// [`Renderer::new`] from an already packed scene (no per-gaussian
@@ -520,18 +553,29 @@ impl Renderer {
         image_w: u32,
         image_h: u32,
     ) -> Result<Self, GpuError> {
-        Self::build(ctx, packed, image_w, image_h, None)
+        let gpu_scene = GpuScene::upload_packed(&ctx, packed);
+        Self::build(ctx, gpu_scene, image_w, image_h, None)
+    }
+
+    /// [`Renderer::new`] over a scene whose buffers are already on the device
+    /// (no upload).
+    pub fn from_gpu_scene(
+        ctx: GpuContext,
+        gpu_scene: GpuScene,
+        image_w: u32,
+        image_h: u32,
+    ) -> Result<Self, GpuError> {
+        Self::build(ctx, gpu_scene, image_w, image_h, None)
     }
 
     fn build(
         ctx: GpuContext,
-        packed: PackedScene,
+        gpu_scene: GpuScene,
         image_w: u32,
         image_h: u32,
         initial_isects: Option<usize>,
     ) -> Result<Self, GpuError> {
-        let sh_degree = packed.sh_degree;
-        let gpu_scene = GpuScene::upload_packed(&ctx, packed);
+        let sh_degree = gpu_scene.packed.sh_degree;
         let n = gpu_scene.packed.num_gaussians;
         let (tbw, tbh) = tile_bounds(image_w, image_h);
         let num_tiles = (tbw * tbh) as usize;

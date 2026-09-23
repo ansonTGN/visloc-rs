@@ -56,6 +56,8 @@ pub use gpu::{try_context, GpuContext, GpuError};
 #[cfg(feature = "gpu")]
 pub use renderer::{DeviceParams, GpuScene, ParamGrads, Renderer, SCREEN_GRAD_FLOATS};
 #[cfg(feature = "gpu")]
+pub use scan::PrefixScanner;
+#[cfg(feature = "gpu")]
 pub use sort::{RadixParams, RadixSorter, SortBuffers};
 #[cfg(feature = "gpu")]
 pub use uniforms::{tile_bounds, ProjectUniforms, RasterUniforms, TILE_SIZE, TILE_WIDTH};
