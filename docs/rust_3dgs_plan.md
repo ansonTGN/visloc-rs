@@ -212,8 +212,14 @@ The tile sort now runs only `ceil(log2(num_tiles) / 4)` radix passes (tile ids
 are small; the LSD sort is stable so depth order survives): 3 passes at
 640x480, 4 at 1080p, versus 8. `rasterize` also stops loading batches once
 every pixel in its tile is saturated. Next targets: the tile sort and
-`tile_offsets` on real views, and `Renderer::new`, which takes ~10 minutes on
-DX12 (shader compilation) and dominates every benchmark run.
+`tile_offsets` on real views.
+
+**DX12 startup.** `Renderer::new` used to take ~10 minutes on Windows: wgpu's
+`Auto` shader-compiler choice falls back to FXC when `dxcompiler.dll` is not
+on the DLL search path, and FXC is extremely slow on these compute shaders.
+`GpuContext` now finds `dxcompiler.dll` on `PATH` or in the newest installed
+Windows SDK and loads DXC explicitly (`WGPU_DX12_COMPILER` still overrides).
+GPU test suite 145 s → 3.7 s; `gsplat_gpu_render` end to end ~590 s → 11 s.
 
 ### Stage 2 — Burn + CubeCL differentiable rasterizer
 - Port the forward rasterizer to CubeCL kernels; add the **analytic backward**
