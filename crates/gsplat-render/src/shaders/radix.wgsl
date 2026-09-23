@@ -18,8 +18,8 @@
 
 const BINS: u32 = 16u;
 const WG: u32 = 256u;
-const ITEMS: u32 = 4u;
-const BLOCK: u32 = WG * ITEMS; // 1024 elements per workgroup
+const ITEMS: u32 = 16u;
+const BLOCK: u32 = WG * ITEMS; // 4096 elements per workgroup (keep = sort.rs BLOCK)
 
 struct RadixParams {
     shift: u32,
@@ -40,9 +40,10 @@ struct RadixParams {
 
 // Shared in-block per-digit exclusive-scan buffer (16 digits x 256 threads).
 var<workgroup> scan_cur: array<u32, BINS * WG>;
-// Per-digit totals and exclusive digit prefix, used by `radix_scan`.
-var<workgroup> digit_totals: array<u32, BINS>;
-var<workgroup> digit_prefix: array<u32, BINS>;
+// Per-thread partial sums for the chunked scan in `radix_scan`.
+var<workgroup> partial: array<u32, WG>;
+// Entries of the digit-major histogram each thread handles per scan chunk.
+const SCAN_ITEMS: u32 = 16u;
 
 // Pass 0: zero every histogram entry for this pass. One invocation per entry;
 // the dispatch covers num_blocks * BINS entries.
@@ -85,37 +86,56 @@ fn radix_histogram(
 // base[d * num_blocks + wg] = sum of counts of all digits < d over all blocks
 //                          + sum of counts of digit d in blocks < wg.
 //
-// One workgroup; the grid is BINS * num_blocks entries. Two serial reductions
-// keep this obviously correct.
+// That is exactly an exclusive scan of the flat digit-major sequence
+// j = d * num_blocks + wg (value hist[wg * BINS + d]). One workgroup walks it
+// in chunks of WG * SCAN_ITEMS: each thread sums SCAN_ITEMS consecutive
+// entries, the workgroup scans the 256 partial sums, then each thread writes
+// its entries' exclusive offsets. (A per-digit serial walk over the blocks was
+// latency-bound: ~2 * num_blocks dependent global loads per thread.)
 @compute @workgroup_size(256)
 fn radix_scan(@builtin(local_invocation_id) lid: vec3<u32>) {
     let nblocks = params.num_blocks;
-    // Each digit's grand total (one thread per digit), then the exclusive
-    // prefix over digits, then one thread per digit walks the blocks. O(BINS *
-    // nblocks) total.
-    if (lid.x < BINS) {
-        var total = 0u;
-        for (var w = 0u; w < nblocks; w = w + 1u) {
-            total = total + atomicLoad(&hist[w * BINS + lid.x]);
+    let total_len = BINS * nblocks;
+    let t = lid.x;
+    var carry = 0u;
+    var chunk = 0u;
+    loop {
+        if (chunk >= total_len) { break; }
+        let first = chunk + t * SCAN_ITEMS;
+        var sum = 0u;
+        for (var k = 0u; k < SCAN_ITEMS; k = k + 1u) {
+            let j = first + k;
+            if (j < total_len) {
+                sum = sum + atomicLoad(&hist[(j % nblocks) * BINS + j / nblocks]);
+            }
         }
-        digit_totals[lid.x] = total;
-    }
-    workgroupBarrier();
-    if (lid.x == 0u) {
-        var acc = 0u;
-        for (var d = 0u; d < BINS; d = d + 1u) {
-            digit_prefix[d] = acc;
-            acc = acc + digit_totals[d];
+        partial[t] = sum;
+        workgroupBarrier();
+        // Inclusive Hillis-Steele over the 256 partial sums.
+        var offset = 1u;
+        loop {
+            if (offset >= WG) { break; }
+            var v = partial[t];
+            if (t >= offset) {
+                v = v + partial[t - offset];
+            }
+            workgroupBarrier();
+            partial[t] = v;
+            workgroupBarrier();
+            offset = offset * 2u;
         }
-    }
-    workgroupBarrier();
-    if (lid.x < BINS) {
-        let d = lid.x;
-        var running = digit_prefix[d];
-        for (var wg = 0u; wg < nblocks; wg = wg + 1u) {
-            base[d * nblocks + wg] = running;
-            running = running + atomicLoad(&hist[wg * BINS + d]);
+        var running = carry + partial[t] - sum;
+        for (var k = 0u; k < SCAN_ITEMS; k = k + 1u) {
+            let j = first + k;
+            if (j < total_len) {
+                base[j] = running;
+                running = running + atomicLoad(&hist[(j % nblocks) * BINS + j / nblocks]);
+            }
         }
+        carry = carry + partial[WG - 1u];
+        // Everyone has read partial[] before the next chunk overwrites it.
+        workgroupBarrier();
+        chunk = chunk + WG * SCAN_ITEMS;
     }
 }
 

@@ -132,7 +132,15 @@ fn build_bind_group(
 /// A compute pipeline plus the bind group for its single bind group (group 0).
 struct Stage {
     pipeline: wgpu::ComputePipeline,
+    layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
+}
+
+impl Stage {
+    /// Point the stage at new buffers (same layout), keeping the pipeline.
+    fn rebind(&mut self, device: &wgpu::Device, label: &str, bindings: &[Binding]) {
+        self.bind_group = build_bind_group(device, label, &self.layout, bindings);
+    }
 }
 
 fn build_stage(
@@ -163,6 +171,7 @@ fn build_stage(
     let bind_group = build_bind_group(device, label, &layout, bindings);
     Stage {
         pipeline,
+        layout,
         bind_group,
     }
 }
@@ -171,6 +180,18 @@ fn dispatch(pass: &mut wgpu::ComputePass<'_>, stage: &Stage, x: u32) {
     pass.set_pipeline(&stage.pipeline);
     pass.set_bind_group(0, &stage.bind_group, &[]);
     pass.dispatch_workgroups(x.max(1), 1, 1);
+}
+
+/// Dispatch one 256-wide invocation per element for `threads` elements, folding
+/// the workgroup count into 2D so it can exceed the 65535-per-dimension limit.
+/// The kernel must linearise with `gid.x + gid.y * num_workgroups.x * 256`.
+fn dispatch_threads(pass: &mut wgpu::ComputePass<'_>, stage: &Stage, threads: u32) {
+    const MAX_DIM: u32 = 65535;
+    let groups = threads.div_ceil(256).max(1);
+    let x = groups.min(MAX_DIM);
+    pass.set_pipeline(&stage.pipeline);
+    pass.set_bind_group(0, &stage.bind_group, &[]);
+    pass.dispatch_workgroups(x, groups.div_ceil(x), 1);
 }
 
 /// Per-frame scratch buffers sized from the gaussian count.
@@ -197,7 +218,8 @@ impl Scratch {
             depths: new_storage(device, "depths", (n * 4) as u64),
             intersect_counts: new_storage(device, "intersect_counts", (n * 4) as u64),
             cum_tiles_hit: new_storage(device, "cum_tiles_hit", (n * 4) as u64),
-            projected_splats: new_storage(device, "projected_splats", (max_isects * 9 * 4) as u64),
+            // Indexed by compact (visible) id, not by intersection.
+            projected_splats: new_storage(device, "projected_splats", (n * 9 * 4) as u64),
             tile_id_from_isect: new_storage(device, "tile_id_from_isect", (max_isects * 4) as u64),
             compact_gid_from_isect: new_storage(
                 device,
@@ -245,6 +267,119 @@ fn read_counters(
     (values[0], values[1])
 }
 
+const RO: wgpu::BufferBindingType = wgpu::BufferBindingType::Storage { read_only: true };
+const RW: wgpu::BufferBindingType = wgpu::BufferBindingType::Storage { read_only: false };
+
+// Bindings of the stages that touch intersection-sized buffers; shared by
+// `Renderer::new` and `Renderer::ensure_isect_capacity`.
+fn map_bindings(
+    proj_uniforms: &wgpu::Buffer,
+    gpu_scene: &GpuScene,
+    scratch: &Scratch,
+) -> Vec<Binding> {
+    vec![
+        Binding {
+            binding: 0,
+            ty: wgpu::BufferBindingType::Uniform,
+            buffer: proj_uniforms.clone(),
+        },
+        Binding {
+            binding: 1,
+            ty: RO,
+            buffer: gpu_scene.transforms.clone(),
+        },
+        Binding {
+            binding: 2,
+            ty: RO,
+            buffer: gpu_scene.opacity.clone(),
+        },
+        Binding {
+            binding: 3,
+            ty: RO,
+            buffer: scratch.cum_tiles_hit.clone(),
+        },
+        Binding {
+            binding: 4,
+            ty: RO,
+            buffer: scratch.global_from_compact.clone(),
+        },
+        Binding {
+            binding: 5,
+            ty: RW,
+            buffer: scratch.tile_id_from_isect.clone(),
+        },
+        Binding {
+            binding: 6,
+            ty: RW,
+            buffer: scratch.compact_gid_from_isect.clone(),
+        },
+    ]
+}
+
+fn offsets_bindings(
+    proj_uniforms: &wgpu::Buffer,
+    scratch: &Scratch,
+    tile_offsets: &wgpu::Buffer,
+) -> Vec<Binding> {
+    vec![
+        Binding {
+            binding: 0,
+            ty: wgpu::BufferBindingType::Uniform,
+            buffer: proj_uniforms.clone(),
+        },
+        Binding {
+            binding: 1,
+            ty: RO,
+            buffer: scratch.tile_id_from_isect.clone(),
+        },
+        Binding {
+            binding: 2,
+            ty: RW,
+            buffer: tile_offsets.clone(),
+        },
+    ]
+}
+
+fn raster_bindings(
+    raster_uniforms: &wgpu::Buffer,
+    scratch: &Scratch,
+    tile_offsets: &wgpu::Buffer,
+    out_img: &wgpu::Buffer,
+) -> Vec<Binding> {
+    vec![
+        Binding {
+            binding: 0,
+            ty: wgpu::BufferBindingType::Uniform,
+            buffer: raster_uniforms.clone(),
+        },
+        Binding {
+            binding: 1,
+            ty: RO,
+            buffer: scratch.projected_splats.clone(),
+        },
+        Binding {
+            binding: 2,
+            ty: RO,
+            buffer: scratch.compact_gid_from_isect.clone(),
+        },
+        Binding {
+            binding: 3,
+            ty: RO,
+            buffer: tile_offsets.clone(),
+        },
+        Binding {
+            binding: 4,
+            ty: RW,
+            buffer: out_img.clone(),
+        },
+        Binding {
+            binding: 5,
+            ty: RO,
+            buffer: scratch.global_from_compact.clone(),
+        },
+    ]
+}
+
 /// The forward renderer.
 pub struct Renderer {
     pub ctx: GpuContext,
@@ -268,6 +403,8 @@ pub struct Renderer {
     depth_pairs: [crate::sort::SortBuffers; 2],
     tile_pairs: [crate::sort::SortBuffers; 2],
     counts_sorted: wgpu::Buffer,
+    /// Hard ceiling for the isect buffers (device storage-binding limit).
+    max_isects_limit: usize,
     /// Skip the output-image readback (for GPU-only timing / viewer use).
     skip_readback: bool,
 }
@@ -279,19 +416,34 @@ impl Renderer {
         image_w: u32,
         image_h: u32,
     ) -> Result<Self, GpuError> {
+        Self::with_initial_isect_capacity(ctx, scene, image_w, image_h, None)
+    }
+
+    /// [`Renderer::new`] with an explicit initial intersection capacity
+    /// (`None` = the default guess). Buffers still grow on demand; a small
+    /// value lets tests exercise that growth cheaply.
+    #[doc(hidden)]
+    pub fn with_initial_isect_capacity(
+        ctx: GpuContext,
+        scene: &Scene,
+        image_w: u32,
+        image_h: u32,
+        initial_isects: Option<usize>,
+    ) -> Result<Self, GpuError> {
         let gpu_scene = GpuScene::upload(&ctx, scene);
         let n = scene.len();
         let (tbw, tbh) = tile_bounds(image_w, image_h);
         let num_tiles = (tbw * tbh) as usize;
-        // The projected-splat buffer is 9 f32 per intersection, so an
-        // intersection count is bounded by whichever storage limit is smaller.
-        let bytes_per_isect = 9 * 4u64;
+        // Per-intersection buffers hold one u32 each. Start from a guess and
+        // grow on demand (`ensure_isect_capacity`) up to the binding limit.
         let limit = ctx
             .limits
             .max_storage_buffer_binding_size
             .min(ctx.limits.max_buffer_size);
-        let max_isects_by_limit = (limit / bytes_per_isect) as usize;
-        let max_isects = (n * 64).clamp(1 << 20, 1 << 26).min(max_isects_by_limit);
+        let max_isects_limit = (limit / 4) as usize;
+        let max_isects = initial_isects
+            .unwrap_or_else(|| (n * 64).clamp(1 << 20, 1 << 26))
+            .clamp(1, max_isects_limit);
         let scratch = Scratch::new(&ctx.device, n, max_isects);
         let dev = &ctx.device;
 
@@ -423,43 +575,7 @@ impl Renderer {
             "map_gaussians",
             "map_gaussians",
             shaders::map_gaussians().source,
-            &[
-                Binding {
-                    binding: 0,
-                    ty: wgpu::BufferBindingType::Uniform,
-                    buffer: proj_uniforms.clone(),
-                },
-                Binding {
-                    binding: 1,
-                    ty: ro,
-                    buffer: gpu_scene.transforms.clone(),
-                },
-                Binding {
-                    binding: 2,
-                    ty: ro,
-                    buffer: gpu_scene.opacity.clone(),
-                },
-                Binding {
-                    binding: 3,
-                    ty: ro,
-                    buffer: scratch.cum_tiles_hit.clone(),
-                },
-                Binding {
-                    binding: 4,
-                    ty: ro,
-                    buffer: scratch.global_from_compact.clone(),
-                },
-                Binding {
-                    binding: 5,
-                    ty: rw,
-                    buffer: scratch.tile_id_from_isect.clone(),
-                },
-                Binding {
-                    binding: 6,
-                    ty: rw,
-                    buffer: scratch.compact_gid_from_isect.clone(),
-                },
-            ],
+            &map_bindings(&proj_uniforms, &gpu_scene, &scratch),
         );
 
         let offsets = build_stage(
@@ -467,23 +583,7 @@ impl Renderer {
             "get_tile_offsets",
             "get_tile_offsets",
             shaders::tile_offsets().source,
-            &[
-                Binding {
-                    binding: 0,
-                    ty: wgpu::BufferBindingType::Uniform,
-                    buffer: proj_uniforms.clone(),
-                },
-                Binding {
-                    binding: 1,
-                    ty: ro,
-                    buffer: scratch.tile_id_from_isect.clone(),
-                },
-                Binding {
-                    binding: 2,
-                    ty: rw,
-                    buffer: tile_offsets.clone(),
-                },
-            ],
+            &offsets_bindings(&proj_uniforms, &scratch, &tile_offsets),
         );
 
         let raster = build_stage(
@@ -491,38 +591,7 @@ impl Renderer {
             "rasterize",
             "rasterize",
             shaders::rasterize().source,
-            &[
-                Binding {
-                    binding: 0,
-                    ty: wgpu::BufferBindingType::Uniform,
-                    buffer: raster_uniforms.clone(),
-                },
-                Binding {
-                    binding: 1,
-                    ty: ro,
-                    buffer: scratch.projected_splats.clone(),
-                },
-                Binding {
-                    binding: 2,
-                    ty: ro,
-                    buffer: scratch.compact_gid_from_isect.clone(),
-                },
-                Binding {
-                    binding: 3,
-                    ty: ro,
-                    buffer: tile_offsets.clone(),
-                },
-                Binding {
-                    binding: 4,
-                    ty: rw,
-                    buffer: out_img.clone(),
-                },
-                Binding {
-                    binding: 5,
-                    ty: ro,
-                    buffer: scratch.global_from_compact.clone(),
-                },
-            ],
+            &raster_bindings(&raster_uniforms, &scratch, &tile_offsets, &out_img),
         );
 
         // Device-side sort/scan scratch. The depth sort and tile sort each need
@@ -554,8 +623,47 @@ impl Renderer {
             depth_pairs,
             tile_pairs,
             counts_sorted,
+            max_isects_limit,
             skip_readback: false,
         })
+    }
+
+    /// Grow every intersection-sized buffer (and the tile sort scratch) so a
+    /// frame with `needed` intersections fits. Views from inside a scene can
+    /// produce far more intersections than the initial guess (e.g. 31M at
+    /// 1080p for 419k gaussians); without this they were truncated.
+    fn ensure_isect_capacity(&mut self, needed: usize) {
+        if needed <= self.scratch.max_isects || self.scratch.max_isects >= self.max_isects_limit {
+            return;
+        }
+        let cap = needed.saturating_add(needed / 4).min(self.max_isects_limit);
+        let dev = &self.ctx.device;
+        self.scratch.tile_id_from_isect = new_storage(dev, "tile_id_from_isect", (cap * 4) as u64);
+        self.scratch.compact_gid_from_isect =
+            new_storage(dev, "compact_gid_from_isect", (cap * 4) as u64);
+        self.scratch.max_isects = cap;
+        self.sorter.reserve(dev, cap);
+        self.tile_pairs = self.sorter.allocate(dev, "tile");
+        self.map.rebind(
+            dev,
+            "map_gaussians",
+            &map_bindings(&self.proj_uniforms, &self.scene, &self.scratch),
+        );
+        self.offsets.rebind(
+            dev,
+            "get_tile_offsets",
+            &offsets_bindings(&self.proj_uniforms, &self.scratch, &self.tile_offsets),
+        );
+        self.raster.rebind(
+            dev,
+            "rasterize",
+            &raster_bindings(
+                &self.raster_uniforms,
+                &self.scratch,
+                &self.tile_offsets,
+                &self.out_img,
+            ),
+        );
     }
 
     /// Render without reading the output image back to the CPU.
@@ -636,7 +744,9 @@ impl Renderer {
                 self.scratch.max_isects
             );
         }
+        self.ensure_isect_capacity(num_intersections as usize);
         let nv = (num_visible as usize).min(self.num_gaussians());
+        // Only truncates if the device's storage-binding limit is exceeded.
         let ni = (num_intersections as usize).min(self.scratch.max_isects);
 
         // Re-upload the uniforms with the now-known compaction counts.
@@ -729,7 +839,7 @@ impl Renderer {
                     });
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-                dispatch(&mut pass, &self.offsets, (ni as u32).div_ceil(256));
+                dispatch_threads(&mut pass, &self.offsets, ni as u32);
             }
             self.ctx.queue.submit(Some(encoder.finish()));
         }

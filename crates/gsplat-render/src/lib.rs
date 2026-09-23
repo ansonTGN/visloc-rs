@@ -205,10 +205,18 @@ mod gpu_tests {
         // original indices and must be increasing within a key. Cover the full
         // 32-bit sort plus reduced-bit sorts with an even (2) and odd (3) pass
         // count, since an odd count leaves the result in `pairs[1]`.
-        let n = 5000usize;
-        let sorter = RadixSorter::new(&ctx.device, n);
+        //
+        // The 1.2M case has 293 blocks (16 * 293 = 4688 digit-major entries),
+        // so `radix_scan` spans more than one of its 4096-entry chunks.
+        let max_n = 1_200_000usize;
+        let sorter = RadixSorter::new(&ctx.device, max_n);
         let pairs = sorter.allocate(&ctx.device, "test");
-        for (modulus, key_bits) in [(17u32, 32u32), (17, 5), (4000, 12)] {
+        for (n, modulus, key_bits) in [
+            (5000usize, 17u32, 32u32),
+            (5000, 17, 5),
+            (5000, 4000, 12),
+            (max_n, 1 << 20, 20),
+        ] {
             let mut state = 0x1234_5678u32;
             let mut keys = Vec::with_capacity(n);
             for _ in 0..n {
@@ -292,6 +300,52 @@ mod gpu_tests {
             .collect();
         let first_bad = gpu.iter().zip(&expect).position(|(a, b)| a != b);
         assert_eq!(first_bad, None, "inclusive scan differs from host");
+    }
+
+    #[test]
+    fn gpu_grows_isect_buffers_past_initial_capacity() {
+        let Some(ctx) = try_context() else {
+            eprintln!("skipping gpu_grows_isect_buffers_past_initial_capacity: no GPU adapter");
+            return;
+        };
+        // 40 faint gaussians covering all 16 tiles of a 64x64 frame: 640
+        // intersections against an initial capacity of 100, so the renderer
+        // must grow its isect buffers (and re-point the map/offsets/raster
+        // bind groups) mid-frame. Before on-demand growth the excess was
+        // truncated and the far gaussians silently dropped.
+        let count = 40;
+        let gaussians: Vec<Gaussian> = (0..count)
+            .map(|i| {
+                let t = i as f32 / count as f32;
+                let mut g = solid_gaussian(
+                    Vector3::new(0.0, 0.0, 4.0 + 4.0 * t),
+                    30.0,
+                    [t, 1.0 - t, 0.5],
+                );
+                g.opacity_logit = -3.0; // ~5% each, so every layer shows
+                g
+            })
+            .collect();
+        let scene = Scene::new(gaussians, 0);
+        let view = front_camera();
+        let bg = [0.1, 0.2, 0.3];
+        let cpu = cpu_render::render(&scene, &view, bg);
+        let mut renderer = Renderer::with_initial_isect_capacity(ctx, &scene, 64, 64, Some(100))
+            .expect("renderer");
+        // Twice: the first frame grows, the second runs on the grown buffers.
+        for frame in 0..2 {
+            let gpu = renderer.render(&view, bg);
+            let mut max_err = 0.0f32;
+            for (a, b) in cpu.rgb.iter().zip(gpu.rgb.iter()) {
+                for c in 0..3 {
+                    max_err = max_err.max((a[c] - b[c]).abs());
+                }
+            }
+            assert!(
+                max_err < 0.02,
+                "frame {frame}: max abs error {max_err} vs CPU"
+            );
+        }
     }
 
     #[test]

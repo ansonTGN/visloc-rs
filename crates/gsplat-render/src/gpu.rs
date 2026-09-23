@@ -53,10 +53,10 @@ impl GpuContext {
 
     /// Create a context restricted to specific backends (useful in tests).
     pub fn with_backends(backends: wgpu::Backends) -> Result<Self, GpuError> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
+        let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
+        desc.backends = backends;
+        desc.backend_options.dx12.shader_compiler = dx12_shader_compiler();
+        let instance = wgpu::Instance::new(desc);
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback_adapter: false,
@@ -82,6 +82,65 @@ impl GpuContext {
             limits,
         })
     }
+}
+
+/// DX12 shader compiler choice.
+///
+/// wgpu's `Auto` falls back to FXC when `dxcompiler.dll` is not on the DLL
+/// search path, and FXC takes ~10 minutes to compile this renderer's compute
+/// shaders (DXC: seconds). So unless `WGPU_DX12_COMPILER` says otherwise, look
+/// for `dxcompiler.dll` on `PATH` and then in the newest installed Windows SDK,
+/// and load it explicitly. An older DXC only lowers the maximum shader model,
+/// which these baseline-WebGPU shaders do not need.
+fn dx12_shader_compiler() -> wgpu::Dx12Compiler {
+    if let Some(from_env) = wgpu::Dx12Compiler::from_env() {
+        return from_env;
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(path) = find_dxcompiler() {
+        return wgpu::Dx12Compiler::DynamicDxc {
+            dxc_path: path.to_string_lossy().into_owned(),
+        };
+    }
+    wgpu::Dx12Compiler::Auto
+}
+
+#[cfg(target_os = "windows")]
+fn find_dxcompiler() -> Option<std::path::PathBuf> {
+    const DLL: &str = "dxcompiler.dll";
+    if let Some(paths) = std::env::var_os("PATH") {
+        if let Some(p) = std::env::split_paths(&paths)
+            .map(|d| d.join(DLL))
+            .find(|p| p.is_file())
+        {
+            return Some(p);
+        }
+    }
+    let arch = if cfg!(target_arch = "aarch64") {
+        "arm64"
+    } else {
+        "x64"
+    };
+    let kits = std::path::PathBuf::from(
+        std::env::var_os("ProgramFiles(x86)").unwrap_or_else(|| r"C:\Program Files (x86)".into()),
+    )
+    .join("Windows Kits")
+    .join("10")
+    .join("bin");
+    // SDK dirs are named like `10.0.26100.0`; take the highest version that
+    // ships the DLL.
+    let version =
+        |name: &str| -> Vec<u32> { name.split('.').map(|c| c.parse().unwrap_or(0)).collect() };
+    std::fs::read_dir(kits)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let dll = e.path().join(arch).join(DLL);
+            dll.is_file()
+                .then(|| (version(&e.file_name().to_string_lossy()), dll))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map(|(_, dll)| dll)
 }
 
 /// Try to create a GPU context, returning `None` when no adapter is available.
