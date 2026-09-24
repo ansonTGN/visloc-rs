@@ -6972,12 +6972,15 @@ fn reduce_landmark_factors_f32_checked_with_options(
         writer.write_stage("prior_after", &h, &b)?;
         writer.write_stage("final", &h, &b)?;
     }
-    // The historical reducer retained compact recovery independently of the
-    // model evaluator.  The later Q2 model payload transfer and all-or-nothing
-    // invalidation are intentionally absent from this rollback variant.
+    // Transfer the projected visual Q2 rows into the model-decrease sidecar
+    // so the lean LM loop evaluates `model_cost_decrease_from_payload`
+    // instead of re-factoring every landmark on each damping attempt. The
+    // transfer is all-or-nothing: any structural mismatch yields `None`, and
+    // the loop then uses the full `model_cost_decrease_f32` evaluator.
     let (compact_back_substitution, model_decrease_payload) = if retain_compact_back_substitution {
-        drop(projected);
-        (compact_back_substitution, None)
+        let payload =
+            move_model_decrease_payload(factors, projected, compact_back_substitution.as_ref());
+        (compact_back_substitution, payload)
     } else {
         drop(projected);
         (None, None)
