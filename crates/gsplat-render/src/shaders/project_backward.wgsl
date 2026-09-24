@@ -33,22 +33,66 @@ fn outer3(a: vec3<f32>, b: vec3<f32>) -> mat3x3<f32> {
     return mat3x3<f32>(a * b.x, a * b.y, a * b.z);
 }
 
-// SH rest coefficient k (0-based, after DC) of channel ch, or 0 past the
-// scene's degree.
-fn sh_rest(sh_base: u32, rest_pc: u32, ch: u32, k: u32) -> f32 {
+// SH rows (3 * (degree + 1)^2 <= 48 floats) of the workgroup's 64
+// gaussians, staged in shared memory: each gaussian's row is contiguous in
+// the scene buffers but rows are scattered, so a thread reading its own row
+// float by float touches 48 strided cache lines. Instead the workgroup
+// copies whole rows with consecutive lanes, and grad_sh goes back the same
+// way (each thread overwrites its row with the gradient in place).
+const WG: u32 = 64u;
+var<workgroup> sh_rows: array<f32, 3072>; // 64 x 48
+var<workgroup> row_gid: array<u32, 64>;
+
+// SH rest coefficient k (0-based, after DC) of channel ch of this thread's
+// staged row, or 0 past the scene's degree.
+fn sh_rest(row: u32, rest_pc: u32, ch: u32, k: u32) -> f32 {
     if (k >= rest_pc) {
         return 0.0;
     }
-    return sh_in[sh_base + 3u + ch * rest_pc + k];
+    return sh_rows[row + 3u + ch * rest_pc + k];
 }
 
-@compute @workgroup_size(256)
-fn project_backward(@builtin(global_invocation_id) gid3: vec3<u32>) {
-    let compact = gid3.x;
-    if (compact >= u.num_visible) {
-        return;
+@compute @workgroup_size(64)
+fn project_backward(
+    @builtin(workgroup_id) wid: vec3<u32>,
+    @builtin(num_workgroups) nw: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let t = lid.x;
+    let compact = (wid.x + wid.y * nw.x) * WG + t;
+    let in_frame = compact < u.num_visible;
+    let cpc = u.sh_degree + 1u;
+    let cpc2 = cpc * cpc;
+    let rest_pc = cpc2 - 1u;
+    let row_len = 3u * cpc2;
+    var gid = 0u;
+    if (in_frame) {
+        gid = global_from_compact[compact];
     }
-    let gid = global_from_compact[compact];
+    row_gid[t] = select(0xFFFFFFFFu, gid, in_frame);
+    workgroupBarrier();
+    for (var i = t; i < WG * row_len; i = i + WG) {
+        let r = i / row_len;
+        let g = row_gid[r];
+        if (g != 0xFFFFFFFFu) {
+            sh_rows[r * 48u + (i % row_len)] = sh_in[g * row_len + (i % row_len)];
+        }
+    }
+    workgroupBarrier();
+    if (in_frame) {
+        project_backward_one(compact, gid, t * 48u, rest_pc);
+    }
+    workgroupBarrier();
+    for (var i = t; i < WG * row_len; i = i + WG) {
+        let r = i / row_len;
+        let g = row_gid[r];
+        if (g != 0xFFFFFFFFu) {
+            grad_sh[g * row_len + (i % row_len)] = sh_rows[r * 48u + (i % row_len)];
+        }
+    }
+}
+
+fn project_backward_one(compact: u32, gid: u32, row: u32, rest_pc: u32) {
     let sg = compact * 9u;
     let g_u = screen_grads[sg + 0u];
     let g_v = screen_grads[sg + 1u];
@@ -175,10 +219,6 @@ fn project_backward(@builtin(global_invocation_id) gid3: vec3<u32>) {
     // Colour -> SH coefficients, and -> mean through the view direction.
     // Basis and its direction derivative are written out term by term (no
     // runtime-indexed arrays); coefficients past the scene degree read as 0.
-    let cpc = u.sh_degree + 1u;
-    let cpc2 = cpc * cpc;
-    let rest_pc = cpc2 - 1u;
-    let sh_base = gid * 3u * cpc2;
     let dir_raw = m - u.camera_center.xyz;
     let dn = length(dir_raw);
     var dir = vec3<f32>(0.0, 0.0, 1.0);
@@ -216,22 +256,22 @@ fn project_backward(@builtin(global_invocation_id) gid3: vec3<u32>) {
     let b15 = -c8 * x * (xx - 3.0 * yy);
     var gdir = vec3<f32>(0.0, 0.0, 0.0);
     for (var ch = 0u; ch < 3u; ch = ch + 1u) {
-        let r1 = sh_rest(sh_base, rest_pc, ch, 0u);
-        let r2 = sh_rest(sh_base, rest_pc, ch, 1u);
-        let r3 = sh_rest(sh_base, rest_pc, ch, 2u);
-        let r4 = sh_rest(sh_base, rest_pc, ch, 3u);
-        let r5 = sh_rest(sh_base, rest_pc, ch, 4u);
-        let r6 = sh_rest(sh_base, rest_pc, ch, 5u);
-        let r7 = sh_rest(sh_base, rest_pc, ch, 6u);
-        let r8 = sh_rest(sh_base, rest_pc, ch, 7u);
-        let r9 = sh_rest(sh_base, rest_pc, ch, 8u);
-        let r10 = sh_rest(sh_base, rest_pc, ch, 9u);
-        let r11 = sh_rest(sh_base, rest_pc, ch, 10u);
-        let r12 = sh_rest(sh_base, rest_pc, ch, 11u);
-        let r13 = sh_rest(sh_base, rest_pc, ch, 12u);
-        let r14 = sh_rest(sh_base, rest_pc, ch, 13u);
-        let r15 = sh_rest(sh_base, rest_pc, ch, 14u);
-        let raw = 0.2820948 * sh_in[sh_base + ch]
+        let r1 = sh_rest(row, rest_pc, ch, 0u);
+        let r2 = sh_rest(row, rest_pc, ch, 1u);
+        let r3 = sh_rest(row, rest_pc, ch, 2u);
+        let r4 = sh_rest(row, rest_pc, ch, 3u);
+        let r5 = sh_rest(row, rest_pc, ch, 4u);
+        let r6 = sh_rest(row, rest_pc, ch, 5u);
+        let r7 = sh_rest(row, rest_pc, ch, 6u);
+        let r8 = sh_rest(row, rest_pc, ch, 7u);
+        let r9 = sh_rest(row, rest_pc, ch, 8u);
+        let r10 = sh_rest(row, rest_pc, ch, 9u);
+        let r11 = sh_rest(row, rest_pc, ch, 10u);
+        let r12 = sh_rest(row, rest_pc, ch, 11u);
+        let r13 = sh_rest(row, rest_pc, ch, 12u);
+        let r14 = sh_rest(row, rest_pc, ch, 13u);
+        let r15 = sh_rest(row, rest_pc, ch, 14u);
+        let raw = 0.2820948 * sh_rows[row + ch]
             + b1 * r1 + b2 * r2 + b3 * r3 + b4 * r4 + b5 * r5 + b6 * r6 + b7 * r7 + b8 * r8
             + b9 * r9 + b10 * r10 + b11 * r11 + b12 * r12 + b13 * r13 + b14 * r14 + b15 * r15
             + 0.5;
@@ -239,28 +279,30 @@ fn project_backward(@builtin(global_invocation_id) gid3: vec3<u32>) {
         if (raw < 0.0) {
             gc = 0.0;
         }
-        grad_sh[sh_base + ch] = gc * 0.2820948;
-        let rb = sh_base + 3u + ch * rest_pc;
+        // This channel's coefficients are in registers now: overwrite them
+        // with their gradient (stored back to grad_sh by the workgroup).
+        sh_rows[row + ch] = gc * 0.2820948;
+        let rb = row + 3u + ch * rest_pc;
         if (rest_pc >= 3u) {
-            grad_sh[rb + 0u] = gc * b1;
-            grad_sh[rb + 1u] = gc * b2;
-            grad_sh[rb + 2u] = gc * b3;
+            sh_rows[rb + 0u] = gc * b1;
+            sh_rows[rb + 1u] = gc * b2;
+            sh_rows[rb + 2u] = gc * b3;
         }
         if (rest_pc >= 8u) {
-            grad_sh[rb + 3u] = gc * b4;
-            grad_sh[rb + 4u] = gc * b5;
-            grad_sh[rb + 5u] = gc * b6;
-            grad_sh[rb + 6u] = gc * b7;
-            grad_sh[rb + 7u] = gc * b8;
+            sh_rows[rb + 3u] = gc * b4;
+            sh_rows[rb + 4u] = gc * b5;
+            sh_rows[rb + 5u] = gc * b6;
+            sh_rows[rb + 6u] = gc * b7;
+            sh_rows[rb + 7u] = gc * b8;
         }
         if (rest_pc >= 15u) {
-            grad_sh[rb + 8u] = gc * b9;
-            grad_sh[rb + 9u] = gc * b10;
-            grad_sh[rb + 10u] = gc * b11;
-            grad_sh[rb + 11u] = gc * b12;
-            grad_sh[rb + 12u] = gc * b13;
-            grad_sh[rb + 13u] = gc * b14;
-            grad_sh[rb + 14u] = gc * b15;
+            sh_rows[rb + 8u] = gc * b9;
+            sh_rows[rb + 9u] = gc * b10;
+            sh_rows[rb + 10u] = gc * b11;
+            sh_rows[rb + 11u] = gc * b12;
+            sh_rows[rb + 12u] = gc * b13;
+            sh_rows[rb + 13u] = gc * b14;
+            sh_rows[rb + 14u] = gc * b15;
         }
         // d(colour)/d(dir) = sum_k coef_k * d(b_k)/d(dir).
         var dd = vec3<f32>(0.0, -c0, 0.0) * r1

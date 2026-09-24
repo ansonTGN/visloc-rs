@@ -198,7 +198,11 @@ impl Renderer {
                 });
                 {
                     let mut pass = enc2.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-                    super::dispatch(&mut pass, &st.project_bwd, (frame.nv as u32).div_ceil(256));
+                    super::dispatch_groups_2d(
+                        &mut pass,
+                        &st.project_bwd,
+                        (frame.nv as u32).div_ceil(64),
+                    );
                 }
                 queue.submit(Some(enc2.finish()));
                 let t1 = std::time::Instant::now();
@@ -216,7 +220,7 @@ impl Renderer {
             if frame.ni > 0 {
                 super::dispatch(&mut pass, &st.raster_bwd, frame.num_tiles);
             }
-            super::dispatch(&mut pass, &st.project_bwd, (frame.nv as u32).div_ceil(256));
+            super::dispatch_groups_2d(&mut pass, &st.project_bwd, (frame.nv as u32).div_ceil(64));
         }
         queue.submit(Some(encoder.finish()));
         Ok(())

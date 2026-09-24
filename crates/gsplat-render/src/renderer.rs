@@ -224,6 +224,17 @@ fn dispatch(pass: &mut wgpu::ComputePass<'_>, stage: &Stage, x: u32) {
     pass.dispatch_workgroups(x.max(1), 1, 1);
 }
 
+/// Dispatch `groups` workgroups folded into 2D (x <= 65535); the kernel
+/// linearises its workgroup id as `wid.x + wid.y * num_workgroups.x`.
+fn dispatch_groups_2d(pass: &mut wgpu::ComputePass<'_>, stage: &Stage, groups: u32) {
+    const MAX_DIM: u32 = 65535;
+    let groups = groups.max(1);
+    let x = groups.min(MAX_DIM);
+    pass.set_pipeline(&stage.pipeline);
+    pass.set_bind_group(0, &stage.bind_group, &[]);
+    pass.dispatch_workgroups(x, groups.div_ceil(x), 1);
+}
+
 /// Dispatch one 256-wide invocation per element for `threads` elements, folding
 /// the workgroup count into 2D so it can exceed the 65535-per-dimension limit.
 /// The kernel must linearise with `gid.x + gid.y * num_workgroups.x * 256`.
