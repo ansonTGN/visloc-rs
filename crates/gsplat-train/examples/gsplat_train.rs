@@ -106,6 +106,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
+        if step % 1000 == 0 && std::env::var_os("GSPLAT_MEM_REPORT").is_some() {
+            if let Some(r) = trainer.memory_report() {
+                println!("  {r}");
+            }
+        }
         if step % 100 == 0 {
             let loss = trainer.take_mean_loss();
             if let Some(p) = trainer.take_profile() {

@@ -107,8 +107,8 @@ struct StatsUniforms {
 /// Everything sized by the gaussian count; rebuilt after densification.
 struct SceneState {
     renderer: Renderer,
-    loss_binds: Vec<wgpu::BindGroup>,
-    ssim_binds: Vec<SsimBinds>,
+    loss_bind: wgpu::BindGroup,
+    ssim_bind: SsimBinds,
     adam: [AdamGroup; 3],
     grad_accum: wgpu::Buffer,
     grad_count: wgpu::Buffer,
@@ -124,7 +124,10 @@ pub struct Trainer {
     height: u32,
     extent: f32,
     sh_degree: u32,
-    gt: Vec<wgpu::Buffer>,
+    /// Ground truth of the current view (the host keeps every view packed
+    /// as RGBA8 and uploads one per step: ~3 MB instead of ~300 MB resident).
+    gt: wgpu::Buffer,
+    gt_host: Vec<Vec<u32>>,
     loss_pipeline: wgpu::ComputePipeline,
     loss_uniforms: wgpu::Buffer,
     loss_acc: wgpu::Buffer,
@@ -356,11 +359,10 @@ impl Trainer {
         let dev = ctx.device.clone();
         let queue = ctx.queue.clone();
         let npix = (width * height) as u64;
-        let mut gt = Vec::with_capacity(views.len());
+        let gt = storage(&dev, "gt", npix * 4);
+        let mut gt_host = Vec::with_capacity(views.len());
         for v in &views {
-            let b = storage(&dev, "gt", npix * 4);
-            queue.write_buffer(&b, 0, bytemuck::cast_slice(&pack_rgba8(&load_view_rgb(v)?)));
-            gt.push(b);
+            gt_host.push(pack_rgba8(&load_view_rgb(v)?));
         }
         let loss_pipeline = pipeline(
             &dev,
@@ -407,6 +409,7 @@ impl Trainer {
             extent,
             sh_degree: init.sh_degree,
             gt,
+            gt_host,
             loss_pipeline,
             loss_uniforms,
             loss_acc,
@@ -448,23 +451,19 @@ impl Trainer {
 
         let out_img = renderer.output_buffer().clone();
         let d_image = renderer.d_image_buffer()?.clone();
-        let loss_binds = self
-            .gt
-            .iter()
-            .map(|g| {
-                bind(
-                    &dev,
-                    &self.loss_pipeline,
-                    "loss",
-                    &[&self.loss_uniforms, &out_img, g, &d_image, &self.loss_acc],
-                )
-            })
-            .collect();
-        let ssim_binds = self
-            .gt
-            .iter()
-            .map(|g| self.ssim.bind(&dev, &out_img, g, &d_image))
-            .collect();
+        let loss_bind = bind(
+            &dev,
+            &self.loss_pipeline,
+            "loss",
+            &[
+                &self.loss_uniforms,
+                &out_img,
+                &self.gt,
+                &d_image,
+                &self.loss_acc,
+            ],
+        );
+        let ssim_bind = self.ssim.bind(&dev, &out_img, &self.gt, &d_image);
 
         let params = renderer.param_buffers();
         let (pt, po, ps) = (
@@ -528,8 +527,8 @@ impl Trainer {
         );
         self.state = Some(SceneState {
             renderer,
-            loss_binds,
-            ssim_binds,
+            loss_bind,
+            ssim_bind,
             adam,
             grad_accum,
             grad_count,
@@ -607,6 +606,8 @@ impl Trainer {
             p.mark(&dev, "forward");
         }
         let queue = st.renderer.ctx.queue.clone();
+        // Ordered after the previous step's loss work, before this one's.
+        queue.write_buffer(&self.gt, 0, bytemuck::cast_slice(&self.gt_host[vi]));
         {
             let mut enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("loss"),
@@ -614,11 +615,11 @@ impl Trainer {
             {
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
                 pass.set_pipeline(&self.loss_pipeline);
-                pass.set_bind_group(0, &st.loss_binds[vi], &[]);
+                pass.set_bind_group(0, &st.loss_bind, &[]);
                 let (x, y) = groups_2d(npix);
                 pass.dispatch_workgroups(x, y, 1);
                 if self.cfg.ssim_weight > 0.0 {
-                    self.ssim.encode(&mut pass, &st.ssim_binds[vi]);
+                    self.ssim.encode(&mut pass, &st.ssim_bind);
                 }
             }
             queue.submit(Some(enc.finish()));
@@ -895,6 +896,33 @@ impl Trainer {
     }
 
     /// Download the current gaussians as a [`Scene`].
+    /// GPU memory summary from the allocator (backends that expose one):
+    /// allocated / reserved MiB and the largest buffers grouped by label.
+    pub fn memory_report(&self) -> Option<String> {
+        let dev = &self.st().renderer.ctx.device;
+        // Let wgpu release buffers dropped since the last maintain.
+        dev.poll(wgpu::PollType::wait_indefinitely()).ok();
+        let report = dev.generate_allocator_report()?;
+        let mut by_name: std::collections::BTreeMap<String, (u64, usize)> = Default::default();
+        for a in &report.allocations {
+            let e = by_name.entry(a.name.clone()).or_default();
+            e.0 += a.size;
+            e.1 += 1;
+        }
+        let mut top: Vec<(String, (u64, usize))> = by_name.into_iter().collect();
+        top.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+        let mib = |b: u64| b as f64 / (1u64 << 20) as f64;
+        let mut line = format!(
+            "gpu mem: allocated {:.0} MiB, reserved {:.0} MiB |",
+            mib(report.total_allocated_bytes),
+            mib(report.total_reserved_bytes)
+        );
+        for (name, (bytes, count)) in top.iter().take(12) {
+            line.push_str(&format!(" {name} {:.0}x{count}", mib(*bytes)));
+        }
+        Some(line)
+    }
+
     pub fn scene(&self) -> Scene {
         let (t, o, sh) = self.st().renderer.read_params();
         let group = |stride: usize, values: Vec<f32>| Group {

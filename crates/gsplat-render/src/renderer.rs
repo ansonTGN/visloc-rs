@@ -763,7 +763,8 @@ impl Renderer {
         let sort_capacity = n.max(max_isects).max(1);
         let sorter = crate::sort::RadixSorter::new(dev, sort_capacity);
         let scanner = crate::scan::PrefixScanner::new(dev, n.max(1));
-        let depth_pairs = sorter.allocate(dev, "depth");
+        // The depth sort only ever holds the visible gaussians (<= n).
+        let depth_pairs = sorter.allocate_len(dev, "depth", n.max(1));
         let tile_pairs = sorter.allocate(dev, "tile");
 
         Ok(Self {
