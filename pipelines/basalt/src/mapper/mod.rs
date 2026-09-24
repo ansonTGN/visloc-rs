@@ -1504,10 +1504,7 @@ impl PoseBlockHessian {
     }
 
     fn add_block(&mut self, row: usize, col: usize, block: &Matrix6<f64>) {
-        *self
-            .blocks
-            .entry((row, col))
-            .or_insert_with(Matrix6::zeros) += block;
+        *self.blocks.entry((row, col)).or_insert_with(Matrix6::zeros) += block;
     }
 
     fn diagonal(&self) -> Vec<f64> {
@@ -1525,9 +1522,7 @@ impl PoseBlockHessian {
     fn to_dense(&self) -> DMatrix<f64> {
         let mut dense = DMatrix::zeros(self.dim(), self.dim());
         for (&(row, col), block) in &self.blocks {
-            dense
-                .view_mut((row * 6, col * 6), (6, 6))
-                .copy_from(block);
+            dense.view_mut((row * 6, col * 6), (6, 6)).copy_from(block);
         }
         dense
     }
@@ -1568,7 +1563,7 @@ impl PoseBlockHessian {
             for c in 0..6 {
                 let value = x[col * 6 + c];
                 for r in 0..6 {
-                    y[row * 6 + r] = block[(r, c)] * value + y[row * 6 + r];
+                    y[row * 6 + r] += block[(r, c)] * value;
                 }
             }
         }
@@ -1764,7 +1759,14 @@ fn solve_damped_block_system(
             return solution;
         }
     }
-    solve_damped_system(&h.to_dense(), b, h_diagonal, lambda, min_lambda, gauge_anchor)
+    solve_damped_system(
+        &h.to_dense(),
+        b,
+        h_diagonal,
+        lambda,
+        min_lambda,
+        gauge_anchor,
+    )
 }
 
 fn diagonal_preconditioned_cg(

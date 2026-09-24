@@ -122,13 +122,18 @@ impl BasaltConfig {
     fn urgent_kf_policy(&self) -> Result<Option<UrgentKeyframePolicy>, ConfigError> {
         let threshold = "config.vio_urgent_kf_keypoints_thresh";
         let spacing = "config.vio_urgent_min_frames_after_kf";
-        match (self.values.contains_key(threshold), self.values.contains_key(spacing)) {
+        match (
+            self.values.contains_key(threshold),
+            self.values.contains_key(spacing),
+        ) {
             (false, false) => Ok(None),
             (true, true) => Ok(Some(UrgentKeyframePolicy {
                 threshold: self.value(threshold)?,
                 min_frames_after_kf: self.value(spacing)?,
             })),
-            _ => Err(ConfigError::Value(format!("{threshold} and {spacing} must be set together"))),
+            _ => Err(ConfigError::Value(format!(
+                "{threshold} and {spacing} must be set together"
+            ))),
         }
     }
     pub fn estimator_config(&self) -> Result<EstimatorConfig, ConfigError> {
@@ -260,7 +265,10 @@ mod tests {
         let mut v: Value = serde_json::from_str(FIX).unwrap();
         v["value0"]["config.vio_urgent_kf_keypoints_thresh"] = serde_json::json!(0.3);
         let partial = BasaltConfig::from_json(&v.to_string()).unwrap();
-        assert!(matches!(partial.estimator_config(), Err(ConfigError::Value(_))));
+        assert!(matches!(
+            partial.estimator_config(),
+            Err(ConfigError::Value(_))
+        ));
         v["value0"]["config.vio_urgent_min_frames_after_kf"] = serde_json::json!(2);
         let e = BasaltConfig::from_json(&v.to_string())
             .unwrap()
