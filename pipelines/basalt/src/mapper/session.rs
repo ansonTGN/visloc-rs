@@ -1671,6 +1671,35 @@ impl NfrMapper {
     /// same-frame host observation is bad (`-2` in Basalt), otherwise remove
     /// only target-image observations, and commit all removals after the
     /// ordered decision pass.
+    /// Test-only copy of the previous `filter_outliers` removal loop, which
+    /// rebuilt the observation index after every removal. It exists so the
+    /// batched rebuild can be checked against it.
+    #[cfg(test)]
+    pub(crate) fn filter_outliers_per_removal_reference(
+        &mut self,
+        outlier_threshold: f64,
+        min_num_obs: usize,
+    ) {
+        let (_, outliers, _) = self.reprojection_diagnostics(outlier_threshold);
+        for (&track_id, entries) in &outliers {
+            let num_observations = self
+                .lmdb
+                .num_landmark_observations(track_id)
+                .unwrap_or_default();
+            let remove_landmark = num_observations.saturating_sub(entries.len()) < min_num_obs
+                || entries.iter().any(|(_, marker, _)| *marker == -2.0);
+            if remove_landmark {
+                self.lmdb.remove_landmark(track_id);
+            } else {
+                let target_ids = entries
+                    .iter()
+                    .map(|(target, _, _)| *target)
+                    .collect::<BTreeSet<_>>();
+                self.lmdb.remove_observations(track_id, &target_ids);
+            }
+        }
+    }
+
     pub fn filter_outliers(
         &mut self,
         outlier_threshold: f64,
@@ -1695,13 +1724,15 @@ impl NfrMapper {
                 .unwrap_or_default();
             let remove_landmark = num_observations.saturating_sub(entries.len()) < min_num_obs
                 || entries.iter().any(|(_, marker, _)| *marker == -2.0);
+            // Removals are applied in the same ordered landmark loop, but the
+            // host/target observation index is rebuilt once afterwards. The
+            // index is a pure function of `landmarks` (`from_landmarks`), the
+            // raw removals read only `landmarks`, and nothing observes the
+            // index mid-loop, so the final state is identical to rebuilding
+            // after every removal. Per-removal rebuilds made this pass
+            // quadratic (about 25 s per call on MH_01).
             if remove_landmark {
-                // The upstream database mutates its host/target index at
-                // each call.  Keep that operation inside the ordered
-                // landmark loop rather than batching the removals: callers
-                // observing the state between operations see the same
-                // source deletion order.
-                if self.lmdb.remove_landmark(track_id) {
+                if self.lmdb.remove_landmark_raw(track_id) {
                     removed_landmark_count += 1;
                 }
             } else {
@@ -1709,8 +1740,12 @@ impl NfrMapper {
                     .iter()
                     .map(|(target, _, _)| *target)
                     .collect::<BTreeSet<_>>();
-                removed_observation_count += self.lmdb.remove_observations(track_id, &target_ids);
+                removed_observation_count +=
+                    self.lmdb.remove_observations_raw(track_id, &target_ids);
             }
+        }
+        if removed_landmark_count > 0 || removed_observation_count > 0 {
+            self.lmdb.rebuild_observation_index();
         }
 
         Ok(NfrMapperFilterReport {

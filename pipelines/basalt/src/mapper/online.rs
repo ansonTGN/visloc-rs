@@ -2227,13 +2227,7 @@ mod tests {
         );
     }
 
-    /// The compact optimizer snapshot must drive the background pipeline to
-    /// exactly the same poses, tracks, landmarks and optimizer state as a
-    /// full clone of the mapper.  Synthetic state: 60 points seen by six
-    /// translated cam0 frames with deterministic pixel noise, chained by
-    /// consecutive and skip-one temporal matches.
-    #[test]
-    fn optimizer_snapshot_matches_full_clone_pipeline() {
+    fn synthetic_ba_mapper() -> NfrMapper {
         let calibration = feature_calibration();
         let camera = *calibration.camera(0).expect("camera");
         let mut mapper = NfrMapper::with_calibration(MapperConfig::default(), calibration);
@@ -2288,6 +2282,17 @@ mod tests {
                 );
             }
         }
+        mapper
+    }
+
+    /// The compact optimizer snapshot must drive the background pipeline to
+    /// exactly the same poses, tracks, landmarks and optimizer state as a
+    /// full clone of the mapper.  Synthetic state: 60 points seen by six
+    /// translated cam0 frames with deterministic pixel noise, chained by
+    /// consecutive and skip-one temporal matches.
+    #[test]
+    fn optimizer_snapshot_matches_full_clone_pipeline() {
+        let mapper = synthetic_ba_mapper();
         let headless = OnlineMapperConfig::default().headless;
         let run = |mut mapper: NfrMapper| {
             let _ = mapper.build_tracks();
@@ -2316,6 +2321,44 @@ mod tests {
             .feature_corners
             .values()
             .all(|f| f.descriptors.is_empty()));
+    }
+
+    /// Batching the observation-index rebuild in `filter_outliers` must give
+    /// exactly the landmark database of the previous per-removal rebuild,
+    /// including both whole-landmark and single-observation removals.
+    #[test]
+    fn filter_outliers_batched_rebuild_matches_per_removal_reference() {
+        let mut mapper = synthetic_ba_mapper();
+        // Corrupt a few pixels so some observations become outliers: points
+        // 0..4 in one frame (observation removal) and points 10..14 in
+        // three frames (landmark removal once too few observations remain).
+        for (frame, ids) in [(3_u64, 0..4), (1, 10..14), (2, 10..14), (4, 10..14)] {
+            let features = mapper
+                .feature_corners
+                .get_mut(&TimeCamId::new(frame, 0))
+                .expect("frame features");
+            for id in ids {
+                features.corners[id].x += 40.0;
+                features.corners[id].y -= 25.0;
+            }
+        }
+        let _ = mapper.build_tracks();
+        mapper.setup_opt().expect("setup_opt");
+        let _ = mapper.optimize(4);
+        let headless = OnlineMapperConfig::default().headless;
+        let mut reference = mapper.clone();
+        reference.filter_outliers_per_removal_reference(
+            headless.outlier_threshold,
+            headless.min_num_obs,
+        );
+        let report = mapper
+            .filter_outliers(headless.outlier_threshold, headless.min_num_obs)
+            .expect("filter");
+        assert!(
+            report.removed_landmark_count > 0 && report.removed_observation_count > 0,
+            "fixture must exercise both removal kinds: {report:?}"
+        );
+        assert_eq!(mapper.lmdb, reference.lmdb);
     }
 
     /// Stripping images that an earlier packet already carried must leave
