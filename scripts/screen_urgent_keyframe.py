@@ -17,12 +17,25 @@ import sys
 REPO = Path(__file__).resolve().parents[1]
 SCRIPTS = REPO / 'scripts'
 SWEEP = REPO / 'target/keyframe_sweep_full_20260921'
+MH = '/mnt/win/linux_data/euroc_mh03_official_20260830/extracted'
+VICON = '/mnt/win/linux_data/euroc_vicon_missing_20260921/extracted'
 DATASETS = {
     'MH_03_medium': '/mnt/win/linux_data/euroc_mh03_official_20260830/MH_03_medium',
-    'MH_04_difficult': '/mnt/win/linux_data/euroc_mh03_official_20260830/extracted/MH_04_difficult',
-    'V2_03_difficult': '/mnt/win/linux_data/euroc_mh03_official_20260830/extracted/V2_03_difficult',
-    'V2_02_medium': '/mnt/win/linux_data/euroc_vicon_missing_20260921/extracted/V2_02_medium',
+    'MH_04_difficult': f'{MH}/MH_04_difficult',
+    'V2_03_difficult': f'{MH}/V2_03_difficult',
+    'V2_02_medium': f'{VICON}/V2_02_medium',
 }
+# Sequences not used while designing the urgent policy (held-out check).
+HELD_OUT = {
+    'MH_01_easy': f'{MH}/MH_01_easy',
+    'MH_02_easy': f'{MH}/MH_02_easy',
+    'MH_05_difficult': f'{MH}/MH_05_difficult',
+    'V1_01_easy': f'{VICON}/V1_01_easy',
+    'V1_02_medium': f'{VICON}/V1_02_medium',
+    'V1_03_difficult': f'{VICON}/V1_03_difficult',
+    'V2_01_easy': f'{VICON}/V2_01_easy',
+}
+DATASETS.update(HELD_OUT)
 FLAGS = ['--optimize-every-k', '100', '--periodic-iterations', '4', '--threads', '4',
          '--loop-match-max-rot-error', '30']
 
@@ -44,7 +57,7 @@ def main():
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--threshold', type=float, default=0.5)
     parser.add_argument('--urgent-spacing', type=int, default=2)
-    parser.add_argument('--sequences', nargs='+', default=list(DATASETS))
+    parser.add_argument('--sequences', nargs='+', default=list(DATASETS)[:4])
     parser.add_argument('--per-run-seconds', type=int, default=1500)
     args = parser.parse_args()
 
