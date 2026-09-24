@@ -403,9 +403,31 @@ differentiating against). Structure:
   30k). Speed bar not met: 1.6-2.2x brush's wall time (~190 ms/step at 1.2M
   gaussians after densification stops, plus a host round-trip and renderer
   rebuild every 100 steps while densifying).
+- **M2 re-benchmark (2026-09-24)** after on-device densification, the
+  backward/SSIM speedups and halving the trainer's GPU memory (the 1.2M
+  gaussian run had overflowed the 6 GB card and was being paged by WDDM):
+  same protocol, GPU exclusive but thermal-throttling (88 C) and shared
+  with a desktop app.
+
+  | scene | method | steps | PSNR | SSIM | gaussians | train time |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | south-building | brush 0.3.0 | 30k | 21.684 | 0.7875 | 1.05M | 2379 s |
+  | south-building | ours | 30k | **22.102** | **0.8009** | 1.20M | 3054 s |
+  | gerrard-hall | brush 0.3.0 | 30k | 19.022 | 0.6934 | 0.83M | 2147 s |
+  | gerrard-hall | ours | 30k | **19.579** | **0.7046** | 0.64M | 2344 s |
+
+  Quality beats brush on both scenes (+0.42 / +0.56 dB); wall time is
+  1.28x / 1.09x brush's. Not yet in these numbers: the tile sort now runs in
+  place over 4 per-intersection buffers instead of 8 (profiled forward
+  160 -> 144 ms, identical renders).
 - **M3**: `gsplat_euroc` example (feature `euroc`): raw EuRoC -> undistort
   -> SIFT -> verified temporal matches -> visloc-rs incremental SfM ->
-  trainer, no COLMAP or Python.
+  trainer, no COLMAP or Python. With `--gpu-sift --gpu-ba` (crates
+  `visloc-sift-gpu`, `visloc-ba-gpu`) V1_01 (200 frames, stride 4) goes from
+  images to poses in 239 s (SIFT 28 s, batched GPU matching 38 s, parallel
+  verification 32 s, SfM 141 s; the CPU path spends 838 s in SfM alone) and
+  to a 7k-step splat in 766 s total: 183/200 frames registered, 0.638 px,
+  held-out PSNR 29.26 / SSIM 0.946 (CPU-SfM run: 29.03 / 0.945).
 
 ### Stage 4 — Browser (optional, non-blocking)
 - wasm + WebGPU build of the renderer; training only if stage 2/3 land cleanly.

@@ -31,7 +31,10 @@ fn main() {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|e| e == "png" || e == "jpg" || e == "JPG"))
+        .filter(|p| {
+            p.extension()
+                .is_some_and(|e| e == "png" || e == "jpg" || e == "JPG")
+        })
         .collect();
     paths.sort();
     paths.truncate(max_images);
