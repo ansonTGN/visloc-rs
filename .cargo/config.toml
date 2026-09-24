@@ -1,0 +1,19 @@
+# Enable AVX2/FMA code generation on x86_64 by default.
+#
+# Without `+fma`, every `f32::mul_add`/`f64::mul_add` (used throughout the
+# Basalt VIO to reproduce Eigen's FMA schedules bit-for-bit) compiles to a
+# libm `fmaf` call. On MH_01 that was ~31% of VIO CPU time; with this flag the
+# VIO runs ~1.9x faster with byte-identical trajectories (hardware FMA and
+# libm `fmaf` are both correctly rounded).
+#
+# Requires an AVX2/FMA-capable CPU (Intel Haswell / AMD Excavator or newer).
+# To build for older CPUs, override with
+# `RUSTFLAGS="-C target-feature=-avx2,-fma"` or `--config` on the command line.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-feature=+avx2,+fma"]
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+avx2,+fma"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "target-feature=+avx2,+fma"]
