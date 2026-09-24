@@ -617,6 +617,60 @@ pub struct NfrMapper {
 }
 
 impl NfrMapper {
+    /// Minimal copy for the background optimizer pipeline
+    /// (`build_tracks` -> `setup_opt` -> `optimize` -> `filter_outliers`).
+    ///
+    /// Those stages read only the match graph, feature *pixel* corners,
+    /// poses, factors, calibration and optimizer configuration and state.
+    /// `build_tracks` always replaces `feature_tracks`, and `setup_opt`
+    /// (given calibration) always replaces `lmdb`. Descriptors, rays, BoW,
+    /// match payloads, raw images and the old tracks and landmarks are
+    /// therefore dead weight in the snapshot. A full clone doubled the
+    /// mapper's persistent memory at every periodic optimize.
+    ///
+    /// Without calibration `setup_opt` would keep the old `lmdb`, so the
+    /// full clone is returned in that case.
+    pub fn optimizer_snapshot(&self) -> Self {
+        if self.calibration.is_none() {
+            return self.clone();
+        }
+        let feature_corners = self
+            .feature_corners
+            .iter()
+            .map(|(&key, features)| {
+                (
+                    key,
+                    MapperImageFeatures {
+                        corners: features.corners.clone(),
+                        corner_angles: Vec::new(),
+                        descriptors: Vec::new(),
+                        rays: Vec::new(),
+                        hashes: Vec::new(),
+                        bow_vector: Vec::new(),
+                    },
+                )
+            })
+            .collect();
+        Self {
+            config: self.config,
+            calibration: self.calibration.clone(),
+            feature_config: self.feature_config,
+            frame_poses: self.frame_poses.clone(),
+            frame_timestamps: self.frame_timestamps.clone(),
+            factors: self.factors.clone(),
+            img_data: BTreeMap::new(),
+            feature_corners,
+            hash_index: BTreeMap::new(),
+            feature_matches: self.feature_matches.clone(),
+            feature_match_data: BTreeMap::new(),
+            feature_tracks: FeatureTracks::new(),
+            lmdb: NfrMapperLandmarkDb::default(),
+            optimize_config: self.optimize_config,
+            optimizer_state: self.optimizer_state.clone(),
+            accepted_packets: self.accepted_packets,
+        }
+    }
+
     /// Approximate heap payload per persistent container, in bytes.
     ///
     /// Counts element payload (`len * size_of`) only, ignoring allocator and

@@ -1574,7 +1574,7 @@ impl OnlineNfrMapper {
     /// [`Self::poll_pending_optimizer`] or [`Self::finalize`] merges the
     /// result back.
     fn spawn_background_optimize(&mut self) {
-        let mut snapshot = self.mapper.clone();
+        let mut snapshot = self.mapper.optimizer_snapshot();
         let periodic_iterations = self.config.periodic_iterations;
         let outlier_threshold = self.config.headless.outlier_threshold;
         let min_num_obs = self.config.headless.min_num_obs;
@@ -2225,6 +2225,97 @@ mod tests {
             4,
             "feature_corners must contain exactly 4 keys total, not a duplicate 6"
         );
+    }
+
+    /// The compact optimizer snapshot must drive the background pipeline to
+    /// exactly the same poses, tracks, landmarks and optimizer state as a
+    /// full clone of the mapper.  Synthetic state: 60 points seen by six
+    /// translated cam0 frames with deterministic pixel noise, chained by
+    /// consecutive and skip-one temporal matches.
+    #[test]
+    fn optimizer_snapshot_matches_full_clone_pipeline() {
+        let calibration = feature_calibration();
+        let camera = *calibration.camera(0).expect("camera");
+        let mut mapper = NfrMapper::with_calibration(MapperConfig::default(), calibration);
+        let mut state = 0x2545_f491_u32;
+        let mut next = move || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            f64::from(state >> 8) / f64::from(1u32 << 24) - 0.5
+        };
+        let points = (0..60)
+            .map(|_| nalgebra::Point3::new(2.0 * next(), 1.4 * next(), 4.5 + 3.0 * next()))
+            .collect::<Vec<_>>();
+        // `min_track_length` defaults to 5, so tracks need six images.
+        let frames = 6_u64;
+        for frame in 0..frames {
+            let pose = SE3::new(
+                UnitQuaternion::identity(),
+                Vector3::new(0.15 * frame as f64, 0.02 * next(), 0.0),
+            );
+            let world_to_camera = pose.inverse();
+            let corners = points
+                .iter()
+                .map(|point| {
+                    let pixel = camera
+                        .project(&world_to_camera.transform_point(point))
+                        .expect("visible point");
+                    nalgebra::Point2::new(pixel.x + 0.3 * next(), pixel.y + 0.3 * next())
+                })
+                .collect::<Vec<_>>();
+            let count = corners.len();
+            mapper.feature_corners.insert(
+                TimeCamId::new(frame, 0),
+                MapperImageFeatures {
+                    corners,
+                    corner_angles: vec![0.25; count],
+                    descriptors: vec![[7; 32]; count],
+                    rays: vec![[0.0, 0.0, 1.0, 0.0]; count],
+                    hashes: vec![3; count],
+                    bow_vector: Vec::new(),
+                },
+            );
+            mapper.frame_poses.insert(frame, pose);
+            mapper.frame_timestamps.insert(frame, 1_000 + frame as i64);
+        }
+        for step in [1, 2] {
+            for frame in 0..frames.saturating_sub(step) {
+                let inliers = (0..points.len() as u64)
+                    .map(|id| (id, id))
+                    .collect::<Vec<_>>();
+                mapper.feature_matches.insert(
+                    (TimeCamId::new(frame, 0), TimeCamId::new(frame + step, 0)),
+                    MatchData::new(inliers),
+                );
+            }
+        }
+        let headless = OnlineMapperConfig::default().headless;
+        let run = |mut mapper: NfrMapper| {
+            let _ = mapper.build_tracks();
+            mapper.setup_opt().expect("setup_opt");
+            let _ = mapper.optimize(4);
+            let _ = mapper.filter_outliers(headless.outlier_threshold, headless.min_num_obs);
+            let _ = mapper.optimize(4);
+            mapper
+        };
+        let full = run(mapper.clone());
+        let compact = run(mapper.optimizer_snapshot());
+        assert!(
+            full.lmdb.landmarks.len() > 30,
+            "fixture must triangulate landmarks, got {}",
+            full.lmdb.landmarks.len()
+        );
+        assert_ne!(
+            full.frame_poses, mapper.frame_poses,
+            "BA must move the poses"
+        );
+        assert_eq!(full.frame_poses, compact.frame_poses);
+        assert_eq!(full.feature_tracks, compact.feature_tracks);
+        assert_eq!(full.lmdb, compact.lmdb);
+        assert_eq!(full.optimizer_state, compact.optimizer_state);
+        assert!(compact
+            .feature_corners
+            .values()
+            .all(|f| f.descriptors.is_empty()));
     }
 
     /// Stripping images that an earlier packet already carried must leave
