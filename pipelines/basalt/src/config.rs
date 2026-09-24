@@ -1,6 +1,6 @@
 use crate::mapper::{GlobalBaConfig, MapperConfig, OfflineMapperConfig};
 use crate::vio::aom::LmConfig;
-use crate::vio::estimator::EstimatorConfig;
+use crate::vio::estimator::{EstimatorConfig, UrgentKeyframePolicy};
 use crate::vio::margdata::WindowPolicy;
 use crate::vio::scalar::ScalarMode;
 use serde::{Deserialize, Serialize};
@@ -62,6 +62,11 @@ const KEYS: &[&str] = &[
     "config.mapper_lm_lambda_min",
     "config.mapper_lm_lambda_max",
 ];
+/// Opt-in keys that are not part of the upstream config schema.
+const OPTIONAL_KEYS: &[&str] = &[
+    "config.vio_urgent_kf_keypoints_thresh",
+    "config.vio_urgent_min_frames_after_kf",
+];
 #[derive(Debug, Error, PartialEq)]
 pub enum ConfigError {
     #[error("missing config key: {0}")]
@@ -93,7 +98,7 @@ impl BasaltConfig {
             .ok_or(ConfigError::Wrapper)?;
         let mut values = BTreeMap::new();
         for k in obj.keys() {
-            if !KEYS.contains(&k.as_str()) {
+            if !KEYS.contains(&k.as_str()) && !OPTIONAL_KEYS.contains(&k.as_str()) {
                 return Err(ConfigError::Unknown(k.clone()));
             }
             values.insert(k.clone(), obj[k].clone());
@@ -114,6 +119,23 @@ impl BasaltConfig {
                     .map_err(|e| ConfigError::Value(format!("{key}: {e}")))
             })
     }
+    fn urgent_kf_policy(&self) -> Result<Option<UrgentKeyframePolicy>, ConfigError> {
+        let threshold = "config.vio_urgent_kf_keypoints_thresh";
+        let spacing = "config.vio_urgent_min_frames_after_kf";
+        match (
+            self.values.contains_key(threshold),
+            self.values.contains_key(spacing),
+        ) {
+            (false, false) => Ok(None),
+            (true, true) => Ok(Some(UrgentKeyframePolicy {
+                threshold: self.value(threshold)?,
+                min_frames_after_kf: self.value(spacing)?,
+            })),
+            _ => Err(ConfigError::Value(format!(
+                "{threshold} and {spacing} must be set together"
+            ))),
+        }
+    }
     pub fn estimator_config(&self) -> Result<EstimatorConfig, ConfigError> {
         Ok(EstimatorConfig {
             scalar_mode: ScalarMode::UpstreamF32,
@@ -124,6 +146,7 @@ impl BasaltConfig {
             },
             min_frames_after_kf: self.value("config.vio_min_frames_after_kf")?,
             new_kf_keypoints_threshold: self.value("config.vio_new_kf_keypoints_thresh")?,
+            urgent_kf: self.urgent_kf_policy()?,
             solver: LmConfig {
                 lambda_initial: self.value("config.vio_lm_lambda_initial")?,
                 lambda_min: self.value("config.vio_lm_lambda_min")?,
@@ -200,6 +223,7 @@ mod tests {
         assert_eq!(e.window.min_feature_ratio, 0.1);
         assert_eq!(e.min_frames_after_kf, 5);
         assert_eq!(e.new_kf_keypoints_threshold, 0.7);
+        assert_eq!(e.urgent_kf, None);
         assert_eq!(e.solver.max_iterations, 7);
         assert_eq!(e.initial_pose_weight, 1.0e8);
         assert_eq!(e.initial_accel_bias_weight, 1.0e1);
@@ -235,6 +259,28 @@ mod tests {
             BasaltConfig::from_json(&v.to_string()),
             Err(ConfigError::Missing(_))
         ));
+    }
+    #[test]
+    fn urgent_keyframe_keys_are_optional_and_paired() {
+        let mut v: Value = serde_json::from_str(FIX).unwrap();
+        v["value0"]["config.vio_urgent_kf_keypoints_thresh"] = serde_json::json!(0.3);
+        let partial = BasaltConfig::from_json(&v.to_string()).unwrap();
+        assert!(matches!(
+            partial.estimator_config(),
+            Err(ConfigError::Value(_))
+        ));
+        v["value0"]["config.vio_urgent_min_frames_after_kf"] = serde_json::json!(2);
+        let e = BasaltConfig::from_json(&v.to_string())
+            .unwrap()
+            .estimator_config()
+            .unwrap();
+        assert_eq!(
+            e.urgent_kf,
+            Some(UrgentKeyframePolicy {
+                threshold: 0.3,
+                min_frames_after_kf: 2,
+            })
+        );
     }
     #[test]
     fn compat_profile_has_no_out_of_json_extensions() {

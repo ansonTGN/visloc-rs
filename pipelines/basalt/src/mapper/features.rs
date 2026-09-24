@@ -835,13 +835,41 @@ fn stewenius_eigen_full_v_last4_f64(q: &DMatrix<f64>) -> Option<Matrix9x4> {
     Some(result)
 }
 
+// A RANSAC hypothesis must not make the entire mapper wait indefinitely:
+// `Schur::new` iterates without limit and can spin forever on non-finite or
+// non-convergent input.  This generous per-decomposition budget is a safety
+// ceiling, not a convergence tolerance change.
+const STEWENIUS_SCHUR_MAX_ITERATIONS: usize = 10_000;
+
+fn stewenius_schur_bounded(
+    matrix: ComplexMatrix10,
+    max_iterations: usize,
+) -> Option<(ComplexMatrix10, ComplexMatrix10)> {
+    assert!(
+        max_iterations > 0,
+        "zero would enable unbounded Schur iteration"
+    );
+    if !matrix.iter().all(|x| x.re.is_finite() && x.im.is_finite()) {
+        return None;
+    }
+    // Same epsilon as Schur::new; only non-convergent hypotheses are dropped.
+    let (q, triangular) = Schur::try_new(matrix, f64::EPSILON, max_iterations)?.unpack();
+    q.iter()
+        .chain(triangular.iter())
+        .all(|x| x.re.is_finite() && x.im.is_finite())
+        .then_some((q, triangular))
+}
+
 fn stewenius_eigenvectors(matrix: ComplexMatrix10) -> Vec<ComplexVector10> {
     // The complex Schur form is upper triangular.  Back-substitution gives
     // the right eigenvector for each diagonal eigenvalue, then Q maps it back
     // to the original matrix.  This is the same EigenSolver result consumed
     // by OpenGV's fivept_stewenius_main, without the nalgebra Eigen helper's
     // unconditional diagnostic println.
-    let (q, triangular) = Schur::new(matrix).unpack();
+    let Some((q, triangular)) = stewenius_schur_bounded(matrix, STEWENIUS_SCHUR_MAX_ITERATIONS)
+    else {
+        return Vec::new();
+    };
     let mut vectors = Vec::with_capacity(10);
     for column in 0..10 {
         let eigenvalue = triangular[(column, column)];
@@ -1117,6 +1145,10 @@ fn stewenius_model_from_sample(
     let w = Matrix3::new(0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
 
     for essential in essentials {
+        // SVD::new also iterates without limit; non-finite input can hang it.
+        if !essential.iter().all(|value| value.is_finite()) {
+            continue;
+        }
         let svd = SVD::new(essential, true, true);
         let singular_values = svd.singular_values;
         let Some(u) = svd.u else { continue };
@@ -2379,6 +2411,57 @@ fn hamming_distance(a: &[u8; 32], b: &[u8; 32]) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stewenius_schur_rejects_nonfinite_inputs() {
+        use nalgebra::Complex;
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for imaginary in [false, true] {
+                let mut matrix = super::ComplexMatrix10::identity();
+                matrix[(3, 7)] = if imaginary {
+                    Complex::new(0.0, invalid)
+                } else {
+                    Complex::new(invalid, 0.0)
+                };
+                assert!(super::stewenius_schur_bounded(matrix, 10_000).is_none());
+                assert!(super::stewenius_eigenvectors(matrix).is_empty());
+            }
+        }
+    }
+
+    fn finite_schur_fixture(seed: u32) -> super::ComplexMatrix10 {
+        let mut state = seed;
+        super::ComplexMatrix10::from_fn(|row, col| {
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            let value = (state >> 8) as f64 / 16777216.0 - 0.5;
+            nalgebra::Complex::new(value, if row == col { 0.125 } else { 0.0 })
+        })
+    }
+
+    #[test]
+    fn stewenius_schur_preserves_convergent_decomposition_bits() {
+        for seed in 1..=64 {
+            let matrix = finite_schur_fixture(seed);
+            let expected = nalgebra::linalg::Schur::new(matrix).unpack();
+            let actual =
+                super::stewenius_schur_bounded(matrix, super::STEWENIUS_SCHUR_MAX_ITERATIONS)
+                    .expect("finite fixture must converge within the budget");
+            for (left, right) in actual
+                .0
+                .iter()
+                .chain(actual.1.iter())
+                .zip(expected.0.iter().chain(expected.1.iter()))
+            {
+                assert_eq!(left.re.to_bits(), right.re.to_bits(), "seed={seed}");
+                assert_eq!(left.im.to_bits(), right.im.to_bits(), "seed={seed}");
+            }
+        }
+    }
+
+    #[test]
+    fn stewenius_schur_reports_iteration_exhaustion() {
+        assert!(super::stewenius_schur_bounded(finite_schur_fixture(7), 1).is_none());
+    }
+
     use super::{
         compute_angles, compute_descriptors, descriptor_pattern, opengv_cayley2rot,
         opengv_eigen_dot3, opengv_eigen_mat34_vec4, opengv_eigen_matvec3, opengv_eigen_norm3,
