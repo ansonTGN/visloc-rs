@@ -6736,15 +6736,15 @@ fn reduce_landmark_factors_f32_checked_with_options(
         .filter(|(_, factor)| factor.landmark_jacobian.ncols() != 0)
         .map(|(index, _)| index)
         .collect();
-    let visual_contributions: Vec<(DMatrix<f32>, DVector<f32>)> = visual_factor_indices
+    let visual_contributions: Vec<(VisualGramContribution, DVector<f32>)> = visual_factor_indices
         .par_iter()
         .map(|&index| {
             let factor = &factors[index];
             let (jacobian, residual, _) = &projected[index];
             let h = if factor.kind == FactorKind::Visual {
-                eigen_visual_gram_packet_tail_f32(jacobian)
+                eigen_visual_gram_packet_tail_sparse_f32(jacobian)
             } else {
-                jacobian.transpose() * jacobian
+                VisualGramContribution::Dense(jacobian.transpose() * jacobian)
             };
             let mut b = DVector::<f32>::zeros(jacobian.ncols());
             accumulate_transpose_vector_f32_eigen(&mut b, jacobian, residual, false);
@@ -6784,7 +6784,7 @@ fn reduce_landmark_factors_f32_checked_with_options(
             let (contribution_h, contribution_b) =
                 &visual_contributions[visual_contribution_cursor];
             visual_contribution_cursor += 1;
-            visual_h += contribution_h;
+            contribution_h.add_to(&mut visual_h);
             visual_b += contribution_b;
             if let (Some(writer), Some(prefix)) = (visual_prefix_trace.as_mut(), prefix) {
                 writer.finish_visual_prefix(prefix, &visual_h, &visual_b)?;
@@ -9015,6 +9015,81 @@ fn eigen_q2_gram_f32(jacobian: &DMatrix<f32>) -> DMatrix<f32> {
 // Per-landmark LM product, not the stacked Q2 exporter. Pinned Eigen's
 // one/half-packet four-column panels split peeled depth into C/D, merge,
 // then process the remaining depth. Keep other panel kernels unchanged.
+/// A visual landmark's `JᵀJ` contribution, either over the full state width
+/// or restricted to the columns where the projected Jacobian is nonzero.
+enum VisualGramContribution {
+    Dense(DMatrix<f32>),
+    /// `columns[a]` is the full state column of compact row/column `a`.
+    Sparse {
+        columns: Vec<usize>,
+        gram: DMatrix<f32>,
+    },
+}
+
+impl VisualGramContribution {
+    /// `h += contribution`. The dense form adds every entry. The sparse form
+    /// adds only the support block: every other entry of the dense
+    /// contribution is an exact `+0.0` (each product in its FMA chain
+    /// involves a zero column), and `h + 0.0 == h`, so the result is the same.
+    fn add_to(&self, h: &mut DMatrix<f32>) {
+        match self {
+            Self::Dense(dense) => *h += dense,
+            Self::Sparse { columns, gram } => {
+                for (b, &column) in columns.iter().enumerate() {
+                    for (a, &row) in columns.iter().enumerate() {
+                        h[(row, column)] += gram[(a, b)];
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Support-restricted counterpart of [`eigen_visual_gram_packet_tail_f32`].
+///
+/// A visual factor's projected Jacobian is nonzero only in the state columns
+/// of the frames that observe the landmark, but the dense kernel forms the
+/// full `(state x state)` product. This forms `JcᵀJc` over the nonzero
+/// columns `S` with the same nalgebra/matrixmultiply product. Each gemm entry
+/// is an ordered FMA chain over the depth that does not depend on the
+/// entry's position, so `(JcᵀJc)[a, b] == (JᵀJ)[S[a], S[b]]` bit for bit. The
+/// Eigen-parity overrides of the dense kernel are applied using the entries'
+/// full-width row and column indices. With five or fewer support columns
+/// nalgebra switches to a different product path, so that case (and an
+/// all-dense support) uses the dense kernel unchanged.
+fn eigen_visual_gram_packet_tail_sparse_f32(jacobian: &DMatrix<f32>) -> VisualGramContribution {
+    let columns = jacobian.ncols();
+    let support = (0..columns)
+        .filter(|&column| jacobian.column(column).iter().any(|value| *value != 0.0))
+        .collect::<Vec<_>>();
+    if support.len() <= 5 || support.len() == columns || jacobian.nrows() <= 5 {
+        return VisualGramContribution::Dense(eigen_visual_gram_packet_tail_f32(jacobian));
+    }
+    let compact = DMatrix::from_fn(jacobian.nrows(), support.len(), |row, a| {
+        jacobian[(row, support[a])]
+    });
+    let mut gram = compact.transpose() * &compact;
+    let end24 = columns / 24 * 24;
+    let end16 = end24 + (columns - end24) / 16 * 16;
+    let end8 = end16 + (columns - end16) / 8 * 8;
+    let end4 = end8 + (columns - end8) / 4 * 4;
+    let parity_cols = columns / 4 * 4;
+    for (a, &row) in support.iter().enumerate() {
+        if !(end16..end4).contains(&row) {
+            continue;
+        }
+        for (b, &column) in support.iter().enumerate() {
+            if column < parity_cols {
+                gram[(a, b)] = eigen_q2_dot_packet_parity_f32(jacobian, row, column);
+            }
+        }
+    }
+    VisualGramContribution::Sparse {
+        columns: support,
+        gram,
+    }
+}
+
 fn eigen_visual_gram_packet_tail_f32(jacobian: &DMatrix<f32>) -> DMatrix<f32> {
     let columns = jacobian.ncols();
     let mut product = jacobian.transpose() * jacobian;
@@ -16775,6 +16850,64 @@ mod tests {
         assert_eq!(rank, 0);
         assert!(compact.is_none());
         assert_eq!(arena, arena_before);
+    }
+
+    /// The support-restricted visual gram must reproduce the dense kernel
+    /// plus dense `+=` bit for bit, over window widths that hit every Eigen
+    /// panel boundary and support layouts from sparse to nearly dense.
+    #[test]
+    fn sparse_visual_gram_accumulation_matches_dense_bits() {
+        let mut state = 0x9e37_79b9_u32;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state
+        };
+        let mut sparse_cases = 0;
+        for case in 0..600 {
+            let columns = 24 + (next() % 110) as usize;
+            let rows = 3 + (next() % 40) as usize;
+            // Choose 1-4 random blocks of 6 or 15 columns, like pose-only
+            // keyframes and full navigation states.
+            let mut active = vec![false; columns];
+            for _ in 0..1 + next() % 4 {
+                let width = if next() % 2 == 0 { 6 } else { 15 };
+                let start = (next() as usize) % columns;
+                for column in start..(start + width).min(columns) {
+                    active[column] = true;
+                }
+            }
+            let jacobian = DMatrix::from_fn(rows, columns, |_, column| {
+                if active[column] && next() % 8 != 0 {
+                    ((next() % 20_001) as f32 - 10_000.0) * 1.3e-3
+                } else {
+                    0.0
+                }
+            });
+            let base = DMatrix::from_fn(columns, columns, |_, _| {
+                ((next() % 2001) as f32 - 1000.0) * 0.37
+            });
+            let mut dense = base.clone();
+            dense += eigen_visual_gram_packet_tail_f32(&jacobian);
+            let contribution = eigen_visual_gram_packet_tail_sparse_f32(&jacobian);
+            if matches!(contribution, VisualGramContribution::Sparse { .. }) {
+                sparse_cases += 1;
+            }
+            let mut sparse = base;
+            contribution.add_to(&mut sparse);
+            for (index, (d, s)) in dense.iter().zip(sparse.iter()).enumerate() {
+                assert_eq!(
+                    d.to_bits(),
+                    s.to_bits(),
+                    "case {case} rows {rows} columns {columns} entry {index}: {d} vs {s}"
+                );
+            }
+        }
+        assert!(
+            sparse_cases > 300,
+            "only {sparse_cases} cases took the sparse path"
+        );
     }
 
     #[test]
