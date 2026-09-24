@@ -1,15 +1,15 @@
 //! wgpu compute SIFT for visloc-rs.
 //!
-//! [`SiftGpu`] runs visloc-vision's default SIFT path (DoG detector on a
+//! `SiftGpu` runs visloc-vision's default SIFT path (DoG detector on a
 //! nearest-doubled first octave, legacy orientation histogram, isotropic
 //! 128-D descriptor with L2 or L1-root normalization) on the GPU in f32.
 //! It is a quality-validated port, not a bit-exact one: compare it with
-//! [`visloc_vision::features::sift::extract_sift`] by keypoint repeatability
+//! `visloc_vision::features::sift::extract_sift` by keypoint repeatability
 //! and descriptor similarity (see `examples/sift_gpu_bench.rs`).
 //!
 //! Configurations outside that path (affine shapes, DSP, Hessian-Laplace,
 //! the VLFeat-compatible detector/descriptor, scale-adaptive gradients,
-//! standard orientation peaks) are rejected by [`SiftGpu::supports`] so
+//! standard orientation peaks) are rejected by `SiftGpu::supports` so
 //! callers can fall back to the CPU extractor.
 
 #[cfg(feature = "gpu")]

@@ -1,7 +1,7 @@
 //! wgpu bundle adjustment for visloc-rs SfM.
 //!
-//! [`GpuBundleAdjuster`] runs the same Levenberg-Marquardt loop as
-//! visloc-slam's CPU [`BundleAdjustment::optimize`] for monocular pinhole
+//! `GpuBundleAdjuster` runs the same Levenberg-Marquardt loop as
+//! visloc-slam's CPU `BundleAdjustment::optimize` for monocular pinhole
 //! problems (same damping schedule, acceptance test, non-projectable gate
 //! and convergence tests; costs evaluated on the CPU in f64), but builds and
 //! solves each linear system on the GPU in f32: per-observation Jacobians
@@ -10,8 +10,9 @@
 //! back-substitution. The f32 step is only a proposal; the f64 cost test
 //! decides, so the result is validated like any LM step.
 //!
-//! Register it with [`visloc_slam::set_ba_accelerator`] to make the
-//! incremental SfM use it for its global and local bundle adjustments.
+//! Register it with `visloc_slam::set_ba_accelerator` to make the
+//! incremental SfM use it for its global bundle adjustments (local windows
+//! are opt-in, see `GpuBaSettings::local_windows`).
 
 #[cfg(feature = "gpu")]
 mod solver;
