@@ -3038,11 +3038,13 @@ pub fn extract_nonlinear_factors(
         j_rp[(5, kf_start + col)] = d_rp[1][col];
     }
     let cov_rp = &j_rp * &cov_old * j_rp.transpose();
-    let rp_info = cov_rp
-        .view((4, 4), (2, 2))
-        .clone_owned()
-        .try_inverse()
-        .ok_or(NfrExtractionError::SingularCovariance)?;
+    let rp_info = nearest_psd_if_indefinite(
+        cov_rp
+            .view((4, 4), (2, 2))
+            .clone_owned()
+            .try_inverse()
+            .ok_or(NfrExtractionError::SingularCovariance)?,
+    );
     let (roll, pitch, _) = kf.rotation.euler_angles();
     let roll_pitch = if data.used_imu {
         vec![RollPitchFactor {
@@ -3081,6 +3083,40 @@ pub fn extract_nonlinear_factors(
         roll_pitch,
         ba_covisibility: Vec::new(),
     })
+}
+
+/// Return `information` unchanged when it is positive semidefinite, otherwise
+/// its nearest PSD matrix in the Frobenius norm: symmetrize, then clamp the
+/// negative eigenvalues to zero.
+///
+/// The factor information is `(J * cov * Jᵀ)⁻¹`, with `cov` from a QR inverse
+/// of the marginalization Hessian. When that Hessian is ill-conditioned, the
+/// result can be slightly indefinite. An indefinite information matrix makes
+/// `rᵀ W r` unbounded below, so global BA can drive the total cost negative
+/// and diverge. This was observed on V2_03, where the final cost was
+/// −8.6e5, with 100 rejected trials and an ATE of 0.375 m against a usual
+/// 0.076 m. Healthy factors are returned bit for bit.
+static PSD_PROJECTIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Number of factor information matrices projected to PSD in this process.
+pub fn psd_information_projection_count() -> usize {
+    PSD_PROJECTIONS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn nearest_psd_if_indefinite(information: DMatrix<f64>) -> DMatrix<f64> {
+    // `symmetric_eigen` iterates without limit, so never feed it non-finite
+    // input; the callers reject such factors separately.
+    if !information.iter().all(|value| value.is_finite()) {
+        return information;
+    }
+    let symmetric = (&information + information.transpose()) * 0.5;
+    let eigen = symmetric.clone().symmetric_eigen();
+    if eigen.eigenvalues.iter().all(|&value| value >= 0.0) {
+        return information;
+    }
+    PSD_PROJECTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let clamped = eigen.eigenvalues.map(|value| value.max(0.0));
+    &eigen.eigenvectors * DMatrix::from_diagonal(&clamped) * eigen.eigenvectors.transpose()
 }
 
 /// Build the relative-pose factor between the marginalization keyframe
@@ -3138,6 +3174,7 @@ fn relative_pose_factor(
     if information.iter().any(|x| !x.is_finite()) {
         return Err(NfrExtractionError::NonFinite);
     }
+    let information = nearest_psd_if_indefinite(information);
     let q = measurement.rotation.quaternion();
     Ok(Some(RelativePoseFactor {
         from: kf_id,
@@ -3283,6 +3320,36 @@ fn shared_tracks(obs: &[OfObservationData], a: u64, b: u64) -> u32 {
         }
     }
     x.intersection(&y).count() as u32
+}
+
+#[cfg(test)]
+mod psd_information_tests {
+    use super::*;
+
+    #[test]
+    fn psd_information_is_returned_bit_for_bit() {
+        let a = DMatrix::from_fn(6, 6, |r, c| ((r * 7 + c * 3) % 11) as f64 * 0.1 - 0.4);
+        let information = &a * a.transpose() + DMatrix::identity(6, 6) * 0.01;
+        let out = nearest_psd_if_indefinite(information.clone());
+        for (x, y) in information.iter().zip(out.iter()) {
+            assert_eq!(x.to_bits(), y.to_bits());
+        }
+    }
+
+    #[test]
+    fn indefinite_information_is_projected_to_psd() {
+        let information = DMatrix::from_row_slice(2, 2, &[1.0, 3.0, 3.0, 1.0]);
+        let out = nearest_psd_if_indefinite(information);
+        let eigen = out.clone().symmetric_eigen();
+        assert!(eigen.eigenvalues.iter().all(|&v| v >= -1e-12), "{eigen:?}");
+        // The positive eigenpair (4, [1,1]/sqrt(2)) survives: 2 in every entry.
+        for value in out.iter() {
+            assert!((value - 2.0).abs() < 1e-12, "{out}");
+        }
+        // Residuals can no longer produce a negative cost.
+        let r = nalgebra::DVector::from_row_slice(&[1.0, -1.0]);
+        assert!((r.transpose() * &out * &r)[(0, 0)] >= -1e-12);
+    }
 }
 
 #[cfg(test)]

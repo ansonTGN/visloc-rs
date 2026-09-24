@@ -445,6 +445,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .join(" ")
     );
     let total_wall_seconds = vio_start.elapsed().as_secs_f64();
+    eprintln!(
+        "mapper_psd_information_projections={}",
+        visloc_basalt::mapper::psd_information_projection_count()
+    );
 
     // Propagate the mapper's keyframe corrections to every VIO frame (rigid
     // spanning-tree: scripts/propagate_basalt_mapper_corrections.py's exact
