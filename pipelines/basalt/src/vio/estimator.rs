@@ -61,6 +61,11 @@ pub struct EstimatorConfig {
     /// Upstream `vio_new_kf_keypoints_thresh`, applied to camera-0 tracks
     /// that already have a landmark versus all accepted camera-0 tracks.
     pub new_kf_keypoints_threshold: f64,
+    /// Opt-in adaptive keyframe spacing (not upstream).  When the connected
+    /// ratio falls below `threshold`, a keyframe may be taken once
+    /// `frames_after_kf > min_frames_after_kf` instead of the regular
+    /// spacing.  `None` keeps the upstream decision unchanged.
+    pub urgent_kf: Option<UrgentKeyframePolicy>,
     pub solver: LmConfig,
     /// Basalt's initial square-root prior weights.  The upstream names are
     /// retained even though its `ba`/`bg` assignments follow the state-block
@@ -78,12 +83,19 @@ impl Default for EstimatorConfig {
             window: WindowPolicy::default(),
             min_frames_after_kf: 5,
             new_kf_keypoints_threshold: 0.7,
+            urgent_kf: None,
             solver: LmConfig::default(),
             initial_pose_weight: 1.0e8,
             initial_accel_bias_weight: 1.0e1,
             initial_gyro_bias_weight: 1.0e2,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UrgentKeyframePolicy {
+    pub threshold: f64,
+    pub min_frames_after_kf: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -2782,13 +2794,18 @@ impl BasaltVioEstimator {
 
     fn decide_keyframe(&mut self, connected: usize, unconnected: usize) -> bool {
         let total = connected + unconnected;
-        if total > 0
-            && (connected as f64 / total as f64) < self.config.new_kf_keypoints_threshold
+        if total > 0 {
+            let ratio = connected as f64 / total as f64;
             // This strict comparison is intentional and matches
             // sqrt_keypoint_vio.cpp:370-373 at the pinned SHA.
-            && self.frames_after_kf > self.config.min_frames_after_kf
-        {
-            self.take_kf = true;
+            let regular = ratio < self.config.new_kf_keypoints_threshold
+                && self.frames_after_kf > self.config.min_frames_after_kf;
+            let urgent = self.config.urgent_kf.is_some_and(|policy| {
+                ratio < policy.threshold && self.frames_after_kf > policy.min_frames_after_kf
+            });
+            if regular || urgent {
+                self.take_kf = true;
+            }
         }
 
         if self.take_kf {
@@ -6552,6 +6569,35 @@ mod tests {
         assert_eq!(
             decisions,
             vec![true, false, false, false, false, false, false, true, false, false, false]
+        );
+    }
+
+    #[test]
+    fn urgent_keyframe_policy_shortens_gap_only_below_its_threshold() {
+        let config = EstimatorConfig {
+            urgent_kf: Some(UrgentKeyframePolicy {
+                threshold: 0.3,
+                min_frames_after_kf: 2,
+            }),
+            ..EstimatorConfig::default()
+        };
+        // Ratio 0.5 is below the regular threshold only: upstream spacing.
+        let mut estimator = BasaltVioEstimator::new(cam(), config);
+        let moderate = (0..=10)
+            .map(|_| estimator.decide_keyframe(50, 50))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            moderate,
+            vec![true, false, false, false, false, false, false, true, false, false, false]
+        );
+        // Ratio 0.0 is below the urgent threshold: strict gap of two.
+        let mut estimator = BasaltVioEstimator::new(cam(), config);
+        let severe = (0..=10)
+            .map(|_| estimator.decide_keyframe(0, 100))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            severe,
+            vec![true, false, false, false, true, false, false, false, true, false, false]
         );
     }
 
