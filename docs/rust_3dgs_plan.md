@@ -412,14 +412,17 @@ differentiating against). Structure:
   | scene | method | steps | PSNR | SSIM | gaussians | train time |
   | --- | --- | --- | --- | --- | --- | --- |
   | south-building | brush 0.3.0 | 30k | 21.684 | 0.7875 | 1.05M | 2379 s |
-  | south-building | ours | 30k | **22.102** | **0.8009** | 1.20M | 3054 s |
+  | south-building | ours | 30k | 22.102 | 0.8009 | 1.20M | 3054 s |
+  | south-building | ours (main @ PR #206) | 30k | **22.296** | **0.8001** | 1.19M | **1906 s** |
   | gerrard-hall | brush 0.3.0 | 30k | 19.022 | 0.6934 | 0.83M | 2147 s |
-  | gerrard-hall | ours | 30k | **19.579** | **0.7046** | 0.64M | 2344 s |
+  | gerrard-hall | ours | 30k | 19.579 | 0.7046 | 0.64M | 2344 s |
+  | gerrard-hall | ours (main @ PR #206) | 30k | **19.766** | **0.7053** | 0.64M | **1356 s** |
 
-  Quality beats brush on both scenes (+0.42 / +0.56 dB); wall time is
-  1.28x / 1.09x brush's. Not yet in these numbers: the tile sort now runs in
-  place over 4 per-intersection buffers instead of 8 (profiled forward
-  160 -> 144 ms, identical renders).
+  With the tile sort running in place over 4 per-intersection buffers and
+  project_backward staging SH rows through shared memory (both in PR #206),
+  **all three success bars are met**: quality beats brush (+0.61 / +0.74 dB)
+  and training is 20% / 37% faster than brush on the same GPU (which was
+  thermal-throttling at ~86 C during these runs).
 - **M3**: `gsplat_euroc` example (feature `euroc`): raw EuRoC -> undistort
   -> SIFT -> verified temporal matches -> visloc-rs incremental SfM ->
   trainer, no COLMAP or Python. With `--gpu-sift --gpu-ba` (crates
@@ -428,6 +431,26 @@ differentiating against). Structure:
   verification 32 s, SfM 141 s; the CPU path spends 838 s in SfM alone) and
   to a 7k-step splat in 766 s total: 183/200 frames registered, 0.638 px,
   held-out PSNR 29.26 / SSIM 0.946 (CPU-SfM run: 29.03 / 0.945).
+- **SfM accuracy (2026-09-24)**: `gsplat_euroc` now reports the Sim(3) ATE of
+  the registered cam0 centres against the EuRoC ground truth. The original
+  4000-keypoint / window-5 matching broke the monocular scale on V1_01
+  (73.6 cm ATE, a 2.5x scale jump). New defaults, cheap with GPU matching and
+  BA: 8000 keypoints, window 10, skips 15..120, and a keyframe gate that
+  leaves out frames with < 2 px accumulated motion (parallax-free frames
+  before take-off were registered up to 1.5 m off). 200 frames, stride 4:
+
+  | sequence | old defaults: registered / ATE | new defaults: registered / ATE |
+  | --- | --- | --- |
+  | V1_01 | 183 / 73.6 cm | 179 / 3.81 cm |
+  | MH_01 | 75 / 0.75 cm | 104 / 0.46 cm |
+  | V1_02 | 91 / 8.71 cm | 182 / 8.13 cm |
+  | V2_01 | 129 / 2.64 cm | 184 / 5.48 cm |
+
+  (Old-default ATE covers only the frames that registered.) More BA
+  iterations (50) were not a consistent win. V1_01 end to end with the new
+  defaults: 514 s, ATE 3.81 cm, PSNR 28.87 / SSIM 0.955 (23 views); with
+  stride 2 / 400 frames: 726 s, ATE 5.55 cm, PSNR 29.98 / SSIM 0.955 (45
+  views) -- more views help the splat, shorter baselines hurt the ATE.
 
 ### Stage 4 — Browser (optional, non-blocking)
 - wasm + WebGPU build of the renderer; training only if stage 2/3 land cleanly.

@@ -55,6 +55,13 @@ pub struct EurocSfmConfig {
     /// needs the `gpu` feature). Local windows stay on the CPU unless
     /// `VISLOC_BA_GPU_LOCAL` is set (latency-bound on small systems).
     pub gpu_ba: bool,
+    /// Override the SfM's LM iteration budget per bundle adjustment.
+    pub ba_max_iterations: Option<usize>,
+    /// Keyframe gate: a frame joins the SfM only once the accumulated median
+    /// feature motion since the last kept frame reaches this many pixels.
+    /// Near-static frames (e.g. before take-off) have no parallax and were
+    /// registered metres off. `0` keeps every frame.
+    pub min_keyframe_motion_px: f64,
 }
 
 impl Default for EurocSfmConfig {
@@ -62,13 +69,20 @@ impl Default for EurocSfmConfig {
         Self {
             stride: 4,
             max_frames: 200,
-            window: 5,
-            skip_offsets: vec![8, 12],
+            // Denser than the original 5 / [8, 12] / 4000 (GPU matching and
+            // BA make it cheap): on EuRoC V1_01, MH_01, V1_02 and V2_01
+            // (200 frames, stride 4) it registers 139-200 frames instead of
+            // 75-183, and removes a monocular scale break on V1_01 (73.6 cm
+            // -> 4.9 cm ATE).
+            window: 10,
+            skip_offsets: vec![15, 20, 30, 45, 60, 90, 120],
             min_matches: 30,
-            sift_max_keypoints: 4000,
+            sift_max_keypoints: 8000,
             eval_every: 8,
             gpu_sift: false,
             gpu_ba: false,
+            ba_max_iterations: None,
+            min_keyframe_motion_px: 2.0,
         }
     }
 }
@@ -104,6 +118,44 @@ pub struct EurocSfmReport {
     pub registered: usize,
     pub points: usize,
     pub mean_reprojection_px: f64,
+    /// Sim(3)-aligned ATE RMSE of the registered camera centres against the
+    /// Vicon/Leica ground truth (metres), when the sequence has one.
+    pub ate_rmse_m: Option<f64>,
+}
+
+/// Sim(3) (Umeyama) alignment of `est` onto `gt`; returns the RMSE of the
+/// aligned residuals, or `None` for fewer than three pairs.
+pub fn sim3_ate_rmse(est: &[Vector3<f64>], gt: &[Vector3<f64>]) -> Option<f64> {
+    let n = est.len();
+    if n < 3 || gt.len() != n {
+        return None;
+    }
+    let mu_e = est.iter().sum::<Vector3<f64>>() / n as f64;
+    let mu_g = gt.iter().sum::<Vector3<f64>>() / n as f64;
+    let mut cov = nalgebra::Matrix3::<f64>::zeros();
+    let mut var_e = 0.0;
+    for (e, g) in est.iter().zip(gt) {
+        let (de, dg) = (e - mu_e, g - mu_g);
+        cov += dg * de.transpose();
+        var_e += de.norm_squared();
+    }
+    cov /= n as f64;
+    var_e /= n as f64;
+    let svd = cov.svd(true, true);
+    let (u, vt) = (svd.u?, svd.v_t?);
+    let mut d = nalgebra::Matrix3::<f64>::identity();
+    if (u * vt).determinant() < 0.0 {
+        d[(2, 2)] = -1.0;
+    }
+    let r = u * d * vt;
+    let scale = (svd.singular_values.component_mul(&d.diagonal())).sum() / var_e.max(1e-300);
+    let t = mu_g - scale * r * mu_e;
+    let sq: f64 = est
+        .iter()
+        .zip(gt)
+        .map(|(e, g)| (scale * r * e + t - g).norm_squared())
+        .sum();
+    Some((sq / n as f64).sqrt())
 }
 
 /// Bilinear undistortion of a grey image to a pinhole camera with the same
@@ -326,11 +378,57 @@ pub fn build_euroc_dataset(
     #[cfg(not(feature = "gpu"))]
     let all_matches: Option<Vec<Vec<DescriptorMatch>>> = None;
     log(&format!("matched {} candidate pairs", candidates.len()));
+
+    // Keyframe gate from the consecutive-pair matches: median pixel motion
+    // of the cross-checked matches, accumulated since the last kept frame.
+    let consecutive_motion = |c: usize, i: usize, j: usize| -> Option<f64> {
+        let dm = match &all_matches {
+            Some(all) => std::borrow::Cow::Borrowed(&all[c]),
+            None => std::borrow::Cow::Owned(cpu_matches(&features[i], &features[j])),
+        };
+        if dm.len() < cfg.min_matches {
+            return None; // weak overlap: treat as motion
+        }
+        let mut d: Vec<f64> = dm
+            .iter()
+            .map(|m| {
+                (features[i].keypoints[m.query_index] - features[j].keypoints[m.train_index]).norm()
+            })
+            .collect();
+        d.sort_by(|a, b| a.total_cmp(b));
+        Some(d[d.len() / 2])
+    };
+    let mut keep = vec![true; n];
+    if cfg.min_keyframe_motion_px > 0.0 {
+        let mut accumulated = 0.0;
+        for (c, &(i, j)) in candidates.iter().enumerate() {
+            if j != i + 1 {
+                continue;
+            }
+            match consecutive_motion(c, i, j) {
+                Some(px) => accumulated += px,
+                None => accumulated = f64::INFINITY,
+            }
+            if accumulated >= cfg.min_keyframe_motion_px {
+                accumulated = 0.0;
+            } else {
+                keep[j] = false;
+            }
+        }
+    }
+    let dropped = keep.iter().filter(|k| !**k).count();
+    if dropped > 0 {
+        log(&format!(
+            "keyframe gate: {dropped} near-static frames left out (< {} px)",
+            cfg.min_keyframe_motion_px
+        ));
+    }
     // Geometric verification is independent per pair (seeded RANSAC), so it
     // runs in parallel; results keep the candidate order.
     let pairwise: Vec<PairwiseMatches> = candidates
         .par_iter()
         .enumerate()
+        .filter(|(_, &(i, j))| keep[i] && keep[j])
         .filter_map(|(c, &(i, j))| {
             let dm = match &all_matches {
                 Some(all) => std::borrow::Cow::Borrowed(&all[c]),
@@ -350,14 +448,59 @@ pub fn build_euroc_dataset(
         .collect();
     log(&format!("{} verified pairs", pairwise.len()));
 
-    let sfm_cfg = IncrementalSfmConfig {
+    let mut sfm_cfg = IncrementalSfmConfig {
         min_seed_matches: cfg.min_matches,
         colmap_style_mapper: true,
         ..IncrementalSfmConfig::default()
     };
+    if let Some(it) = cfg.ba_max_iterations {
+        sfm_cfg.ba_config.max_iterations = it;
+    }
     let result = incremental_sfm(&camera, &features, &pairwise, &sfm_cfg)
         .map_err(|e| EurocError::Sfm(e.to_string()))?;
     let registered = result.poses.iter().filter(|p| p.is_some()).count();
+    // ATE against ground truth: nearest GT sample within 10 ms of each
+    // registered frame, cam0 centre = p_WB + R_WB t_BS.
+    let ate_rmse_m = {
+        let t_bs = seq.cam0_calibration.t_body_sensor;
+        let t_bs = Vector3::new(t_bs[(0, 3)], t_bs[(1, 3)], t_bs[(2, 3)]);
+        let gt = &seq.ground_truth;
+        let mut est_c = Vec::new();
+        let mut gt_c = Vec::new();
+        for (i, pose) in result.poses.iter().enumerate() {
+            let Some(pose) = pose else { continue };
+            let ts = frames[i].timestamp_nanoseconds;
+            let k = gt.partition_point(|s| s.timestamp_nanoseconds < ts);
+            let near = [k.checked_sub(1), Some(k)]
+                .into_iter()
+                .flatten()
+                .filter_map(|j| gt.get(j))
+                .min_by_key(|s| (s.timestamp_nanoseconds - ts).abs());
+            if let Some(s) = near.filter(|s| (s.timestamp_nanoseconds - ts).abs() <= 10_000_000) {
+                est_c.push(pose.camera_to_world().translation);
+                gt_c.push(s.position_world + s.orientation_world * t_bs);
+            }
+        }
+        // Associated centres for offline inspection / other aligners.
+        let csv: String = std::iter::once(
+            "frame,est_x,est_y,est_z,gt_x,gt_y,gt_z
+"
+            .to_string(),
+        )
+        .chain(est_c.iter().zip(&gt_c).enumerate().map(|(i, (e, g))| {
+            format!(
+                "{i},{},{},{},{},{},{}
+",
+                e.x, e.y, e.z, g.x, g.y, g.z
+            )
+        }))
+        .collect();
+        let _ = std::fs::write(out_dir.join("trajectory_vs_gt.csv"), csv);
+        sim3_ate_rmse(&est_c, &gt_c)
+    };
+    if let Some(ate) = ate_rmse_m {
+        log(&format!("sfm: Sim(3) ATE RMSE {:.4} m", ate));
+    }
     log(&format!(
         "sfm: {registered}/{n} registered, {} tracks, reprojection {:.3} px",
         result.tracks.len(),
@@ -416,6 +559,7 @@ pub fn build_euroc_dataset(
         registered,
         points: points.len(),
         mean_reprojection_px: result.mean_reprojection_px,
+        ate_rmse_m,
     };
     Ok((
         Dataset {
@@ -426,4 +570,30 @@ pub fn build_euroc_dataset(
         points,
         report,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sim3_ate_rmse;
+    use nalgebra::{Rotation3, Vector3};
+
+    #[test]
+    fn sim3_ate_is_zero_for_a_similar_trajectory_and_positive_otherwise() {
+        let gt: Vec<Vector3<f64>> = (0..20)
+            .map(|i| {
+                let t = i as f64 * 0.3;
+                Vector3::new(t.cos() * 2.0, t.sin() * 1.5, 0.1 * t)
+            })
+            .collect();
+        let r = Rotation3::from_euler_angles(0.3, -0.7, 1.1);
+        let est: Vec<Vector3<f64>> = gt
+            .iter()
+            .map(|g| 0.37 * (r * g) + Vector3::new(4.0, -2.0, 0.5))
+            .collect();
+        assert!(sim3_ate_rmse(&est, &gt).unwrap() < 1e-9);
+        let mut noisy = est.clone();
+        noisy[5].x += 0.37;
+        assert!(sim3_ate_rmse(&noisy, &gt).unwrap() > 1e-3);
+        assert!(sim3_ate_rmse(&est[..2], &gt[..2]).is_none());
+    }
 }
