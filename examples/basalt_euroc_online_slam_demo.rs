@@ -429,7 +429,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mapper_join_seconds = vio_start.elapsed().as_secs_f64() - vio_wall_seconds;
 
+    let mapper_heap = online_mapper.inner().approx_heap_breakdown();
     let final_report = online_mapper.finalize()?;
+    eprintln!(
+        "mapper_heap_estimate {}",
+        mapper_heap
+            .iter()
+            .map(|(name, bytes)| format!("{name}={bytes}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
     let total_wall_seconds = vio_start.elapsed().as_secs_f64();
 
     // Propagate the mapper's keyframe corrections to every VIO frame (rigid
@@ -641,7 +650,25 @@ fn peak_working_set_bytes() -> u64 {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn peak_working_set_bytes() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status.lines().find_map(|line| {
+                line.strip_prefix("VmHWM:")?
+                    .trim()
+                    .strip_suffix("kB")?
+                    .trim()
+                    .parse::<u64>()
+                    .ok()?
+                    .checked_mul(1024)
+            })
+        })
+        .unwrap_or(0)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 const fn peak_working_set_bytes() -> u64 {
     0
 }

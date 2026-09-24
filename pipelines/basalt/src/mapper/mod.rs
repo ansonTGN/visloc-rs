@@ -1045,7 +1045,7 @@ struct VisionLandmarkSolve {
 #[derive(Debug, Clone)]
 struct VisionLinearization {
     cost: f64,
-    h: DMatrix<f64>,
+    h: PoseBlockHessian,
     b: DVector<f64>,
     landmarks: Vec<VisionLandmarkSolve>,
 }
@@ -1297,7 +1297,7 @@ fn linearize_vision(
 ) -> VisionLinearization {
     let mut out = VisionLinearization {
         cost: 0.0,
-        h: DMatrix::zeros(pose_count * 6, pose_count * 6),
+        h: PoseBlockHessian::new(pose_count),
         b: DVector::zeros(pose_count * 6),
         landmarks: Vec::new(),
     };
@@ -1346,9 +1346,7 @@ fn linearize_vision(
             for &(row_pose, row_j) in &pose_terms {
                 for &(col_pose, col_j) in &pose_terms {
                     let hpp = obs_weight * row_j.transpose() * col_j;
-                    out.h
-                        .view_mut((row_pose * 6, col_pose * 6), (6, 6))
-                        .add_assign(&dynamic_matrix6(&hpp));
+                    out.h.add_block(row_pose, col_pose, &hpp);
                 }
             }
             for &(pose_index, j_pose) in &pose_terms {
@@ -1386,9 +1384,7 @@ fn linearize_vision(
                 .add_assign(&dynamic_vector6(&(-schur_b)));
             for &(pose_j, hpl_j) in &hpl {
                 let schur_h = hpl_i * hll_inv * hpl_j.transpose();
-                out.h
-                    .view_mut((pose_i * 6, pose_j * 6), (6, 6))
-                    .add_assign(&dynamic_matrix6(&(-schur_h)));
+                out.h.add_block(pose_i, pose_j, &(-schur_h));
             }
         }
         out.landmarks.push(VisionLandmarkSolve {
@@ -1407,7 +1403,7 @@ fn linearize_factors(
     pose_indices: &BTreeMap<u64, usize>,
     pose_count: usize,
     config: GlobalBaConfig,
-    h: &mut DMatrix<f64>,
+    h: &mut PoseBlockHessian,
     b: &mut DVector<f64>,
 ) {
     if !config.use_factors {
@@ -1470,7 +1466,7 @@ fn linearize_factors(
 }
 
 fn add_factor_pose_block(
-    h: &mut DMatrix<f64>,
+    h: &mut PoseBlockHessian,
     row: usize,
     col: usize,
     block: Matrix6<f64>,
@@ -1479,8 +1475,105 @@ fn add_factor_pose_block(
     if row >= pose_count || col >= pose_count {
         return;
     }
-    h.view_mut((row * 6, col * 6), (6, 6))
-        .add_assign(&dynamic_matrix6(&block));
+    h.add_block(row, col, &block);
+}
+
+/// Block-sparse pose Hessian for global BA.
+///
+/// Upstream accumulates the reduced camera system in a
+/// `SparseHashAccumulator`; a dense `(6N)^2` matrix made mapper memory grow
+/// quadratically with keyframes.  Blocks accumulate element-wise in the same
+/// order as the former dense `view_mut(..).add_assign(..)` calls, and absent
+/// blocks are exact zeros, so the solve sees the same values.
+#[derive(Debug, Clone)]
+struct PoseBlockHessian {
+    pose_count: usize,
+    blocks: BTreeMap<(usize, usize), Matrix6<f64>>,
+}
+
+impl PoseBlockHessian {
+    fn new(pose_count: usize) -> Self {
+        Self {
+            pose_count,
+            blocks: BTreeMap::new(),
+        }
+    }
+
+    fn dim(&self) -> usize {
+        self.pose_count * 6
+    }
+
+    fn add_block(&mut self, row: usize, col: usize, block: &Matrix6<f64>) {
+        *self
+            .blocks
+            .entry((row, col))
+            .or_insert_with(Matrix6::zeros) += block;
+    }
+
+    fn diagonal(&self) -> Vec<f64> {
+        let mut diagonal = vec![0.0; self.dim()];
+        for pose in 0..self.pose_count {
+            if let Some(block) = self.blocks.get(&(pose, pose)) {
+                for axis in 0..6 {
+                    diagonal[pose * 6 + axis] = block[(axis, axis)];
+                }
+            }
+        }
+        diagonal
+    }
+
+    fn to_dense(&self) -> DMatrix<f64> {
+        let mut dense = DMatrix::zeros(self.dim(), self.dim());
+        for (&(row, col), block) in &self.blocks {
+            dense
+                .view_mut((row * 6, col * 6), (6, 6))
+                .copy_from(block);
+        }
+        dense
+    }
+
+    /// `(H + H^T) / 2` with per-entry operand order `(h[r,c] + h[c,r]) * 0.5`,
+    /// plus the LM diagonal, exactly as [`solve_damped_system`] builds it.
+    fn symmetrized_damped(&self, h_diagonal: &[f64], lambda: f64, min_lambda: f64) -> Self {
+        let zero = Matrix6::zeros();
+        let mut keys = self.blocks.keys().copied().collect::<BTreeSet<_>>();
+        keys.extend(self.blocks.keys().map(|&(row, col)| (col, row)));
+        for pose in 0..self.pose_count {
+            keys.insert((pose, pose));
+        }
+        let mut blocks = BTreeMap::new();
+        for (row, col) in keys {
+            let upper = self.blocks.get(&(row, col)).unwrap_or(&zero);
+            let lower = self.blocks.get(&(col, row)).unwrap_or(&zero);
+            let mut block = Matrix6::from_fn(|r, c| (upper[(r, c)] + lower[(c, r)]) * 0.5);
+            if row == col {
+                for axis in 0..6 {
+                    let index = row * 6 + axis;
+                    block[(axis, axis)] += (h_diagonal[index] * lambda).max(min_lambda);
+                }
+            }
+            blocks.insert((row, col), block);
+        }
+        Self {
+            pose_count: self.pose_count,
+            blocks,
+        }
+    }
+
+    /// `self * x`, accumulating each row in ascending column order like
+    /// nalgebra's dense column-major gemv (`y = A[:,j] * x[j] + y`).
+    fn mul_vector(&self, x: &DVector<f64>) -> DVector<f64> {
+        let mut y = DVector::zeros(self.dim());
+        for (&(row, col), block) in &self.blocks {
+            for c in 0..6 {
+                let value = x[col * 6 + c];
+                for r in 0..6 {
+                    y[row * 6 + r] = block[(r, c)] * value + y[row * 6 + r];
+                }
+            }
+        }
+        y
+    }
 }
 
 fn add_factor_pose_gradient(
@@ -1644,6 +1737,36 @@ fn solve_damped_system(
 /// stopping semantics while leaving sparse/hash accumulation out of the Rust
 /// core.  Returning `None` delegates malformed or indefinite systems to the
 /// defensive factorization fallbacks in [`solve_damped_system`].
+/// Block-sparse counterpart of [`solve_damped_system`]: same symmetrization,
+/// damping and CG contract.  Only the rare CG failure densifies for the
+/// factorization fallbacks.
+fn solve_damped_block_system(
+    h: &PoseBlockHessian,
+    b: &DVector<f64>,
+    h_diagonal: &[f64],
+    lambda: f64,
+    min_lambda: f64,
+    gauge_anchor: Option<usize>,
+) -> DVector<f64> {
+    let system = h.symmetrized_damped(h_diagonal, lambda, min_lambda);
+    let finite = system
+        .blocks
+        .values()
+        .all(|block| block.iter().all(|value| value.is_finite()));
+    if finite && b.len() == system.dim() {
+        let diagonal = system.diagonal();
+        if let Some(solution) = preconditioned_cg(
+            b,
+            1e-4,
+            |index| diagonal[index],
+            |vector| system.mul_vector(vector),
+        ) {
+            return solution;
+        }
+    }
+    solve_damped_system(&h.to_dense(), b, h_diagonal, lambda, min_lambda, gauge_anchor)
+}
+
 fn diagonal_preconditioned_cg(
     system: &DMatrix<f64>,
     rhs: &DVector<f64>,
@@ -1652,11 +1775,28 @@ fn diagonal_preconditioned_cg(
     if system.nrows() != system.ncols() || rhs.len() != system.nrows() {
         return None;
     }
+    if !system.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    preconditioned_cg(
+        rhs,
+        tolerance,
+        |index| system[(index, index)],
+        |vector| system * vector,
+    )
+}
+
+fn preconditioned_cg(
+    rhs: &DVector<f64>,
+    tolerance: f64,
+    diagonal_at: impl Fn(usize) -> f64,
+    multiply: impl Fn(&DVector<f64>) -> DVector<f64>,
+) -> Option<DVector<f64>> {
     let n = rhs.len();
     if n == 0 {
         return Some(DVector::zeros(0));
     }
-    if !system.iter().all(|value| value.is_finite()) || !rhs.iter().all(|value| value.is_finite()) {
+    if !rhs.iter().all(|value| value.is_finite()) {
         return None;
     }
     let rhs_norm2 = rhs.dot(rhs);
@@ -1670,7 +1810,7 @@ fn diagonal_preconditioned_cg(
     let inv_diagonal = DVector::from_iterator(
         n,
         (0..n).map(|index| {
-            let diagonal = system[(index, index)];
+            let diagonal = diagonal_at(index);
             if diagonal != 0.0 && diagonal.is_finite() {
                 diagonal.recip()
             } else {
@@ -1691,7 +1831,7 @@ fn diagonal_preconditioned_cg(
     let threshold = (tolerance * tolerance * rhs_norm2).max(f64::MIN_POSITIVE);
     let max_iterations = n.saturating_mul(2).max(1);
     for _iteration in 0..max_iterations {
-        let product = system * &direction;
+        let product = multiply(&direction);
         let denominator = direction.dot(&product);
         if !denominator.is_finite() || denominator <= 0.0 {
             return None;
@@ -2108,8 +2248,8 @@ fn global_ba_impl_in_place(
             &mut vision.h,
             &mut vision.b,
         );
-        let h_diagonal = vision.h.diagonal().iter().copied().collect::<Vec<_>>();
-        let solve = solve_damped_system(
+        let h_diagonal = vision.h.diagonal();
+        let solve = solve_damped_block_system(
             &vision.h,
             &vision.b,
             &h_diagonal,
@@ -3141,6 +3281,92 @@ fn shared_tracks(obs: &[OfObservationData], a: u64, b: u64) -> u32 {
         }
     }
     x.intersection(&y).count() as u32
+}
+
+#[cfg(test)]
+mod pose_block_hessian_tests {
+    use super::*;
+
+    /// A gauge-free, SPD-dominant but asymmetric block system resembling a
+    /// Schur-reduced pose graph: chain neighbours plus sparse long links.
+    fn fixture(seed: u64, poses: usize) -> (PoseBlockHessian, DVector<f64>) {
+        let mut state = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((state >> 11) as f64 / (1u64 << 53) as f64) - 0.5
+        };
+        let mut h = PoseBlockHessian::new(poses);
+        for pose in 0..poses {
+            let mut links = vec![pose];
+            if pose + 1 < poses {
+                links.push(pose + 1);
+            }
+            if pose % 5 == 0 && pose + 7 < poses {
+                links.push(pose + 7);
+            }
+            for &other in &links {
+                let a = Matrix6::from_fn(|_, _| next());
+                let block = if other == pose {
+                    a * a.transpose() + Matrix6::identity() * 40.0
+                } else {
+                    a
+                };
+                h.add_block(pose, other, &block);
+                if other != pose {
+                    // Roundoff-level antisymmetric residue, as in accumulation.
+                    let residue = Matrix6::from_fn(|_, _| next() * 1e-12);
+                    h.add_block(other, pose, &(block.transpose() + residue));
+                }
+            }
+        }
+        let b = DVector::from_fn(poses * 6, |_, _| next());
+        (h, b)
+    }
+
+    #[test]
+    fn block_product_matches_dense_gemv_bits() {
+        for seed in 1..=8 {
+            let (h, x) = fixture(seed, 23);
+            let dense = &h.to_dense() * &x;
+            let sparse = h.mul_vector(&x);
+            for (a, b) in dense.iter().zip(sparse.iter()) {
+                assert!(a == b, "seed={seed}: {a} vs {b}");
+            }
+        }
+    }
+
+    #[test]
+    fn block_damped_solve_matches_dense_solve_bits() {
+        for seed in 1..=8 {
+            for &lambda in &[1e-6, 1e-2, 10.0] {
+                let (h, b) = fixture(seed, 31);
+                let diagonal = h.diagonal();
+                let dense_diagonal = h.to_dense().diagonal();
+                assert_eq!(diagonal, dense_diagonal.iter().copied().collect::<Vec<_>>());
+                let expected =
+                    solve_damped_system(&h.to_dense(), &b, &diagonal, lambda, 1e-12, Some(0));
+                let actual = solve_damped_block_system(&h, &b, &diagonal, lambda, 1e-12, Some(0));
+                for (e, a) in expected.iter().zip(actual.iter()) {
+                    assert!(e == a, "seed={seed} lambda={lambda}: {e} vs {a}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nonfinite_block_system_uses_dense_fallback_contract() {
+        let (mut h, b) = fixture(3, 5);
+        h.add_block(2, 2, &(Matrix6::identity() * f64::NAN));
+        let diagonal = h.diagonal();
+        let expected = solve_damped_system(&h.to_dense(), &b, &diagonal, 1e-3, 1e-12, Some(0));
+        let actual = solve_damped_block_system(&h, &b, &diagonal, 1e-3, 1e-12, Some(0));
+        assert_eq!(expected.len(), actual.len());
+        for (e, a) in expected.iter().zip(actual.iter()) {
+            assert!(e.to_bits() == a.to_bits() || (e.is_nan() && a.is_nan()));
+        }
+    }
 }
 
 #[cfg(test)]

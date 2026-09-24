@@ -617,6 +617,75 @@ pub struct NfrMapper {
 }
 
 impl NfrMapper {
+    /// Approximate heap payload per persistent container, in bytes.
+    ///
+    /// Counts element payload (`len * size_of`) only, ignoring allocator and
+    /// B-tree node overhead, so it is a lower bound suited to comparing
+    /// containers and keyframe densities, not an RSS reconstruction.
+    pub fn approx_heap_breakdown(&self) -> Vec<(&'static str, usize)> {
+        use std::mem::size_of;
+        let features: usize = self
+            .feature_corners
+            .values()
+            .map(|f| {
+                f.corners.len() * size_of::<nalgebra::Point2<f64>>()
+                    + f.corner_angles.len() * size_of::<f64>()
+                    + f.descriptors.len() * 32
+                    + f.rays.len() * size_of::<[f64; 4]>()
+                    + f.hashes.len() * size_of::<u32>()
+                    + f.bow_vector.len() * size_of::<super::features::BowEntry>()
+            })
+            .sum();
+        let pair = size_of::<(FeatureId, FeatureId)>();
+        let match_data: usize = self
+            .feature_match_data
+            .values()
+            .map(|m| (m.matches.len() + m.inliers.len()) * pair + size_of::<NfrMapperMatchData>())
+            .sum();
+        let matches: usize = self
+            .feature_matches
+            .values()
+            .map(|m| m.inliers.len() * pair)
+            .sum();
+        let tracks: usize = self
+            .feature_tracks
+            .values()
+            .map(|t| t.len() * size_of::<(TimeCamId, FeatureId)>())
+            .sum();
+        let landmarks: usize = self
+            .lmdb
+            .landmarks
+            .values()
+            .map(|l| {
+                size_of::<MapperLandmark>()
+                    + l.observations.len() * size_of::<super::triangulation::MapperObservation>()
+            })
+            .sum();
+        let observation_index: usize = self
+            .lmdb
+            .observations
+            .values()
+            .flat_map(BTreeMap::values)
+            .map(|ids| ids.len() * size_of::<u64>() + 2 * size_of::<TimeCamId>())
+            .sum();
+        let hash_index: usize = self
+            .hash_index
+            .values()
+            .map(|ids| ids.len() * size_of::<TimeCamId>() + size_of::<u32>())
+            .sum();
+        vec![
+            ("keyframe_images", self.feature_corners.len()),
+            ("feature_corners", features),
+            ("feature_match_data", match_data),
+            ("feature_matches", matches),
+            ("feature_tracks", tracks),
+            ("lmdb_landmarks", landmarks),
+            ("lmdb_observation_index", observation_index),
+            ("hash_index", hash_index),
+            ("match_pairs", self.feature_match_data.len()),
+        ]
+    }
+
     pub fn new(config: MapperConfig) -> Self {
         Self {
             config,
