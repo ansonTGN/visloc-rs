@@ -26,17 +26,25 @@ pub struct GpuBaSettings {
     pub max_pcg_iterations: u32,
     /// Stop when ||r|| <= tol * ||b|| (f32 arithmetic: keep >= ~1e-6).
     pub pcg_relative_tolerance: f32,
+    /// Also take the SfM's local BA windows (`BaScope::Local`). Off by
+    /// default: those systems are small (~1e4 observations) and on a
+    /// GTX 1660 Ti the GPU path is bound by submit/sync latency (~5 ms per
+    /// round trip), so it only ties the CPU solver there.
+    pub local_windows: bool,
 }
 
 impl Default for GpuBaSettings {
     fn default() -> Self {
-        let env_u = |k: &str| std::env::var(k).ok().and_then(|v| v.parse().ok());
+        fn env_u<T: std::str::FromStr>(k: &str) -> Option<T> {
+            std::env::var(k).ok().and_then(|v| v.parse().ok())
+        }
         Self {
             max_pcg_iterations: env_u("VISLOC_BA_GPU_PCG_ITERS").unwrap_or(100),
             pcg_relative_tolerance: std::env::var("VISLOC_BA_GPU_PCG_TOL")
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1e-4),
+            local_windows: std::env::var_os("VISLOC_BA_GPU_LOCAL").is_some(),
         }
     }
 }
@@ -486,12 +494,15 @@ impl GpuBundleAdjuster {
             // PCG in chunks: most solves converge in a handful of
             // iterations, so check the device-side done flag between chunks
             // instead of always dispatching the full iteration budget.
-            const CHUNK: u32 = 10;
+            let chunk: u32 = std::env::var("VISLOC_BA_GPU_PCG_CHUNK")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10);
             let max = self.settings.max_pcg_iterations;
-            let mut issued = CHUNK.min(max);
+            let mut issued = chunk.min(max);
             self.run(prob, &[LM_PREP, POSE_PREP, PCG_INIT, PCG_STEP], issued);
             while issued < max && read_scal()[2] == 0.0 {
-                let n = CHUNK.min(max - issued);
+                let n = chunk.min(max - issued);
                 self.run(prob, &[PCG_STEP], n);
                 issued += n;
             }
@@ -560,10 +571,18 @@ impl GpuBundleAdjuster {
         let profile = std::env::var_os("VISLOC_BA_GPU_PROFILE").is_some();
         for iteration in 0..config.max_iterations {
             let t0 = std::time::Instant::now();
+            let mut t_lin = 0.0;
             if !linearized {
                 self.write_state(&prob, ba);
                 self.write_params(&prob, ba, lambda, huber);
                 self.run(&prob, &[LINEARIZE, POSE_REDUCE, LM_REDUCE], 0);
+                if profile {
+                    self.ctx
+                        .device
+                        .poll(wgpu::PollType::wait_indefinitely())
+                        .ok();
+                    t_lin = t0.elapsed().as_secs_f64();
+                }
                 linearized = true;
             }
             self.write_params(&prob, ba, lambda, huber);
@@ -602,7 +621,7 @@ impl GpuBundleAdjuster {
             };
             if profile {
                 eprintln!(
-                    "ba-gpu: iteration={iteration} lambda={lambda:.3e} solve={:.4}s pcg={pcg_iters} total={:.4}s cost {cost_before:.6e} -> {cost_after:.6e}",
+                    "ba-gpu: iteration={iteration} lambda={lambda:.3e} linearize={t_lin:.4}s solve={:.4}s pcg={pcg_iters} total={:.4}s cost {cost_before:.6e} -> {cost_after:.6e}",
                     t_solve,
                     t0.elapsed().as_secs_f64()
                 );
@@ -712,8 +731,11 @@ impl BaAccelerator for GpuBundleAdjuster {
         &self,
         ba: &mut BundleAdjustment,
         config: &BaConfig,
-        _scope: BaScope,
+        scope: BaScope,
     ) -> Option<Result<BaResult, BaError>> {
+        if scope == BaScope::Local && !self.settings.local_windows {
+            return None;
+        }
         Self::check(ba, config).ok()?;
         GpuBundleAdjuster::optimize(self, ba, config).ok().map(Ok)
     }

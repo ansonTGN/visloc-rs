@@ -43,16 +43,34 @@ fn main() {
     let load = || {
         let mut ba = read_ba_problem(&path).expect("read problem").0;
         if let Some(n) = local {
+            // Shape of the SfM's local BA: the last n poses variable, only the
+            // landmarks they observe, and every pose observing those.
             let ids: Vec<u64> = ba.poses.keys().copied().collect();
-            for &id in &ids[..ids.len().saturating_sub(n)] {
-                ba.fix_pose(id);
+            let variable: std::collections::BTreeSet<u64> =
+                ids[ids.len().saturating_sub(n)..].iter().copied().collect();
+            let keep_lm: std::collections::BTreeSet<u64> = ba
+                .observations
+                .iter()
+                .filter(|o| variable.contains(&o.keyframe_id))
+                .map(|o| o.landmark_id)
+                .collect();
+            ba.observations.retain(|o| keep_lm.contains(&o.landmark_id));
+            ba.landmarks.retain(|id, _| keep_lm.contains(id));
+            let used: std::collections::BTreeSet<u64> =
+                ba.observations.iter().map(|o| o.keyframe_id).collect();
+            ba.poses.retain(|id, _| used.contains(id));
+            ba.fixed_poses.clear();
+            for id in ba.poses.keys().copied().collect::<Vec<_>>() {
+                if !variable.contains(&id) {
+                    ba.fix_pose(id);
+                }
             }
         }
         ba
     };
     let ba0 = load();
     println!(
-        "problem: {} poses ({} fixed), {} landmarks, {} observations",
+        "problem: {} poses ({} fixed), {} landmarks, {} observations (local window: {local:?})",
         ba0.poses.len(),
         ba0.fixed_poses.len(),
         ba0.landmarks.len(),

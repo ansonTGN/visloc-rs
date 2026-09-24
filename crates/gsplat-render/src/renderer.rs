@@ -244,12 +244,14 @@ struct Scratch {
     intersect_counts: wgpu::Buffer,
     cum_tiles_hit: wgpu::Buffer,
     projected_splats: wgpu::Buffer,
+    /// Per-isect tile id (the tile sort's keys; `tile_pairs[0].keys`).
     tile_id_from_isect: wgpu::Buffer,
-    compact_gid_from_isect: wgpu::Buffer,
-    /// Isect index, permuted by the tile sort (list position -> isect slot).
-    isect_id: wgpu::Buffer,
-    /// Compact gaussian id per tile-sorted list entry (rasterize's input).
+    /// Per-isect compact gaussian id: written by `map` in isect order, sorted
+    /// in place by tile, then read by rasterize (`tile_pairs[0].values`).
     compact_sorted: wgpu::Buffer,
+    /// `map` also writes each isect's slot; the sort does not need it, so it
+    /// lands in the ping-pong buffer the sort overwrites (`tile_pairs[1].values`).
+    isect_id: wgpu::Buffer,
     num_visible: wgpu::Buffer,
     num_intersections: wgpu::Buffer,
     readback: wgpu::Buffer,
@@ -257,7 +259,12 @@ struct Scratch {
 }
 
 impl Scratch {
-    fn new(device: &wgpu::Device, n: usize, max_isects: usize) -> Self {
+    fn new(
+        device: &wgpu::Device,
+        n: usize,
+        max_isects: usize,
+        tile_pairs: &[crate::sort::SortBuffers; 2],
+    ) -> Self {
         Self {
             global_from_compact: new_storage(device, "global_from_compact", (n * 4) as u64),
             compact_from_global: new_storage(device, "compact_from_global", (n * 4) as u64),
@@ -266,14 +273,9 @@ impl Scratch {
             cum_tiles_hit: new_storage(device, "cum_tiles_hit", (n * 4) as u64),
             // Indexed by compact (visible) id, not by intersection.
             projected_splats: new_storage(device, "projected_splats", (n * 9 * 4) as u64),
-            tile_id_from_isect: new_storage(device, "tile_id_from_isect", (max_isects * 4) as u64),
-            compact_gid_from_isect: new_storage(
-                device,
-                "compact_gid_from_isect",
-                (max_isects * 4) as u64,
-            ),
-            isect_id: new_storage(device, "isect_id", (max_isects * 4) as u64),
-            compact_sorted: new_storage(device, "compact_sorted", (max_isects * 4) as u64),
+            tile_id_from_isect: tile_pairs[0].keys.clone(),
+            compact_sorted: tile_pairs[0].values.clone(),
+            isect_id: tile_pairs[1].values.clone(),
             num_visible: new_storage(device, "num_visible", 4),
             num_intersections: new_storage(device, "num_intersections", 4),
             readback: device.create_buffer(&wgpu::BufferDescriptor {
@@ -359,37 +361,12 @@ fn map_bindings(
         Binding {
             binding: 6,
             ty: RW,
-            buffer: scratch.compact_gid_from_isect.clone(),
+            buffer: scratch.compact_sorted.clone(),
         },
         Binding {
             binding: 7,
             ty: RW,
             buffer: scratch.isect_id.clone(),
-        },
-    ]
-}
-
-fn gather_bindings(proj_uniforms: &wgpu::Buffer, scratch: &Scratch) -> Vec<Binding> {
-    vec![
-        Binding {
-            binding: 0,
-            ty: wgpu::BufferBindingType::Uniform,
-            buffer: proj_uniforms.clone(),
-        },
-        Binding {
-            binding: 1,
-            ty: RO,
-            buffer: scratch.compact_gid_from_isect.clone(),
-        },
-        Binding {
-            binding: 2,
-            ty: RO,
-            buffer: scratch.isect_id.clone(),
-        },
-        Binding {
-            binding: 3,
-            ty: RW,
-            buffer: scratch.compact_sorted.clone(),
         },
     ]
 }
@@ -487,7 +464,6 @@ pub struct Renderer {
     map: Stage,
     offsets: Stage,
     raster: Stage,
-    gather: Stage,
     proj_uniforms: wgpu::Buffer,
     raster_uniforms: wgpu::Buffer,
     tile_offsets: wgpu::Buffer,
@@ -589,8 +565,16 @@ impl Renderer {
         let max_isects = initial_isects
             .unwrap_or_else(|| (n * 64).clamp(1 << 20, 1 << 26))
             .clamp(1, max_isects_limit);
-        let scratch = Scratch::new(&ctx.device, n, max_isects);
         let dev = &ctx.device;
+        // Device-side sort scratch. The depth sort and tile sort each need
+        // ping-pong key/value pairs; the tile pairs double as the per-isect
+        // scratch (see `Scratch`), so intersections cost 4 u32 buffers.
+        let sort_capacity = n.max(max_isects).max(1);
+        let sorter = crate::sort::RadixSorter::new(dev, sort_capacity);
+        // The depth sort only ever holds the visible gaussians (<= n).
+        let depth_pairs = sorter.allocate_len(dev, "depth", n.max(1));
+        let tile_pairs = sorter.allocate_len(dev, "tile", max_isects);
+        let scratch = Scratch::new(dev, n, max_isects, &tile_pairs);
 
         let proj_uniforms = dev.create_buffer(&wgpu::BufferDescriptor {
             label: Some("proj_uniforms"),
@@ -750,22 +734,7 @@ impl Renderer {
             ),
         );
 
-        let gather = build_stage(
-            dev,
-            "gather_compact",
-            "gather_compact",
-            shaders::gather_compact().source,
-            &gather_bindings(&proj_uniforms, &scratch),
-        );
-
-        // Device-side sort/scan scratch. The depth sort and tile sort each need
-        // ping-pong key/value pairs; `counts_sorted` feeds the prefix scan.
-        let sort_capacity = n.max(max_isects).max(1);
-        let sorter = crate::sort::RadixSorter::new(dev, sort_capacity);
         let scanner = crate::scan::PrefixScanner::new(dev, n.max(1));
-        // The depth sort only ever holds the visible gaussians (<= n).
-        let depth_pairs = sorter.allocate_len(dev, "depth", n.max(1));
-        let tile_pairs = sorter.allocate(dev, "tile");
 
         Ok(Self {
             ctx,
@@ -776,7 +745,6 @@ impl Renderer {
             map,
             offsets,
             raster,
-            gather,
             proj_uniforms,
             raster_uniforms,
             tile_offsets,
@@ -807,14 +775,12 @@ impl Renderer {
         }
         let cap = needed.saturating_add(needed / 4).min(self.max_isects_limit);
         let dev = &self.ctx.device;
-        self.scratch.tile_id_from_isect = new_storage(dev, "tile_id_from_isect", (cap * 4) as u64);
-        self.scratch.compact_gid_from_isect =
-            new_storage(dev, "compact_gid_from_isect", (cap * 4) as u64);
-        self.scratch.isect_id = new_storage(dev, "isect_id", (cap * 4) as u64);
-        self.scratch.compact_sorted = new_storage(dev, "compact_sorted", (cap * 4) as u64);
-        self.scratch.max_isects = cap;
         self.sorter.reserve(dev, cap);
-        self.tile_pairs = self.sorter.allocate(dev, "tile");
+        self.tile_pairs = self.sorter.allocate_len(dev, "tile", cap);
+        self.scratch.tile_id_from_isect = self.tile_pairs[0].keys.clone();
+        self.scratch.compact_sorted = self.tile_pairs[0].values.clone();
+        self.scratch.isect_id = self.tile_pairs[1].values.clone();
+        self.scratch.max_isects = cap;
         self.map.rebind(
             dev,
             "map_gaussians",
@@ -835,11 +801,6 @@ impl Renderer {
                 &self.out_img,
                 &self.residuals,
             ),
-        );
-        self.gather.rebind(
-            dev,
-            "gather_compact",
-            &gather_bindings(&self.proj_uniforms, &self.scratch),
         );
     }
 
@@ -1001,15 +962,32 @@ impl Renderer {
 
         // ----- Device-side tile-id sort over the isect list. -----
         if ni > 0 {
-            self.sort_in_place(
-                &self.scratch.tile_id_from_isect,
-                &self.scratch.isect_id,
+            // Sort (tile id, compact id) pairs in `tile_pairs` directly. Keys
+            // are tile ids < num_tiles; the LSD sort is stable, so the depth
+            // order from the first sort survives within each tile.
+            let key_bits = crate::sort::key_bits_for(num_tiles.saturating_sub(1));
+            self.sorter.prepare(&self.ctx.queue, ni, key_bits);
+            let mut encoder =
+                self.ctx
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("tile_sort"),
+                    });
+            let out = self.sorter.encode(
+                &self.ctx.device,
+                &mut encoder,
                 &self.tile_pairs,
                 ni,
-                // Keys are tile ids < num_tiles; the LSD sort is stable, so the
-                // depth order from the first sort survives within each tile.
-                crate::sort::key_bits_for(num_tiles.saturating_sub(1)),
+                key_bits,
             );
+            if out == 1 {
+                // Downstream stages read pair 0.
+                let len = (ni * 4) as u64;
+                let [a, b] = &self.tile_pairs;
+                encoder.copy_buffer_to_buffer(&b.keys, 0, &a.keys, 0, len);
+                encoder.copy_buffer_to_buffer(&b.values, 0, &a.values, 0, len);
+            }
+            self.ctx.queue.submit(Some(encoder.finish()));
         }
         prof.mark(&self.ctx.device, "tile_sort");
 
@@ -1023,7 +1001,6 @@ impl Renderer {
                     });
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-                dispatch_threads(&mut pass, &self.gather, ni as u32);
                 dispatch_threads(&mut pass, &self.offsets, ni as u32);
             }
             self.ctx.queue.submit(Some(encoder.finish()));

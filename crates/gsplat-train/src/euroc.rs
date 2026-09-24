@@ -51,8 +51,9 @@ pub struct EurocSfmConfig {
     /// same detector/descriptor path as the CPU extractor, validated by
     /// keypoint agreement rather than bytes.
     pub gpu_sift: bool,
-    /// Run the SfM's global and local bundle adjustments on the GPU
-    /// (`visloc-ba-gpu`, needs the `gpu` feature).
+    /// Run the SfM's global bundle adjustments on the GPU (`visloc-ba-gpu`,
+    /// needs the `gpu` feature). Local windows stay on the CPU unless
+    /// `VISLOC_BA_GPU_LOCAL` is set (latency-bound on small systems).
     pub gpu_ba: bool,
 }
 
