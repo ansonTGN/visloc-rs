@@ -12,6 +12,10 @@
 @group(0) @binding(4) var<storage, read> global_from_compact: array<u32>;
 @group(0) @binding(5) var<storage, read_write> tile_id_from_isect: array<u32>;
 @group(0) @binding(6) var<storage, read_write> compact_gid_from_isect: array<u32>;
+// Identity (the isect's own index). The tile sort permutes it, so after the
+// sort it maps each list position back to its unsorted isect slot (where the
+// backward pass writes that isect's gradient).
+@group(0) @binding(7) var<storage, read_write> isect_id: array<u32>;
 
 @compute @workgroup_size(256)
 fn map_gaussians(@builtin(global_invocation_id) gid3: vec3<u32>) {
@@ -51,6 +55,7 @@ fn map_gaussians(@builtin(global_invocation_id) gid3: vec3<u32>) {
             let tile_id = ty * u.tile_bw + tx;
             tile_id_from_isect[base_isect] = tile_id;
             compact_gid_from_isect[base_isect] = compact;
+            isect_id[base_isect] = base_isect;
             base_isect = base_isect + 1u;
             count = count - 1u;
         }

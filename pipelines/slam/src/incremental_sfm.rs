@@ -11591,13 +11591,34 @@ fn run_bundle_adjustment_impl_with_fixed_rotations(
     } else {
         None
     };
+    if let Some(path) = std::env::var_os("VISLOC_SFM_BA_DUMP") {
+        // Replayable copy of this solve for solver benchmarks (overwritten
+        // by every global BA, so the file ends with the last one).
+        if fixed_rotation_images.is_none() && ba.camera.params.len() >= 4 {
+            if let Err(error) = crate::ba_problem_io::write_ba_problem(
+                &ba,
+                observation_weights.as_deref(),
+                std::path::Path::new(&path),
+            ) {
+                eprintln!("sfm-ba-dump: failed: {error}");
+            }
+        }
+    }
     let pre_optimize_seconds = assembly_started.elapsed().as_secs_f64();
     let optimize_started = std::time::Instant::now();
     let use_matrix_free = sfm_matrix_free_ba_enabled(&ba_config) && fixed_rotation_images.is_none();
     if use_matrix_free && sfm_timing_or_debug_enabled() && !ba_config.matrix_free_ba {
         eprintln!("sfm-matrix-free: enabled via VISLOC_SFM_BA_MATRIX_FREE");
     }
-    let result = if use_matrix_free {
+    let accelerated = if observation_weights.is_none() && fixed_rotation_images.is_none() {
+        crate::ba_accel::ba_accelerator()
+            .and_then(|a| a.optimize(&mut ba, &ba_config, crate::ba_accel::BaScope::Global))
+    } else {
+        None
+    };
+    let result = if let Some(result) = accelerated {
+        result?
+    } else if use_matrix_free {
         ba.optimize_honoring_matrix_free(&ba_config, observation_weights.as_deref())?
     } else if let Some(weights) = observation_weights.as_deref() {
         ba.optimize_with_observation_weights(&ba_config, weights)?
@@ -12169,7 +12190,24 @@ fn bundle_adjust_local(
             }
         }
     }
-    ba.optimize(&config.ba_config)?;
+    if let Some(path) = std::env::var_os("VISLOC_SFM_BA_DUMP_LOCAL") {
+        // Replayable copy of this local solve (overwritten by every call).
+        if let Err(error) =
+            crate::ba_problem_io::write_ba_problem(&ba, None, std::path::Path::new(&path))
+        {
+            eprintln!("sfm-ba-dump: failed: {error}");
+        }
+    }
+    match crate::ba_accel::ba_accelerator()
+        .and_then(|a| a.optimize(&mut ba, &config.ba_config, crate::ba_accel::BaScope::Local))
+    {
+        Some(result) => {
+            result?;
+        }
+        None => {
+            ba.optimize(&config.ba_config)?;
+        }
+    }
 
     for &image in &used {
         if variable.contains(&image) {

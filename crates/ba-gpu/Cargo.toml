@@ -1,0 +1,43 @@
+[package]
+name = "visloc-ba-gpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "wgpu bundle adjustment (GPU linearization + implicit-Schur PCG) for visloc-rs SfM."
+readme.workspace = true
+documentation = "https://docs.rs/visloc-ba-gpu"
+homepage.workspace = true
+repository.workspace = true
+keywords = ["bundle-adjustment", "sfm", "wgpu", "gpu", "pcg"]
+categories = ["computer-vision", "science::robotics"]
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+# Opt-in for the same toolchain reason as `visloc-gsplat-render/gpu`.
+gpu = ["visloc-gsplat-render/gpu", "dep:wgpu", "dep:bytemuck", "dep:pollster"]
+
+[dependencies]
+bytemuck = { workspace = true, optional = true }
+nalgebra = { workspace = true }
+pollster = { workspace = true, optional = true }
+rayon = { workspace = true }
+thiserror = { workspace = true }
+visloc-core = { path = "../core", version = "0.2.0" }
+visloc-gsplat-render = { path = "../gsplat-render", version = "0.2.0" }
+visloc-slam = { path = "../../pipelines/slam", version = "0.2.0" }
+wgpu = { workspace = true, optional = true }
+
+[[example]]
+name = "ba_gpu_replay"
+path = "examples/ba_gpu_replay.rs"
+required-features = ["gpu"]
+
+[lib]
+doctest = false
+
+[lints.rust]
+unsafe_code = "deny"

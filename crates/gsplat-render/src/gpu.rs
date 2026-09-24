@@ -9,6 +9,8 @@ pub enum GpuError {
     NoAdapter,
     #[error("failed to create the GPU device: {0}")]
     Device(#[from] wgpu::RequestDeviceError),
+    #[error("the GPU device lacks a required feature: {0}")]
+    MissingFeature(&'static str),
 }
 
 /// A ready-to-use wgpu device and queue.
@@ -21,6 +23,8 @@ pub struct GpuContext {
     pub adapter_info: wgpu::AdapterInfo,
     /// Adapter limits actually requested for the device (used to size buffers).
     pub limits: wgpu::Limits,
+    /// Optional features enabled on the device (`SUBGROUP` when supported).
+    pub features: wgpu::Features,
 }
 
 impl GpuContext {
@@ -68,9 +72,12 @@ impl GpuContext {
         // Request the adapter's real limits so large scenes are not capped by
         // the conservative WebGPU defaults (e.g. 256 MiB buffers).
         let limits = adapter.limits();
+        // Subgroup ops are used by the backward pass (training) when present.
+        let features = adapter.features() & wgpu::Features::SUBGROUP;
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("visloc-gsplat-render"),
+                required_features: features,
                 required_limits: limits.clone(),
                 ..Default::default()
             }))?;
@@ -80,6 +87,7 @@ impl GpuContext {
             queue,
             adapter_info: info,
             limits,
+            features,
         })
     }
 }

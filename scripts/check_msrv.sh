@@ -19,4 +19,6 @@ fi
 # 30 depends on naga, which needs `indexmap >= 2.11.4` (edition2024, Rust >=
 # 1.85). The feature is off by default, so this build never pulls it; build the
 # GPU renderer with `--features gpu` on a current stable toolchain.
+# `visloc-gsplat-train/gpu`, `visloc-sift-gpu/gpu` and `visloc-ba-gpu/gpu` are
+# the same opt-in wgpu boundary.
 cargo +1.83.0 check --workspace --all-targets --features image-io

@@ -308,21 +308,126 @@ on the DLL search path, and FXC is extremely slow on these compute shaders.
 Windows SDK and loads DXC explicitly (`WGPU_DX12_COMPILER` still overrides).
 GPU test suite 145 s → 3.7 s; `gsplat_gpu_render` end to end ~590 s → 11 s.
 
-### Stage 2 — Burn + CubeCL differentiable rasterizer
-- Port the forward rasterizer to CubeCL kernels; add the **analytic backward**
-  (projection backward + tile rasterize backward) as Burn custom ops.
-- Validate every gradient against finite differences and against the CPU
-  reference. This is the highest-risk stage; brush and diffsplat are the
-  references.
-- Deliverable: a differentiable render step whose `backward` matches FD.
+## Trainer goal (decided 2026-09-23)
 
-### Stage 3 — Trainer
-- Init gaussians from the SfM sparse points (on-surface init, the fix
-  `euroc_colmap_splat.sh` documents), optimize with L1 + 0.2*(1-SSIM), RNG-free
-  densify/prune or MCMC strategy.
-- Deliverable: `gsplat-cli train <colmap_model> <out.ply>` runs in Rust on
-  EuRoC V2_03 and produces a `.splat` comparable to the Python baseline
-  (l1 ~= 0.006 on the orbit capture).
+Compete with brush as a Rust 3DGS **trainer**, differentiated by:
+
+1. **COLMAP-free, all-Rust pipeline**: images (+IMU) → visloc-rs SfM/VIO poses →
+   trained splat in one command. brush expects a COLMAP/nerfstudio dataset.
+2. **Released crates only**: stock wgpu from crates.io, no git-pinned Burn, no
+   wgpu fork (brush needs both).
+
+Success bar: eval PSNR within 0.5 dB of brush at equal steps, training time
+<= brush on the same GPU (GTX 1660 Ti), and an EuRoC sequence → splat with no
+Python or COLMAP.
+
+Milestones: **M0** baselines (brush on the COLMAP sample scenes, scored by our
+own evaluator) → **M1** differentiable renderer → **M2** trainer → **M3**
+end-to-end CLI.
+
+**Evaluation protocol.** Undistort to PINHOLE with `colmap image_undistorter
+--max_image_size 1024`, sort views by image name, hold out every 8th (index
+0, 8, ...: brush's and the Inria split), train on the rest, and score every
+method's exported Inria `.ply` with `visloc-gsplat-train`'s `gsplat_eval`
+(one renderer, black background, PSNR on display-space RGB). brush prints no
+metrics without its viewer, and scoring all methods with one evaluator keeps
+the comparison fair anyway.
+
+### Stage 2 (M1) — differentiable rasterizer on wgpu
+
+Decision: hand-written WGSL backward next to the existing wgpu forward, **not**
+Burn + CubeCL (that would bring back the git-pinned Burn this project is
+differentiating against). Structure:
+
+- **CPU reference backward** in `gsplat-core`, checked against central finite
+  differences for every parameter group (mean, log-scale, quaternion, opacity
+  logit, SH). It is the oracle for the GPU kernels.
+- **Forward residuals**: the forward pass also stores each pixel's final
+  transmittance and last contributing list index, so the backward walk can
+  start there and recover `T_i = T_{i+1} / (1 - alpha_i)` back to front.
+- **`rasterize_backward`** (one workgroup per tile, one thread per pixel):
+  per-pixel gradients of each splat's `(mean2d, conic, opacity, colour)` are
+  summed over the tile with `subgroupAdd` (native `SUBGROUP`; DX12 + DXC has it)
+  and a shared-memory CAS float add across the 8 subgroups (no float atomics in
+  wgpu on this GPU). Each (tile, splat) total goes to its own slot — the tile
+  sort carries the original isect index — so there are **no global atomics**
+  and a gaussian's gradient is the deterministic sum of its contiguous isect
+  range. A baseline-WebGPU fallback (no subgroups) can come later.
+- **`project_backward`**: per gaussian, chain `(mean2d, conic, colour, opacity)`
+  gradients through the EWA projection, the covariance and the SH basis to the
+  parameters.
+- Deliverable: GPU gradients match the CPU reference (and FD) on synthetic
+  scenes and on a real-scene subsample.
+
+### Stage 3 (M2) — Trainer
+- Init from the SfM points; L1 + 0.2 (1 - SSIM) loss with its image gradient on
+  the GPU; Adam on the GPU; densify/prune (brush-style growth) or MCMC.
+- Deliverable: train on the M0 scenes and land within 0.5 dB of brush at equal
+  steps.
+
+### M3 — End-to-end CLI
+- `gsplat-cli train` from a COLMAP model, and from raw EuRoC via visloc-rs
+  SfM/VIO poses (no COLMAP, no Python), exporting `.ply` / `.splat`.
+
+### Status (2026-09-23)
+
+- **M0**: `visloc-gsplat-train` with the brush-compatible evaluator
+  (`gsplat_eval`: PSNR + SSIM, black background, every 8th view held out).
+  brush v0.3.0 baselines on the undistorted COLMAP sample scenes (1024 px,
+  30k steps, GTX 1660 Ti): south-building 21.68 dB (7k: 21.57) in 2379 s,
+  1.05M splats; gerrard-hall in 2147 s. Getting there fixed three bugs:
+  a gamma-2.2 encode in `Image::to_rgb8` (all PNGs were washed out), a PLY
+  reader that assumed contiguous properties (brush writes them sorted), and
+  `sh_rest_coeffs_per_channel` returning 3x the per-channel count (every
+  standard degree 1-3 PLY was rejected and the GPU read wrong SH for
+  degree > 0).
+- **M1**: done. CPU f64 oracle (`gsplat_core::backward`, FD-checked); GPU
+  backward (`Renderer::backward`) matches it to < 1e-6 relative on degree 2
+  and 3 scenes.
+- **M2**: on-device trainer (`trainer::Trainer`): L1 + 0.2 D-SSIM (GPU SSIM
+  gradient matches the CPU one to 1e-6), Adam with Inria learning rates,
+  Inria densification on the host with the Adam state carried across.
+- **M2 result** (same evaluator, split, 1024 px, GTX 1660 Ti; our run used
+  DXC and atomic backward accumulation):
+
+  | scene | method | steps | PSNR | SSIM | gaussians | train time |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | south-building | brush 0.3.0 | 30k | 21.684 | 0.7875 | 1.05M | 2379 s |
+  | south-building | ours | 30k | 21.672 | 0.7872 | 1.20M | 5319 s |
+  | gerrard-hall | brush 0.3.0 | 30k | 19.022 | 0.6934 | 0.83M | 2147 s |
+  | gerrard-hall | ours | 30k | 19.686 | 0.7070 | 0.64M | 3533 s |
+  | south-building | brush / ours | 7k | 21.574 / 20.696 | 0.726 / 0.685 | | |
+  | gerrard-hall | brush / ours | 7k | 19.191 / 19.555 | 0.671 / 0.659 | | |
+
+  Quality bar met (parity on south-building, +0.66 dB on gerrard-hall at
+  30k). Speed bar not met: 1.6-2.2x brush's wall time (~190 ms/step at 1.2M
+  gaussians after densification stops, plus a host round-trip and renderer
+  rebuild every 100 steps while densifying).
+- **M2 re-benchmark (2026-09-24)** after on-device densification, the
+  backward/SSIM speedups and halving the trainer's GPU memory (the 1.2M
+  gaussian run had overflowed the 6 GB card and was being paged by WDDM):
+  same protocol, GPU exclusive but thermal-throttling (88 C) and shared
+  with a desktop app.
+
+  | scene | method | steps | PSNR | SSIM | gaussians | train time |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | south-building | brush 0.3.0 | 30k | 21.684 | 0.7875 | 1.05M | 2379 s |
+  | south-building | ours | 30k | **22.102** | **0.8009** | 1.20M | 3054 s |
+  | gerrard-hall | brush 0.3.0 | 30k | 19.022 | 0.6934 | 0.83M | 2147 s |
+  | gerrard-hall | ours | 30k | **19.579** | **0.7046** | 0.64M | 2344 s |
+
+  Quality beats brush on both scenes (+0.42 / +0.56 dB); wall time is
+  1.28x / 1.09x brush's. Not yet in these numbers: the tile sort now runs in
+  place over 4 per-intersection buffers instead of 8 (profiled forward
+  160 -> 144 ms, identical renders).
+- **M3**: `gsplat_euroc` example (feature `euroc`): raw EuRoC -> undistort
+  -> SIFT -> verified temporal matches -> visloc-rs incremental SfM ->
+  trainer, no COLMAP or Python. With `--gpu-sift --gpu-ba` (crates
+  `visloc-sift-gpu`, `visloc-ba-gpu`) V1_01 (200 frames, stride 4) goes from
+  images to poses in 239 s (SIFT 28 s, batched GPU matching 38 s, parallel
+  verification 32 s, SfM 141 s; the CPU path spends 838 s in SfM alone) and
+  to a 7k-step splat in 766 s total: 183/200 frames registered, 0.638 px,
+  held-out PSNR 29.26 / SSIM 0.946 (CPU-SfM run: 29.03 / 0.945).
 
 ### Stage 4 — Browser (optional, non-blocking)
 - wasm + WebGPU build of the renderer; training only if stage 2/3 land cleanly.

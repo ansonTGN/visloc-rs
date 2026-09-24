@@ -18,6 +18,22 @@ fn build(name: &'static str, body: &str) -> Kernel {
     }
 }
 
+/// Uses subgroup ops: naga (wgpu 30) accepts them without an `enable`
+/// directive when the device has `Features::SUBGROUP`.
+pub fn rasterize_backward() -> Kernel {
+    build(
+        "rasterize_backward",
+        include_str!("shaders/rasterize_backward.wgsl"),
+    )
+}
+
+pub fn project_backward() -> Kernel {
+    build(
+        "project_backward",
+        include_str!("shaders/project_backward.wgsl"),
+    )
+}
+
 pub fn project_forward() -> Kernel {
     build(
         "project_forward",
@@ -34,6 +50,13 @@ pub fn project_visible() -> Kernel {
 
 pub fn map_gaussians() -> Kernel {
     build("map_gaussians", include_str!("shaders/map_gaussians.wgsl"))
+}
+
+pub fn gather_compact() -> Kernel {
+    build(
+        "gather_compact",
+        include_str!("shaders/gather_compact.wgsl"),
+    )
 }
 
 pub fn tile_offsets() -> Kernel {

@@ -13,7 +13,7 @@
 //! rot_0..3                f32   quaternion (w, x, y, z), unnormalized
 //! ```
 //!
-//! `K = sh_rest_coeffs_per_channel(degree)` (0, 9, 24, 45 for degrees 0..3).
+//! `K = sh_rest_coeffs_per_channel(degree)` (0, 3, 8, 15 for degrees 0..3).
 //! Unlike `.splat`, `.ply` stores the raw (pre-activation) values and the full
 //! SH, so it is the lossless interop format used for training.
 
@@ -132,10 +132,12 @@ pub fn scene_from_ply(bytes: &[u8]) -> Result<Scene, PlyError> {
     let i_x = req("x")?;
     let i_y = req("y")?;
     let i_z = req("z")?;
-    let i_dc0 = req("f_dc_0")?;
+    // Look every property up by name: exporters order them differently (brush
+    // sorts alphabetically), so do not assume f_dc_1 follows f_dc_0.
+    let i_dc = [req("f_dc_0")?, req("f_dc_1")?, req("f_dc_2")?];
     let i_opacity = req("opacity")?;
-    let i_s0 = req("scale_0")?;
-    let i_r0 = req("rot_0")?;
+    let i_s = [req("scale_0")?, req("scale_1")?, req("scale_2")?];
+    let i_r = [req("rot_0")?, req("rot_1")?, req("rot_2")?, req("rot_3")?];
 
     // Discover the SH degree from the highest present f_rest index.
     let mut rest_indices: Vec<(usize, usize)> = Vec::new();
@@ -151,9 +153,9 @@ pub fn scene_from_ply(bytes: &[u8]) -> Result<Scene, PlyError> {
     let coeffs_per_channel = rest_total / 3;
     let sh_degree = match coeffs_per_channel {
         0 => 0,
-        9 => 1,
-        24 => 2,
-        45 => 3,
+        3 => 1,
+        8 => 2,
+        15 => 3,
         _ => {
             return Err(PlyError::MissingProperty(format!(
                 "unsupported f_rest count {rest_total}"
@@ -171,26 +173,22 @@ pub fn scene_from_ply(bytes: &[u8]) -> Result<Scene, PlyError> {
         let mean = Vector3::new(f32_at(row, i_x), f32_at(row, i_y), f32_at(row, i_z));
         // f_rest_0..2 are the first higher-order R/G/B coefficients; the DC is
         // in f_dc_0..2. The full rest layout is channel-major once re-ordered.
-        let sh_dc = [
-            f32_at(row, i_dc0),
-            f32_at(row, i_dc0 + 1),
-            f32_at(row, i_dc0 + 2),
-        ];
+        let sh_dc = i_dc.map(|i| f32_at(row, i));
         let mut sh_rest = vec![0.0f32; rest_total];
         // PLY stores f_rest channel-major already: [R..., G..., B...].
         for (k, idx) in &rest_indices {
             sh_rest[*k] = f32_at(row, *idx);
         }
         let scale_log = Vector3::new(
-            f32_at(row, i_s0),
-            f32_at(row, i_s0 + 1),
-            f32_at(row, i_s0 + 2),
+            f32_at(row, i_s[0]),
+            f32_at(row, i_s[1]),
+            f32_at(row, i_s[2]),
         );
         let rotation = Quaternion::new(
-            f32_at(row, i_r0),
-            f32_at(row, i_r0 + 1),
-            f32_at(row, i_r0 + 2),
-            f32_at(row, i_r0 + 3),
+            f32_at(row, i_r[0]),
+            f32_at(row, i_r[1]),
+            f32_at(row, i_r[2]),
+            f32_at(row, i_r[3]),
         );
         let opacity_logit = f32_at(row, i_opacity);
         gaussians.push(Gaussian {

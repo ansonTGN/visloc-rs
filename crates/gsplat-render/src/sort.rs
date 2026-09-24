@@ -194,7 +194,13 @@ impl RadixSorter {
 
     /// Allocate a pair of ping-pong buffers for up to `max_elements` pairs.
     pub fn allocate(&self, device: &wgpu::Device, label: &str) -> [SortBuffers; 2] {
-        let bytes = (self.max_elements * 4) as u64;
+        self.allocate_len(device, label, self.max_elements)
+    }
+
+    /// Ping-pong buffers for a sort that never exceeds `len` pairs (at most
+    /// the sorter's capacity), e.g. the per-gaussian depth sort.
+    pub fn allocate_len(&self, device: &wgpu::Device, label: &str, len: usize) -> [SortBuffers; 2] {
+        let bytes = (len.min(self.max_elements).max(1) * 4) as u64;
         let mk = |suffix: &str| SortBuffers {
             keys: storage(
                 device,

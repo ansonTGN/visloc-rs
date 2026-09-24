@@ -11,6 +11,9 @@
 //! complement bundle adjustment that jointly refines poses and landmarks
 //! from 2D reprojection residuals.
 
+pub mod ba_accel;
+pub mod ba_problem_io;
+pub use ba_accel::{set_ba_accelerator, BaAccelerator, BaScope};
 pub mod bundle;
 // Milestone C1 (docs/colmap_rig_mapper_port_plan.md): a faithful, from-source
 // port of COLMAP's rig-aware incremental-mapper data model (Rig/Frame/

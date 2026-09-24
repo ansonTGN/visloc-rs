@@ -26,6 +26,9 @@ use crate::shaders;
 use crate::uniforms::{tile_bounds, ProjectUniforms, RasterUniforms};
 
 /// A scene uploaded to the GPU once.
+///
+/// `packed` keeps the scene's metadata (count, SH degree); its host arrays
+/// are dropped after upload so a large scene is not held twice.
 pub struct GpuScene {
     pub packed: PackedScene,
     transforms: wgpu::Buffer,
@@ -46,7 +49,11 @@ fn new_storage(device: &wgpu::Device, label: &str, bytes: u64) -> wgpu::Buffer {
 
 impl GpuScene {
     pub fn upload(ctx: &GpuContext, scene: &Scene) -> Self {
-        let packed = PackedScene::from_scene(scene);
+        Self::upload_packed(ctx, PackedScene::from_scene(scene))
+    }
+
+    /// Upload an already packed scene (e.g. a trainer's parameter arrays).
+    pub fn upload_packed(ctx: &GpuContext, packed: PackedScene) -> Self {
         let transforms = new_storage(
             &ctx.device,
             "transforms",
@@ -61,11 +68,46 @@ impl GpuScene {
         ctx.queue
             .write_buffer(&sh, 0, bytemuck::cast_slice(&packed.sh));
         Self {
-            packed,
+            packed: PackedScene {
+                transforms: Vec::new(),
+                opacity: Vec::new(),
+                sh: Vec::new(),
+                ..packed
+            },
             transforms,
             opacity,
             sh,
         }
+    }
+
+    /// Wrap parameter buffers that already live on the device (e.g. written by
+    /// a trainer's on-device densification) in the forward input layouts.
+    pub fn from_buffers(
+        transforms: wgpu::Buffer,
+        opacity: wgpu::Buffer,
+        sh: wgpu::Buffer,
+        num_gaussians: usize,
+        sh_degree: u32,
+    ) -> Self {
+        let cpc = (sh_degree + 1) as usize;
+        Self {
+            packed: PackedScene {
+                transforms: Vec::new(),
+                opacity: Vec::new(),
+                sh: Vec::new(),
+                sh_coeffs_per_channel: cpc * cpc,
+                num_gaussians,
+                sh_degree,
+            },
+            transforms,
+            opacity,
+            sh,
+        }
+    }
+
+    /// Floats in the SH buffer (3 channels x (degree + 1)^2 per gaussian).
+    pub fn sh_floats(&self) -> usize {
+        self.packed.num_gaussians * 3 * self.packed.sh_coeffs_per_channel
     }
 
     /// Re-upload the packed arrays (used when the host mutates the scene).
@@ -182,6 +224,17 @@ fn dispatch(pass: &mut wgpu::ComputePass<'_>, stage: &Stage, x: u32) {
     pass.dispatch_workgroups(x.max(1), 1, 1);
 }
 
+/// Dispatch `groups` workgroups folded into 2D (x <= 65535); the kernel
+/// linearises its workgroup id as `wid.x + wid.y * num_workgroups.x`.
+fn dispatch_groups_2d(pass: &mut wgpu::ComputePass<'_>, stage: &Stage, groups: u32) {
+    const MAX_DIM: u32 = 65535;
+    let groups = groups.max(1);
+    let x = groups.min(MAX_DIM);
+    pass.set_pipeline(&stage.pipeline);
+    pass.set_bind_group(0, &stage.bind_group, &[]);
+    pass.dispatch_workgroups(x, groups.div_ceil(x), 1);
+}
+
 /// Dispatch one 256-wide invocation per element for `threads` elements, folding
 /// the workgroup count into 2D so it can exceed the 65535-per-dimension limit.
 /// The kernel must linearise with `gid.x + gid.y * num_workgroups.x * 256`.
@@ -202,8 +255,14 @@ struct Scratch {
     intersect_counts: wgpu::Buffer,
     cum_tiles_hit: wgpu::Buffer,
     projected_splats: wgpu::Buffer,
+    /// Per-isect tile id (the tile sort's keys; `tile_pairs[0].keys`).
     tile_id_from_isect: wgpu::Buffer,
-    compact_gid_from_isect: wgpu::Buffer,
+    /// Per-isect compact gaussian id: written by `map` in isect order, sorted
+    /// in place by tile, then read by rasterize (`tile_pairs[0].values`).
+    compact_sorted: wgpu::Buffer,
+    /// `map` also writes each isect's slot; the sort does not need it, so it
+    /// lands in the ping-pong buffer the sort overwrites (`tile_pairs[1].values`).
+    isect_id: wgpu::Buffer,
     num_visible: wgpu::Buffer,
     num_intersections: wgpu::Buffer,
     readback: wgpu::Buffer,
@@ -211,7 +270,12 @@ struct Scratch {
 }
 
 impl Scratch {
-    fn new(device: &wgpu::Device, n: usize, max_isects: usize) -> Self {
+    fn new(
+        device: &wgpu::Device,
+        n: usize,
+        max_isects: usize,
+        tile_pairs: &[crate::sort::SortBuffers; 2],
+    ) -> Self {
         Self {
             global_from_compact: new_storage(device, "global_from_compact", (n * 4) as u64),
             compact_from_global: new_storage(device, "compact_from_global", (n * 4) as u64),
@@ -220,12 +284,9 @@ impl Scratch {
             cum_tiles_hit: new_storage(device, "cum_tiles_hit", (n * 4) as u64),
             // Indexed by compact (visible) id, not by intersection.
             projected_splats: new_storage(device, "projected_splats", (n * 9 * 4) as u64),
-            tile_id_from_isect: new_storage(device, "tile_id_from_isect", (max_isects * 4) as u64),
-            compact_gid_from_isect: new_storage(
-                device,
-                "compact_gid_from_isect",
-                (max_isects * 4) as u64,
-            ),
+            tile_id_from_isect: tile_pairs[0].keys.clone(),
+            compact_sorted: tile_pairs[0].values.clone(),
+            isect_id: tile_pairs[1].values.clone(),
             num_visible: new_storage(device, "num_visible", 4),
             num_intersections: new_storage(device, "num_intersections", 4),
             readback: device.create_buffer(&wgpu::BufferDescriptor {
@@ -311,7 +372,12 @@ fn map_bindings(
         Binding {
             binding: 6,
             ty: RW,
-            buffer: scratch.compact_gid_from_isect.clone(),
+            buffer: scratch.compact_sorted.clone(),
+        },
+        Binding {
+            binding: 7,
+            ty: RW,
+            buffer: scratch.isect_id.clone(),
         },
     ]
 }
@@ -345,6 +411,7 @@ fn raster_bindings(
     scratch: &Scratch,
     tile_offsets: &wgpu::Buffer,
     out_img: &wgpu::Buffer,
+    residuals: &PixelResiduals,
 ) -> Vec<Binding> {
     vec![
         Binding {
@@ -360,7 +427,7 @@ fn raster_bindings(
         Binding {
             binding: 2,
             ty: RO,
-            buffer: scratch.compact_gid_from_isect.clone(),
+            buffer: scratch.compact_sorted.clone(),
         },
         Binding {
             binding: 3,
@@ -377,7 +444,25 @@ fn raster_bindings(
             ty: RO,
             buffer: scratch.global_from_compact.clone(),
         },
+        Binding {
+            binding: 6,
+            ty: RW,
+            buffer: residuals.final_t.clone(),
+        },
+        Binding {
+            binding: 7,
+            ty: RW,
+            buffer: residuals.last_idx.clone(),
+        },
     ]
+}
+
+/// Per-pixel forward residuals kept for the backward pass.
+pub(crate) struct PixelResiduals {
+    /// Transmittance left after the last blended splat.
+    pub(crate) final_t: wgpu::Buffer,
+    /// One past the tile-list index of the last blended splat (0 = none).
+    pub(crate) last_idx: wgpu::Buffer,
 }
 
 /// The forward renderer.
@@ -394,6 +479,7 @@ pub struct Renderer {
     raster_uniforms: wgpu::Buffer,
     tile_offsets: wgpu::Buffer,
     out_img: wgpu::Buffer,
+    residuals: PixelResiduals,
     image_w: u32,
     image_h: u32,
     sh_degree: u32,
@@ -407,6 +493,18 @@ pub struct Renderer {
     max_isects_limit: usize,
     /// Skip the output-image readback (for GPU-only timing / viewer use).
     skip_readback: bool,
+    /// Counts of the last rendered frame (what the backward pass differentiates).
+    last_frame: FrameCounts,
+    /// Backward-pass pipelines and buffers, built on first use.
+    backward: Option<backward::BackwardState>,
+}
+
+/// Visible gaussians, intersections and tiles of a rendered frame.
+#[derive(Clone, Copy, Default)]
+struct FrameCounts {
+    nv: usize,
+    ni: usize,
+    num_tiles: u32,
 }
 
 impl Renderer {
@@ -431,7 +529,41 @@ impl Renderer {
         initial_isects: Option<usize>,
     ) -> Result<Self, GpuError> {
         let gpu_scene = GpuScene::upload(&ctx, scene);
-        let n = scene.len();
+        Self::build(ctx, gpu_scene, image_w, image_h, initial_isects)
+    }
+
+    /// [`Renderer::new`] from an already packed scene (no per-gaussian
+    /// conversion; used by the trainer after densification).
+    pub fn from_packed(
+        ctx: GpuContext,
+        packed: PackedScene,
+        image_w: u32,
+        image_h: u32,
+    ) -> Result<Self, GpuError> {
+        let gpu_scene = GpuScene::upload_packed(&ctx, packed);
+        Self::build(ctx, gpu_scene, image_w, image_h, None)
+    }
+
+    /// [`Renderer::new`] over a scene whose buffers are already on the device
+    /// (no upload).
+    pub fn from_gpu_scene(
+        ctx: GpuContext,
+        gpu_scene: GpuScene,
+        image_w: u32,
+        image_h: u32,
+    ) -> Result<Self, GpuError> {
+        Self::build(ctx, gpu_scene, image_w, image_h, None)
+    }
+
+    fn build(
+        ctx: GpuContext,
+        gpu_scene: GpuScene,
+        image_w: u32,
+        image_h: u32,
+        initial_isects: Option<usize>,
+    ) -> Result<Self, GpuError> {
+        let sh_degree = gpu_scene.packed.sh_degree;
+        let n = gpu_scene.packed.num_gaussians;
         let (tbw, tbh) = tile_bounds(image_w, image_h);
         let num_tiles = (tbw * tbh) as usize;
         // Per-intersection buffers hold one u32 each. Start from a guess and
@@ -444,8 +576,16 @@ impl Renderer {
         let max_isects = initial_isects
             .unwrap_or_else(|| (n * 64).clamp(1 << 20, 1 << 26))
             .clamp(1, max_isects_limit);
-        let scratch = Scratch::new(&ctx.device, n, max_isects);
         let dev = &ctx.device;
+        // Device-side sort scratch. The depth sort and tile sort each need
+        // ping-pong key/value pairs; the tile pairs double as the per-isect
+        // scratch (see `Scratch`), so intersections cost 4 u32 buffers.
+        let sort_capacity = n.max(max_isects).max(1);
+        let sorter = crate::sort::RadixSorter::new(dev, sort_capacity);
+        // The depth sort only ever holds the visible gaussians (<= n).
+        let depth_pairs = sorter.allocate_len(dev, "depth", n.max(1));
+        let tile_pairs = sorter.allocate_len(dev, "tile", max_isects);
+        let scratch = Scratch::new(dev, n, max_isects, &tile_pairs);
 
         let proj_uniforms = dev.create_buffer(&wgpu::BufferDescriptor {
             label: Some("proj_uniforms"),
@@ -461,6 +601,11 @@ impl Renderer {
         });
         let tile_offsets = new_storage(dev, "tile_offsets", (num_tiles * 2 * 4) as u64);
         let out_img = new_storage(dev, "out_img", (image_w as u64) * (image_h as u64) * 3 * 4);
+        let pixels = image_w as u64 * image_h as u64;
+        let residuals = PixelResiduals {
+            final_t: new_storage(dev, "final_t", pixels * 4),
+            last_idx: new_storage(dev, "last_idx", pixels * 4),
+        };
 
         let ro = wgpu::BufferBindingType::Storage { read_only: true };
         let rw = wgpu::BufferBindingType::Storage { read_only: false };
@@ -591,16 +736,16 @@ impl Renderer {
             "rasterize",
             "rasterize",
             shaders::rasterize().source,
-            &raster_bindings(&raster_uniforms, &scratch, &tile_offsets, &out_img),
+            &raster_bindings(
+                &raster_uniforms,
+                &scratch,
+                &tile_offsets,
+                &out_img,
+                &residuals,
+            ),
         );
 
-        // Device-side sort/scan scratch. The depth sort and tile sort each need
-        // ping-pong key/value pairs; `counts_sorted` feeds the prefix scan.
-        let sort_capacity = n.max(max_isects).max(1);
-        let sorter = crate::sort::RadixSorter::new(dev, sort_capacity);
         let scanner = crate::scan::PrefixScanner::new(dev, n.max(1));
-        let depth_pairs = sorter.allocate(dev, "depth");
-        let tile_pairs = sorter.allocate(dev, "tile");
 
         Ok(Self {
             ctx,
@@ -615,9 +760,10 @@ impl Renderer {
             raster_uniforms,
             tile_offsets,
             out_img,
+            residuals,
             image_w,
             image_h,
-            sh_degree: scene.sh_degree,
+            sh_degree,
             sorter,
             scanner,
             depth_pairs,
@@ -625,6 +771,8 @@ impl Renderer {
             counts_sorted,
             max_isects_limit,
             skip_readback: false,
+            last_frame: FrameCounts::default(),
+            backward: None,
         })
     }
 
@@ -638,12 +786,12 @@ impl Renderer {
         }
         let cap = needed.saturating_add(needed / 4).min(self.max_isects_limit);
         let dev = &self.ctx.device;
-        self.scratch.tile_id_from_isect = new_storage(dev, "tile_id_from_isect", (cap * 4) as u64);
-        self.scratch.compact_gid_from_isect =
-            new_storage(dev, "compact_gid_from_isect", (cap * 4) as u64);
-        self.scratch.max_isects = cap;
         self.sorter.reserve(dev, cap);
-        self.tile_pairs = self.sorter.allocate(dev, "tile");
+        self.tile_pairs = self.sorter.allocate_len(dev, "tile", cap);
+        self.scratch.tile_id_from_isect = self.tile_pairs[0].keys.clone();
+        self.scratch.compact_sorted = self.tile_pairs[0].values.clone();
+        self.scratch.isect_id = self.tile_pairs[1].values.clone();
+        self.scratch.max_isects = cap;
         self.map.rebind(
             dev,
             "map_gaussians",
@@ -662,6 +810,7 @@ impl Renderer {
                 &self.scratch,
                 &self.tile_offsets,
                 &self.out_img,
+                &self.residuals,
             ),
         );
     }
@@ -672,6 +821,12 @@ impl Renderer {
     /// per-frame cost that matters; use it to measure the true GPU frame time.
     pub fn set_skip_readback(&mut self, skip: bool) {
         self.skip_readback = skip;
+    }
+
+    /// Give the GPU context back (e.g. to rebuild the renderer for a scene
+    /// with a different number of gaussians).
+    pub fn into_context(self) -> GpuContext {
+        self.ctx
     }
 
     pub fn num_gaussians(&self) -> usize {
@@ -748,6 +903,7 @@ impl Renderer {
         let nv = (num_visible as usize).min(self.num_gaussians());
         // Only truncates if the device's storage-binding limit is exceeded.
         let ni = (num_intersections as usize).min(self.scratch.max_isects);
+        self.last_frame = FrameCounts { nv, ni, num_tiles };
 
         // Re-upload the uniforms with the now-known compaction counts.
         let u = ProjectUniforms {
@@ -817,15 +973,32 @@ impl Renderer {
 
         // ----- Device-side tile-id sort over the isect list. -----
         if ni > 0 {
-            self.sort_in_place(
-                &self.scratch.tile_id_from_isect,
-                &self.scratch.compact_gid_from_isect,
+            // Sort (tile id, compact id) pairs in `tile_pairs` directly. Keys
+            // are tile ids < num_tiles; the LSD sort is stable, so the depth
+            // order from the first sort survives within each tile.
+            let key_bits = crate::sort::key_bits_for(num_tiles.saturating_sub(1));
+            self.sorter.prepare(&self.ctx.queue, ni, key_bits);
+            let mut encoder =
+                self.ctx
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("tile_sort"),
+                    });
+            let out = self.sorter.encode(
+                &self.ctx.device,
+                &mut encoder,
                 &self.tile_pairs,
                 ni,
-                // Keys are tile ids < num_tiles; the LSD sort is stable, so the
-                // depth order from the first sort survives within each tile.
-                crate::sort::key_bits_for(num_tiles.saturating_sub(1)),
+                key_bits,
             );
+            if out == 1 {
+                // Downstream stages read pair 0.
+                let len = (ni * 4) as u64;
+                let [a, b] = &self.tile_pairs;
+                encoder.copy_buffer_to_buffer(&b.keys, 0, &a.keys, 0, len);
+                encoder.copy_buffer_to_buffer(&b.values, 0, &a.values, 0, len);
+            }
+            self.ctx.queue.submit(Some(encoder.finish()));
         }
         prof.mark(&self.ctx.device, "tile_sort");
 
@@ -1039,3 +1212,7 @@ impl StageTimer {
         );
     }
 }
+
+#[path = "renderer_backward.rs"]
+mod backward;
+pub use backward::{DeviceParams, ParamGrads, SCREEN_GRAD_FLOATS};

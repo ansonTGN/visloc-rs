@@ -16,6 +16,74 @@
 @group(0) @binding(7) var<storage, read> intersect_counts: array<u32>;
 @group(0) @binding(8) var<storage, read_write> counts_sorted: array<u32>;
 
+// SH rest coefficient k (after DC) of channel ch, or 0 past the degree.
+fn sh_rest_coef(sh_base: u32, rest_pc: u32, ch: u32, k: u32) -> f32 {
+    if (k >= rest_pc) {
+        return 0.0;
+    }
+    return sh_in[sh_base + 3u + ch * rest_pc + k];
+}
+
+// View-dependent colour (raw, + 0.5) up to degree 3; same basis as
+// `eval_sh_basis`.
+fn sh_color(sh_base: u32, rest_pc: u32, d: vec3<f32>) -> vec3<f32> {
+    let x = d.x;
+    let y = d.y;
+    let z = d.z;
+    let xx = x * x;
+    let yy = y * y;
+    let zz = z * z;
+    let c0 = 0.4886025;
+    let c3 = 1.0925485;
+    let c5 = 0.3153916;
+    let c8 = 0.3731762;
+    let c9 = 2.8906113;
+    let c10 = 1.843772;
+    let c11 = 0.5900436;
+    let b1 = -c0 * y;
+    let b2 = c0 * z;
+    let b3 = -c0 * x;
+    let b4 = c3 * x * y;
+    let b5 = -c3 * y * z;
+    let b6 = c5 * (2.0 * zz - xx - yy);
+    let b7 = -c3 * x * z;
+    let b8 = c3 * (xx - yy);
+    let b9 = -c8 * y * (3.0 * xx - yy);
+    let b10 = c9 * x * y * z;
+    let b11 = -c10 * y * (4.0 * zz - xx - yy);
+    let b12 = c11 * z * (2.0 * zz - 3.0 * xx - 3.0 * yy);
+    let b13 = -c10 * x * (4.0 * zz - xx - yy);
+    let b14 = c9 * z * (xx - yy);
+    let b15 = -c8 * x * (xx - 3.0 * yy);
+    var out: vec3<f32>;
+    for (var ch = 0u; ch < 3u; ch = ch + 1u) {
+        var acc = 0.2820948 * sh_in[sh_base + ch];
+        if (rest_pc >= 3u) {
+            acc = acc + b1 * sh_rest_coef(sh_base, rest_pc, ch, 0u)
+                + b2 * sh_rest_coef(sh_base, rest_pc, ch, 1u)
+                + b3 * sh_rest_coef(sh_base, rest_pc, ch, 2u);
+        }
+        if (rest_pc >= 8u) {
+            acc = acc + b4 * sh_rest_coef(sh_base, rest_pc, ch, 3u)
+                + b5 * sh_rest_coef(sh_base, rest_pc, ch, 4u)
+                + b6 * sh_rest_coef(sh_base, rest_pc, ch, 5u)
+                + b7 * sh_rest_coef(sh_base, rest_pc, ch, 6u)
+                + b8 * sh_rest_coef(sh_base, rest_pc, ch, 7u);
+        }
+        if (rest_pc >= 15u) {
+            acc = acc + b9 * sh_rest_coef(sh_base, rest_pc, ch, 8u)
+                + b10 * sh_rest_coef(sh_base, rest_pc, ch, 9u)
+                + b11 * sh_rest_coef(sh_base, rest_pc, ch, 10u)
+                + b12 * sh_rest_coef(sh_base, rest_pc, ch, 11u)
+                + b13 * sh_rest_coef(sh_base, rest_pc, ch, 12u)
+                + b14 * sh_rest_coef(sh_base, rest_pc, ch, 13u)
+                + b15 * sh_rest_coef(sh_base, rest_pc, ch, 14u);
+        }
+        out[ch] = acc + 0.5;
+    }
+    return out;
+}
+
 @compute @workgroup_size(256)
 fn project_visible(@builtin(global_invocation_id) gid3: vec3<u32>) {
     let compact = gid3.x;
@@ -47,17 +115,9 @@ fn project_visible(@builtin(global_invocation_id) gid3: vec3<u32>) {
     let cpc = u.sh_degree + 1u;
     let cpc2 = cpc * cpc;
     let sh_base = gid * 3u * cpc2;
-    let dc = vec3<f32>(sh_in[sh_base], sh_in[sh_base + 1u], sh_in[sh_base + 2u]);
-    var rest: array<f32, 45>;
-    let rest_per_channel = 3u * (cpc2 - 1u);
-    for (var i = 0u; i < 45u; i = i + 1u) {
-        if (i < rest_per_channel) {
-            rest[i] = sh_in[sh_base + 3u + i];
-        } else {
-            rest[i] = 0.0;
-        }
-    }
-    let color = eval_sh_color(cpc2, dir, dc, &rest);
+    // Written out term by term: copying the coefficients into a
+    // runtime-indexed local array made the compiler spill it.
+    let color = sh_color(sh_base, cpc2 - 1u, dir);
 
     let out = compact * PROJECTED_STRIDE;
     projected_splats[out + 0u] = select(0.0, p.proj_u, p.ok);
