@@ -85,7 +85,7 @@ pub struct GpuMatcher {
 }
 
 /// Rows of output per dispatch batch (16 B each).
-const MAX_BATCH_ROWS: usize = 8 << 20;
+const MAX_BATCH_ROWS: usize = 1 << 20;
 
 impl GpuMatcher {
     pub fn new(ctx: &GpuContext) -> Self {

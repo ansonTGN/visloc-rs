@@ -11611,7 +11611,8 @@ fn run_bundle_adjustment_impl_with_fixed_rotations(
         eprintln!("sfm-matrix-free: enabled via VISLOC_SFM_BA_MATRIX_FREE");
     }
     let accelerated = if observation_weights.is_none() && fixed_rotation_images.is_none() {
-        crate::ba_accel::global_ba_accelerator().and_then(|a| a.optimize(&mut ba, &ba_config))
+        crate::ba_accel::ba_accelerator()
+            .and_then(|a| a.optimize(&mut ba, &ba_config, crate::ba_accel::BaScope::Global))
     } else {
         None
     };
@@ -12189,7 +12190,24 @@ fn bundle_adjust_local(
             }
         }
     }
-    ba.optimize(&config.ba_config)?;
+    if let Some(path) = std::env::var_os("VISLOC_SFM_BA_DUMP_LOCAL") {
+        // Replayable copy of this local solve (overwritten by every call).
+        if let Err(error) =
+            crate::ba_problem_io::write_ba_problem(&ba, None, std::path::Path::new(&path))
+        {
+            eprintln!("sfm-ba-dump: failed: {error}");
+        }
+    }
+    match crate::ba_accel::ba_accelerator()
+        .and_then(|a| a.optimize(&mut ba, &config.ba_config, crate::ba_accel::BaScope::Local))
+    {
+        Some(result) => {
+            result?;
+        }
+        None => {
+            ba.optimize(&config.ba_config)?;
+        }
+    }
 
     for &image in &used {
         if variable.contains(&image) {

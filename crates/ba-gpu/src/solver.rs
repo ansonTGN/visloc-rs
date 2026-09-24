@@ -9,7 +9,7 @@ use visloc_core::geometry::{Pose, SE3};
 use visloc_core::types::CameraModel;
 use visloc_gsplat_render::GpuContext;
 use visloc_slam::{
-    BaConfig, BaError, BaIterationStats, BaResult, BundleAdjustment, GlobalBaAccelerator,
+    BaAccelerator, BaConfig, BaError, BaIterationStats, BaResult, BaScope, BundleAdjustment,
     RobustKernel,
 };
 
@@ -477,23 +477,61 @@ impl GpuBundleAdjuster {
     fn solve(&self, prob: &Problem) -> Option<(Vec<f32>, Vec<f32>, u32)> {
         let np = prob.var_poses.len();
         let nl = prob.var_lms.len();
-        let stages: &[usize] = if np > 0 {
-            &[LM_PREP, POSE_PREP, PCG_INIT, PCG_STEP, BACKSUB]
-        } else {
-            &[LM_PREP, BACKSUB]
-        };
-        self.run(prob, stages, self.settings.max_pcg_iterations);
         let dev = &self.ctx.device;
         let queue = &self.ctx.queue;
-        let read = |b: usize, n: usize| -> Vec<f32> {
-            if n == 0 {
-                return Vec::new();
-            }
-            bytemuck::cast_slice(&read_bytes(dev, queue, &prob.bufs[b], n * 4)).to_vec()
+        let read_scal = || -> Vec<f32> {
+            bytemuck::cast_slice(&read_bytes(dev, queue, &prob.bufs[22], 32)).to_vec()
         };
-        let x = read(16, np * 6);
-        let dl = read(23, nl * 3);
-        let scal = read(22, 8);
+        if np > 0 {
+            // PCG in chunks: most solves converge in a handful of
+            // iterations, so check the device-side done flag between chunks
+            // instead of always dispatching the full iteration budget.
+            const CHUNK: u32 = 10;
+            let max = self.settings.max_pcg_iterations;
+            let mut issued = CHUNK.min(max);
+            self.run(prob, &[LM_PREP, POSE_PREP, PCG_INIT, PCG_STEP], issued);
+            while issued < max && read_scal()[2] == 0.0 {
+                let n = CHUNK.min(max - issued);
+                self.run(prob, &[PCG_STEP], n);
+                issued += n;
+            }
+            self.run(prob, &[BACKSUB], 0);
+        } else {
+            self.run(prob, &[LM_PREP, BACKSUB], 0);
+        }
+        // One staging copy + map for all three outputs.
+        let parts = [(16usize, np * 6), (23, nl * 3), (22, 8)];
+        let total: usize = parts.iter().map(|p| p.1 * 4).sum();
+        let staging = dev.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ba-out-staging"),
+            size: total as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("ba-out-copy"),
+        });
+        let mut off = 0u64;
+        for &(b, n) in &parts {
+            if n > 0 {
+                encoder.copy_buffer_to_buffer(&prob.bufs[b], 0, &staging, off, (n * 4) as u64);
+            }
+            off += (n * 4) as u64;
+        }
+        queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        dev.poll(wgpu::PollType::wait_indefinitely()).ok();
+        let _ = rx.recv();
+        let all: Vec<f32> =
+            bytemuck::cast_slice(&slice.get_mapped_range().expect("map range")).to_vec();
+        staging.unmap();
+        let x = all[..np * 6].to_vec();
+        let dl = all[np * 6..np * 6 + nl * 3].to_vec();
+        let scal = all[np * 6 + nl * 3..].to_vec();
         let iters = scal.get(3).copied().unwrap_or(0.0) as u32;
         let finite = x.iter().chain(&dl).all(|v| v.is_finite());
         finite.then_some((x, dl, iters))
@@ -669,11 +707,12 @@ fn cost_and_nonprojectable(ba: &BundleAdjustment, kernel: &RobustKernel) -> (f64
         .reduce(|| (0.0, 0), |a, b| (a.0 + b.0, a.1 + b.1))
 }
 
-impl GlobalBaAccelerator for GpuBundleAdjuster {
+impl BaAccelerator for GpuBundleAdjuster {
     fn optimize(
         &self,
         ba: &mut BundleAdjustment,
         config: &BaConfig,
+        _scope: BaScope,
     ) -> Option<Result<BaResult, BaError>> {
         Self::check(ba, config).ok()?;
         GpuBundleAdjuster::optimize(self, ba, config).ok().map(Ok)

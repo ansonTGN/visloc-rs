@@ -3,7 +3,10 @@
 //! LM iterations, robust cost and RMS reprojection error.
 //!
 //! cargo run --release -p visloc-ba-gpu --features gpu --example ba_gpu_replay -- \
-//!     <problem.txt> [--iterations 20] [--no-cpu]
+//!     <problem.txt> [--iterations 20] [--no-cpu] [--local N]
+//!
+//! `--local N` keeps only the last N poses variable (fixing the rest), the
+//! shape of the SfM's local BA window.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -36,7 +39,18 @@ fn main() {
     if let Some(it) = opt("--iterations") {
         config.max_iterations = it.parse().unwrap();
     }
-    let (ba0, _) = read_ba_problem(&path).expect("read problem");
+    let local: Option<usize> = opt("--local").map(|v| v.parse().unwrap());
+    let load = || {
+        let mut ba = read_ba_problem(&path).expect("read problem").0;
+        if let Some(n) = local {
+            let ids: Vec<u64> = ba.poses.keys().copied().collect();
+            for &id in &ids[..ids.len().saturating_sub(n)] {
+                ba.fix_pose(id);
+            }
+        }
+        ba
+    };
+    let ba0 = load();
     println!(
         "problem: {} poses ({} fixed), {} landmarks, {} observations",
         ba0.poses.len(),
@@ -49,12 +63,12 @@ fn main() {
     println!("gpu init {:.2}s", t.elapsed().as_secs_f64());
     // Warm-up (driver/pipeline caches) on a copy.
     {
-        let mut warm = read_ba_problem(&path).unwrap().0;
+        let mut warm = load();
         let mut c = config;
         c.max_iterations = 1;
         let _ = gpu.optimize(&mut warm, &c);
     }
-    let mut ba = read_ba_problem(&path).unwrap().0;
+    let mut ba = load();
     let t = Instant::now();
     let r = gpu.optimize(&mut ba, &config).expect("gpu optimize");
     report("gpu", t.elapsed().as_secs_f64(), &r, &ba);

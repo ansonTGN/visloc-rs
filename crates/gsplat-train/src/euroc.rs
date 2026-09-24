@@ -51,8 +51,8 @@ pub struct EurocSfmConfig {
     /// same detector/descriptor path as the CPU extractor, validated by
     /// keypoint agreement rather than bytes.
     pub gpu_sift: bool,
-    /// Run the SfM's global bundle adjustments on the GPU (`visloc-ba-gpu`,
-    /// needs the `gpu` feature); local BA stays on the CPU.
+    /// Run the SfM's global and local bundle adjustments on the GPU
+    /// (`visloc-ba-gpu`, needs the `gpu` feature).
     pub gpu_ba: bool,
 }
 
@@ -240,9 +240,7 @@ pub fn build_euroc_dataset(
         let ctx =
             visloc_ba_gpu::GpuContext::new().map_err(|e| EurocError::Sfm(format!("gpu: {e}")))?;
         // Process-wide: the first registration wins.
-        visloc_slam::set_global_ba_accelerator(Box::new(visloc_ba_gpu::GpuBundleAdjuster::new(
-            ctx,
-        )));
+        visloc_slam::set_ba_accelerator(Box::new(visloc_ba_gpu::GpuBundleAdjuster::new(ctx)));
     }
     let mut grays: Vec<Vec<u8>> = Vec::with_capacity(frames.len());
     let mut names: Vec<String> = Vec::with_capacity(frames.len());

@@ -10,8 +10,8 @@
 //! back-substitution. The f32 step is only a proposal; the f64 cost test
 //! decides, so the result is validated like any LM step.
 //!
-//! Register it with [`visloc_slam::set_global_ba_accelerator`] to make the
-//! incremental SfM use it for global bundle adjustment.
+//! Register it with [`visloc_slam::set_ba_accelerator`] to make the
+//! incremental SfM use it for its global and local bundle adjustments.
 
 #[cfg(feature = "gpu")]
 mod solver;
