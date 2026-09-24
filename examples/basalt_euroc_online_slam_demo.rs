@@ -42,7 +42,9 @@ use std::{
 
 use serde_json::json;
 use visloc_basalt::{
-    mapper_online::{run_mapper_thread, OnlineIngestReport, OnlineMapperConfig, OnlineNfrMapper},
+    mapper_online::{
+        run_mapper_thread, OnlineIngestReport, OnlineMapperConfig, OnlineNfrMapper, SentImageFilter,
+    },
     vio::MargData,
     BasaltAdapterError, BasaltAdapterOutput, BasaltVioEstimatorAdapter, EurocSensorDataset,
     TimingBreakdown,
@@ -317,6 +319,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_imu = 0usize;
     let mut total_observations = 0usize;
     let mut mapper_packet_count = 0u64;
+    let mut sent_images = SentImageFilter::new();
     let mut max_queue_depth = 0usize;
     let mut demo_index = 0usize;
     // Every processed frame's raw VIO body-to-world pose, keyed by frame_id.
@@ -353,13 +356,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         if output.estimator.marg_data.is_mapper_packet() {
+            let mut marg_data = output.estimator.marg_data;
+            sent_images.strip_sent(&mut marg_data);
             let depth_after_send = {
                 let mut guard = send_times.lock().expect("lock");
                 guard.push_back(Instant::now());
                 guard.len()
             };
             max_queue_depth = max_queue_depth.max(depth_after_send);
-            sender.send(output.estimator.marg_data).map_err(|_| {
+            sender.send(marg_data).map_err(|_| {
                 BasaltAdapterError::Output(
                     "mapper thread ended before the VIO stream finished".into(),
                 )

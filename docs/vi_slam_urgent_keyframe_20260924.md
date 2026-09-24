@@ -224,3 +224,34 @@ Next options:
    denser keyframes expensive.
 2. Run a 3-pair confirmation on all four sequences before recommending the
    policy more broadly.
+
+## Held-out sequences, partial (2026-09-24, sparse binary)
+
+This is the 11-sequence kf5 vs urgent screen, with output at
+`/mnt/win/linux_data/visloc_urgent_kf_all11_20260924`.
+
+Claude Code stopped the screen at about 14:30 because the *host* was critically
+low on memory, with other workloads running. This was not a failure of the run.
+9 runs had completed by then; the V1_02 urgent run was in progress and is lost.
+
+These 4 sequences were not used while designing the policy:
+
+| Sequence | ATE kf5 → urgent | wall | peak RSS | mapper KFs |
+|---|---|---|---|---|
+| MH_01 | 0.01627 → 0.01545 (−5.0%) | +11.8% | 718196 → 1328392 KiB (**+85%**) | 458 → 566 |
+| MH_02 | 0.02443 → 0.02583 (+5.7%) | +3.8% | 534428 → 799172 KiB (+50%) | 398 → 487 |
+| MH_05 | 0.06339 → 0.06321 (−0.3%) | +5.0% | 343696 → 356200 KiB (+3.6%) | 306 → 382 |
+| V1_01 | 0.03545 → 0.03545 (0.0%) | −1.9% | 507832 → 653452 KiB (+29%) | 378 → 416 |
+
+Reading so far:
+
+* **No accuracy gain on held-out sequences.** The four results average out
+  to neutral, while memory still rises. The large gains remain specific to the
+  sequences that lose tracks quickly: MH_04 and V2_03. Do not make the policy
+  the default on this evidence.
+* **MH_01 peak RSS is large even for kf5**, at 718 MB and 1.33 GB with urgent.
+  MH_01 is the longest sequence at 3682 frames, which points to a separate
+  memory component that grows with sequence length, beyond the pose matrix.
+  It is the same open item as the MH_03 remaining peak.
+
+Not yet run: V1_02 urgent, V1_03, V2_01, and the 4 design sequences.

@@ -39,7 +39,7 @@
 //!    reported trajectory's last optimization is not distinguishable from
 //!    the offline path's.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::sync::OnceLock;
 use std::thread::JoinHandle;
@@ -1672,6 +1672,36 @@ pub fn run_mapper_thread(
     }
 }
 
+/// Producer-side filter that drops raw images already sent to the mapper.
+///
+/// Each MargData packet carries the whole AOM window's images, so
+/// consecutive packets repeat almost every image. The mapper ignores a
+/// repeated image: a processed key is skipped, and an image still waiting for
+/// its pose stays in `img_data` until it becomes eligible. Queued packets,
+/// however, hold their full pixel buffers until the mapper reads them. When
+/// the mapper lags, the repeats dominate memory. Stripping them before
+/// sending leaves the mapper's inputs unchanged and bounds queued pixels to
+/// about one copy per image.
+#[derive(Debug, Default)]
+pub struct SentImageFilter {
+    sent: HashSet<(u64, i64, u16)>,
+}
+
+impl SentImageFilter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Remove images whose `(frame_id, timestamp_ns, camera_id)` was already
+    /// forwarded, keeping the canonical order of the rest.
+    pub fn strip_sent(&mut self, data: &mut MargData) {
+        data.of_images.retain(|image| {
+            self.sent
+                .insert((image.frame_id, image.timestamp_ns, image.camera_id))
+        });
+    }
+}
+
 /// Producer handle used by the VIO thread.
 ///
 /// Bounded (`SyncSender`), not a plain `Sender`. An earlier revision used an
@@ -2195,6 +2225,54 @@ mod tests {
             4,
             "feature_corners must contain exactly 4 keys total, not a duplicate 6"
         );
+    }
+
+    /// Stripping images that an earlier packet already carried must leave
+    /// the mapper's detection, stereo, and temporal-match state unchanged.
+    #[test]
+    fn sent_image_filter_preserves_online_mapper_state() {
+        let new_online = || {
+            OnlineNfrMapper::new(
+                MapperConfig::default(),
+                feature_calibration(),
+                OfflineMapperConfig::default(),
+                GlobalBaConfig::default(),
+                OnlineMapperConfig {
+                    optimize_every_k: usize::MAX,
+                    ..OnlineMapperConfig::default()
+                },
+            )
+        };
+        let (packet_one, packet_two) = overlapping_packets_with_images();
+
+        let mut full = new_online();
+        for packet in [packet_one.clone(), packet_two.clone()] {
+            let mut packet = packet;
+            full.ingest_packet(&mut packet, Some(TEST_SEED))
+                .expect("full ingest");
+        }
+
+        let mut filter = SentImageFilter::new();
+        let mut stripped = new_online();
+        let mut sizes = Vec::new();
+        for packet in [packet_one, packet_two] {
+            let mut packet = packet;
+            filter.strip_sent(&mut packet);
+            sizes.push(packet.of_images.len());
+            stripped
+                .ingest_packet(&mut packet, Some(TEST_SEED))
+                .expect("stripped ingest");
+        }
+
+        assert_eq!(sizes, vec![2, 2], "packet 2 keeps only its 2 new images");
+        assert_eq!(full.mapper.feature_corners, stripped.mapper.feature_corners);
+        assert_eq!(full.mapper.feature_matches, stripped.mapper.feature_matches);
+        assert_eq!(
+            full.mapper.feature_match_data,
+            stripped.mapper.feature_match_data
+        );
+        assert_eq!(full.mapper.frame_poses, stripped.mapper.frame_poses);
+        assert_eq!(full.retained_image_bytes(), stripped.retained_image_bytes());
     }
 
     /// Guardrail (1): the incremental matcher must accept exactly the same
