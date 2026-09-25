@@ -534,7 +534,9 @@ fn held_out_control_lifecycle_binds_order_and_snapshot_hash() {
     );
     assert_eq!(
         canonical_mapper_snapshot_hash(&first),
-        17_527_291_100_915_582_511,
+        // Re-pinned for the LM retry fix (retries re-solve with damped
+        // landmark blocks); this control fixture exercises rejected trials.
+        12_831_308_286_871_830_055,
         "held-out control canonical snapshot changed"
     );
     assert_eq!(first.result().poses.len(), 8);

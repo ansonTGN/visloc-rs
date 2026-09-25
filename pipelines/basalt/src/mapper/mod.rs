@@ -1036,6 +1036,8 @@ type Matrix6x3 = nalgebra::SMatrix<f64, 6, 3>;
 #[derive(Debug, Clone)]
 struct VisionLandmarkSolve {
     id: u64,
+    /// Undamped landmark block, kept so LM retries can damp it.
+    hll: Matrix3<f64>,
     hll_inv: Matrix3<f64>,
     bl: Vector3<f64>,
     /// Schur cross blocks `H_pl`, one for each participating absolute pose.
@@ -1389,6 +1391,7 @@ fn linearize_vision(
         }
         out.landmarks.push(VisionLandmarkSolve {
             id: landmark_id,
+            hll,
             hll_inv,
             bl,
             hpl,
@@ -1888,14 +1891,69 @@ fn apply_pose_solve(
     }
 }
 
+/// Damped landmark inverses `(Hll + D_l)^-1`, with
+/// `D_l = max(diag(Hll) * lambda, min_lambda)`, and the reduced pose system
+/// built from them. The undamped reduced system subtracts
+/// `Hpl Hll^-1 Hplᵀ` (and `Hpl Hll^-1 bl`), so the damped one adds back
+/// `Hpl (Hll^-1 - Hl_damped^-1) Hplᵀ` for each landmark. This needs no
+/// relinearization. A landmark whose damped block is not invertible keeps
+/// its undamped inverse.
+fn damped_landmark_system(
+    h: &PoseBlockHessian,
+    b: &DVector<f64>,
+    solves: &[VisionLandmarkSolve],
+    lambda: f64,
+    min_lambda: f64,
+) -> (PoseBlockHessian, DVector<f64>, Vec<Matrix3<f64>>) {
+    let mut h = h.clone();
+    let mut b = b.clone();
+    let mut inverses = Vec::with_capacity(solves.len());
+    for solve in solves {
+        let mut damped = solve.hll;
+        for axis in 0..3 {
+            damped[(axis, axis)] += (solve.hll[(axis, axis)] * lambda).max(min_lambda);
+        }
+        let damped_inv = damped
+            .cholesky()
+            .map(|chol| chol.inverse())
+            .filter(|inverse| inverse.iter().all(|value| value.is_finite()))
+            .unwrap_or(solve.hll_inv);
+        let correction = solve.hll_inv - damped_inv;
+        for &(pose_i, hpl_i) in &solve.hpl {
+            let db = hpl_i * correction * solve.bl;
+            for axis in 0..6 {
+                b[pose_i * 6 + axis] += db[axis];
+            }
+            for &(pose_j, hpl_j) in &solve.hpl {
+                h.add_block(pose_i, pose_j, &(hpl_i * correction * hpl_j.transpose()));
+            }
+        }
+        inverses.push(damped_inv);
+    }
+    (h, b, inverses)
+}
+
 fn back_substitute_landmarks(
     landmarks: &mut BTreeMap<u64, MapperLandmark>,
     solves: &[VisionLandmarkSolve],
     pose_indices: &BTreeMap<u64, usize>,
     pose_solve: &DVector<f64>,
 ) -> Vec<(u64, [f64; 3])> {
+    back_substitute_landmarks_with(landmarks, solves, None, pose_indices, pose_solve)
+}
+
+/// Landmark back-substitution with an optional per-landmark inverse that
+/// replaces `hll_inv` (the damped inverse on LM retries).
+fn back_substitute_landmarks_with(
+    landmarks: &mut BTreeMap<u64, MapperLandmark>,
+    solves: &[VisionLandmarkSolve],
+    damped_inverses: Option<&[Matrix3<f64>]>,
+    pose_indices: &BTreeMap<u64, usize>,
+    pose_solve: &DVector<f64>,
+) -> Vec<(u64, [f64; 3])> {
     let mut increments = Vec::with_capacity(solves.len());
-    for solve in solves {
+    for (index, solve) in solves.iter().enumerate() {
+        let hll_inv = damped_inverses.map_or(&solve.hll_inv, |inverses| &inverses[index]);
         let mut h_l_p_x = Vector3::zeros();
         for &(pose_index, hpl) in &solve.hpl {
             let offset = pose_index * 6;
@@ -1904,7 +1962,7 @@ fn back_substitute_landmarks(
                     * Vector6::from_column_slice(&pose_solve.as_slice()[offset..offset + 6]);
             }
         }
-        let increment = -(solve.hll_inv * (solve.bl - h_l_p_x));
+        let increment = -(hll_inv * (solve.bl - h_l_p_x));
         if let Some(landmark) = landmarks.get_mut(&solve.id) {
             landmark.direction.xy.coords += increment.fixed_rows::<2>(0);
             landmark.inverse_distance = (landmark.inverse_distance + increment.z).max(0.0);
@@ -2251,15 +2309,16 @@ fn global_ba_impl_in_place(
             &mut vision.b,
         );
         let h_diagonal = vision.h.diagonal();
-        let solve = solve_damped_block_system(
+        let damping_diagonal = h_diagonal.clone();
+        let mut solve = solve_damped_block_system(
             &vision.h,
             &vision.b,
-            &h_diagonal,
+            &damping_diagonal,
             optimizer.lambda,
             optimizer.min_lambda,
             anchor_index,
         );
-        let max_increment = solve.iter().map(|v| v.abs()).fold(0.0, f64::max);
+        let mut max_increment = solve.iter().map(|v| v.abs()).fold(0.0, f64::max);
         let mut iteration_trace = GlobalBaIteration {
             iteration,
             vision_cost: cost.vision,
@@ -2280,12 +2339,49 @@ fn global_ba_impl_in_place(
         let mut trial_count = 10;
         if config.use_lm {
             while !accepted_step && trial_count > 0 && !converged {
+                // Upstream `NfrMapper::optimize` solves the damped system
+                // inside this loop, so every retry uses the lambda raised by
+                // the previous rejection. Re-applying the first increment
+                // instead made one rejection cascade through all ten trials
+                // (observed: 80 rejected trials in one V2_01 final optimize).
+                // The first trial keeps the solve above, so an iteration
+                // accepted on its first trial is unchanged.
+                // Retries also damp the landmark blocks. Otherwise every
+                // retry re-applies the full undamped landmark Newton step
+                // `-Hll^-1 bl`, however small the pose step, and the trial can
+                // never succeed (observed on V2_01: pose increments of 1e-5
+                // still raised the vision cost by 2.8e4 on every trial).
+                let mut damped_inverses = None;
+                if trial_count < 10 {
+                    let (h, b, inverses) = damped_landmark_system(
+                        &vision.h,
+                        &vision.b,
+                        &vision.landmarks,
+                        optimizer.lambda,
+                        optimizer.min_lambda,
+                    );
+                    solve = solve_damped_block_system(
+                        &h,
+                        &b,
+                        &damping_diagonal,
+                        optimizer.lambda,
+                        optimizer.min_lambda,
+                        anchor_index,
+                    );
+                    max_increment = solve.iter().map(|v| v.abs()).fold(0.0, f64::max);
+                    damped_inverses = Some(inverses);
+                }
                 converged = max_increment < 1e-5;
                 let backup_poses = poses.clone();
                 let backup_landmarks = landmarks.clone();
                 apply_pose_solve(poses, &pose_indices, &solve);
-                let increments =
-                    back_substitute_landmarks(landmarks, &vision.landmarks, &pose_indices, &solve);
+                let increments = back_substitute_landmarks_with(
+                    landmarks,
+                    &vision.landmarks,
+                    damped_inverses.as_deref(),
+                    &pose_indices,
+                    &solve,
+                );
                 if iteration_trace.landmark_increments.is_empty() {
                     iteration_trace.landmark_increments = increments;
                 }
