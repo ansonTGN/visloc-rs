@@ -255,3 +255,37 @@ Reading so far:
   It is the same open item as the MH_03 remaining peak.
 
 Not yet run: V1_02 urgent, V1_03, V2_01, and the 4 design sequences.
+
+## Default in the online demo (2026-09-25)
+
+The urgent policy (threshold 0.5, spacing 2) was re-screened on main after two
+changes: interpolated propagation (#215) and PSD factor information (#216). It
+used one kf5/urgent pair per sequence, plus two extra pairs for V2_01 and
+MH_02.
+
+| seq | ATE kf5 → urgent |
+|---|---|
+| V2_03 | 0.0546 → **0.0451 (−17%)** |
+| MH_04 | 0.0832 → **0.0700 (−16%)** |
+| MH_01 | 0.0170 → **0.0155 (−8.5%)** |
+| V1_03 | 0.0231 → **0.0213 (−7.7%)** |
+| V1_02 | 0.0147 → **0.0137 (−7.0%)** |
+| MH_03 | 0.0269 → **0.0255 (−5.2%)** |
+| V2_02 | 0.0125 → **0.0120 (−4.5%)** |
+| V1_01 | 0.0354 → 0.0354 |
+| MH_05 | 0.0627 → 0.0634 (+1%) |
+| V2_01 | +24%, +1.7%, −5.3% over three pairs |
+| MH_02 | +4.9%, +4.7%, +5.1% over three pairs (small systematic cost) |
+
+The one V2_01 outlier had 80 rejected trials in the final mapper LM, while all
+four other V2_01 runs had 0. That is a separate LM robustness issue, not an
+effect of the policy.
+
+Wall time rises by 10 to 30%. V2_03 with `--pipeline` still runs at 0.71× real
+time: 83 s for 116.7 s of data, with ATE 0.0449.
+
+Decision: the **online demo enables urgent keyframes by default**. It
+inserts the two config keys when the config omits them, and
+`--no-urgent-keyframes` opts out. The library defaults and the
+upstream-compatible config fixtures are unchanged. The screen runner now
+passes `--no-urgent-keyframes` for its kf5 reference arm.
