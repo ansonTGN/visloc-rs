@@ -89,7 +89,10 @@ def main():
         run.mkdir()
         dataset = Path(DATASETS[seq])
         command = [str(binary), '--euroc-dir', str(dataset), '--calibration', str(root / 'calibration.json'),
-                   '--config', str(root / f'{label}_config.json'), '--out-dir', str(run), *FLAGS]
+                   '--config', str(root / f'{label}_config.json'), '--out-dir', str(run), *FLAGS,
+                   # The demo enables urgent keyframes when the config omits the
+                   # keys, so the kf5 reference must opt out explicitly.
+                   *(['--no-urgent-keyframes'] if label == 'baseline' else [])]
         row = dict(sequence=seq, label=label, command=command, state='running')
         report['runs'].append(row)
         save(summary, report)

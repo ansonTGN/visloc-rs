@@ -66,6 +66,7 @@ struct Args {
     decode_threads: usize,
     threads: Option<usize>,
     mapper_queue_capacity: usize,
+    no_urgent_keyframes: bool,
     /// Restores the legacy diagnostic MargData LM path (per-trial landmark
     /// re-factorization + pre-solve diagnostic linearization).  Off by default:
     /// the compact path is byte-identical in trajectory and MargData bytes, so
@@ -196,8 +197,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&args.out_dir)?;
 
     let dataset = EurocSensorDataset::open(&args.euroc_dir, &args.calibration, &args.config)?;
-    let mut adapter =
-        BasaltVioEstimatorAdapter::from_config(dataset.calibration(), dataset.config())?;
+    // Urgent keyframe spacing is on by default in this demo: a keyframe may be
+    // taken two frames after the last one when fewer than half of the tracks
+    // are connected. On 11 EuRoC sequences it improved ATE on 7 sequences
+    // (V2_03 −17%, MH_04 −16%), left 3 unchanged and cost MH_02 +5%. Config
+    // values win; `--no-urgent-keyframes` restores the upstream decision.
+    let mut vio_config = dataset.config().clone();
+    if !args.no_urgent_keyframes {
+        for (key, value) in [
+            ("config.vio_urgent_kf_keypoints_thresh", json!(0.5)),
+            ("config.vio_urgent_min_frames_after_kf", json!(2)),
+        ] {
+            vio_config.values.entry(key.to_string()).or_insert(value);
+        }
+    }
+    let mut adapter = BasaltVioEstimatorAdapter::from_config(dataset.calibration(), &vio_config)?;
     // Default: compact MargData LM path.  Trajectory and MargData bytes are
     // identical to the diagnostic path (verified by the retained-vs-lean
     // window regression test); only the per-trial diagnostic trace is skipped.
@@ -836,6 +850,7 @@ impl Args {
         let mut decode_threads = 3usize;
         let mut threads = None;
         let mut mapper_queue_capacity = DEFAULT_MAPPER_QUEUE_CAPACITY;
+        let mut no_urgent_keyframes = false;
         let mut retained_marg_diagnostics = false;
         let mut num_opt_iter = 10usize;
         let mut projection_rematch = false;
@@ -886,6 +901,7 @@ impl Args {
                 "--realtime" => realtime = true,
                 "--as-fast-as-possible" => realtime = false,
                 "--pipeline" => pipeline = true,
+                "--no-urgent-keyframes" => no_urgent_keyframes = true,
                 "--pipeline-capacity" => {
                     pipeline_capacity = next(&mut arguments, &option)?
                         .to_string_lossy()
@@ -1009,6 +1025,7 @@ impl Args {
             decode_threads,
             threads,
             mapper_queue_capacity,
+            no_urgent_keyframes,
             retained_marg_diagnostics,
             num_opt_iter,
             projection_rematch,
@@ -1105,6 +1122,20 @@ mod tests {
         assert_eq!(args.decode_threads, 3);
         assert_eq!(args.threads, None);
         assert_eq!(args.mapper_queue_capacity, DEFAULT_MAPPER_QUEUE_CAPACITY);
+    }
+
+    #[test]
+    fn urgent_keyframes_default_on_and_can_be_disabled() {
+        let base = ["--euroc-dir", "d", "--calibration", "c.json"];
+        let args = Args::parse(base.map(Into::into)).expect("parses");
+        assert!(!args.no_urgent_keyframes);
+        let args = Args::parse(
+            base.into_iter()
+                .chain(["--no-urgent-keyframes"])
+                .map(Into::into),
+        )
+        .expect("parses");
+        assert!(args.no_urgent_keyframes);
     }
 
     #[test]
