@@ -563,6 +563,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "first_optimize_requested_iterations": final_report.first_optimize.requested_iterations,
             "first_optimize_accepted_steps": final_report.first_optimize.accepted_step_count,
             "first_optimize_rejected_trials": final_report.first_optimize.rejected_trial_count,
+            "first_optimize_initial_lambda": final_report.first_optimize.initial_lambda,
+            "first_optimize_trials": final_report
+                .first_optimize
+                .trace
+                .iter()
+                .flat_map(|iteration| {
+                    iteration.trials.iter().map(move |trial| {
+                        json!({
+                            "iteration": iteration.iteration,
+                            "total_cost": iteration.total_cost,
+                            "lambda": trial.lambda,
+                            "f_diff": trial.f_diff,
+                            "max_pose_increment": trial.max_pose_increment,
+                            "after_vision": trial.after_vision_cost,
+                            "after_relative": trial.after_relative_cost,
+                            "after_roll_pitch": trial.after_roll_pitch_cost,
+                            "accepted": trial.accepted,
+                        })
+                    })
+                })
+                .collect::<Vec<_>>(),
             "second_optimize_final_cost": final_report.second_optimize.final_cost,
             "second_optimize_iterations": final_report.second_optimize.iterations,
             "second_optimize_rejected_trials": final_report.second_optimize.rejected_trial_count,
