@@ -447,6 +447,36 @@ differentiating against). Structure:
   and slower on Mip-NeRF 360, so the trainer goal is **not** met yet: the
   open work is quality on the indoor 360 scenes and speed at 2.5M
   gaussians / 1297x840.
+- **brush strategy + vec4 Adam (2026-09-26/27)**: `gsplat_train --strategy
+  brush` ports brush's refine schedule (prune + multinomial refill + split
+  of the top 10% by the max-weight statistic, mean noise). `GSPLAT_TRAIN_PROFILE`
+  showed Adam at ~34% of a step at ~1M gaussians, about 3x its bandwidth
+  floor. Updating four elements per thread through `vec4` bindings halves it
+  (18.5 -> 9.2 ms/step). The protocol is the same as the table above, on
+  the same GPU:
+
+  | scene | ours PSNR / SSIM | brush PSNR / SSIM | ours time | brush time |
+  | --- | --- | --- | --- | --- |
+  | Mip-NeRF 360 bonsai | 32.88 / 0.959 | **33.02 / 0.960** | 1355 s | **1333 s** |
+  | Mip-NeRF 360 room | **33.15 / 0.950** | 32.95 / 0.951 | 1278 s | **1184 s** |
+  | Mip-NeRF 360 garden | 27.55 / 0.865 | **27.62 / 0.868** | **3130 s** | 3134 s |
+  | south-building (2 runs) | 21.89, 22.30 / 0.790, 0.791 | **22.69 / 0.805** | **2156, 2137 s** | 2379 s |
+  | gerrard-hall | 19.93 / 0.711 | **19.98 / 0.719** | **1859 s** | 2147 s |
+
+  - **Quality:** every scene is within 0.14 dB of brush except
+    south-building (0.39-0.80 dB), and room is 0.20 dB above brush.
+  - **Speed:** faster than brush on garden and on both COLMAP scenes;
+    within 2% on bonsai and 8% on room.
+  - **south-building varies from run to run.** The same settings give
+    21.9-22.4 dB: two pre-vec4 runs scored 22.44 and 22.38, and a
+    padded-buffer run with the scalar Adam scored 21.98. The gradient
+    accumulation uses unordered atomics and the refill sampling depends on
+    it, so its single-run numbers are noisy. The vec4 change is not what
+    moves them.
+  - **Tried and reverted:** per-subgroup shared-memory slots instead of the
+    CAS float add in `rasterize_backward`. The batch had to shrink from 128
+    to 64 splats to fit, and backward went from 20.8 to 26-28 ms. CAS
+    contention was not the bottleneck.
 - **M3**: `gsplat_euroc` example (feature `euroc`): raw EuRoC -> undistort
   -> SIFT -> verified temporal matches -> visloc-rs incremental SfM ->
   trainer, no COLMAP or Python. With `--gpu-sift --gpu-ba` (crates
