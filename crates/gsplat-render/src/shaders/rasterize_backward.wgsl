@@ -11,8 +11,9 @@
 // with d = pixel centre - mean; a clamped alpha passes no gradient to opacity,
 // conic or mean.
 //
-// The 256 per-pixel contributions of a splat are summed with subgroupAdd and
-// a shared-memory float add (CAS on u32 bits) across subgroups; the tile's
+// The 256 per-pixel contributions of a splat are summed within each subgroup
+// (a transposed xor butterfly on 32-wide subgroups, subgroupAdd otherwise)
+// and a shared-memory float add (CAS on u32 bits) across subgroups; the tile's
 // total is then added to the gaussian's record in screen_grads with one
 // global CAS float add per component (no per-intersection storage).
 //
@@ -53,6 +54,12 @@ fn gacc_add(i: u32, v: f32) {
     }
 }
 
+// One butterfly step: keep `lo` or `hi` by this lane's bit, add the partner's
+// other half.
+fn xstep(lo: f32, hi: f32, h: bool, m: u32) -> f32 {
+    return select(lo, hi, h) + subgroupShuffleXor(select(hi, lo, h), m);
+}
+
 fn global_add(i: u32, v: f32) {
     var old = atomicLoad(&screen_grads[i]);
     loop {
@@ -69,6 +76,7 @@ fn rasterize_backward(
     @builtin(workgroup_id) wid: vec3<u32>,
     @builtin(local_invocation_id) lid: vec3<u32>,
     @builtin(subgroup_invocation_id) lane: u32,
+    @builtin(subgroup_size) sg_size: u32,
 ) {
     let tile = wid.x;
     let tid = lid.x;
@@ -184,23 +192,53 @@ fn rasterize_backward(
             // no lane of this subgroup blended it. The condition is
             // subgroup-uniform, so the subgroup ops stay in uniform flow.
             if (subgroupAny(hit)) {
-                let t_uv = subgroupAdd(vec2<f32>(g_u, g_v));
-                let t_abc = subgroupAdd(vec3<f32>(g_a, g_b, g_c));
-                let t_o = subgroupAdd(g_o);
-                let t_col = subgroupAdd(g_col);
-                let t_r = subgroupAdd(g_r);
-                if (lane == 0u) {
-                    let base = s * NG;
-                    gacc_add(base + 0u, t_uv.x);
-                    gacc_add(base + 1u, t_uv.y);
-                    gacc_add(base + 2u, t_abc.x);
-                    gacc_add(base + 3u, t_abc.y);
-                    gacc_add(base + 4u, t_abc.z);
-                    gacc_add(base + 5u, t_o);
-                    gacc_add(base + 6u, t_col.x);
-                    gacc_add(base + 7u, t_col.y);
-                    gacc_add(base + 8u, t_col.z);
-                    gacc_add(base + 9u, t_r);
+                if (sg_size == 32u) {
+                    // Transposed butterfly: each xor step halves the values a
+                    // lane carries, so the 10 (padded to 16) sums take
+                    // 8+4+2+1+1 shuffles instead of 10 full reductions, and
+                    // lanes 2c (c < 10) end up holding component c.
+                    let h4 = (lane & 16u) != 0u;
+                    let w0 = xstep(g_u, g_col.z, h4, 16u);
+                    let w1 = xstep(g_v, g_r, h4, 16u);
+                    let w2 = xstep(g_a, 0.0, h4, 16u);
+                    let w3 = xstep(g_b, 0.0, h4, 16u);
+                    let w4 = xstep(g_c, 0.0, h4, 16u);
+                    let w5 = xstep(g_o, 0.0, h4, 16u);
+                    let w6 = xstep(g_col.x, 0.0, h4, 16u);
+                    let w7 = xstep(g_col.y, 0.0, h4, 16u);
+                    let h3 = (lane & 8u) != 0u;
+                    let x0 = xstep(w0, w4, h3, 8u);
+                    let x1 = xstep(w1, w5, h3, 8u);
+                    let x2 = xstep(w2, w6, h3, 8u);
+                    let x3 = xstep(w3, w7, h3, 8u);
+                    let h2 = (lane & 4u) != 0u;
+                    let y0 = xstep(x0, x2, h2, 4u);
+                    let y1 = xstep(x1, x3, h2, 4u);
+                    var z = xstep(y0, y1, (lane & 2u) != 0u, 2u);
+                    z = z + subgroupShuffleXor(z, 1u);
+                    let comp = lane >> 1u;
+                    if ((lane & 1u) == 0u && comp < NG && z != 0.0) {
+                        gacc_add(s * NG + comp, z);
+                    }
+                } else {
+                    let t_uv = subgroupAdd(vec2<f32>(g_u, g_v));
+                    let t_abc = subgroupAdd(vec3<f32>(g_a, g_b, g_c));
+                    let t_o = subgroupAdd(g_o);
+                    let t_col = subgroupAdd(g_col);
+                    let t_r = subgroupAdd(g_r);
+                    if (lane == 0u) {
+                        let base = s * NG;
+                        gacc_add(base + 0u, t_uv.x);
+                        gacc_add(base + 1u, t_uv.y);
+                        gacc_add(base + 2u, t_abc.x);
+                        gacc_add(base + 3u, t_abc.y);
+                        gacc_add(base + 4u, t_abc.z);
+                        gacc_add(base + 5u, t_o);
+                        gacc_add(base + 6u, t_col.x);
+                        gacc_add(base + 7u, t_col.y);
+                        gacc_add(base + 8u, t_col.z);
+                        gacc_add(base + 9u, t_r);
+                    }
                 }
             }
         }
