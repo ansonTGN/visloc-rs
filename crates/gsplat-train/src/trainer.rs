@@ -232,7 +232,8 @@ impl StageTimes {
 fn storage(dev: &wgpu::Device, label: &str, bytes: u64) -> wgpu::Buffer {
     dev.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
-        size: bytes.max(4),
+        // 16-byte multiple: the Adam moments are bound as `array<vec4<f32>>`.
+        size: bytes.max(4).next_multiple_of(16),
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST
             | wgpu::BufferUsages::COPY_SRC,
@@ -755,6 +756,20 @@ impl Trainer {
                 pass.set_bind_group(0, &st.stats_bind, &[]);
                 pass.dispatch_workgroups(nv.div_ceil(256), 1, 1);
             }
+        }
+        if self.profile.is_some() {
+            // Profiling only: split the stats / Adam / noise work into
+            // separately timed submits.
+            queue.submit(Some(enc.finish()));
+            if let Some(p) = self.profile.as_mut() {
+                p.mark(&dev, "stats");
+            }
+            enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("adam"),
+            });
+        }
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             pass.set_pipeline(&self.adam_pipeline);
             for (g, (a, b, c)) in st.adam.iter().zip(lrs) {
                 let u = AdamUniforms {
@@ -773,9 +788,22 @@ impl Trainer {
                 };
                 queue.write_buffer(&g.uniforms, 0, bytemuck::bytes_of(&u));
                 pass.set_bind_group(0, &g.bind, &[]);
-                let (x, y) = groups_2d(g.n);
+                // One thread per vec4 of elements (see adam.wgsl).
+                let (x, y) = groups_2d(g.n.div_ceil(4));
                 pass.dispatch_workgroups(x, y, 1);
             }
+        }
+        if self.profile.is_some() {
+            queue.submit(Some(enc.finish()));
+            if let Some(p) = self.profile.as_mut() {
+                p.mark(&dev, "adam");
+            }
+            enc = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("noise"),
+            });
+        }
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             if let Some(b) = self.cfg.brush_refine.as_ref() {
                 // Mean noise on nearly transparent gaussians, after the step.
                 let n = st.renderer.num_gaussians() as u32;
@@ -794,7 +822,7 @@ impl Trainer {
         }
         queue.submit(Some(enc.finish()));
         if let Some(p) = self.profile.as_mut() {
-            p.mark(&dev, "adam");
+            p.mark(&dev, "noise");
         }
         self.step += 1;
 

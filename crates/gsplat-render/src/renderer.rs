@@ -39,7 +39,10 @@ pub struct GpuScene {
 fn new_storage(device: &wgpu::Device, label: &str, bytes: u64) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
-        size: bytes.max(4),
+        // Rounded up to 16 bytes so vec4-typed passes (e.g. the trainer's
+        // Adam) can bind any storage buffer; the zeroed tail is never read
+        // as data.
+        size: bytes.max(4).next_multiple_of(16),
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST
             | wgpu::BufferUsages::COPY_SRC,
