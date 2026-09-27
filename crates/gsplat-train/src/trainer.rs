@@ -55,6 +55,13 @@ pub struct TrainConfig {
     pub opac_loss_weight: f32,
     pub scale_loss_weight: f32,
     pub aux_loss_time: f32,
+    /// Per-training-image affine colour transform (3x4) applied to the
+    /// render before the loss (see `shaders/appearance.wgsl`); held-out
+    /// views render without it.
+    pub appearance: bool,
+    pub appearance_lr: f32,
+    /// Pull of the transforms towards identity.
+    pub appearance_reg: f32,
 }
 
 impl Default for TrainConfig {
@@ -80,6 +87,9 @@ impl Default for TrainConfig {
             opac_loss_weight: 0.0,
             scale_loss_weight: 0.0,
             aux_loss_time: 0.9,
+            appearance: false,
+            appearance_lr: 2e-3,
+            appearance_reg: 1e-2,
         }
     }
 }
@@ -160,6 +170,29 @@ struct StatsUniforms {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct AppUniforms {
+    npix: u32,
+    view: u32,
+    lr: f32,
+    reg: f32,
+}
+
+/// Per-view appearance transforms and their pipelines (`appearance.wgsl`).
+struct Appearance {
+    apply: wgpu::ComputePipeline,
+    backward: wgpu::ComputePipeline,
+    adam: wgpu::ComputePipeline,
+    uniforms: wgpu::Buffer,
+    params: wgpu::Buffer,
+    corr: wgpu::Buffer,
+    grad: wgpu::Buffer,
+    m1: wgpu::Buffer,
+    m2: wgpu::Buffer,
+    steps: wgpu::Buffer,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct AuxUniforms {
     n: u32,
     num_visible: u32,
@@ -228,6 +261,7 @@ pub struct Trainer {
     aux_all: wgpu::ComputePipeline,
     aux_visible: wgpu::ComputePipeline,
     aux_uniforms: wgpu::Buffer,
+    appearance: Option<Appearance>,
     sh_degree: u32,
     /// Ground truth of the current view (the host keeps every view packed
     /// as RGBA8 and uploads one per step: ~3 MB instead of ~300 MB resident).
@@ -535,6 +569,27 @@ impl Trainer {
             "aux_visible",
         );
         let aux_uniforms = uniform(&dev, "aux_uniforms", 16);
+        let appearance = cfg.appearance.then(|| {
+            let src = include_str!("shaders/appearance.wgsl");
+            let nv = views.len();
+            let identity: Vec<f32> = (0..nv)
+                .flat_map(|_| [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+                .collect();
+            let params = storage(&dev, "app_params", nv as u64 * 48);
+            queue.write_buffer(&params, 0, bytemuck::cast_slice(&identity));
+            Appearance {
+                apply: pipeline(&dev, "app_apply", src, "app_apply"),
+                backward: pipeline(&dev, "app_backward", src, "app_backward"),
+                adam: pipeline(&dev, "app_adam", src, "app_adam"),
+                uniforms: uniform(&dev, "app_uniforms", 16),
+                params,
+                corr: storage(&dev, "app_corr", npix * 12),
+                grad: storage(&dev, "app_grad", 48),
+                m1: storage(&dev, "app_m1", nv as u64 * 48),
+                m2: storage(&dev, "app_m2", nv as u64 * 48),
+                steps: storage(&dev, "app_steps", nv as u64 * 4),
+            }
+        });
         let init_means: Vec<[f32; 3]> = init
             .gaussians
             .iter()
@@ -567,6 +622,7 @@ impl Trainer {
             aux_all,
             aux_visible,
             aux_uniforms,
+            appearance,
             sh_degree: init.sh_degree,
             gt,
             gt_host,
@@ -611,7 +667,11 @@ impl Trainer {
         renderer.set_grads_zeroed_by_caller(true);
         let dev = renderer.ctx.device.clone();
 
-        let out_img = renderer.output_buffer().clone();
+        // The loss sees the appearance-corrected render when enabled.
+        let out_img = match &self.appearance {
+            Some(a) => a.corr.clone(),
+            None => renderer.output_buffer().clone(),
+        };
         let d_image = renderer.d_image_buffer()?.clone();
         let loss_bind = bind(
             &dev,
@@ -792,12 +852,74 @@ impl Trainer {
             });
             {
                 let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                let app_binds = self.appearance.as_ref().map(|a| {
+                    let au = AppUniforms {
+                        npix,
+                        view: vi as u32,
+                        lr: self.cfg.appearance_lr,
+                        reg: self.cfg.appearance_reg,
+                    };
+                    queue.write_buffer(&a.uniforms, 0, bytemuck::bytes_of(&au));
+                    let render = st.renderer.output_buffer().clone();
+                    let d_image = st
+                        .renderer
+                        .d_image_buffer()
+                        .expect("backward state")
+                        .clone();
+                    let b_apply = bind_slots(
+                        &dev,
+                        &a.apply,
+                        "app_apply",
+                        &[(0, &a.uniforms), (1, &a.params), (2, &render), (3, &a.corr)],
+                    );
+                    let b_bwd = bind_slots(
+                        &dev,
+                        &a.backward,
+                        "app_backward",
+                        &[
+                            (0, &a.uniforms),
+                            (1, &a.params),
+                            (2, &render),
+                            (4, &d_image),
+                            (5, &a.grad),
+                        ],
+                    );
+                    let b_adam = bind_slots(
+                        &dev,
+                        &a.adam,
+                        "app_adam",
+                        &[
+                            (0, &a.uniforms),
+                            (1, &a.params),
+                            (5, &a.grad),
+                            (6, &a.m1),
+                            (7, &a.m2),
+                            (8, &a.steps),
+                        ],
+                    );
+                    (b_apply, b_bwd, b_adam)
+                });
+                if let (Some(a), Some((b_apply, _, _))) = (&self.appearance, &app_binds) {
+                    let (x, y) = groups_2d(npix);
+                    pass.set_pipeline(&a.apply);
+                    pass.set_bind_group(0, b_apply, &[]);
+                    pass.dispatch_workgroups(x, y, 1);
+                }
                 pass.set_pipeline(&self.loss_pipeline);
                 pass.set_bind_group(0, &st.loss_bind, &[]);
                 let (x, y) = groups_2d(npix);
                 pass.dispatch_workgroups(x, y, 1);
                 if self.cfg.ssim_weight > 0.0 {
                     self.ssim.encode(&mut pass, &st.ssim_bind);
+                }
+                if let (Some(a), Some((_, b_bwd, b_adam))) = (&self.appearance, &app_binds) {
+                    let (x, y) = groups_2d(npix);
+                    pass.set_pipeline(&a.backward);
+                    pass.set_bind_group(0, b_bwd, &[]);
+                    pass.dispatch_workgroups(x, y, 1);
+                    pass.set_pipeline(&a.adam);
+                    pass.set_bind_group(0, b_adam, &[]);
+                    pass.dispatch_workgroups(1, 1, 1);
                 }
                 if normal_on {
                     let nl = self.normal.get_or_insert_with(|| NormalLoss {

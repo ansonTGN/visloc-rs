@@ -49,6 +49,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // active from --normal-start on.
             "--normal-weight" => cfg.normal_weight = next()?.parse()?,
             "--normal-start" => cfg.normal_start = next()?.parse()?,
+            // Per-image affine colour correction (exposure / white balance).
+            "--appearance" => cfg.appearance = true,
             "--init-ply" => init_ply = Some(PathBuf::from(next()?)),
             "--export-steps" => {
                 export_steps = next()?
@@ -70,6 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             background: cfg.background,
             normal_weight: cfg.normal_weight,
             normal_start: cfg.normal_start,
+            appearance: cfg.appearance,
             ..TrainConfig::brush_preset()
         };
         if keep_densify_off {

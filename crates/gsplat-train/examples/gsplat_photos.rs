@@ -3,7 +3,7 @@
 //! ```text
 //! cargo run --release -p visloc-gsplat-train --features gpu,euroc --example gsplat_photos -- \
 //!     --images <folder> --out <work dir> [--steps 30000] [--max-size 1600] [--focal PX] \
-//!     [--no-mesh] [--normal-weight 0.005]
+//!     [--no-mesh] [--normal-weight 0.005] [--appearance]
 //! ```
 //!
 //! SfM from `visloc_gsplat_train::photos` (EXIF focal, GPU SIFT/matching,
@@ -31,6 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut steps = 30_000usize;
     let mut mesh = true;
     let mut normal_weight = 0.0f32;
+    let mut appearance = false;
     while let Some(a) = args.next() {
         let mut next = || args.next().ok_or(format!("{a} needs a value"));
         match a.as_str() {
@@ -43,6 +44,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--cpu" => sfm.gpu = false,
             "--no-mesh" => mesh = false,
             "--normal-weight" => normal_weight = next()?.parse()?,
+            // Per-photo colour correction (varying exposure / white balance).
+            "--appearance" => appearance = true,
             other => return Err(format!("unknown argument {other}").into()),
         }
     }
@@ -71,6 +74,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = TrainConfig {
         steps,
         normal_weight,
+        appearance,
         ..TrainConfig::brush_preset()
     };
     let t_train = Instant::now();
