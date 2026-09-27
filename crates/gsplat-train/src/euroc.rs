@@ -73,6 +73,9 @@ pub struct EurocSfmConfig {
     /// static-static pairs), so the mapper registers them by PnP.
     pub register_gated: bool,
     /// With `register_gated`: kept frames linked on each side of a gated one.
+    /// More links register more gated frames (MH_01 182 -> 190, V1_02 198
+    /// -> 200 with 3) but destabilise the mapper elsewhere (MH_03 ATE 1.32
+    /// -> 3.70 cm with 2, 13.1 cm with 3), so the default stays 1.
     pub register_gated_links: usize,
     /// Merge disconnected COLMAP-port models by a similarity estimated from
     /// cross-model matches, then re-triangulate + bundle-adjust the union.
@@ -129,7 +132,7 @@ impl Default for EurocSfmConfig {
             keep_planar: false,
             keep_planar_no_panoramic: false,
             register_gated: false,
-            register_gated_links: 3,
+            register_gated_links: 1,
             merge_models: false,
             polish: false,
             verify_min_inliers: None,
