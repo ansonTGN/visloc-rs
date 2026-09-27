@@ -1,0 +1,626 @@
+<title>South Building Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --stage: #0e1012;
+    --panel: rgba(250, 249, 246, 0.94);
+    --ink: #1d2126;
+    --muted: #5e6670;
+    --line: #d8dbd6;
+    --accent: #b5532f;
+    --accent-ink: #ffffff;
+    --chip: #eceee9;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --panel: rgba(24, 27, 31, 0.92);
+      --ink: #e8eae6;
+      --muted: #9aa3ac;
+      --line: #343a41;
+      --accent: #e0835c;
+      --accent-ink: #1a1c1f;
+      --chip: #2b3036;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --panel: rgba(24, 27, 31, 0.92);
+    --ink: #e8eae6;
+    --muted: #9aa3ac;
+    --line: #343a41;
+    --accent: #e0835c;
+    --accent-ink: #1a1c1f;
+    --chip: #2b3036;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--stage);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow: hidden;
+  }
+  #stage { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  .panel {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    left: 16px;
+    width: min(320px, calc(100% - 32px));
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: grid;
+    gap: 12px;
+    backdrop-filter: blur(6px);
+  }
+  .panel h1 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+  }
+  .panel p { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+  .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: var(--chip); padding: 3px; border-radius: 8px; }
+  .seg button, .row button {
+    font: inherit;
+    font-size: 13px;
+    border: 0;
+    border-radius: 6px;
+    padding: 7px 8px;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .row button { background: var(--chip); padding: 7px 12px; }
+  .row .grow { flex: 1; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .stats {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 3px 12px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .stats dd { margin: 0; color: var(--ink); text-align: right; }
+  .hint { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 10px; line-height: 1.5; }
+  #loading {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    color: #cfd3d6; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px;
+    pointer-events: none;
+  }
+  @media (max-width: 480px) {
+    .hint { display: none; }
+  }
+</style>
+
+<div id="stage"><canvas id="gl"></canvas></div>
+<div id="loading">Loading scene&hellip;</div>
+
+<section class="panel" aria-label="Viewer controls">
+  <div>
+    <h1>South Building</h1>
+    <p>128 raw photos turned into a 3D Gaussian splat and a mesh by visloc-rs, with no COLMAP or Python.</p>
+  </div>
+  <div class="seg" role="group" aria-label="What to show">
+    <button id="m-splat" aria-pressed="true">Splat</button>
+    <button id="m-color" aria-pressed="false">Mesh</button>
+    <button id="m-grey" aria-pressed="false">Shaded</button>
+  </div>
+  <div class="row">
+    <button id="prev" aria-label="Previous photo viewpoint">&#9664;</button>
+    <span class="grow" id="viewname">photo 1 / 128</span>
+    <button id="next" aria-label="Next photo viewpoint">&#9654;</button>
+  </div>
+  <dl class="stats">
+    <dt>splats</dt><dd id="s-splats">&ndash;</dd>
+    <dt>triangles</dt><dd id="s-tris">&ndash;</dd>
+    <dt>frame</dt><dd id="s-fps">&ndash;</dd>
+  </dl>
+  <div class="hint">Drag to orbit &middot; right-drag or shift-drag to pan &middot; wheel to zoom &middot; W A S D Q E to fly &middot; arrows step through the photo viewpoints</div>
+</section>
+
+<script>
+(() => {
+  const canvas = document.getElementById('gl');
+  const gl = canvas.getContext('webgl2', { antialias: false, premultipliedAlpha: true, alpha: true });
+  const loadingEl = document.getElementById('loading');
+  if (!gl) { loadingEl.textContent = 'This viewer needs WebGL2.'; return; }
+
+  // ---------- math (column vectors; R is world-to-camera, COLMAP axes: x right, y down, z forward) ----------
+  const mat3mul = (a, b) => {
+    const r = [];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+      r[i * 3 + j] = a[i * 3] * b[j] + a[i * 3 + 1] * b[3 + j] + a[i * 3 + 2] * b[6 + j];
+    }
+    return r;
+  };
+  const rotAxis = (ax, ang) => {
+    const [x, y, z] = ax, c = Math.cos(ang), s = Math.sin(ang), t = 1 - c;
+    return [t*x*x + c, t*x*y - s*z, t*x*z + s*y, t*x*y + s*z, t*y*y + c, t*y*z - s*x, t*x*z - s*y, t*y*z + s*x, t*z*z + c];
+  };
+  const transpose3 = (m) => [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
+  const mulVec = (m, v) => [m[0]*v[0] + m[1]*v[1] + m[2]*v[2], m[3]*v[0] + m[4]*v[1] + m[5]*v[2], m[6]*v[0] + m[7]*v[1] + m[8]*v[2]];
+
+  // Camera state: rotation R (world-to-camera), centre C, orbit distance.
+  const cam = { R: [1,0,0, 0,1,0, 0,0,1], C: [0,0,0], dist: 3, fy: 1, baseH: 768 };
+  let intr = { width: 1024, height: 768, fx: 847, fy: 847 };
+  let views = [];
+  let viewIndex = 0;
+
+  function setView(i) {
+    if (!views.length) return;
+    viewIndex = (i + views.length) % views.length;
+    const v = views[viewIndex];
+    cam.R = v.rotation.flat();
+    cam.C = v.center.slice();
+    document.getElementById('viewname').textContent = `photo ${viewIndex + 1} / ${views.length}`;
+    requestSort();
+  }
+  const target = () => { const f = transpose3(cam.R); return [cam.C[0] + f[2]*cam.dist, cam.C[1] + f[5]*cam.dist, cam.C[2] + f[8]*cam.dist]; };
+
+  function orbit(dx, dy) {
+    const T = target();
+    // Rotate about the camera's own up (y) and right (x) axes around the target.
+    const Rc = mat3mul(rotAxis([1, 0, 0], dy), rotAxis([0, 1, 0], -dx));
+    cam.R = mat3mul(Rc, cam.R);
+    const back = mulVec(transpose3(cam.R), [0, 0, -cam.dist]);
+    cam.C = [T[0] + back[0], T[1] + back[1], T[2] + back[2]];
+  }
+  function moveLocal(dx, dy, dz) {
+    const d = mulVec(transpose3(cam.R), [dx, dy, dz]);
+    cam.C = [cam.C[0] + d[0], cam.C[1] + d[1], cam.C[2] + d[2]];
+  }
+
+  // ---------- splat program ----------
+  const splatVS = `#version 300 es
+  precision highp float; precision highp int;
+  uniform highp usampler2D u_tex;
+  uniform mat3 u_R; uniform vec3 u_t; uniform vec2 u_focal; uniform vec2 u_viewport;
+  in vec2 a_pos; in int a_index;
+  out vec4 v_color; out vec2 v_pos;
+  void main() {
+    uvec4 c = texelFetch(u_tex, ivec2((uint(a_index) & 0x3ffu) << 1, uint(a_index) >> 10), 0);
+    vec3 p = vec3(uintBitsToFloat(c.x), uintBitsToFloat(c.y), uintBitsToFloat(c.z));
+    vec3 pc = u_R * p + u_t;
+    if (pc.z < 0.05) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+    uvec4 cv = texelFetch(u_tex, ivec2(((uint(a_index) & 0x3ffu) << 1) | 1u, uint(a_index) >> 10), 0);
+    vec2 u1 = unpackHalf2x16(cv.x), u2 = unpackHalf2x16(cv.y), u3 = unpackHalf2x16(cv.z);
+    mat3 S = mat3(u1.x, u1.y, u2.x, u1.y, u2.y, u3.x, u2.x, u3.x, u3.y);
+    float iz = 1.0 / pc.z;
+    mat3 J = mat3(u_focal.x * iz, 0.0, 0.0, 0.0, u_focal.y * iz, 0.0, -u_focal.x * pc.x * iz * iz, -u_focal.y * pc.y * iz * iz, 0.0);
+    mat3 T = J * u_R;
+    mat3 cov = T * S * transpose(T);
+    float a = cov[0][0] + 0.3, b = cov[0][1], d = cov[1][1] + 0.3;
+    float mid = 0.5 * (a + d);
+    float rad = length(vec2(0.5 * (a - d), b));
+    float l1 = mid + rad, l2 = max(mid - rad, 0.1);
+    if (l2 <= 0.0) { gl_Position = vec4(0.0, 0.0, 2.0, 1.0); return; }
+    vec2 dv = normalize(vec2(b, l1 - a));
+    if (abs(b) < 1e-8) dv = a >= d ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+    vec2 major = min(sqrt(2.0 * l1), 1024.0) * dv;
+    vec2 minor = min(sqrt(2.0 * l2), 1024.0) * vec2(dv.y, -dv.x);
+    vec2 center = vec2(u_focal.x * pc.x * iz, u_focal.y * pc.y * iz); // pixels from the principal point
+    vec2 px = center + a_pos.x * major + a_pos.y * minor;
+    v_color = vec4((c.w) & 0xffu, (c.w >> 8) & 0xffu, (c.w >> 16) & 0xffu, (c.w >> 24) & 0xffu) / 255.0;
+    v_pos = a_pos;
+    gl_Position = vec4(px.x / (0.5 * u_viewport.x), -px.y / (0.5 * u_viewport.y), 0.0, 1.0);
+  }`;
+  const splatFS = `#version 300 es
+  precision highp float;
+  in vec4 v_color; in vec2 v_pos; out vec4 o;
+  void main() {
+    float A = -dot(v_pos, v_pos);
+    if (A < -4.0) discard;
+    float B = exp(A) * v_color.a;
+    if (B < 1.0 / 255.0) discard;
+    o = vec4(B * v_color.rgb, B);
+  }`;
+  const meshVS = `#version 300 es
+  precision highp float;
+  uniform mat3 u_R; uniform vec3 u_t; uniform vec2 u_focal; uniform vec2 u_viewport;
+  in vec3 a_p; in vec3 a_n; in vec3 a_c;
+  out vec3 v_c; out vec3 v_n; out vec3 v_view;
+  void main() {
+    vec3 pc = u_R * a_p + u_t;
+    v_c = a_c; v_n = u_R * a_n; v_view = normalize(pc);
+    float z = max(pc.z, 1e-4);
+    vec2 px = vec2(u_focal.x * pc.x / z, u_focal.y * pc.y / z);
+    float near = 0.02, far = 1000.0;
+    float ndcz = (pc.z - near) / (far - near) * 2.0 - 1.0;
+    gl_Position = vec4(px.x / (0.5 * u_viewport.x) * pc.z, -px.y / (0.5 * u_viewport.y) * pc.z, ndcz * pc.z, pc.z);
+  }`;
+  const meshFS = `#version 300 es
+  precision highp float;
+  uniform int u_shaded;
+  in vec3 v_c; in vec3 v_n; in vec3 v_view; out vec4 o;
+  void main() {
+    float l = abs(dot(normalize(v_n), v_view));
+    vec3 base = u_shaded == 1 ? vec3(0.78) : v_c;
+    float k = u_shaded == 1 ? (0.18 + 0.82 * l) : (0.55 + 0.45 * l);
+    o = vec4(base * k, 1.0);
+  }`;
+  function program(vs, fs) {
+    const p = gl.createProgram();
+    for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src); gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+      gl.attachShader(p, s);
+    }
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+    return p;
+  }
+  const splatProg = program(splatVS, splatFS);
+  const meshProg = program(meshVS, meshFS);
+
+  // Splat VAO: a quad plus a per-instance sorted index.
+  const splatVao = gl.createVertexArray();
+  gl.bindVertexArray(splatVao);
+  const quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-2, -2, 2, -2, 2, 2, -2, 2]), gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(splatProg, 'a_pos');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+  const indexBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, indexBuf);
+  const aIndex = gl.getAttribLocation(splatProg, 'a_index');
+  gl.enableVertexAttribArray(aIndex);
+  gl.vertexAttribIPointer(aIndex, 1, gl.INT, false, 0, 0);
+  gl.vertexAttribDivisor(aIndex, 1);
+  gl.bindVertexArray(null);
+  const splatTex = gl.createTexture();
+
+  let splatCount = 0;
+  let sortedCount = 0;
+
+  // ---------- f32 -> f16 ----------
+  const f32 = new Float32Array(1), u32 = new Uint32Array(f32.buffer);
+  function toHalf(v) {
+    f32[0] = v; const x = u32[0];
+    const sign = (x >> 16) & 0x8000; let exp = ((x >> 23) & 0xff) - 112; let mant = x & 0x7fffff;
+    if (exp <= 0) { if (exp < -10) return sign; mant = (mant | 0x800000) >> (1 - exp); return sign | (mant >> 13); }
+    if (exp >= 31) return sign | 0x7c00;
+    return sign | (exp << 10) | (mant >> 13);
+  }
+
+  // ---------- depth sort worker ----------
+  const workerSrc = `
+    let pos = null, n = 0;
+    onmessage = (e) => {
+      if (e.data.positions) { pos = e.data.positions; n = pos.length / 3; return; }
+      const r = e.data.row, t = e.data.tz;
+      const depth = new Int32Array(n);
+      let lo = Infinity, hi = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const d = r[0] * pos[3*i] + r[1] * pos[3*i+1] + r[2] * pos[3*i+2] + t;
+        const q = (d * 4096) | 0; depth[i] = q;
+        if (q < lo) lo = q; if (q > hi) hi = q;
+      }
+      const B = 65536, scale = (B - 1) / Math.max(hi - lo, 1);
+      const counts = new Uint32Array(B);
+      const key = new Uint32Array(n);
+      for (let i = 0; i < n; i++) { const k = ((depth[i] - lo) * scale) | 0; key[i] = k; counts[k]++; }
+      const starts = new Uint32Array(B);
+      for (let i = 1; i < B; i++) starts[i] = starts[i-1] + counts[i-1];
+      const order = new Int32Array(n);
+      for (let i = 0; i < n; i++) order[starts[key[i]]++] = i; // near to far
+      postMessage({ order }, [order.buffer]);
+    };`;
+  const worker = new Worker(URL.createObjectURL(new Blob([workerSrc], { type: 'text/javascript' })));
+  let sortBusy = false, sortPending = false;
+  function requestSort() {
+    if (!splatCount) return;
+    if (sortBusy) { sortPending = true; return; }
+    sortBusy = true;
+    worker.postMessage({ row: [cam.R[6], cam.R[7], cam.R[8]], tz: -(cam.R[6]*cam.C[0] + cam.R[7]*cam.C[1] + cam.R[8]*cam.C[2]) });
+  }
+  worker.onmessage = (e) => {
+    gl.bindBuffer(gl.ARRAY_BUFFER, indexBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, e.data.order, gl.DYNAMIC_DRAW);
+    sortedCount = e.data.order.length;
+    sortBusy = false;
+    if (sortPending) { sortPending = false; requestSort(); }
+  };
+
+  function uploadSplats(buf) {
+    const n = Math.floor(buf.byteLength / 32);
+    const f = new Float32Array(buf), u8 = new Uint8Array(buf);
+    const w = 2048, h = Math.ceil(n / 1024);
+    const data = new Uint32Array(w * h * 4);
+    const fdata = new Float32Array(data.buffer);
+    const positions = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const x = f[8*i], y = f[8*i+1], z = f[8*i+2];
+      positions[3*i] = x; positions[3*i+1] = y; positions[3*i+2] = z;
+      fdata[8*i] = x; fdata[8*i+1] = y; fdata[8*i+2] = z;
+      data[8*i+3] = u8[32*i+24] | (u8[32*i+25] << 8) | (u8[32*i+26] << 16) | (u8[32*i+27] << 24);
+      const sx = f[8*i+3], sy = f[8*i+4], sz = f[8*i+5];
+      const qw = (u8[32*i+28] - 128) / 128, qx = (u8[32*i+29] - 128) / 128, qy = (u8[32*i+30] - 128) / 128, qz = (u8[32*i+31] - 128) / 128;
+      const ql = Math.hypot(qw, qx, qy, qz) || 1;
+      const w_ = qw/ql, x_ = qx/ql, y_ = qy/ql, z_ = qz/ql;
+      const R = [
+        1 - 2*(y_*y_ + z_*z_), 2*(x_*y_ - w_*z_), 2*(x_*z_ + w_*y_),
+        2*(x_*y_ + w_*z_), 1 - 2*(x_*x_ + z_*z_), 2*(y_*z_ - w_*x_),
+        2*(x_*z_ - w_*y_), 2*(y_*z_ + w_*x_), 1 - 2*(x_*x_ + y_*y_),
+      ];
+      const M = [R[0]*sx, R[1]*sy, R[2]*sz, R[3]*sx, R[4]*sy, R[5]*sz, R[6]*sx, R[7]*sy, R[8]*sz];
+      const s00 = M[0]*M[0] + M[1]*M[1] + M[2]*M[2];
+      const s01 = M[0]*M[3] + M[1]*M[4] + M[2]*M[5];
+      const s02 = M[0]*M[6] + M[1]*M[7] + M[2]*M[8];
+      const s11 = M[3]*M[3] + M[4]*M[4] + M[5]*M[5];
+      const s12 = M[3]*M[6] + M[4]*M[7] + M[5]*M[8];
+      const s22 = M[6]*M[6] + M[7]*M[7] + M[8]*M[8];
+      data[8*i+4] = toHalf(s00) | (toHalf(s01) << 16);
+      data[8*i+5] = toHalf(s02) | (toHalf(s11) << 16);
+      data[8*i+6] = toHalf(s12) | (toHalf(s22) << 16);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, splatTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32UI, w, h, 0, gl.RGBA_INTEGER, gl.UNSIGNED_INT, data);
+    splatCount = n;
+    worker.postMessage({ positions }, [positions.buffer]);
+    document.getElementById('s-splats').textContent = n.toLocaleString('en-US');
+    requestSort();
+  }
+
+  // ---------- PLY mesh (binary little endian; float/double xyz, uchar rgb, list faces) ----------
+  const meshVao = gl.createVertexArray();
+  let meshCount = 0;
+  function parsePly(buf) {
+    const bytes = new Uint8Array(buf);
+    const headerEnd = new TextDecoder().decode(bytes.subarray(0, 4096)).indexOf('end_header\n') + 11;
+    const header = new TextDecoder().decode(bytes.subarray(0, headerEnd)).split('\n');
+    const elements = [];
+    for (const line of header) {
+      const t = line.trim().split(/\s+/);
+      if (t[0] === 'element') elements.push({ name: t[1], count: +t[2], props: [] });
+      if (t[0] === 'property') elements[elements.length - 1].props.push(t[1] === 'list' ? { list: true, ct: t[2], it: t[3], name: t[4] } : { type: t[1], name: t[2] });
+    }
+    const size = { char: 1, uchar: 1, int8: 1, uint8: 1, short: 2, ushort: 2, int: 4, uint: 4, int32: 4, uint32: 4, float: 4, float32: 4, double: 8, float64: 8 };
+    const dv = new DataView(buf);
+    const read = (type, o) => {
+      switch (type) {
+        case 'float': case 'float32': return dv.getFloat32(o, true);
+        case 'double': case 'float64': return dv.getFloat64(o, true);
+        case 'uchar': case 'uint8': return dv.getUint8(o);
+        case 'char': case 'int8': return dv.getInt8(o);
+        case 'int': case 'int32': return dv.getInt32(o, true);
+        case 'uint': case 'uint32': return dv.getUint32(o, true);
+        case 'short': return dv.getInt16(o, true);
+        case 'ushort': return dv.getUint16(o, true);
+      }
+    };
+    let o = headerEnd;
+    let pos, col, idx = [];
+    for (const el of elements) {
+      if (el.name === 'vertex') {
+        pos = new Float32Array(el.count * 3); col = new Float32Array(el.count * 3).fill(0.7);
+        for (let i = 0; i < el.count; i++) {
+          for (const p of el.props) {
+            const v = read(p.type, o); o += size[p.type];
+            const k = { x: 0, y: 1, z: 2 }[p.name];
+            if (k !== undefined) pos[3*i + k] = v;
+            const c = { red: 0, green: 1, blue: 2 }[p.name];
+            if (c !== undefined) col[3*i + c] = v / 255;
+          }
+        }
+      } else if (el.name === 'face') {
+        idx = new Uint32Array(el.count * 3);
+        for (let i = 0; i < el.count; i++) {
+          for (const p of el.props) {
+            if (p.list) {
+              const n = read(p.ct, o); o += size[p.ct];
+              const vs = [];
+              for (let k = 0; k < n; k++) { vs.push(read(p.it, o)); o += size[p.it]; }
+              idx[3*i] = vs[0]; idx[3*i+1] = vs[1]; idx[3*i+2] = vs[2];
+            } else { o += size[p.type]; }
+          }
+        }
+      }
+    }
+    // Smooth vertex normals.
+    const nrm = new Float32Array(pos.length);
+    for (let i = 0; i < idx.length; i += 3) {
+      const a = idx[i]*3, b = idx[i+1]*3, c = idx[i+2]*3;
+      const ux = pos[b]-pos[a], uy = pos[b+1]-pos[a+1], uz = pos[b+2]-pos[a+2];
+      const vx = pos[c]-pos[a], vy = pos[c+1]-pos[a+1], vz = pos[c+2]-pos[a+2];
+      const nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+      for (const v of [a, b, c]) { nrm[v] += nx; nrm[v+1] += ny; nrm[v+2] += nz; }
+    }
+    return { pos, col, nrm, idx };
+  }
+  function uploadMesh(m) {
+    gl.bindVertexArray(meshVao);
+    for (const [name, arr] of [['a_p', m.pos], ['a_n', m.nrm], ['a_c', m.col]]) {
+      const b = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(meshProg, name);
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+    }
+    const ib = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.idx, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    meshCount = m.idx.length;
+    document.getElementById('s-tris').textContent = (meshCount / 3).toLocaleString('en-US');
+  }
+
+  // ---------- modes ----------
+  let mode = 'splat';
+  const modeButtons = { splat: 'm-splat', color: 'm-color', grey: 'm-grey' };
+  function setMode(m) {
+    mode = m;
+    for (const [k, id] of Object.entries(modeButtons)) document.getElementById(id).setAttribute('aria-pressed', String(k === m));
+    if (m !== 'splat' && !meshCount && !meshLoading) loadMesh();
+  }
+  for (const [k, id] of Object.entries(modeButtons)) document.getElementById(id).addEventListener('click', () => setMode(k));
+  document.getElementById('prev').addEventListener('click', () => setView(viewIndex - 1));
+  document.getElementById('next').addEventListener('click', () => setView(viewIndex + 1));
+
+  // A binary file next to the page, or its base64 text twin (`<name>.txt`)
+  // where only text can be hosted. Streams with progress.
+  async function fetchBinary(name, progress) {
+    let res = await fetch(name);
+    const b64 = !res.ok;
+    if (b64) res = await fetch(name + '.txt');
+    if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+    const total = +res.headers.get('content-length') || 0;
+    const reader = res.body.getReader();
+    const chunks = []; let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); got += value.length;
+      progress(got, total);
+    }
+    const all = new Uint8Array(got); let o = 0;
+    for (const c of chunks) { all.set(c, o); o += c.length; }
+    if (!b64) return all.buffer;
+    const text = new TextDecoder().decode(all);
+    const bin = atob(text.trim());
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out.buffer;
+  }
+
+  let meshLoading = false;
+  async function loadMesh() {
+    meshLoading = true;
+    loadingEl.textContent = 'Loading mesh\u2026'; loadingEl.hidden = false;
+    try {
+      const buf = await fetchBinary('mesh.ply', () => {});
+      uploadMesh(parsePly(buf));
+      loadingEl.hidden = true;
+    } catch (err) {
+      loadingEl.textContent = 'Could not load mesh.ply: ' + err.message;
+    }
+  }
+
+  // ---------- input ----------
+  const keys = new Set();
+  let drag = null;
+  canvas.addEventListener('pointerdown', (e) => { canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey }; });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    drag.x = e.clientX; drag.y = e.clientY;
+    if (drag.pan) { const s = cam.dist / (cam.fy * canvas.clientHeight / cam.baseH); moveLocal(-dx * s, -dy * s, 0); }
+    else orbit(dx * 0.005, dy * 0.005);
+    requestSort();
+  });
+  canvas.addEventListener('pointerup', () => { drag = null; });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const step = cam.dist * (e.deltaY > 0 ? 0.1 : -0.1);
+    moveLocal(0, 0, -step);
+    cam.dist = Math.max(0.05, cam.dist + step);
+    requestSort();
+  }, { passive: false });
+  addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') setView(viewIndex + 1);
+    else if (e.key === 'ArrowLeft') setView(viewIndex - 1);
+    else keys.add(e.key.toLowerCase());
+  });
+  addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+
+  // ---------- frame ----------
+  function resize() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+  }
+  let last = performance.now(), fpsAcc = 0, fpsN = 0;
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.1); last = now;
+    fpsAcc += dt; fpsN++;
+    if (fpsAcc > 0.5) { document.getElementById('s-fps').textContent = (1000 * fpsAcc / fpsN).toFixed(1) + ' ms'; fpsAcc = 0; fpsN = 0; }
+    const sp = cam.dist * 0.6 * dt;
+    let moved = false;
+    const kmap = { w: [0, 0, 1], s: [0, 0, -1], a: [-1, 0, 0], d: [1, 0, 0], q: [0, 1, 0], e: [0, -1, 0] };
+    for (const [k, v] of Object.entries(kmap)) if (keys.has(k)) { moveLocal(v[0]*sp, v[1]*sp, v[2]*sp); moved = true; }
+    if (moved) requestSort();
+
+    resize();
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    // Keep the photos' vertical field of view.
+    const f = cam.fy * canvas.height / cam.baseH;
+    const t = mulVec(cam.R, cam.C).map((v) => -v);
+    const Rgl = transpose3(cam.R); // column-major upload of row-major R
+    if (mode === 'splat' && sortedCount) {
+      gl.useProgram(splatProg);
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFuncSeparate(gl.ONE_MINUS_DST_ALPHA, gl.ONE, gl.ONE_MINUS_DST_ALPHA, gl.ONE);
+      gl.uniformMatrix3fv(gl.getUniformLocation(splatProg, 'u_R'), false, Rgl);
+      gl.uniform3fv(gl.getUniformLocation(splatProg, 'u_t'), t);
+      gl.uniform2f(gl.getUniformLocation(splatProg, 'u_focal'), f * cam.fxRatio, f);
+      gl.uniform2f(gl.getUniformLocation(splatProg, 'u_viewport'), canvas.width, canvas.height);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, splatTex);
+      gl.uniform1i(gl.getUniformLocation(splatProg, 'u_tex'), 0);
+      gl.bindVertexArray(splatVao);
+      gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, sortedCount);
+    } else if (mode !== 'splat' && meshCount) {
+      gl.useProgram(meshProg);
+      gl.disable(gl.BLEND);
+      gl.enable(gl.DEPTH_TEST);
+      gl.uniformMatrix3fv(gl.getUniformLocation(meshProg, 'u_R'), false, Rgl);
+      gl.uniform3fv(gl.getUniformLocation(meshProg, 'u_t'), t);
+      gl.uniform2f(gl.getUniformLocation(meshProg, 'u_focal'), f * cam.fxRatio, f);
+      gl.uniform2f(gl.getUniformLocation(meshProg, 'u_viewport'), canvas.width, canvas.height);
+      gl.uniform1i(gl.getUniformLocation(meshProg, 'u_shaded'), mode === 'grey' ? 1 : 0);
+      gl.bindVertexArray(meshVao);
+      gl.drawElements(gl.TRIANGLES, meshCount, gl.UNSIGNED_INT, 0);
+    }
+    gl.bindVertexArray(null);
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- load ----------
+  (async () => {
+    try {
+      const camsRes = await fetch('scene.cameras.json');
+      if (camsRes.ok) {
+        const j = await camsRes.json();
+        intr = j; views = j.views || [];
+      }
+      cam.fy = intr.fy; cam.baseH = intr.height; cam.fxRatio = intr.fx / intr.fy;
+      // Orbit distance: camera centre spread.
+      if (views.length) {
+        const c = views.reduce((a, v) => [a[0] + v.center[0], a[1] + v.center[1], a[2] + v.center[2]], [0, 0, 0]).map((x) => x / views.length);
+        const d = views.map((v) => Math.hypot(v.center[0] - c[0], v.center[1] - c[1], v.center[2] - c[2])).sort((a, b) => a - b);
+        cam.dist = d[d.length >> 1] || 3;
+        setView(Math.floor(views.length * 0.23));
+      }
+      const buf = await fetchBinary('scene.splat', (got, total) => {
+        loadingEl.textContent = total ? `Loading splats\u2026 ${Math.round(100 * got / total)}%` : `Loading splats\u2026 ${(got / 1e6).toFixed(1)} MB`;
+      });
+      uploadSplats(buf);
+      loadingEl.hidden = true;
+    } catch (err) {
+      loadingEl.textContent = 'Could not load the scene: ' + err.message;
+    }
+  })();
+  cam.fxRatio = 1;
+  requestAnimationFrame(frame);
+})();
+</script>
