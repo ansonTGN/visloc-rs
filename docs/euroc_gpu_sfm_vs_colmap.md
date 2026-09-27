@@ -162,6 +162,24 @@ is the default:
 | `--keypoints 8000` (COLMAP's cap is 8,192) | V2_01 ATE 3.30 → 2.02 cm | MH_05 2.58 → 5.09 cm; V1_02 1.76 → 2.89 cm; fewer frames registered |
 | `--polish` (re-triangulate all pairs + global BA) | MH_03 198/200 at 2.27 cm; V2_01, V1_02 and MH_05 200/200; V1_03 96 frames | MH_01 ATE 0.35 → 1.10 cm; V1_03 2.17 → 7.34 cm |
 
+Two more attempts, also opt-in:
+
+- **Weak-link rescue.** `--rescue-weak 100 [--rescue-ratio 0.9]
+  [--rescue-add-only]` re-matches nearby pairs that have fewer than 100
+  verified matches, using a relaxed ratio and no cross-check.
+  - Replacing the original pairs with the relaxed matches registers more
+    frames but costs accuracy: V1_03 goes 67 → 105–107 frames (COLMAP: 80)
+    at 8–10 cm, and V2_03 lands at 6.6–16 cm. MH_03 does improve, from
+    1.32 to 1.07 cm.
+  - Adding only the pairs that were missing changes almost nothing.
+- **V2_01 scale drift.** Aligned on its own, each half of V2_01 fits
+  ground truth to 0.5–0.7 cm, but the two halves' Sim(3) scales differ by 3%
+  (2.2505 vs 2.1818).
+  - Skip pairs out to 195 frames added 3,090 candidates, but none of the new
+    long-range pairs passed verification (2,264 verified either way).
+  - The sequence never revisits a view, so there is no loop to close the
+    drift.
+
 The remaining gap is bridging blurred stretches (V2_03, V1_03) and V2_01's
 accuracy. The options above stay available for single-sequence use: for
 example, `--polish` suits MH_03-like sequences, where it both registers more

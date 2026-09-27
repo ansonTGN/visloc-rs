@@ -8,7 +8,7 @@
 //! Usage:
 //! ```text
 //! cargo run --release --example localize_rne_map_sequence -- \
-//!   --out-dir <dir> [--radius-m 5.0] [--min-inliers 6] \
+//!   --out-dir <dir> [--radius-m 5.0] [--min-inliers 6] [--projection-px 30] [--motion-model] \
 //!   <colmap_text_dir> <landmark_descriptors.txt> <camera_id> \
 //!   <query_features.txt> [query_features_2.txt ...]
 //! ```
@@ -44,14 +44,43 @@ fn localize_with_prior(
     store: &LandmarkDescriptorStore,
     pose: &Pose,
     radius_m: f64,
+    projection_px: Option<f64>,
 ) -> LocalizationResult {
     let selector = RadiusLandmarkSelector::new(pose.camera_center_world(), radius_m);
+    if let Some(px) = projection_px {
+        // Projection-guided: each candidate landmark is matched only to the
+        // query keypoints within `px` of where the prior projects it.
+        return pipeline.localize_with_projection_window_and_descriptor_store(
+            query, map, store, selector, pose, px,
+        );
+    }
     pipeline.localize_with_candidate_selector_and_descriptor_store_and_pose_prior(
         query,
         map,
         store,
         selector,
         Some(pose),
+    )
+}
+
+/// Constant-velocity prediction from the last two accepted poses
+/// (world-to-camera): the relative motion prev -> last, scaled to the time
+/// since `last`, applied once more.
+fn predict_pose(prev: &(f64, Pose), last: &(f64, Pose), timestamp: f64) -> Pose {
+    let (t0, p0) = prev;
+    let (t1, p1) = last;
+    let dt = t1 - t0;
+    if dt <= 1e-9 {
+        return p1.clone();
+    }
+    let alpha = ((timestamp - t1) / dt).clamp(0.0, 3.0);
+    let (q0, q1) = (p0.world_to_camera.rotation, p1.world_to_camera.rotation);
+    let r = q1 * q0.inverse();
+    let t_rel = p1.world_to_camera.translation - r * p0.world_to_camera.translation;
+    let r_a = r.powf(alpha);
+    Pose::from_world_to_camera(
+        r_a * q1,
+        r_a * p1.world_to_camera.translation + t_rel * alpha,
     )
 }
 
@@ -123,6 +152,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|value| value.parse())
         .transpose()?
         .unwrap_or(6);
+    let motion_model = if let Some(pos) = args.iter().position(|a| a == "--motion-model") {
+        args.remove(pos);
+        true
+    } else {
+        false
+    };
+    let projection_px: Option<f64> = parse_flag(&mut args, "--projection-px")
+        .map(|value| value.parse())
+        .transpose()?;
     let prior_tum: Option<Vec<(i64, Pose)>> = parse_flag(&mut args, "--prior-tum")
         .map(|path| load_prior_tum(Path::new(&path)))
         .transpose()?;
@@ -188,6 +226,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|(_, keyframe)| keyframe.frame.pose.clone());
     println!("seed prior: {}", prior.is_some());
     let mut consecutive_failures = 0_usize;
+    // Last two accepted (timestamp, pose) for the constant-velocity prior.
+    let mut history: Vec<(f64, Pose)> = Vec::new();
     let mut tum = String::new();
     let mut stats =
         String::from("frame,query,success,inliers,inlier_ratio,latency_ms,used_prior,fallback\n");
@@ -207,15 +247,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let external = prior_tum
             .as_ref()
             .and_then(|priors| nearest_prior(priors, timestamp_ns, 100_000_000));
-        let active: Option<Pose> = external.or_else(|| prior.clone());
+        let predicted = (motion_model && history.len() == 2 && prior.is_some())
+            .then(|| predict_pose(&history[0], &history[1], timestamp));
+        let active: Option<Pose> = external.or(predicted).or_else(|| prior.clone());
         let used_prior = active.is_some();
         let start = Instant::now();
-        let prior_result = active
-            .as_ref()
-            .map(|pose| localize_with_prior(&pipeline, &query, map, store, pose, radius_m));
-        let prior_accepted = prior_result.as_ref().is_some_and(|result| {
-            result.success && result.inlier_count >= min_inliers && result.pose.is_some()
+        let prior_result = active.as_ref().map(|pose| {
+            localize_with_prior(&pipeline, &query, map, store, pose, radius_m, projection_px)
         });
+        let accept = |result: &LocalizationResult| {
+            result.success && result.inlier_count >= min_inliers && result.pose.is_some()
+        };
+        // A missed projection window: retry once with a 3x wider window
+        // before the (much slower) global fallback.
+        let prior_result = match (prior_result, projection_px, active.as_ref()) {
+            (Some(r), Some(px), Some(pose)) if !accept(&r) => Some(localize_with_prior(
+                &pipeline,
+                &query,
+                map,
+                store,
+                pose,
+                radius_m,
+                Some(px * 3.0),
+            )),
+            (r, _, _) => r,
+        };
+        let prior_accepted = prior_result.as_ref().is_some_and(accept);
         // Two-stage: prior first; on failure fall back to global matching so a
         // stale prior cannot poison the track and loss is recovered immediately.
         let (result, used_fallback) = if prior_accepted {
@@ -244,6 +301,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 quaternion.k,
                 quaternion.w,
             ));
+            history.push((timestamp, pose.clone()));
+            if history.len() > 2 {
+                history.remove(0);
+            }
             prior = Some(pose);
             consecutive_failures = 0;
             localized += 1;
@@ -251,6 +312,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             consecutive_failures += 1;
             if consecutive_failures >= 10 {
                 prior = None;
+                history.clear();
                 consecutive_failures = 0;
             }
         }
