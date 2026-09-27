@@ -136,6 +136,38 @@ of the scalar intrinsics. The complete option set, the courtyard control
 commands, and the connected-component export mode are in the
 [SfM benchmark details](docs/sfm_benchmarks.md#run-the-sfm-demo).
 
+## Photos to splat and mesh (3D Gaussian Splatting)
+
+A folder of photos becomes a trained 3D Gaussian Splatting scene and a
+coloured mesh in one command, in Rust + wgpu with no COLMAP or Python:
+
+```bash
+cargo run --release -p visloc-gsplat-train --features gpu,euroc --example gsplat_photos -- \
+  --images /path/to/my_photos --out /path/to/runs/my-scene
+```
+
+<p align="center">
+  <img src="docs/assets/photos_to_mesh.gif" alt="south-building: each raw input photo next to the trained Gaussian splat and the extracted mesh rendered from the same recovered pose" width="900">
+</p>
+<p align="center"><sub>The 128 raw south-building JPGs: every image registered, focal refined from EXIF 796 px to 847.0 px (COLMAP: 847.2), held-out PSNR 22.77 at 30k steps, 37 min end to end. <a href="scripts/make_photos_demo_gif.py">Script</a>.</sub></p>
+
+The pipeline has three stages:
+
+1. **SfM.** Takes the focal length from EXIF, then runs GPU SIFT and
+   matching, two-view verification and the COLMAP-port mapper (the
+   configuration that beats COLMAP on EuRoC above). A final bundle
+   adjustment refines the intrinsics. A COLMAP text model is written to
+   `sparse/0`, so brush and Inria 3DGS can use the result too.
+2. **Training.** brush's refine strategy on the hand-written wgpu forward
+   and backward passes. On the same GPU, at 30k steps, it is faster than
+   brush 0.3 on all five benchmark scenes (14–30%). PSNR is within
+   0.05 dB of brush on four of them; details in
+   [the 3DGS plan](docs/rust_3dgs_plan.md).
+3. **Mesh.** Median-depth rendering, TSDF fusion and surface nets. Surfaces
+   with no SfM point nearby, such as the sky, are dropped. The
+   `--normal-weight 0.005` depth-normal loss makes surfaces smoother for
+   -0.2 dB.
+
 ## Visual-Inertial SLAM (Basalt Rust port)
 
 A separate, faithful Rust port of upstream
