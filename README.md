@@ -61,7 +61,8 @@ the docs record open gaps.
 | Stereo + IMU | VIO + mapping (Basalt port) | **Benchmarked** | Beats ORB-SLAM3 on 8/11 EuRoC sequences; native-Basalt parity within 0.1%; not yet real time | `basalt_euroc_online_slam_demo` |
 | RGB-D (as virtual stereo) | VO | **Benchmarked** | TUM fr1_xyz 0.014 m, fr1_desk 0.026 m (about 1.3–1.6× ORB-SLAM2 RGB-D) | [TUM RGB-D](docs/tum_rgbd_benchmark.md) |
 | Multi-camera rig | SfM | Experimental | OpenLORIS 10k: 9,998/10,000 registered; RMSE parity with COLMAP still open | `generalized_rig_sfm` |
-| Single image vs. a prebuilt map | Relocalization | **Benchmarked** | 7-Scenes chess: about 99% localized with LightGlue, median 3.3 cm / 1.7° | `relocalization_7scenes_demo` |
+| Robot rig cameras vs. a prebuilt map | Relocalization | **Benchmarked** | OpenLORIS (robot-mounted rig): 98.96% of 1,250 held-out frames localized against a map built from other frames, median 2.9 mm | `localize_openloris_map` |
+| Robot camera sequence vs. a prebuilt map | Sequential map-matching localization | Experimental | Simulated robot corridor (RNE): 105/400 frames localized, 1.39 m ATE; limited by repetitive texture | `localize_rne_map_sequence` |
 | Camera + GNSS prior | Tracking | Example only | Synthetic smoke test; no tight GNSS fusion | `track_sequence_with_gnss_prior` |
 
 LiDAR and wheel odometry are not supported.
