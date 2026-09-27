@@ -67,6 +67,13 @@ pub fn rasterize() -> Kernel {
     build("rasterize", include_str!("shaders/rasterize.wgsl"))
 }
 
+pub fn rasterize_depth() -> Kernel {
+    build(
+        "rasterize_depth",
+        include_str!("shaders/rasterize_depth.wgsl"),
+    )
+}
+
 pub fn radix() -> Kernel {
     build("radix", include_str!("shaders/radix.wgsl"))
 }

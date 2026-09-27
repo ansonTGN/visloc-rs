@@ -11,6 +11,7 @@
 //! - [`init`]: initial gaussians from coloured SfM points.
 //! - [`densify`]: Inria-style clone / split / prune on the host.
 //! - `trainer` (feature `gpu`): the on-device training loop.
+//! - `mesh` (feature `gpu`): TSDF fusion of rendered depth + surface nets.
 //!
 //! Scoring every method's splat with the same renderer, split and metric keeps
 //! comparisons (e.g. against brush) apples to apples.
@@ -22,6 +23,8 @@ pub mod euroc;
 pub mod init;
 #[cfg(feature = "gpu")]
 pub mod loss;
+#[cfg(feature = "gpu")]
+pub mod mesh;
 pub mod metrics;
 #[cfg(feature = "gpu")]
 pub mod trainer;
