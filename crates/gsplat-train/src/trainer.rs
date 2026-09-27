@@ -1167,22 +1167,30 @@ impl Trainer {
         // the gaussians above the refine threshold, sampled by their weight.
         let mut add = vec![false; n];
         let rng = &mut self.rng;
+        // Weighted sampling *without* replacement (brush uses
+        // `rand::seq::index::sample_weighted`): `count` distinct indices.
+        // Efraimidis-Spirakis: the `count` smallest keys -ln(u) / w. Drawing
+        // with replacement instead collapses repeats of heavy gaussians, so
+        // far fewer are added than asked for.
         let mut sample = |weights: &[f32], count: usize, add: &mut Vec<bool>| {
-            let mut cdf = Vec::with_capacity(weights.len());
-            let mut acc = 0.0f64;
-            for &w in weights {
-                acc += w.max(0.0) as f64;
-                cdf.push(acc);
+            let mut keys: Vec<(f64, usize)> = Vec::with_capacity(weights.len());
+            for (j, &w) in weights.iter().enumerate() {
+                if w > 0.0 && w.is_finite() {
+                    *rng ^= *rng << 13;
+                    *rng ^= *rng >> 7;
+                    *rng ^= *rng << 17;
+                    let u = ((*rng >> 11) as f64 + 0.5) / (1u64 << 53) as f64;
+                    keys.push((-u.ln() / w as f64, j));
+                }
             }
-            if acc <= 0.0 {
+            let count = count.min(keys.len());
+            if count == 0 {
                 return;
             }
-            for _ in 0..count {
-                *rng ^= *rng << 13;
-                *rng ^= *rng >> 7;
-                *rng ^= *rng << 17;
-                let u = (*rng >> 11) as f64 / (1u64 << 53) as f64 * acc;
-                let j = cdf.partition_point(|&c| c <= u).min(weights.len() - 1);
+            if count < keys.len() {
+                keys.select_nth_unstable_by(count - 1, |a, b| a.0.total_cmp(&b.0));
+            }
+            for &(_, j) in &keys[..count] {
                 add[j] = true;
             }
         };
