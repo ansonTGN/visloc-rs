@@ -49,6 +49,12 @@ pub struct TrainConfig {
     /// `normal_start` on.
     pub normal_weight: f32,
     pub normal_start: usize,
+    /// brush's auxiliary losses (see `shaders/aux_loss.wgsl`): opacity-logit
+    /// and scale weights, applied with weight `aux_loss_time - t` (t = step /
+    /// steps, clamped to [0, 1]). 0 = off.
+    pub opac_loss_weight: f32,
+    pub scale_loss_weight: f32,
+    pub aux_loss_time: f32,
 }
 
 impl Default for TrainConfig {
@@ -71,6 +77,9 @@ impl Default for TrainConfig {
             lr_scale_final: None,
             normal_weight: 0.0,
             normal_start: 7000,
+            opac_loss_weight: 0.0,
+            scale_loss_weight: 0.0,
+            aux_loss_time: 0.9,
         }
     }
 }
@@ -91,6 +100,8 @@ impl TrainConfig {
             lr_sh_rest: 2e-3 / 20.0,
             densify: None,
             brush_refine: Some(BrushRefineConfig::default()),
+            opac_loss_weight: 1e-9,
+            scale_loss_weight: 1e-8,
             ..Self::default()
         }
     }
@@ -145,6 +156,15 @@ struct StatsUniforms {
     half_h: f32,
     /// 0 Inria (sum of NDC xy grad norms), 1 brush (max refine weight).
     mode: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct AuxUniforms {
+    n: u32,
+    num_visible: u32,
+    opac_coef: f32,
+    scale_coef: f32,
 }
 
 #[repr(C)]
@@ -204,6 +224,10 @@ pub struct Trainer {
     /// Depth-normal loss: the two passes of normal_loss.wgsl, their
     /// uniforms and per-pixel scratch (built on first use).
     normal: Option<NormalLoss>,
+    /// brush's auxiliary losses: `aux_all` / `aux_visible` and uniforms.
+    aux_all: wgpu::ComputePipeline,
+    aux_visible: wgpu::ComputePipeline,
+    aux_uniforms: wgpu::Buffer,
     sh_degree: u32,
     /// Ground truth of the current view (the host keeps every view packed
     /// as RGBA8 and uploads one per step: ~3 MB instead of ~300 MB resident).
@@ -498,6 +522,19 @@ impl Trainer {
             "mean_noise",
         );
         let noise_uniforms = uniform(&dev, "noise_uniforms", 16);
+        let aux_all = pipeline(
+            &dev,
+            "aux_all",
+            include_str!("shaders/aux_loss.wgsl"),
+            "aux_all",
+        );
+        let aux_visible = pipeline(
+            &dev,
+            "aux_visible",
+            include_str!("shaders/aux_loss.wgsl"),
+            "aux_visible",
+        );
+        let aux_uniforms = uniform(&dev, "aux_uniforms", 16);
         let init_means: Vec<[f32; 3]> = init
             .gaussians
             .iter()
@@ -527,6 +564,9 @@ impl Trainer {
             noise_pipeline,
             noise_uniforms,
             normal: None,
+            aux_all,
+            aux_visible,
+            aux_uniforms,
             sh_degree: init.sh_degree,
             gt,
             gt_host,
@@ -860,6 +900,46 @@ impl Trainer {
                 pass.set_pipeline(&self.stats_pipeline);
                 pass.set_bind_group(0, &st.stats_bind, &[]);
                 pass.dispatch_workgroups(nv.div_ceil(256), 1, 1);
+            }
+            let aux_w = (self.cfg.aux_loss_time - frac).clamp(0.0, 1.0);
+            let aux_on = aux_w > 0.0
+                && (self.cfg.opac_loss_weight > 0.0 || self.cfg.scale_loss_weight > 0.0);
+            if aux_on {
+                let n = st.renderer.num_gaussians() as u32;
+                let au = AuxUniforms {
+                    n,
+                    num_visible: nv,
+                    opac_coef: self.cfg.opac_loss_weight * aux_w,
+                    scale_coef: self.cfg.scale_loss_weight * aux_w / self.bound_size.max(1e-6),
+                };
+                queue.write_buffer(&self.aux_uniforms, 0, bytemuck::bytes_of(&au));
+                let params = st.renderer.param_buffers();
+                let pt = params.transforms.clone();
+                let grads = st.renderer.grad_buffers()?;
+                let (gt, go) = (grads.transforms.clone(), grads.opacity.clone());
+                let gfc = st.renderer.screen_grad_buffers()?.0.clone();
+                let bind_all = bind_slots(
+                    &dev,
+                    &self.aux_all,
+                    "aux_all",
+                    &[(0, &self.aux_uniforms), (1, &pt), (2, &gt), (3, &go)],
+                );
+                let bind_vis = bind(
+                    &dev,
+                    &self.aux_visible,
+                    "aux_visible",
+                    &[&self.aux_uniforms, &pt, &gt, &go, &gfc],
+                );
+                let (x, y) = groups_2d(n);
+                pass.set_pipeline(&self.aux_all);
+                pass.set_bind_group(0, &bind_all, &[]);
+                pass.dispatch_workgroups(x, y, 1);
+                if nv > 0 {
+                    let (x, y) = groups_2d(nv);
+                    pass.set_pipeline(&self.aux_visible);
+                    pass.set_bind_group(0, &bind_vis, &[]);
+                    pass.dispatch_workgroups(x, y, 1);
+                }
             }
         }
         if self.profile.is_some() {
