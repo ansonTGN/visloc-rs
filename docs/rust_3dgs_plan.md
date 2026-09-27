@@ -505,6 +505,37 @@ differentiating against). Structure:
       (18.57 ms), because the cost scales with the component count.
     - Per-lane shared CAS when only a few lanes hit a splat, falling back
       to the reduction above K lanes: 19.7 / 32.8 / 76.7 ms at K = 4 / 8 / 16.
+- **brush refine fidelity (2026-09-27)**: splat counts on south-building
+  trailed brush's (0.71M vs 0.94M at 14k steps). Reading brush 0.3's
+  source turned up three differences:
+  - brush counts a view only when the splat was blended into a pixel. The
+    port counted every projected splat, which deflated
+    max-weight / view-count, so fewer splats crossed the growth threshold.
+    **This was the cause:** south-building now grows 0.32M / 0.92M at
+    7k / 14k (brush 0.32M / 0.94M).
+  - brush samples growth indices without replacement. Porting that
+    changed little.
+  - brush's auxiliary opacity / scale losses (1e-9 / 1e-8) are now in the
+    brush preset. They made no measurable difference.
+  - An alpha cap of 0.999 (brush) instead of 0.99 was tried and dropped:
+    no effect.
+
+  Same protocol and GPU as above:
+
+  | scene | ours PSNR / SSIM | brush PSNR / SSIM | ours time | brush time |
+  | --- | --- | --- | --- | --- |
+  | Mip-NeRF 360 bonsai | 32.97 / 0.959 | **33.02 / 0.960** | **1085 s** | 1333 s |
+  | Mip-NeRF 360 room | 32.93 / 0.950 | **32.95 / 0.951** | **934 s** | 1184 s |
+  | Mip-NeRF 360 garden | 27.60 / 0.866 | **27.62 / 0.868** | **2608 s** | 3134 s |
+  | south-building (3 runs) | 21.92, 22.18, 22.33 / 0.800, 0.799, 0.803 | **22.69 / 0.805** | **~1750 s** | 2379 s |
+  | gerrard-hall | 19.95 / 0.717 | **19.98 / 0.719** | **1509 s** | 2147 s |
+
+  - **Quality:** within 0.05 dB of brush on four scenes. south-building's
+    SSIM gap shrank from 0.014 to 0.005; its PSNR stays noisy
+    (21.9-22.3) against a single brush run.
+  - **Speed:** faster than brush everywhere (14-30%). We are about 10%
+    slower than before the fix because there are more splats.
+
 - **Mesh extraction (2026-09-27)**: `gsplat_mesh` (feature `gpu`) turns a
   trained `.ply` plus its COLMAP dataset into a vertex-coloured triangle
   mesh without retraining.
