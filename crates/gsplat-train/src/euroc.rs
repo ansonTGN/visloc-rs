@@ -83,6 +83,13 @@ pub struct EurocSfmConfig {
     /// After the COLMAP-port mapper: re-triangulate all verified pairs and
     /// bundle-adjust the model once more.
     pub polish: bool,
+    /// Re-match weak links (fewer verified matches than this; 0 = off) with
+    /// a relaxed matcher, see `rescue_window` / `rescue_ratio`.
+    pub rescue_weak: usize,
+    pub rescue_window: usize,
+    pub rescue_ratio: f32,
+    /// Only add pairs that failed verification; keep verified ones as is.
+    pub rescue_add_only: bool,
     /// Inlier floor for a verified pair; `None` = `min_matches`.
     pub verify_min_inliers: Option<usize>,
     /// Diagnostic: replace the SIFT features and verified pairs with an
@@ -135,6 +142,10 @@ impl Default for EurocSfmConfig {
             register_gated_links: 1,
             merge_models: false,
             polish: false,
+            rescue_weak: 0,
+            rescue_window: 3,
+            rescue_ratio: 0.9,
+            rescue_add_only: false,
             verify_min_inliers: None,
             import_colmap: None,
             init_poses: None,
@@ -1120,6 +1131,74 @@ pub fn build_euroc_dataset(
         candidates.len()
     ));
     log(&format!("{} verified pairs", pairwise.len()));
+
+    if cfg.rescue_weak > 0 {
+        // Bridge weak links (motion blur): pairs of kept frames at most
+        // `rescue_window` apart whose verified matches are missing or fewer
+        // than `rescue_weak` are re-matched with a relaxed ratio and no
+        // cross-check, then pass through the same verifier; a result with
+        // more inliers replaces the original.
+        let t = std::time::Instant::now();
+        let mut slot: std::collections::HashMap<(usize, usize), usize> = pairwise
+            .iter()
+            .enumerate()
+            .map(|(k, p)| ((p.image_i, p.image_j), k))
+            .collect();
+        let weak: Vec<(usize, usize)> = (0..n)
+            .flat_map(|i| ((i + 1)..(i + 1 + cfg.rescue_window).min(n)).map(move |j| (i, j)))
+            .filter(|&(i, j)| keep[i] && keep[j])
+            .filter(|p| {
+                slot.get(p)
+                    .is_none_or(|&k| pairwise[k].matches.len() < cfg.rescue_weak)
+            })
+            .collect();
+        #[cfg(feature = "gpu")]
+        let relaxed: Vec<Vec<DescriptorMatch>> = match &gpu_match {
+            Some((ctx, bank, m)) => m.match_pairs(ctx, bank, &weak, Some(cfg.rescue_ratio), false),
+            None => weak
+                .par_iter()
+                .map(|&(i, j)| {
+                    BruteForceMatcher {
+                        ratio: Some(cfg.rescue_ratio),
+                    }
+                    .match_descriptors(&features[i].descriptors, &features[j].descriptors)
+                })
+                .collect(),
+        };
+        #[cfg(not(feature = "gpu"))]
+        let relaxed: Vec<Vec<DescriptorMatch>> = weak
+            .par_iter()
+            .map(|&(i, j)| {
+                BruteForceMatcher {
+                    ratio: Some(cfg.rescue_ratio),
+                }
+                .match_descriptors(&features[i].descriptors, &features[j].descriptors)
+            })
+            .collect();
+        let rescued = verify_chunk(&weak, relaxed);
+        let (mut added, mut improved) = (0, 0);
+        for p in rescued {
+            let key = (p.image_i, p.image_j);
+            match slot.get(&key) {
+                Some(&k) => {
+                    if !cfg.rescue_add_only && p.matches.len() > pairwise[k].matches.len() {
+                        pairwise[k] = p;
+                        improved += 1;
+                    }
+                }
+                None => {
+                    slot.insert(key, pairwise.len());
+                    pairwise.push(p);
+                    added += 1;
+                }
+            }
+        }
+        log(&format!(
+            "rescue: {} weak pairs re-matched, {added} added, {improved} improved ({:.1}s)",
+            weak.len(),
+            t.elapsed().as_secs_f64()
+        ));
+    }
 
     let mut sfm_cfg = IncrementalSfmConfig {
         min_seed_matches: cfg.min_matches,

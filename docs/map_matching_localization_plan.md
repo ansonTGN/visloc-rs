@@ -313,3 +313,33 @@ visloc-rs internal
 - `docs/learned_retrieval_relocalization.md` (retrieval is the binding constraint)
 - `docs/superpoint_lightglue_plan.md` (descriptor quality lever)
 - `RoboSim:docs/VISLOC_NAVIGATION_PLAN.md` (M2/M3 integration)
+
+## Results: projection-guided tracking with a motion model (2026-09-28)
+
+`localize_rne_map_sequence --projection-px 30 --motion-model` changes the
+tracking stage in three ways:
+
+- It predicts each query's pose from the last two accepted poses
+  (constant velocity).
+- It matches each candidate landmark only to query keypoints within 30 px
+  of where that prediction projects it.
+- It retries once with a 90 px window before the global fallback.
+
+`scripts/eval_localization_tum.py` scores a run against the episode's
+`gt.tum`: a Sim(3) alignment over timestamps matched within 20 ms.
+
+| scene (400 queries) | mode | localized | ATE RMSE | latency p50 / p90 | global fallbacks |
+| --- | --- | ---: | ---: | ---: | ---: |
+| drjohnson | radius prior (before) | 387 | 0.055 m | 488 / 2747 ms | 185 |
+| drjohnson | projection 30 px | 387 | 0.059 m | 163 / 2233 ms | 192 |
+| drjohnson | projection 30 px + motion model | 387 | 0.056 m | **99 / 601 ms** | **50** |
+| checker corridor | radius prior | 203 | 1.57 m | 51 / 97 ms | 76 |
+| checker corridor | projection 30 px + motion model | 256 | 2.25 m | 77 / 99 ms | 46 |
+
+- **drjohnson (textured):** the new mode is 5× faster at the median and
+  4.6× at p90, with the same success rate and accuracy. Most of the gain is
+  fewer global fallbacks, each about 1.6 s.
+- **Checker corridor:** its repetitive texture defeats both modes. Faster,
+  better-predicted matching localizes more frames but also more wrong ones.
+  This scene needs distinctive descriptors or learned retrieval (L4), not
+  tracking changes.
