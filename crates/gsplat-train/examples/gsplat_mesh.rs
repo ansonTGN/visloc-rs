@@ -4,13 +4,15 @@
 //! cargo run --release -p visloc-gsplat-train --features gpu --example gsplat_mesh -- \
 //!     --ply ours.ply --data <colmap_root> --out mesh.ply \
 //!     [--voxel V] [--trunc-voxels 4] [--max-depth D] [--min-component 500] \
-//!     [--min-weight 3] [--no-carve]
+//!     [--min-weight 3] [--no-carve] [--support-voxels 10]
 //! ```
 //!
 //! Renders the median depth of the splat from every dataset view, fuses the
 //! depths into a sparse TSDF and extracts the surface with surface nets (see
 //! `visloc_gsplat_train::mesh`). Pixels with no opaque surface carve free
 //! space, and voxels seen from fewer than `--min-weight` views are dropped.
+//! Triangles farther than `--support-voxels` from every SfM point of the
+//! dataset are dropped too (sky and other invented surfaces; 0 keeps them).
 //! Defaults are relative to the camera rig:
 //! `scale` = median distance of the camera centres from their centroid,
 //! voxel = scale / 256, max depth = 2 * scale.
@@ -35,6 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut min_component = 500usize;
     let mut carve = true;
     let mut min_weight = 3.0f32;
+    let mut support_voxels = 10.0f32;
     let num = |v: Option<String>, flag: &str| -> Result<f32, String> {
         v.and_then(|s| s.parse().ok())
             .ok_or_else(|| format!("{flag} needs a number"))
@@ -50,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--min-component" => min_component = num(args.next(), "--min-component")? as usize,
             "--no-carve" => carve = false,
             "--min-weight" => min_weight = num(args.next(), "--min-weight")?,
+            "--support-voxels" => support_voxels = num(args.next(), "--support-voxels")?,
             other => return Err(format!("unknown argument {other}").into()),
         }
     }
@@ -107,9 +111,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let t0 = Instant::now();
     let mut mesh = tsdf.extract();
     let raw = mesh.triangles.len();
+    if support_voxels > 0.0 {
+        let sfm: Vec<[f32; 3]> = dataset
+            .init
+            .gaussians
+            .iter()
+            .map(|g| [g.mean.x, g.mean.y, g.mean.z])
+            .collect();
+        mesh.keep_supported(&sfm, support_voxels * voxel);
+        println!(
+            "{} triangles within {support_voxels} voxels of the {} SfM points",
+            mesh.triangles.len(),
+            sfm.len()
+        );
+    }
     mesh.remove_small_components(min_component);
     println!(
-        "extracted {raw} triangles, {} after dropping components < {min_component} in {:.1} s",
+        "extracted {raw} triangles, {} after filtering and dropping components < {min_component} in {:.1} s",
         mesh.triangles.len(),
         t0.elapsed().as_secs_f64()
     );

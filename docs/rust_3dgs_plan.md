@@ -529,7 +529,17 @@ differentiating against). Structure:
     vase and ball) come out clean.
   - Surfaces carry the usual 3DGS depth noise.
   - On south-building the sky stays as geometry: it is modelled by opaque
-    splats that every view agrees on, so carving cannot remove it.
+    splats that every view agrees on, so carving cannot remove it. The SfM
+    support filter below removes it.
+  - **SfM support filter (2026-09-27)**: `--support-voxels 10` (default)
+    drops triangles farther than 10 voxels from every SfM point. Sky has no
+    features, so no triangulated points.
+    - south-building: 1.17M -> 0.77M triangles; the sky sheets go, while
+      the building, trees and bushes stay.
+    - garden: the floating fragments go.
+    - bonsai: unchanged.
+    - Before the filter, half of south-building's mesh vertices were
+      within 4.9 voxels of an SfM point, but 10% were beyond 40.
   - Smoother surfaces need depth / normal regularisation during training;
     see the next entry.
 - **Depth-normal consistency loss (2026-09-27)**: `gsplat_train
