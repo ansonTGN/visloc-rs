@@ -5,6 +5,19 @@
 // lr_a for k < split_a, lr_b for k < split_b, else lr_c, so one dispatch
 // covers parameter groups that share a buffer. Bias corrections are passed in
 // as bc1 = 1 - beta1^t, bc2 = 1 - beta2^t. Dispatched in 2D.
+//
+// Two extras ride along so they cost no pass of their own:
+// - brush's auxiliary losses (brush-train 0.3): with aux_kind 1 the
+//   log-scale elements (k >= 7) get + aux_coef * v * exp(log_scale), with
+//   aux_kind 2 every element (an opacity logit) gets + aux_coef * v, where
+//   v = 1e-3 + (1 if the gaussian was projected this frame). Tiny, but Adam
+//   normalises: a gaussian no view sees fades and shrinks until refine
+//   prunes it.
+// - sparse mode: only the records of the gaussians visible this frame are
+//   updated (one thread per vec4 of a visible record, `stride % 4 == 0`).
+//   Used for the SH block, most of the optimiser's memory traffic, whose
+//   gradient is zero for every gaussian not in view; their moments then
+//   stay put instead of decaying (and the stale gradients are never read).
 
 struct AdamUniforms {
     n: u32,
@@ -19,6 +32,10 @@ struct AdamUniforms {
     eps: f32,
     bc1: f32,
     bc2: f32,
+    aux_kind: u32,
+    aux_coef: f32,
+    sparse: u32,
+    num_visible: u32,
 };
 
 @group(0) @binding(0) var<uniform> au: AdamUniforms;
@@ -31,6 +48,10 @@ struct AdamUniforms {
 @group(0) @binding(2) var<storage, read_write> grads: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read_write> m1: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read_write> m2: array<vec4<f32>>;
+// Per gaussian: screen tiles hit this frame (0 = not projected).
+@group(0) @binding(5) var<storage, read> intersect_counts: array<u32>;
+// Compact (visible) index -> gaussian.
+@group(0) @binding(6) var<storage, read> global_from_compact: array<u32>;
 
 fn lr_of(e: u32) -> f32 {
     let k = e % au.stride;
@@ -43,22 +64,48 @@ fn lr_of(e: u32) -> f32 {
     return au.lr_c;
 }
 
+fn aux_grad(e: u32, p: f32) -> f32 {
+    if (au.aux_kind == 0u || e >= au.n) {
+        return 0.0;
+    }
+    let gid = e / au.stride;
+    let v = 1e-3 + select(0.0, 1.0, intersect_counts[gid] > 0u);
+    if (au.aux_kind == 1u) {
+        if (e % au.stride < 7u) {
+            return 0.0;
+        }
+        return au.aux_coef * v * exp(p);
+    }
+    return au.aux_coef * v;
+}
+
 @compute @workgroup_size(256)
 fn adam(
     @builtin(global_invocation_id) gid3: vec3<u32>,
     @builtin(num_workgroups) nwg: vec3<u32>,
 ) {
-    let i = gid3.x + gid3.y * nwg.x * 256u;
-    if (i >= (au.n + 3u) / 4u) {
+    let t = gid3.x + gid3.y * nwg.x * 256u;
+    var i = t;
+    if (au.sparse == 1u) {
+        let per = au.stride / 4u;
+        if (t >= au.num_visible * per) {
+            return;
+        }
+        i = global_from_compact[t / per] * per + t % per;
+    } else if (t >= (au.n + 3u) / 4u) {
         return;
     }
     let e = 4u * i;
     let lr = vec4<f32>(lr_of(e), lr_of(e + 1u), lr_of(e + 2u), lr_of(e + 3u));
-    let g = grads[i];
+    let p = params[i];
+    var g = grads[i];
+    if (au.aux_kind != 0u) {
+        g = g + vec4<f32>(aux_grad(e, p.x), aux_grad(e + 1u, p.y), aux_grad(e + 2u, p.z), aux_grad(e + 3u, p.w));
+    }
     grads[i] = vec4<f32>(0.0);
     let m = au.beta1 * m1[i] + (1.0 - au.beta1) * g;
     let v = au.beta2 * m2[i] + (1.0 - au.beta2) * g * g;
     m1[i] = m;
     m2[i] = v;
-    params[i] = params[i] - lr * (m / au.bc1) / (sqrt(v / au.bc2) + au.eps);
+    params[i] = p - lr * (m / au.bc1) / (sqrt(v / au.bc2) + au.eps);
 }
