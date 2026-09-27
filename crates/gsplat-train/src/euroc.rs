@@ -72,9 +72,17 @@ pub struct EurocSfmConfig {
     /// linked only to kept frames within `window` (no skip pairs, no
     /// static-static pairs), so the mapper registers them by PnP.
     pub register_gated: bool,
+    /// With `register_gated`: kept frames linked on each side of a gated one.
+    /// More links register more gated frames (MH_01 182 -> 190, V1_02 198
+    /// -> 200 with 3) but destabilise the mapper elsewhere (MH_03 ATE 1.32
+    /// -> 3.70 cm with 2, 13.1 cm with 3), so the default stays 1.
+    pub register_gated_links: usize,
     /// Merge disconnected COLMAP-port models by a similarity estimated from
     /// cross-model matches, then re-triangulate + bundle-adjust the union.
     pub merge_models: bool,
+    /// After the COLMAP-port mapper: re-triangulate all verified pairs and
+    /// bundle-adjust the model once more.
+    pub polish: bool,
     /// Inlier floor for a verified pair; `None` = `min_matches`.
     pub verify_min_inliers: Option<usize>,
     /// Diagnostic: replace the SIFT features and verified pairs with an
@@ -124,7 +132,9 @@ impl Default for EurocSfmConfig {
             keep_planar: false,
             keep_planar_no_panoramic: false,
             register_gated: false,
+            register_gated_links: 1,
             merge_models: false,
+            polish: false,
             verify_min_inliers: None,
             import_colmap: None,
             init_poses: None,
@@ -1038,9 +1048,13 @@ pub fn build_euroc_dataset(
         // each side (it sees nearly the same view).
         let mut have: std::collections::HashSet<(usize, usize)> = kept.iter().copied().collect();
         for g in (0..n).filter(|&g| !keep[g]) {
-            let before = (0..g).rev().find(|&k| keep[k]);
-            let after = ((g + 1)..n).find(|&k| keep[k]);
-            for k in [before, after].into_iter().flatten() {
+            // The nearest `register_gated_links` kept frames on each side:
+            // a single link fails when that one frame has few 3D points or
+            // is not registered itself.
+            let links = cfg.register_gated_links.max(1);
+            let before = (0..g).rev().filter(|&k| keep[k]).take(links);
+            let after = ((g + 1)..n).filter(|&k| keep[k]).take(links);
+            for k in before.chain(after) {
                 let pair = (g.min(k), g.max(k));
                 if have.insert(pair) {
                     kept.push(pair);
@@ -1193,11 +1207,35 @@ pub fn build_euroc_dataset(
             }
         } else {
             let (poses, tracks, mean_reprojection_px) = models.into_iter().next().unwrap();
-            SfmOutcome {
-                poses,
-                tracks,
-                mean_reprojection_px,
-                refined_camera: None,
+            if cfg.polish {
+                // Re-triangulate every verified pair's tracks against the
+                // mapper's poses and bundle-adjust the whole model once more.
+                let r = visloc_slam::incremental_sfm_with_initial_poses(
+                    &camera,
+                    &features,
+                    &pairwise,
+                    &sfm_cfg,
+                    Some(&poses),
+                )
+                .map_err(|e| EurocError::Sfm(e.to_string()))?;
+                log(&format!(
+                    "polish: {} -> {} tracks",
+                    tracks.len(),
+                    r.tracks.len()
+                ));
+                SfmOutcome {
+                    poses: r.poses,
+                    tracks: r.tracks,
+                    mean_reprojection_px: r.mean_reprojection_px,
+                    refined_camera: r.refined_camera,
+                }
+            } else {
+                SfmOutcome {
+                    poses,
+                    tracks,
+                    mean_reprojection_px,
+                    refined_camera: None,
+                }
             }
         }
     } else {

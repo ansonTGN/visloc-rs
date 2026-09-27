@@ -557,6 +557,17 @@ differentiating against). Structure:
     south-building gap is not exposure.
   - The flag stays opt-in. It is meant for photo sets with visibly
     varying exposure.
+- **Aux losses fused into Adam (2026-09-28)**: at about 1M gaussians
+  (bonsai), `GSPLAT_TRAIN_PROFILE` showed brush's opacity / scale aux losses
+  costing 1.7 ms per step. They ran as two extra passes over every gaussian.
+  - They now run inside the Adam kernel, which reads visibility from the
+    renderer's per-gaussian tile counts.
+  - Step time: 33.8 → 29.3 ms. Bonsai 30k scores 33.05 dB (brush 33.02).
+  - `--sparse-sh-adam` updates the SH block, 81% of Adam's traffic, only
+    for gaussians visible this frame. That brings Adam from 7.6 to 5.3 ms
+    and the step to 27.0 ms.
+  - It costs about 0.1 dB at 30k (bonsai 32.93, garden 27.49,
+    south-building 22.08, within its noise), so it stays opt-in.
 - **Mesh extraction (2026-09-27)**: `gsplat_mesh` (feature `gpu`) turns a
   trained `.ply` plus its COLMAP dataset into a vertex-coloured triangle
   mesh without retraining.

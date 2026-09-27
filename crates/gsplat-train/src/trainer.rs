@@ -55,6 +55,9 @@ pub struct TrainConfig {
     pub opac_loss_weight: f32,
     pub scale_loss_weight: f32,
     pub aux_loss_time: f32,
+    /// Update the SH block only for the gaussians visible this frame (see
+    /// `shaders/adam.wgsl`).
+    pub sparse_sh_adam: bool,
     /// Per-training-image affine colour transform (3x4) applied to the
     /// render before the loss (see `shaders/appearance.wgsl`); held-out
     /// views render without it.
@@ -87,6 +90,7 @@ impl Default for TrainConfig {
             opac_loss_weight: 0.0,
             scale_loss_weight: 0.0,
             aux_loss_time: 0.9,
+            sparse_sh_adam: false,
             appearance: false,
             appearance_lr: 2e-3,
             appearance_reg: 1e-2,
@@ -156,6 +160,10 @@ struct AdamUniforms {
     eps: f32,
     bc1: f32,
     bc2: f32,
+    aux_kind: u32,
+    aux_coef: f32,
+    sparse: u32,
+    num_visible: u32,
 }
 
 #[repr(C)]
@@ -189,15 +197,6 @@ struct Appearance {
     m1: wgpu::Buffer,
     m2: wgpu::Buffer,
     steps: wgpu::Buffer,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct AuxUniforms {
-    n: u32,
-    num_visible: u32,
-    opac_coef: f32,
-    scale_coef: f32,
 }
 
 #[repr(C)]
@@ -257,10 +256,6 @@ pub struct Trainer {
     /// Depth-normal loss: the two passes of normal_loss.wgsl, their
     /// uniforms and per-pixel scratch (built on first use).
     normal: Option<NormalLoss>,
-    /// brush's auxiliary losses: `aux_all` / `aux_visible` and uniforms.
-    aux_all: wgpu::ComputePipeline,
-    aux_visible: wgpu::ComputePipeline,
-    aux_uniforms: wgpu::Buffer,
     appearance: Option<Appearance>,
     sh_degree: u32,
     /// Ground truth of the current view (the host keeps every view packed
@@ -556,19 +551,6 @@ impl Trainer {
             "mean_noise",
         );
         let noise_uniforms = uniform(&dev, "noise_uniforms", 16);
-        let aux_all = pipeline(
-            &dev,
-            "aux_all",
-            include_str!("shaders/aux_loss.wgsl"),
-            "aux_all",
-        );
-        let aux_visible = pipeline(
-            &dev,
-            "aux_visible",
-            include_str!("shaders/aux_loss.wgsl"),
-            "aux_visible",
-        );
-        let aux_uniforms = uniform(&dev, "aux_uniforms", 16);
         let appearance = cfg.appearance.then(|| {
             let src = include_str!("shaders/appearance.wgsl");
             let nv = views.len();
@@ -619,9 +601,6 @@ impl Trainer {
             noise_pipeline,
             noise_uniforms,
             normal: None,
-            aux_all,
-            aux_visible,
-            aux_uniforms,
             appearance,
             sh_degree: init.sh_degree,
             gt,
@@ -699,6 +678,10 @@ impl Trainer {
             grads.opacity.clone(),
             grads.sh.clone(),
         );
+        let (counts, gfc) = {
+            let (c, g) = renderer.visibility_buffers();
+            (c.clone(), g.clone())
+        };
         let mk_group = |label: &str,
                         p: &wgpu::Buffer,
                         g: &wgpu::Buffer,
@@ -714,7 +697,12 @@ impl Trainer {
                 )
             });
             let u = uniform(&dev, label, std::mem::size_of::<AdamUniforms>() as u64);
-            let bg = bind(&dev, &self.adam_pipeline, label, &[&u, p, g, &m1, &m2]);
+            let bg = bind(
+                &dev,
+                &self.adam_pipeline,
+                label,
+                &[&u, p, g, &m1, &m2, &counts, &gfc],
+            );
             AdamGroup {
                 uniforms: u,
                 bind: bg,
@@ -1023,46 +1011,6 @@ impl Trainer {
                 pass.set_bind_group(0, &st.stats_bind, &[]);
                 pass.dispatch_workgroups(nv.div_ceil(256), 1, 1);
             }
-            let aux_w = (self.cfg.aux_loss_time - frac).clamp(0.0, 1.0);
-            let aux_on = aux_w > 0.0
-                && (self.cfg.opac_loss_weight > 0.0 || self.cfg.scale_loss_weight > 0.0);
-            if aux_on {
-                let n = st.renderer.num_gaussians() as u32;
-                let au = AuxUniforms {
-                    n,
-                    num_visible: nv,
-                    opac_coef: self.cfg.opac_loss_weight * aux_w,
-                    scale_coef: self.cfg.scale_loss_weight * aux_w / self.bound_size.max(1e-6),
-                };
-                queue.write_buffer(&self.aux_uniforms, 0, bytemuck::bytes_of(&au));
-                let params = st.renderer.param_buffers();
-                let pt = params.transforms.clone();
-                let grads = st.renderer.grad_buffers()?;
-                let (gt, go) = (grads.transforms.clone(), grads.opacity.clone());
-                let gfc = st.renderer.screen_grad_buffers()?.0.clone();
-                let bind_all = bind_slots(
-                    &dev,
-                    &self.aux_all,
-                    "aux_all",
-                    &[(0, &self.aux_uniforms), (1, &pt), (2, &gt), (3, &go)],
-                );
-                let bind_vis = bind(
-                    &dev,
-                    &self.aux_visible,
-                    "aux_visible",
-                    &[&self.aux_uniforms, &pt, &gt, &go, &gfc],
-                );
-                let (x, y) = groups_2d(n);
-                pass.set_pipeline(&self.aux_all);
-                pass.set_bind_group(0, &bind_all, &[]);
-                pass.dispatch_workgroups(x, y, 1);
-                if nv > 0 {
-                    let (x, y) = groups_2d(nv);
-                    pass.set_pipeline(&self.aux_visible);
-                    pass.set_bind_group(0, &bind_vis, &[]);
-                    pass.dispatch_workgroups(x, y, 1);
-                }
-            }
         }
         if self.profile.is_some() {
             // Profiling only: split the stats / Adam / noise work into
@@ -1078,7 +1026,19 @@ impl Trainer {
         {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             pass.set_pipeline(&self.adam_pipeline);
-            for (g, (a, b, c)) in st.adam.iter().zip(lrs) {
+            let aux_w = (self.cfg.aux_loss_time - frac).clamp(0.0, 1.0);
+            for (k, (g, (a, b, c))) in st.adam.iter().zip(lrs).enumerate() {
+                // brush's aux losses: group 0 (log-scales), group 1 (opacity).
+                let (aux_kind, aux_coef) = match k {
+                    0 if aux_w > 0.0 => (
+                        1,
+                        self.cfg.scale_loss_weight * aux_w / self.bound_size.max(1e-6),
+                    ),
+                    1 if aux_w > 0.0 => (2, self.cfg.opac_loss_weight * aux_w),
+                    _ => (0, 0.0),
+                };
+                let aux_kind = if aux_coef > 0.0 { aux_kind } else { 0 };
+                let sparse = k == 2 && self.cfg.sparse_sh_adam && g.stride % 4 == 0;
                 let u = AdamUniforms {
                     n: g.n,
                     stride: g.stride,
@@ -1092,11 +1052,21 @@ impl Trainer {
                     eps: 1e-15,
                     bc1: 1.0 - beta1.powf(t),
                     bc2: 1.0 - beta2.powf(t),
+                    aux_kind,
+                    aux_coef,
+                    sparse: sparse as u32,
+                    num_visible: nv,
                 };
                 queue.write_buffer(&g.uniforms, 0, bytemuck::bytes_of(&u));
                 pass.set_bind_group(0, &g.bind, &[]);
-                // One thread per vec4 of elements (see adam.wgsl).
-                let (x, y) = groups_2d(g.n.div_ceil(4));
+                // One thread per vec4 of elements, or of visible records
+                // (see adam.wgsl).
+                let threads = if sparse {
+                    nv * (g.stride / 4)
+                } else {
+                    g.n.div_ceil(4)
+                };
+                let (x, y) = groups_2d(threads);
                 pass.dispatch_workgroups(x, y, 1);
             }
         }

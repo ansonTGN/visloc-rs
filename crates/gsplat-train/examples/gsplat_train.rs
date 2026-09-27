@@ -51,6 +51,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--normal-start" => cfg.normal_start = next()?.parse()?,
             // Per-image affine colour correction (exposure / white balance).
             "--appearance" => cfg.appearance = true,
+            // Adam on the SH block of visible gaussians only.
+            "--sparse-sh-adam" => cfg.sparse_sh_adam = true,
             "--init-ply" => init_ply = Some(PathBuf::from(next()?)),
             "--export-steps" => {
                 export_steps = next()?
@@ -73,6 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             normal_weight: cfg.normal_weight,
             normal_start: cfg.normal_start,
             appearance: cfg.appearance,
+            sparse_sh_adam: cfg.sparse_sh_adam,
             ..TrainConfig::brush_preset()
         };
         if keep_densify_off {

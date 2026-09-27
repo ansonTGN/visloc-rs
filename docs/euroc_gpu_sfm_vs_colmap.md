@@ -135,6 +135,38 @@ correspondences" all use the COLMAP-port mapper.
   COLMAP's 30. The port default of 8 is a rig-benchmark override, and it
   broke MH_01 (13 cm).
 
+## Closing the registration and accuracy gap (2026-09-28)
+
+COLMAP registers more frames on every sequence, and it is more accurate on
+V2_01, V1_03 and V2_03. Most of the frame gap comes from the port mapper
+splitting the sequence into several models; only the largest is scored.
+
+| Sequence | Model sizes | COLMAP registered |
+| --- | --- | ---: |
+| MH_03 | 166, 45, 2 | 200 |
+| V2_03 | 118, 56 | 180 |
+| V1_03 | 67, 65, 31, 19 | 80 |
+
+- **V2_03:** the split is at the badly blurred frame 56. Only 4 verified
+  pairs cross it, with at most 41 matches.
+- **V1_03:** two of the models overlap in time, sharing 35 verified pairs
+  and 1,074 matches.
+
+Nothing below moved the table without a regression somewhere, so none of it
+is the default:
+
+| Change | Gains | Regressions |
+| --- | --- | --- |
+| `--merge-models` (Sim(3) weld + joint BA) | MH_03 199/200 | MH_03 ATE 1.32 → 2.04–2.95 cm; V2_03 not welded (1 link); V1_03 weld rejected (41/140 inliers) |
+| `--register-gated-links 3` (gated frame → 3 kept frames per side) | MH_01 182 → 190; V1_02 198 → 200 | MH_03 ATE 1.32 → 13.1 cm (2 links: 3.70 cm) |
+| `--keypoints 8000` (COLMAP's cap is 8,192) | V2_01 ATE 3.30 → 2.02 cm | MH_05 2.58 → 5.09 cm; V1_02 1.76 → 2.89 cm; fewer frames registered |
+| `--polish` (re-triangulate all pairs + global BA) | MH_03 198/200 at 2.27 cm; V2_01, V1_02 and MH_05 200/200; V1_03 96 frames | MH_01 ATE 0.35 → 1.10 cm; V1_03 2.17 → 7.34 cm |
+
+The remaining gap is bridging blurred stretches (V2_03, V1_03) and V2_01's
+accuracy. The options above stay available for single-sequence use: for
+example, `--polish` suits MH_03-like sequences, where it both registers more
+frames and beats COLMAP's ATE.
+
 ## Reproduce
 
 ```text
