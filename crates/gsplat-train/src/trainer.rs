@@ -44,6 +44,11 @@ pub struct TrainConfig {
     /// brush schedule; early steps skip the higher bands). 0 evaluates the
     /// scene's full degree from the start.
     pub sh_degree_interval: usize,
+    /// Weight of the depth-normal consistency loss (2DGS / PGSR style) on
+    /// the renderer's geometry channels; 0 = off. Active from
+    /// `normal_start` on.
+    pub normal_weight: f32,
+    pub normal_start: usize,
 }
 
 impl Default for TrainConfig {
@@ -64,6 +69,8 @@ impl Default for TrainConfig {
             sh_degree_interval: 1000,
             brush_refine: None,
             lr_scale_final: None,
+            normal_weight: 0.0,
+            normal_start: 7000,
         }
     }
 }
@@ -142,6 +149,19 @@ struct StatsUniforms {
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct NormalUniforms {
+    w: u32,
+    h: u32,
+    fx: f32,
+    fy: f32,
+    cx: f32,
+    cy: f32,
+    coef: f32,
+    _pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct NoiseUniforms {
     n: u32,
     seed: u32,
@@ -161,6 +181,13 @@ struct SceneState {
     noise_bind: wgpu::BindGroup,
 }
 
+struct NormalLoss {
+    normal_grad: wgpu::ComputePipeline,
+    depth_grad: wgpu::ComputePipeline,
+    uniforms: wgpu::Buffer,
+    gab: wgpu::Buffer,
+}
+
 /// The trainer. Owns the renderer (and so the scene on the GPU).
 pub struct Trainer {
     state: Option<SceneState>,
@@ -174,6 +201,9 @@ pub struct Trainer {
     bound_size: f32,
     noise_pipeline: wgpu::ComputePipeline,
     noise_uniforms: wgpu::Buffer,
+    /// Depth-normal loss: the two passes of normal_loss.wgsl, their
+    /// uniforms and per-pixel scratch (built on first use).
+    normal: Option<NormalLoss>,
     sh_degree: u32,
     /// Ground truth of the current view (the host keeps every view packed
     /// as RGBA8 and uploads one per step: ~3 MB instead of ~300 MB resident).
@@ -263,6 +293,27 @@ fn pipeline(dev: &wgpu::Device, label: &str, source: &str, entry: &str) -> wgpu:
         entry_point: Some(entry),
         compilation_options: Default::default(),
         cache: None,
+    })
+}
+
+/// Like [`bind`] with explicit binding slots.
+fn bind_slots(
+    dev: &wgpu::Device,
+    pipeline: &wgpu::ComputePipeline,
+    label: &str,
+    buffers: &[(u32, &wgpu::Buffer)],
+) -> wgpu::BindGroup {
+    let entries: Vec<wgpu::BindGroupEntry> = buffers
+        .iter()
+        .map(|(i, b)| wgpu::BindGroupEntry {
+            binding: *i,
+            resource: b.as_entire_binding(),
+        })
+        .collect();
+    dev.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &entries,
     })
 }
 
@@ -475,6 +526,7 @@ impl Trainer {
             bound_size,
             noise_pipeline,
             noise_uniforms,
+            normal: None,
             sh_degree: init.sh_degree,
             gt,
             gt_host,
@@ -685,6 +737,8 @@ impl Trainer {
         let active_sh = (self.cfg.sh_degree_interval > 0)
             .then(|| (self.step / self.cfg.sh_degree_interval) as u32);
         st.renderer.set_active_sh_degree(active_sh);
+        let normal_on = self.cfg.normal_weight > 0.0 && self.step >= self.cfg.normal_start;
+        st.renderer.set_geometry(normal_on);
         let _ = st.renderer.render(&view, bg);
         if let Some(p) = self.profile.as_mut() {
             p.mark(&dev, "forward");
@@ -704,6 +758,57 @@ impl Trainer {
                 pass.dispatch_workgroups(x, y, 1);
                 if self.cfg.ssim_weight > 0.0 {
                     self.ssim.encode(&mut pass, &st.ssim_bind);
+                }
+                if normal_on {
+                    let nl = self.normal.get_or_insert_with(|| NormalLoss {
+                        normal_grad: pipeline(
+                            &dev,
+                            "normal_grad",
+                            include_str!("shaders/normal_loss.wgsl"),
+                            "normal_grad",
+                        ),
+                        depth_grad: pipeline(
+                            &dev,
+                            "depth_grad",
+                            include_str!("shaders/normal_loss.wgsl"),
+                            "depth_grad",
+                        ),
+                        uniforms: uniform(&dev, "normal_uniforms", 32),
+                        gab: storage(&dev, "normal_gab", npix as u64 * 32),
+                    });
+                    let cam = &view.camera;
+                    let nu = NormalUniforms {
+                        w: self.width,
+                        h: self.height,
+                        fx: cam.fx,
+                        fy: cam.fy,
+                        cx: cam.cx,
+                        cy: cam.cy,
+                        coef: self.cfg.normal_weight / npix as f32,
+                        _pad: 0,
+                    };
+                    queue.write_buffer(&nl.uniforms, 0, bytemuck::bytes_of(&nu));
+                    let (out_geo, d_geo, final_t) =
+                        st.renderer.geo_buffers().expect("geometry enabled above");
+                    let bg_n = bind(
+                        &dev,
+                        &nl.normal_grad,
+                        "normal_grad",
+                        &[&nl.uniforms, out_geo, final_t, d_geo, &nl.gab],
+                    );
+                    let bg_d = bind_slots(
+                        &dev,
+                        &nl.depth_grad,
+                        "depth_grad",
+                        &[(0, &nl.uniforms), (2, final_t), (3, d_geo), (4, &nl.gab)],
+                    );
+                    let (x, y) = groups_2d(npix);
+                    pass.set_pipeline(&nl.normal_grad);
+                    pass.set_bind_group(0, &bg_n, &[]);
+                    pass.dispatch_workgroups(x, y, 1);
+                    pass.set_pipeline(&nl.depth_grad);
+                    pass.set_bind_group(0, &bg_d, &[]);
+                    pass.dispatch_workgroups(x, y, 1);
                 }
             }
             queue.submit(Some(enc.finish()));

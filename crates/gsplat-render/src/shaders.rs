@@ -18,20 +18,65 @@ fn build(name: &'static str, body: &str) -> Kernel {
     }
 }
 
+/// Keep or drop the lines between `// #if GEO` and `// #else` / `// #endif`
+/// markers (the geometry variant renders normals and depth as extra
+/// channels; the plain variant is compiled without any trace of them).
+fn select_geo(src: &str, geo: bool) -> String {
+    let mut out = String::with_capacity(src.len());
+    // None: outside a block; Some(keep): inside, keeping the current branch.
+    let mut keep: Option<bool> = None;
+    for line in src.lines() {
+        match line.trim() {
+            "// #if GEO" => keep = Some(geo),
+            "// #else" => keep = keep.map(|k| !k),
+            "// #endif" => keep = None,
+            _ => {
+                if keep.unwrap_or(true) {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+        }
+    }
+    out
+}
+
+fn build_geo(name: &'static str, body: &str, geo: bool) -> Kernel {
+    build(name, &select_geo(body, geo))
+}
+
 /// Uses subgroup ops: naga (wgpu 30) accepts them without an `enable`
 /// directive when the device has `Features::SUBGROUP`.
 pub fn rasterize_backward() -> Kernel {
-    build(
+    rasterize_backward_variant(false)
+}
+
+/// `geo`: also back-propagate the normal / depth channels (see
+/// `rasterize_variant`).
+pub fn rasterize_backward_variant(geo: bool) -> Kernel {
+    build_geo(
         "rasterize_backward",
         include_str!("shaders/rasterize_backward.wgsl"),
+        geo,
     )
 }
 
 pub fn project_backward() -> Kernel {
-    build(
+    project_backward_variant(false)
+}
+
+pub fn project_backward_variant(geo: bool) -> Kernel {
+    build_geo(
         "project_backward",
         include_str!("shaders/project_backward.wgsl"),
+        geo,
     )
+}
+
+/// Per visible gaussian: camera-space normal (shortest axis, facing the
+/// camera) and depth, for the geometry channels.
+pub fn project_geo() -> Kernel {
+    build("project_geo", include_str!("shaders/project_geo.wgsl"))
 }
 
 pub fn project_forward() -> Kernel {
@@ -64,7 +109,13 @@ pub fn tile_offsets() -> Kernel {
 }
 
 pub fn rasterize() -> Kernel {
-    build("rasterize", include_str!("shaders/rasterize.wgsl"))
+    rasterize_variant(false)
+}
+
+/// `geo`: also composite each splat's camera-space normal and depth into a
+/// 4-float-per-pixel buffer (alpha-weighted sums, no background).
+pub fn rasterize_variant(geo: bool) -> Kernel {
+    build_geo("rasterize", include_str!("shaders/rasterize.wgsl"), geo)
 }
 
 pub fn rasterize_depth() -> Kernel {
@@ -80,4 +131,14 @@ pub fn radix() -> Kernel {
 
 pub fn scan() -> Kernel {
     build("scan", include_str!("shaders/scan.wgsl"))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn select_geo_keeps_one_branch() {
+        let src = "a\n// #if GEO\ng\n// #else\nplain\n// #endif\nb\n";
+        assert_eq!(super::select_geo(src, true), "a\ng\nb\n");
+        assert_eq!(super::select_geo(src, false), "a\nplain\nb\n");
+    }
 }

@@ -530,8 +530,38 @@ differentiating against). Structure:
   - Surfaces carry the usual 3DGS depth noise.
   - On south-building the sky stays as geometry: it is modelled by opaque
     splats that every view agrees on, so carving cannot remove it.
-  - Smoother surfaces need depth / normal regularisation during training
-    (2DGS / PGSR style).
+  - Smoother surfaces need depth / normal regularisation during training;
+    see the next entry.
+- **Depth-normal consistency loss (2026-09-27)**: `gsplat_train
+  --normal-weight W [--normal-start 7000]`, 2DGS / PGSR style.
+  - `Renderer::set_geometry(true)` adds two alpha-blended channels: each
+    splat's camera-space normal (the axis of its smallest scale, facing the
+    camera) and its depth. They go through the geometry variants of
+    rasterize / rasterize_backward / project_backward.
+  - The variants are selected with `// #if GEO` blocks, so the plain kernels
+    compile exactly as before. rasterize_backward still runs in 8.4 ms.
+  - The extra 4 components fill the spare slots of the 16-slot butterfly.
+  - The loss is `1 - N . n_d`: the rendered normal against the normal of
+    the rendered depth map (cross product of central differences).
+    Gradients flow to both terms, through the depth side via a gather pass.
+  - Geometry gradients match central finite differences wherever the same
+    harness on the colour path (CPU-validated) does.
+
+  | bonsai | PSNR | train | mesh dihedral median / >30deg | SfM pts to mesh (median) |
+  | --- | --- | --- | --- | --- |
+  | 7k, off | 30.13 | 157 s | 8.7 deg / 14.3% | 0.26 vox |
+  | 7k, W 0.005 (from 3k) | 29.94 | 167 s | 6.9 deg / 10.5% | 0.23 vox |
+  | 7k, W 0.015 | 27.74 | 169 s | 5.9 deg / 8.5% | 0.22 vox |
+  | 7k, W 0.05 | 26.81 | 162 s | 5.5 deg / 8.9% | 0.21 vox |
+  | 30k, off | 32.88 | 970 s | 10.8 deg / 20.1% | 0.33 vox |
+  | 30k, W 0.005 (from 7k) | 32.68 | 1028 s | 7.2 deg / 12.0% | 0.27 vox |
+
+  - W = 0.005 buys a visibly smoother mesh and slightly more accurate
+    geometry for -0.2 dB.
+  - Stronger weights trade too much PSNR.
+  - **Tried and dropped:** a flattening regulariser alone (push the
+    smallest scale to 0). It cost 1.3-1.5 dB at 7k and made the mesh
+    rougher (10.5 deg): thin splats with unaligned normals.
 - **M3**: `gsplat_euroc` example (feature `euroc`): raw EuRoC -> undistort
   -> SIFT -> verified temporal matches -> visloc-rs incremental SfM ->
   trainer, no COLMAP or Python. With `--gpu-sift --gpu-ba` (crates

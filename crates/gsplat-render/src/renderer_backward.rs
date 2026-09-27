@@ -45,7 +45,7 @@ pub(super) struct BackwardState {
     grad_sh: wgpu::Buffer,
 }
 
-fn raster_bwd_bindings(
+pub(super) fn raster_bwd_bindings(
     r: &Renderer,
     d_image: &wgpu::Buffer,
     screen_grads: &wgpu::Buffer,
@@ -67,7 +67,7 @@ fn raster_bwd_bindings(
     ]
 }
 
-fn project_bwd_bindings(
+pub(super) fn project_bwd_bindings(
     r: &Renderer,
     screen_grads: &wgpu::Buffer,
     grad_transforms: &wgpu::Buffer,
@@ -157,7 +157,23 @@ impl Renderer {
     fn run_backward(&mut self, d_image: Option<&[[f32; 3]]>) -> Result<(), GpuError> {
         self.ensure_backward()?;
         let frame = self.last_frame;
+        let bufs = {
+            let st = self.backward.as_ref().expect("ensured above");
+            [
+                st.d_image.clone(),
+                st.screen_grads.clone(),
+                st.grad_transforms.clone(),
+                st.grad_opacity.clone(),
+                st.grad_sh.clone(),
+            ]
+        };
+        self.prepare_geo_backward(&bufs[0], &bufs[1], [&bufs[2], &bufs[3], &bufs[4]]);
         let st = self.backward.as_ref().expect("ensured above");
+        // The geometry variants when set_geometry(true), else the plain ones.
+        let (raster_bwd, project_bwd, geo_grads) = match self.geo_backward() {
+            Some((r, p, g)) => (r, p, Some(g)),
+            None => (&st.raster_bwd, &st.project_bwd, None),
+        };
         let dev = &self.ctx.device;
         let queue = &self.ctx.queue;
         if let Some(d_image) = d_image {
@@ -184,13 +200,16 @@ impl Renderer {
                 0,
                 Some((frame.nv * SCREEN_GRAD_FLOATS * 4) as u64),
             );
+            if let Some(g) = geo_grads {
+                encoder.clear_buffer(g, 0, Some((frame.nv * 16) as u64));
+            }
             if std::env::var("GSPLAT_PROFILE").is_ok() {
                 // Profiling: time the two kernels separately.
                 {
                     let mut pass =
                         encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
                     if frame.ni > 0 {
-                        super::dispatch(&mut pass, &st.raster_bwd, frame.num_tiles);
+                        super::dispatch(&mut pass, raster_bwd, frame.num_tiles);
                     }
                 }
                 queue.submit(Some(encoder.finish()));
@@ -204,7 +223,7 @@ impl Renderer {
                     let mut pass = enc2.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
                     super::dispatch_groups_2d(
                         &mut pass,
-                        &st.project_bwd,
+                        project_bwd,
                         (frame.nv as u32).div_ceil(64),
                     );
                 }
@@ -222,9 +241,9 @@ impl Renderer {
             }
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
             if frame.ni > 0 {
-                super::dispatch(&mut pass, &st.raster_bwd, frame.num_tiles);
+                super::dispatch(&mut pass, raster_bwd, frame.num_tiles);
             }
-            super::dispatch_groups_2d(&mut pass, &st.project_bwd, (frame.nv as u32).div_ceil(64));
+            super::dispatch_groups_2d(&mut pass, project_bwd, (frame.nv as u32).div_ceil(64));
         }
         queue.submit(Some(encoder.finish()));
         Ok(())

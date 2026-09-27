@@ -29,6 +29,13 @@
 @group(0) @binding(7) var<storage, read> d_image: array<f32>;
 // f32 bits, accumulated with CAS (no float atomics in wgpu here).
 @group(0) @binding(8) var<storage, read_write> screen_grads: array<atomic<u32>>;
+// #if GEO
+// Geometry variant: the normal / depth channels (see rasterize.wgsl) with
+// their per-pixel gradient, and per compact id gradients of (normal, depth).
+@group(0) @binding(9) var<storage, read> geo_splats: array<vec4<f32>>;
+@group(0) @binding(10) var<storage, read> d_geo: array<vec4<f32>>;
+@group(0) @binding(11) var<storage, read_write> geo_grads: array<atomic<u32>>;
+// #endif
 
 const TILE_W: u32 = 16u;
 const TILE_H: u32 = 16u;
@@ -41,6 +48,10 @@ var<workgroup> bsplat: array<f32, BB * 9u>;
 var<workgroup> bcompact: array<u32, BB>;
 var<workgroup> gacc: array<atomic<u32>, BB * NG>;
 var<workgroup> tile_last: atomic<u32>;
+// #if GEO
+var<workgroup> bgeo: array<vec4<f32>, BB>;
+var<workgroup> gacc_geo: array<atomic<u32>, BB * 4u>;
+// #endif
 var<workgroup> tile_last_u: u32;
 
 fn gacc_add(i: u32, v: f32) {
@@ -59,6 +70,30 @@ fn gacc_add(i: u32, v: f32) {
 fn xstep(lo: f32, hi: f32, h: bool, m: u32) -> f32 {
     return select(lo, hi, h) + subgroupShuffleXor(select(hi, lo, h), m);
 }
+
+// #if GEO
+fn gacc_geo_add(i: u32, v: f32) {
+    var old = atomicLoad(&gacc_geo[i]);
+    loop {
+        let r = atomicCompareExchangeWeak(&gacc_geo[i], old, bitcast<u32>(bitcast<f32>(old) + v));
+        if (r.exchanged) {
+            break;
+        }
+        old = r.old_value;
+    }
+}
+
+fn geo_global_add(i: u32, v: f32) {
+    var old = atomicLoad(&geo_grads[i]);
+    loop {
+        let r = atomicCompareExchangeWeak(&geo_grads[i], old, bitcast<u32>(bitcast<f32>(old) + v));
+        if (r.exchanged) {
+            break;
+        }
+        old = r.old_value;
+    }
+}
+// #endif
 
 fn global_add(i: u32, v: f32) {
     var old = atomicLoad(&screen_grads[i]);
@@ -95,11 +130,18 @@ fn rasterize_backward(
     var last = 0u;
     var g = vec3<f32>(0.0, 0.0, 0.0);
     var behind = vec3<f32>(u.bg_r, u.bg_g, u.bg_b);
+// #if GEO
+    var gg = vec4<f32>(0.0);
+    var behind_geo = vec4<f32>(0.0);
+// #endif
     if (in_image) {
         let pix = py * u.img_w + px;
         t_cur = final_t[pix];
         last = last_idx[pix];
         g = vec3<f32>(d_image[pix * 3u], d_image[pix * 3u + 1u], d_image[pix * 3u + 2u]);
+// #if GEO
+        gg = d_geo[pix];
+// #endif
     }
     if (tid == 0u) {
         atomicStore(&tile_last, 0u);
@@ -129,10 +171,18 @@ fn rasterize_backward(
                 bsplat[tid * 9u + k] = projected_splats[src + k];
             }
             bcompact[tid] = cg;
+// #if GEO
+            bgeo[tid] = geo_splats[cg];
+// #endif
         }
         for (var i = tid; i < BB * NG; i = i + 256u) {
             atomicStore(&gacc[i], 0u);
         }
+// #if GEO
+        for (var i = tid; i < BB * 4u; i = i + 256u) {
+            atomicStore(&gacc_geo[i], 0u);
+        }
+// #endif
         workgroupBarrier();
 
         var s = cnt;
@@ -150,6 +200,8 @@ fn rasterize_backward(
             var g_o = 0.0;
             var g_col = vec3<f32>(0.0, 0.0, 0.0);
             var g_r = 0.0;
+            // Normal xyz / depth gradient (geometry variant only).
+            var g_geo = vec4<f32>(0.0);
             var hit = false;
             if (in_image && j < last) {
                 let opac = bsplat[s * 9u + 5u];
@@ -172,8 +224,14 @@ fn rasterize_backward(
                             vec3<f32>(0.0, 0.0, 0.0),
                         );
                         g_col = a * t_before * g;
-                        let d_alpha = t_before * dot(col - behind, g);
+                        var d_alpha = t_before * dot(col - behind, g);
                         behind = a * col + (1.0 - a) * behind;
+// #if GEO
+                        let geo = bgeo[s];
+                        g_geo = a * t_before * gg;
+                        d_alpha = d_alpha + t_before * dot(geo - behind_geo, gg);
+                        behind_geo = a * geo + (1.0 - a) * behind_geo;
+// #endif
                         t_cur = t_before;
                         if (raw <= 0.99) {
                             let d_sigma = -d_alpha * a;
@@ -200,10 +258,10 @@ fn rasterize_backward(
                     let h4 = (lane & 16u) != 0u;
                     let w0 = xstep(g_u, g_col.z, h4, 16u);
                     let w1 = xstep(g_v, g_r, h4, 16u);
-                    let w2 = xstep(g_a, 0.0, h4, 16u);
-                    let w3 = xstep(g_b, 0.0, h4, 16u);
-                    let w4 = xstep(g_c, 0.0, h4, 16u);
-                    let w5 = xstep(g_o, 0.0, h4, 16u);
+                    let w2 = xstep(g_a, g_geo.x, h4, 16u);
+                    let w3 = xstep(g_b, g_geo.y, h4, 16u);
+                    let w4 = xstep(g_c, g_geo.z, h4, 16u);
+                    let w5 = xstep(g_o, g_geo.w, h4, 16u);
                     let w6 = xstep(g_col.x, 0.0, h4, 16u);
                     let w7 = xstep(g_col.y, 0.0, h4, 16u);
                     let h3 = (lane & 8u) != 0u;
@@ -220,12 +278,26 @@ fn rasterize_backward(
                     if ((lane & 1u) == 0u && comp < NG && z != 0.0) {
                         gacc_add(s * NG + comp, z);
                     }
+// #if GEO
+                    if ((lane & 1u) == 0u && comp >= NG && comp < NG + 4u && z != 0.0) {
+                        gacc_geo_add(s * 4u + comp - NG, z);
+                    }
+// #endif
                 } else {
                     let t_uv = subgroupAdd(vec2<f32>(g_u, g_v));
                     let t_abc = subgroupAdd(vec3<f32>(g_a, g_b, g_c));
                     let t_o = subgroupAdd(g_o);
                     let t_col = subgroupAdd(g_col);
                     let t_r = subgroupAdd(g_r);
+// #if GEO
+                    let t_geo = subgroupAdd(g_geo);
+                    if (lane == 0u) {
+                        gacc_geo_add(s * 4u + 0u, t_geo.x);
+                        gacc_geo_add(s * 4u + 1u, t_geo.y);
+                        gacc_geo_add(s * 4u + 2u, t_geo.z);
+                        gacc_geo_add(s * 4u + 3u, t_geo.w);
+                    }
+// #endif
                     if (lane == 0u) {
                         let base = s * NG;
                         gacc_add(base + 0u, t_uv.x);
@@ -249,6 +321,14 @@ fn rasterize_backward(
                 global_add(bcompact[i / NG] * NG + i % NG, v);
             }
         }
+// #if GEO
+        for (var i = tid; i < cnt * 4u; i = i + 256u) {
+            let v = bitcast<f32>(atomicLoad(&gacc_geo[i]));
+            if (v != 0.0) {
+                geo_global_add(bcompact[i / 4u] * 4u + i % 4u, v);
+            }
+        }
+// #endif
         // bsplat / bcompact / gacc are reused by the next batch.
         workgroupBarrier();
         bend = bstart;

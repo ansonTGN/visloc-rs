@@ -508,6 +508,9 @@ pub struct Renderer {
     backward: Option<backward::BackwardState>,
     /// Depth pass and its output buffer, built on first `render_depth`.
     depth_stage: Option<(Stage, wgpu::Buffer)>,
+    /// Geometry channels (normal, depth), see `set_geometry`.
+    geo: Option<geo::GeoState>,
+    geo_enabled: bool,
 }
 
 /// Visible gaussians, intersections and tiles of a rendered frame.
@@ -787,6 +790,8 @@ impl Renderer {
             last_frame: FrameCounts::default(),
             backward: None,
             depth_stage: None,
+            geo: None,
+            geo_enabled: false,
         })
     }
 
@@ -972,6 +977,7 @@ impl Renderer {
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
                 dispatch(&mut pass, &self.visible, (nv as u32).div_ceil(256));
+                self.encode_project_geo(&mut pass, nv as u32);
             }
             self.ctx.queue.submit(Some(encoder.finish()));
         }
@@ -1057,8 +1063,9 @@ impl Renderer {
                         label: Some("raster"),
                     });
             {
+                let raster = self.raster_stage();
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-                dispatch(&mut pass, &self.raster, num_tiles);
+                dispatch(&mut pass, raster, num_tiles);
             }
             self.ctx.queue.submit(Some(encoder.finish()));
         }
@@ -1320,4 +1327,6 @@ impl StageTimer {
 
 #[path = "renderer_backward.rs"]
 mod backward;
+#[path = "renderer_geo.rs"]
+mod geo;
 pub use backward::{DeviceParams, ParamGrads, SCREEN_GRAD_FLOATS};
