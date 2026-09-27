@@ -505,6 +505,33 @@ differentiating against). Structure:
       (18.57 ms), because the cost scales with the component count.
     - Per-lane shared CAS when only a few lanes hit a splat, falling back
       to the reduction above K lanes: 19.7 / 32.8 / 76.7 ms at K = 4 / 8 / 16.
+- **Mesh extraction (2026-09-27)**: `gsplat_mesh` (feature `gpu`) turns a
+  trained `.ply` plus its COLMAP dataset into a vertex-coloured triangle
+  mesh without retraining.
+  1. `Renderer::render_depth` renders every view's median depth: the camera
+     z where transmittance first drops to 0.5. It is a second pass over the
+     same tile lists.
+  2. The depths are fused into a sparse TSDF of 8^3-voxel blocks.
+  3. Surface nets extract the surface, with no lookup tables and quads
+     facing free space.
+
+  Pixels with no opaque surface carve free space, and voxels seen from
+  fewer than 3 views are dropped. Defaults scale with the camera rig
+  (voxel = rig radius / 256, max depth = 2x rig radius).
+
+  | scene | views | render + fuse + extract | triangles |
+  | --- | --- | --- | --- |
+  | Mip-NeRF 360 bonsai | 292 | 22 s | 0.43M |
+  | Mip-NeRF 360 garden | 185 | ~35 s | 3.5M |
+  | south-building | 128 | ~30 s | 1.2M (2.6M before carving) |
+
+  - The object scenes (bonsai: tree, pot and table; garden: table legs,
+    vase and ball) come out clean.
+  - Surfaces carry the usual 3DGS depth noise.
+  - On south-building the sky stays as geometry: it is modelled by opaque
+    splats that every view agrees on, so carving cannot remove it.
+  - Smoother surfaces need depth / normal regularisation during training
+    (2DGS / PGSR style).
 - **M3**: `gsplat_euroc` example (feature `euroc`): raw EuRoC -> undistort
   -> SIFT -> verified temporal matches -> visloc-rs incremental SfM ->
   trainer, no COLMAP or Python. With `--gpu-sift --gpu-ba` (crates

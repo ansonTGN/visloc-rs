@@ -3,12 +3,15 @@
 //! ```text
 //! cargo run --release -p visloc-gsplat-train --features gpu --example gsplat_mesh -- \
 //!     --ply ours.ply --data <colmap_root> --out mesh.ply \
-//!     [--voxel V] [--trunc-voxels 4] [--max-depth D] [--min-component 500]
+//!     [--voxel V] [--trunc-voxels 4] [--max-depth D] [--min-component 500] \
+//!     [--min-weight 3] [--no-carve]
 //! ```
 //!
 //! Renders the median depth of the splat from every dataset view, fuses the
 //! depths into a sparse TSDF and extracts the surface with surface nets (see
-//! `visloc_gsplat_train::mesh`). Defaults are relative to the camera rig:
+//! `visloc_gsplat_train::mesh`). Pixels with no opaque surface carve free
+//! space, and voxels seen from fewer than `--min-weight` views are dropped.
+//! Defaults are relative to the camera rig:
 //! `scale` = median distance of the camera centres from their centroid,
 //! voxel = scale / 256, max depth = 2 * scale.
 
@@ -30,6 +33,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut trunc_voxels = 4.0f32;
     let mut max_depth: Option<f32> = None;
     let mut min_component = 500usize;
+    let mut carve = true;
+    let mut min_weight = 3.0f32;
     let num = |v: Option<String>, flag: &str| -> Result<f32, String> {
         v.and_then(|s| s.parse().ok())
             .ok_or_else(|| format!("{flag} needs a number"))
@@ -43,6 +48,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--trunc-voxels" => trunc_voxels = num(args.next(), "--trunc-voxels")?,
             "--max-depth" => max_depth = Some(num(args.next(), "--max-depth")?),
             "--min-component" => min_component = num(args.next(), "--min-component")? as usize,
+            "--no-carve" => carve = false,
+            "--min-weight" => min_weight = num(args.next(), "--min-weight")?,
             other => return Err(format!("unknown argument {other}").into()),
         }
     }
@@ -67,6 +74,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut tsdf = Tsdf::new(voxel, voxel * trunc_voxels, max_depth);
+    tsdf.carve = carve;
+    tsdf.min_weight = min_weight;
     let mut renderer: Option<(u32, u32, Renderer)> = None;
     let (mut t_render, mut t_fuse) = (0.0f64, 0.0f64);
     for view in &views {

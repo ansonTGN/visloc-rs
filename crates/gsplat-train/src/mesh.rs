@@ -48,6 +48,13 @@ pub struct Tsdf {
     voxel: f32,
     trunc: f32,
     max_depth: f32,
+    /// Also carve free space along pixels with no surface (median depth 0,
+    /// i.e. mostly transparent) or a surface beyond `max_depth`. Removes
+    /// floaters that other views see through.
+    pub carve: bool,
+    /// Voxels fused from fewer observations are treated as unknown when
+    /// extracting.
+    pub min_weight: f32,
     blocks: HashMap<[i32; 3], Box<Block>>,
 }
 
@@ -71,6 +78,8 @@ impl Tsdf {
             voxel,
             trunc,
             max_depth,
+            carve: true,
+            min_weight: 1.0,
             blocks: HashMap::new(),
         }
     }
@@ -129,7 +138,7 @@ impl Tsdf {
             self.blocks.entry(key).or_insert_with(Block::new);
         }
 
-        let (voxel, trunc, max_depth) = (self.voxel, self.trunc, self.max_depth);
+        let (voxel, trunc, max_depth, carve) = (self.voxel, self.trunc, self.max_depth, self.carve);
         let r = f.view.rotation;
         self.blocks.par_iter_mut().for_each(|(key, blk)| {
             for i in 0..BV {
@@ -151,6 +160,13 @@ impl Tsdf {
                 let pix = v as usize * w + u as usize;
                 let d = f.depth[pix];
                 if d <= 0.0 || d > max_depth {
+                    // Nothing opaque (or only background) along this pixel:
+                    // the voxel is free space.
+                    if carve && (d <= 0.0 || pc.z < d - trunc) {
+                        let wn = blk.w[i] + 1.0;
+                        blk.sdf[i] = (blk.sdf[i] * blk.w[i] + 1.0) / wn;
+                        blk.w[i] = wn;
+                    }
                     continue;
                 }
                 let sdf = d - pc.z;
@@ -174,7 +190,7 @@ impl Tsdf {
         let blk = self.blocks.get(&key)?;
         let l = [v[0] - key[0] * B, v[1] - key[1] * B, v[2] - key[2] * B];
         let i = (l[0] + l[1] * B + l[2] * B * B) as usize;
-        (blk.w[i] > 0.0).then(|| (blk.sdf[i], blk.col[i]))
+        (blk.w[i] >= self.min_weight.max(1e-6)).then(|| (blk.sdf[i], blk.col[i]))
     }
 
     /// Surface-nets extraction of the zero level set. Crossings between two
