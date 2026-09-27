@@ -45,6 +45,27 @@ control); the native diagnostic completes all 17 stages **20.41×** faster with
 **17.0%** lower peak RSS. Full comparison tables and caveats:
 [SfM benchmark details](docs/sfm_benchmarks.md).
 
+## Sensor support
+
+What each sensor setup can do today. **Benchmarked** means a measured
+real-data result is in the repo. **Experimental** means the code runs but
+the docs record open gaps.
+
+| Sensor setup | Tasks | Status | Headline result | Entry point |
+| --- | --- | --- | --- | --- |
+| Monocular, unordered photos | SfM, 3DGS, mesh | **Benchmarked** | ETH3D Electro 1,200: 3.46× faster than COLMAP CPU, 3.50 vs 4.68 cm | `unordered_sfm_demo`, `gsplat_photos` |
+| Monocular video | SfM | **Benchmarked** | EuRoC: faster than COLMAP 4.1 CUDA on 8/8 sequences, more accurate on 4/8 | `gsplat_euroc` |
+| Monocular video | VO (DPVO port) | Experimental | MH_01 prefix 0.16 m, about 2× DPVO's published error; CPU only | `euroc_dpvo_vo_demo` |
+| Monocular + IMU | VIO | Experimental | No headline result; IMU coupling is still open | [DPVO plan](docs/dpvo_droid_port_plan.md) |
+| Stereo | VO / SLAM | **Benchmarked** | KITTI seq00 1.23 m and seq09 2.07 m, vs 1.3 m and 3.2 m for ORB-SLAM2 | `deep_stereo_slam`, `online_slam_stereo_vo_kitti_demo` |
+| Stereo + IMU | VIO + mapping (Basalt port) | **Benchmarked** | Beats ORB-SLAM3 on 8/11 EuRoC sequences; native-Basalt parity within 0.1%; not yet real time | `basalt_euroc_online_slam_demo` |
+| RGB-D (as virtual stereo) | VO | **Benchmarked** | TUM fr1_xyz 0.014 m, fr1_desk 0.026 m (about 1.3–1.6× ORB-SLAM2 RGB-D) | [TUM RGB-D](docs/tum_rgbd_benchmark.md) |
+| Multi-camera rig | SfM | Experimental | OpenLORIS 10k: 9,998/10,000 registered; RMSE parity with COLMAP still open | `generalized_rig_sfm` |
+| Single image vs. a prebuilt map | Relocalization | **Benchmarked** | 7-Scenes chess: about 99% localized with LightGlue, median 3.3 cm / 1.7° | `relocalization_7scenes_demo` |
+| Camera + GNSS prior | Tracking | Example only | Synthetic smoke test; no tight GNSS fusion | `track_sequence_with_gnss_prior` |
+
+LiDAR and wheel odometry are not supported.
+
 ## SfM and SLAM benchmarks
 
 visloc-rs registers **9,996/10,008 cameras (99.88%)** across every ETH3D
