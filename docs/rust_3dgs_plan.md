@@ -477,6 +477,34 @@ differentiating against). Structure:
     CAS float add in `rasterize_backward`. The batch had to shrink from 128
     to 64 splats to fit, and backward went from 20.8 to 26-28 ms. CAS
     contention was not the bottleneck.
+- **Butterfly backward reduction (2026-09-27)**: timing-only ablations of
+  `rasterize_backward` put ~43% of the kernel in the per-splat subgroup
+  reductions (10 components, each a full `subgroupAdd`, then 10 serial
+  shared CAS adds on lane 0). On 32-wide subgroups a transposed xor
+  butterfly (`subgroupShuffleXor`, each step halving the values a lane
+  carries) needs 16 shuffles and leaves component c on lane 2c, so the
+  shared adds also run on 10 lanes at once. rasterize_backward on bonsai at
+  ~1M gaussians: 18.49 -> 8.32 ms. Same protocol and GPU as above:
+
+  | scene | ours PSNR / SSIM | brush PSNR / SSIM | ours time | brush time |
+  | --- | --- | --- | --- | --- |
+  | Mip-NeRF 360 bonsai | 32.88 / 0.959 | **33.02 / 0.960** | **970 s** (was 1355) | 1333 s |
+  | Mip-NeRF 360 room | **33.08 / 0.951** | 32.95 / 0.951 | **887 s** (was 1278) | 1184 s |
+  | Mip-NeRF 360 garden | 27.57 / 0.865 | **27.62 / 0.868** | **2718 s** (was 3130) | 3134 s |
+  | south-building | 22.37 / 0.791 | **22.69 / 0.805** | **1449 s** (was 2137-2156) | 2379 s |
+  | gerrard-hall | **20.00** / 0.712 | 19.98 / **0.719** | **1266 s** (was 1859) | 2147 s |
+
+  - **Speed:** faster than brush on all five scenes: 13% on garden, 25-27%
+    on bonsai and room, and 39-41% on the COLMAP scenes.
+  - **Quality:** unchanged from the vec4 table within run-to-run noise.
+    Brush stays ahead by 0.05-0.14 dB on bonsai and garden and by
+    0.32 dB on south-building. We are ahead by 0.13 dB on room and
+    0.02 dB on gerrard-hall.
+  - **Tried and reverted:**
+    - Packing the ten components into three `subgroupAdd` calls: no gain
+      (18.57 ms), because the cost scales with the component count.
+    - Per-lane shared CAS when only a few lanes hit a splat, falling back
+      to the reduction above K lanes: 19.7 / 32.8 / 76.7 ms at K = 4 / 8 / 16.
 - **M3**: `gsplat_euroc` example (feature `euroc`): raw EuRoC -> undistort
   -> SIFT -> verified temporal matches -> visloc-rs incremental SfM ->
   trainer, no COLMAP or Python. With `--gpu-sift --gpu-ba` (crates
