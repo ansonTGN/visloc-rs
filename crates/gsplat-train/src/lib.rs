@@ -26,5 +26,7 @@ pub mod loss;
 #[cfg(feature = "gpu")]
 pub mod mesh;
 pub mod metrics;
+#[cfg(feature = "euroc")]
+pub mod photos;
 #[cfg(feature = "gpu")]
 pub mod trainer;

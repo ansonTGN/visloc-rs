@@ -209,7 +209,7 @@ pub fn sim3_ate_rmse(est: &[Vector3<f64>], gt: &[Vector3<f64>]) -> Option<f64> {
 }
 
 /// Poses, tracks and mean reprojection error read back from the port.
-type PortModel = (
+pub(crate) type PortModel = (
     Vec<Option<visloc_core::geometry::Pose>>,
     Vec<visloc_slam::SfmTrack>,
     f64,
@@ -231,7 +231,7 @@ struct SfmOutcome {
 /// write its inputs (single-sensor rig manifest, keypoints, VISLOC-COLMAP-1
 /// pairs) under `out_dir/port`, run `colmap_incremental::pipeline::run`,
 /// and read the largest model back as poses + tracks.
-fn run_colmap_port(
+pub(crate) fn run_colmap_port(
     out_dir: &Path,
     camera: &Camera,
     width: u32,
@@ -743,12 +743,12 @@ pub fn undistort_gray(
     out
 }
 
-fn cpu_matches(fi: &FeatureSet, fj: &FeatureSet) -> Vec<DescriptorMatch> {
+pub(crate) fn cpu_matches(fi: &FeatureSet, fj: &FeatureSet) -> Vec<DescriptorMatch> {
     CrossCheckMatcher::new(BruteForceMatcher { ratio: Some(0.8) })
         .match_descriptors(&fi.descriptors, &fj.descriptors)
 }
 
-fn verify_pair(
+pub(crate) fn verify_pair(
     camera: &Camera,
     fi: &FeatureSet,
     fj: &FeatureSet,

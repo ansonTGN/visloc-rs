@@ -536,6 +536,27 @@ differentiating against). Structure:
   - **Speed:** faster than brush everywhere (14-30%). We are about 10%
     slower than before the fix because there are more splats.
 
+- **Per-photo appearance (2026-09-27)**: `--appearance` learns a 3x4
+  affine colour transform per training photo, applied to the render before
+  the loss. It starts at the identity with a weak pull back towards it, and
+  held-out views render without it.
+  - Why try it: on south-building, fitting such a transform to each
+    held-out render at evaluation time gains 0.5 dB, so exposure does vary.
+  - Results at 30k steps, also scored with that per-image fit (CC-PSNR):
+
+    | south-building | PSNR | CC-PSNR | SSIM |
+    | --- | --- | --- | --- |
+    | off (3 runs) | 21.91-22.33 | 22.71-23.11 (mean 22.88) | 0.799-0.803 |
+    | `--appearance` (2 runs) | 21.55, 21.77 | 23.01, 23.29 (mean 23.15) | 0.802, 0.801 |
+    | brush 0.3 | 22.69 | 23.32 | 0.805 |
+
+  - CC-PSNR gains 0.27 dB and nearly reaches brush. Plain PSNR loses
+    0.4 dB, because the splat now matches a canonical exposure rather than
+    each held-out photo's.
+  - brush still leads after colour correction, so the rest of the
+    south-building gap is not exposure.
+  - The flag stays opt-in. It is meant for photo sets with visibly
+    varying exposure.
 - **Mesh extraction (2026-09-27)**: `gsplat_mesh` (feature `gpu`) turns a
   trained `.ply` plus its COLMAP dataset into a vertex-coloured triangle
   mesh without retraining.
