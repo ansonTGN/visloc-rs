@@ -7,7 +7,8 @@ struct StatsUniforms {
     half_w: f32,
     half_h: f32,
     // 0: Inria (sum of |view-space xy grad| in NDC units);
-    // 1: brush (max of the refine weight, screen_grads[9]).
+    // 1: brush (max of the refine weight, screen_grads[9], over the views
+    // that blended the splat).
     mode: u32,
 };
 
@@ -28,6 +29,14 @@ fn densify_stats(@builtin(global_invocation_id) gid3: vec3<u32>) {
     let du = screen_grads[c * 10u] * su.half_w;
     let dv = screen_grads[c * 10u + 1u] * su.half_h;
     if (su.mode == 1u) {
+        // brush counts a view only if the splat was blended into at least
+        // one pixel (its rasterizer's `visible`), not merely projected;
+        // a blended splat always has a nonzero colour gradient.
+        let blended = screen_grads[c * 10u + 6u] != 0.0 || screen_grads[c * 10u + 7u] != 0.0
+            || screen_grads[c * 10u + 8u] != 0.0 || screen_grads[c * 10u + 5u] != 0.0;
+        if (!blended) {
+            return;
+        }
         grad_accum[g] = max(grad_accum[g], screen_grads[c * 10u + 9u]);
     } else {
         grad_accum[g] = grad_accum[g] + sqrt(du * du + dv * dv);

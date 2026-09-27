@@ -339,6 +339,40 @@ impl Tsdf {
 }
 
 impl Mesh {
+    /// Drop triangles with a vertex farther than `radius` from every point of
+    /// `support` (e.g. the SfM points). Surfaces the splat invents where no
+    /// feature was ever triangulated -- sky, mostly -- go; textured surfaces
+    /// keep their SfM points nearby. Vertices are left in place.
+    pub fn keep_supported(&mut self, support: &[[f32; 3]], radius: f32) {
+        let cell = |p: [f32; 3]| p.map(|c| (c / radius).floor() as i32);
+        let mut grid: HashMap<[i32; 3], Vec<[f32; 3]>> = HashMap::new();
+        for &p in support {
+            grid.entry(cell(p)).or_default().push(p);
+        }
+        let r2 = radius * radius;
+        let supported: Vec<bool> = self
+            .vertices
+            .par_iter()
+            .map(|&v| {
+                let c = cell(v);
+                (-1..=1).any(|dx| {
+                    (-1..=1).any(|dy| {
+                        (-1..=1).any(|dz| {
+                            grid.get(&[c[0] + dx, c[1] + dy, c[2] + dz])
+                                .is_some_and(|ps| {
+                                    ps.iter().any(|p| {
+                                        (0..3).map(|k| (p[k] - v[k]).powi(2)).sum::<f32>() <= r2
+                                    })
+                                })
+                        })
+                    })
+                })
+            })
+            .collect();
+        self.triangles
+            .retain(|t| t.iter().all(|&i| supported[i as usize]));
+    }
+
     /// Keep only the connected components with at least `min_tris` triangles
     /// (drops floaters). Vertices are left in place.
     pub fn remove_small_components(&mut self, min_tris: usize) {
@@ -421,6 +455,22 @@ mod tests {
     use super::*;
     use nalgebra::Matrix3;
     use visloc_gsplat_core::camera::PinholeCamera;
+
+    #[test]
+    fn keeps_only_supported_triangles() {
+        let mut m = Mesh {
+            vertices: vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [5.0, 5.0, 5.0],
+            ],
+            colors: vec![[0; 3]; 4],
+            triangles: vec![[0, 1, 2], [1, 2, 3]],
+        };
+        m.keep_supported(&[[0.1, 0.1, 0.0], [0.9, 0.2, 0.0]], 1.0);
+        assert_eq!(m.triangles, vec![[0, 1, 2]]);
+    }
 
     /// A sphere seen from six axis-aligned cameras fuses to a closed mesh
     /// whose vertices lie on the sphere.
