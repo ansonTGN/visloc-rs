@@ -505,6 +505,63 @@ differentiating against). Structure:
       (18.57 ms), because the cost scales with the component count.
     - Per-lane shared CAS when only a few lanes hit a splat, falling back
       to the reduction above K lanes: 19.7 / 32.8 / 76.7 ms at K = 4 / 8 / 16.
+- **Mesh extraction (2026-09-27)**: `gsplat_mesh` (feature `gpu`) turns a
+  trained `.ply` plus its COLMAP dataset into a vertex-coloured triangle
+  mesh without retraining.
+  1. `Renderer::render_depth` renders every view's median depth: the camera
+     z where transmittance first drops to 0.5. It is a second pass over the
+     same tile lists.
+  2. The depths are fused into a sparse TSDF of 8^3-voxel blocks.
+  3. Surface nets extract the surface, with no lookup tables and quads
+     facing free space.
+
+  Pixels with no opaque surface carve free space, and voxels seen from
+  fewer than 3 views are dropped. Defaults scale with the camera rig
+  (voxel = rig radius / 256, max depth = 2x rig radius).
+
+  | scene | views | render + fuse + extract | triangles |
+  | --- | --- | --- | --- |
+  | Mip-NeRF 360 bonsai | 292 | 22 s | 0.43M |
+  | Mip-NeRF 360 garden | 185 | ~35 s | 3.5M |
+  | south-building | 128 | ~30 s | 1.2M (2.6M before carving) |
+
+  - The object scenes (bonsai: tree, pot and table; garden: table legs,
+    vase and ball) come out clean.
+  - Surfaces carry the usual 3DGS depth noise.
+  - On south-building the sky stays as geometry: it is modelled by opaque
+    splats that every view agrees on, so carving cannot remove it.
+  - Smoother surfaces need depth / normal regularisation during training;
+    see the next entry.
+- **Depth-normal consistency loss (2026-09-27)**: `gsplat_train
+  --normal-weight W [--normal-start 7000]`, 2DGS / PGSR style.
+  - `Renderer::set_geometry(true)` adds two alpha-blended channels: each
+    splat's camera-space normal (the axis of its smallest scale, facing the
+    camera) and its depth. They go through the geometry variants of
+    rasterize / rasterize_backward / project_backward.
+  - The variants are selected with `// #if GEO` blocks, so the plain kernels
+    compile exactly as before. rasterize_backward still runs in 8.4 ms.
+  - The extra 4 components fill the spare slots of the 16-slot butterfly.
+  - The loss is `1 - N . n_d`: the rendered normal against the normal of
+    the rendered depth map (cross product of central differences).
+    Gradients flow to both terms, through the depth side via a gather pass.
+  - Geometry gradients match central finite differences wherever the same
+    harness on the colour path (CPU-validated) does.
+
+  | bonsai | PSNR | train | mesh dihedral median / >30deg | SfM pts to mesh (median) |
+  | --- | --- | --- | --- | --- |
+  | 7k, off | 30.13 | 157 s | 8.7 deg / 14.3% | 0.26 vox |
+  | 7k, W 0.005 (from 3k) | 29.94 | 167 s | 6.9 deg / 10.5% | 0.23 vox |
+  | 7k, W 0.015 | 27.74 | 169 s | 5.9 deg / 8.5% | 0.22 vox |
+  | 7k, W 0.05 | 26.81 | 162 s | 5.5 deg / 8.9% | 0.21 vox |
+  | 30k, off | 32.88 | 970 s | 10.8 deg / 20.1% | 0.33 vox |
+  | 30k, W 0.005 (from 7k) | 32.68 | 1028 s | 7.2 deg / 12.0% | 0.27 vox |
+
+  - W = 0.005 buys a visibly smoother mesh and slightly more accurate
+    geometry for -0.2 dB.
+  - Stronger weights trade too much PSNR.
+  - **Tried and dropped:** a flattening regulariser alone (push the
+    smallest scale to 0). It cost 1.3-1.5 dB at 7k and made the mesh
+    rougher (10.5 deg): thin splats with unaligned normals.
 - **M3**: `gsplat_euroc` example (feature `euroc`): raw EuRoC -> undistort
   -> SIFT -> verified temporal matches -> visloc-rs incremental SfM ->
   trainer, no COLMAP or Python. With `--gpu-sift --gpu-ba` (crates

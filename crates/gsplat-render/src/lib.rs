@@ -613,6 +613,134 @@ mod gpu_tests {
         check_screen_grads(&scene, 96, 80);
     }
 
+    /// Geometry channels (alpha-weighted normal + depth): the backward pass
+    /// against central finite differences of L = sum_px dot(W_px, geo_px)
+    /// over every mean, quaternion, log-scale and opacity parameter.
+    ///
+    /// Finite differences are unreliable where a perturbation moves pixels
+    /// across the 1/255 alpha cutoff (a jump, not a slope), so the same
+    /// harness is run on the colour channels -- whose gradients the CPU
+    /// reference tests validate -- and only parameters where that control
+    /// agrees are held to a tolerance.
+    #[test]
+    fn gpu_geo_grads_match_finite_differences() {
+        let Some(ctx) = try_context() else {
+            eprintln!("skipping geo grad check: no GPU adapter");
+            return;
+        };
+        if !ctx.features.contains(wgpu::Features::SUBGROUP) {
+            eprintln!("skipping geo grad check: no SUBGROUP support");
+            return;
+        }
+        let (w, h) = (48u32, 40u32);
+        let scene = random_scene(6, 13, 0);
+        let view = CameraView::new(
+            Matrix3::identity(),
+            Vector3::zeros(),
+            PinholeCamera::new(w, h, 40.0, 40.0, 24.0, 20.0),
+        );
+        let bg = [0.0, 0.0, 0.0];
+        let mut st = 77u32;
+        let mut rnd = move || {
+            st = st.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (st >> 8) as f32 / (1u32 << 24) as f32 - 0.5
+        };
+        let npix = (w * h) as usize;
+        let wgeo: Vec<[f32; 4]> = (0..npix)
+            .map(|_| [rnd(), rnd(), rnd(), 0.2 * rnd()])
+            .collect();
+        let wcol: Vec<[f32; 3]> = (0..npix).map(|_| [rnd(), rnd(), rnd()]).collect();
+
+        let mut r = Renderer::new(ctx, &scene, w, h).expect("renderer");
+        r.set_geometry(true);
+        let (t0, o0, _) = r.read_params();
+        let zero_col = vec![[0.0f32; 3]; npix];
+        let zero_geo = vec![[0.0f32; 4]; npix];
+
+        // (fd, analytic) over transforms then opacity, for one loss.
+        let mut check = |geo: bool| -> Vec<(f64, f64)> {
+            let p = r.param_buffers();
+            r.ctx
+                .queue
+                .write_buffer(p.transforms, 0, bytemuck::cast_slice(&t0));
+            r.ctx
+                .queue
+                .write_buffer(p.opacity, 0, bytemuck::cast_slice(&o0));
+            let _ = r.render(&view, bg);
+            let grads = if geo {
+                r.backward_geo(&zero_col, &wgeo)
+            } else {
+                r.backward_geo(&wcol, &zero_geo)
+            }
+            .expect("backward");
+            let mut eval = |t: &[f32], o: &[f32]| -> f64 {
+                let p = r.param_buffers();
+                r.ctx
+                    .queue
+                    .write_buffer(p.transforms, 0, bytemuck::cast_slice(t));
+                r.ctx
+                    .queue
+                    .write_buffer(p.opacity, 0, bytemuck::cast_slice(o));
+                let img = r.render(&view, bg);
+                if geo {
+                    r.read_geo()
+                        .expect("geo")
+                        .iter()
+                        .zip(&wgeo)
+                        .map(|(g, k)| (0..4).map(|c| g[c] as f64 * k[c] as f64).sum::<f64>())
+                        .sum()
+                } else {
+                    img.rgb
+                        .iter()
+                        .zip(&wcol)
+                        .map(|(c, k)| (0..3).map(|i| c[i] as f64 * k[i] as f64).sum::<f64>())
+                        .sum()
+                }
+            };
+            let eps = 1e-3f32;
+            let mut out = Vec::new();
+            for k in 0..t0.len() {
+                let (mut tp, mut tm) = (t0.clone(), t0.clone());
+                tp[k] += eps;
+                tm[k] -= eps;
+                let fd = (eval(&tp, &o0) - eval(&tm, &o0)) / (2.0 * eps as f64);
+                out.push((fd, grads.transforms[k] as f64));
+            }
+            for k in 0..o0.len() {
+                let (mut op, mut om) = (o0.clone(), o0.clone());
+                op[k] += eps;
+                om[k] -= eps;
+                let fd = (eval(&t0, &op) - eval(&t0, &om)) / (2.0 * eps as f64);
+                out.push((fd, grads.opacity[k] as f64));
+            }
+            out
+        };
+        let rel = |v: &[(f64, f64)]| -> Vec<f64> {
+            let scale = v.iter().map(|x| x.0.abs()).fold(0.0, f64::max).max(1e-9);
+            v.iter().map(|(a, b)| (a - b).abs() / scale).collect()
+        };
+        let col = rel(&check(false));
+        let geo_pairs = check(true);
+        let geo = rel(&geo_pairs);
+        let mut checked = 0;
+        for (k, (ec, eg)) in col.iter().zip(&geo).enumerate() {
+            if *ec < 1e-3 {
+                checked += 1;
+                assert!(
+                    *eg < 5e-3,
+                    "param {k}: fd {:.5e} analytic {:.5e} (rel {eg:.2e}; colour control {ec:.2e})",
+                    geo_pairs[k].0,
+                    geo_pairs[k].1
+                );
+            }
+        }
+        assert!(
+            checked >= geo.len() / 2,
+            "only {checked} of {} params checkable",
+            geo.len()
+        );
+    }
+
     #[test]
     fn gpu_matches_cpu_reference() {
         let Some(ctx) = try_context() else {

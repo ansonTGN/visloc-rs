@@ -128,6 +128,7 @@ impl GpuScene {
 }
 
 /// A named binding used to build layouts and bind groups uniformly.
+#[derive(Clone)]
 struct Binding {
     binding: u32,
     ty: wgpu::BufferBindingType,
@@ -505,6 +506,11 @@ pub struct Renderer {
     last_frame: FrameCounts,
     /// Backward-pass pipelines and buffers, built on first use.
     backward: Option<backward::BackwardState>,
+    /// Depth pass and its output buffer, built on first `render_depth`.
+    depth_stage: Option<(Stage, wgpu::Buffer)>,
+    /// Geometry channels (normal, depth), see `set_geometry`.
+    geo: Option<geo::GeoState>,
+    geo_enabled: bool,
 }
 
 /// Visible gaussians, intersections and tiles of a rendered frame.
@@ -783,6 +789,9 @@ impl Renderer {
             grads_zeroed_by_caller: false,
             last_frame: FrameCounts::default(),
             backward: None,
+            depth_stage: None,
+            geo: None,
+            geo_enabled: false,
         })
     }
 
@@ -968,6 +977,7 @@ impl Renderer {
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
                 dispatch(&mut pass, &self.visible, (nv as u32).div_ceil(256));
+                self.encode_project_geo(&mut pass, nv as u32);
             }
             self.ctx.queue.submit(Some(encoder.finish()));
         }
@@ -1053,8 +1063,9 @@ impl Renderer {
                         label: Some("raster"),
                     });
             {
+                let raster = self.raster_stage();
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-                dispatch(&mut pass, &self.raster, num_tiles);
+                dispatch(&mut pass, raster, num_tiles);
             }
             self.ctx.queue.submit(Some(encoder.finish()));
         }
@@ -1090,6 +1101,79 @@ impl Renderer {
             height: self.image_h,
             rgb,
         }
+    }
+
+    /// Render `view` and also return, per pixel, the median depth (camera z
+    /// where the transmittance first drops to 0.5; 0 if it never does) and
+    /// the accumulated opacity, as `(image, depth, opacity)`.
+    pub fn render_depth(&mut self, view: &CameraView, bg: [f32; 3]) -> (Image, Vec<f32>, Vec<f32>) {
+        let image = self.render(view, bg);
+        let pixels = self.image_w as usize * self.image_h as usize;
+        let bindings = vec![
+            Binding {
+                binding: 0,
+                ty: wgpu::BufferBindingType::Uniform,
+                buffer: self.raster_uniforms.clone(),
+            },
+            Binding {
+                binding: 1,
+                ty: RO,
+                buffer: self.scratch.projected_splats.clone(),
+            },
+            Binding {
+                binding: 2,
+                ty: RO,
+                buffer: self.scratch.compact_sorted.clone(),
+            },
+            Binding {
+                binding: 3,
+                ty: RO,
+                buffer: self.tile_offsets.clone(),
+            },
+            Binding {
+                binding: 4,
+                ty: RO,
+                buffer: self.scratch.depths.clone(),
+            },
+        ];
+        let dev = &self.ctx.device;
+        let (stage, out) = self.depth_stage.get_or_insert_with(|| {
+            let out = new_storage(dev, "out_depth", (pixels * 2 * 4) as u64);
+            let mut all = bindings.clone();
+            all.push(Binding {
+                binding: 5,
+                ty: RW,
+                buffer: out.clone(),
+            });
+            let stage = build_stage(
+                dev,
+                "rasterize_depth",
+                "rasterize_depth",
+                shaders::rasterize_depth().source,
+                &all,
+            );
+            (stage, out)
+        });
+        let mut all = bindings;
+        all.push(Binding {
+            binding: 5,
+            ty: RW,
+            buffer: out.clone(),
+        });
+        // The isect buffers may have been reallocated by this frame.
+        stage.rebind(dev, "rasterize_depth", &all);
+        let mut encoder = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("raster_depth"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            dispatch(&mut pass, stage, self.last_frame.num_tiles);
+        }
+        self.ctx.queue.submit(Some(encoder.finish()));
+        let raw = read_f32s(dev, &self.ctx.queue, out, pixels * 2);
+        let depth = raw.iter().step_by(2).copied().collect();
+        let opacity = raw.iter().skip(1).step_by(2).copied().collect();
+        (image, depth, opacity)
     }
 
     /// Per-tile isect list length statistics (profiling only): a long tail
@@ -1243,4 +1327,6 @@ impl StageTimer {
 
 #[path = "renderer_backward.rs"]
 mod backward;
+#[path = "renderer_geo.rs"]
+mod geo;
 pub use backward::{DeviceParams, ParamGrads, SCREEN_GRAD_FLOATS};

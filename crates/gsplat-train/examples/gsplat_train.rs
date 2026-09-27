@@ -45,6 +45,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "inria" => brush_strategy = false,
                 other => return Err(format!("unknown strategy {other}").into()),
             },
+            // Depth-normal consistency loss for mesh extraction (0 = off),
+            // active from --normal-start on.
+            "--normal-weight" => cfg.normal_weight = next()?.parse()?,
+            "--normal-start" => cfg.normal_start = next()?.parse()?,
             "--init-ply" => init_ply = Some(PathBuf::from(next()?)),
             "--export-steps" => {
                 export_steps = next()?
@@ -64,6 +68,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ssim_weight: cfg.ssim_weight,
             sh_degree_interval: cfg.sh_degree_interval,
             background: cfg.background,
+            normal_weight: cfg.normal_weight,
+            normal_start: cfg.normal_start,
             ..TrainConfig::brush_preset()
         };
         if keep_densify_off {

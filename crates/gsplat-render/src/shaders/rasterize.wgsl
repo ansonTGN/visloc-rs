@@ -17,12 +17,21 @@
 // past the list index of the last splat that was blended (0 = none).
 @group(0) @binding(6) var<storage, read_write> final_t: array<f32>;
 @group(0) @binding(7) var<storage, read_write> last_idx: array<u32>;
+// #if GEO
+// Geometry variant: per compact id (normal xyz, depth), and per pixel their
+// alpha-weighted sums (no background).
+@group(0) @binding(8) var<storage, read> geo_splats: array<vec4<f32>>;
+@group(0) @binding(9) var<storage, read_write> out_geo: array<vec4<f32>>;
+// #endif
 
 const TILE_W: u32 = 16u;
 const TILE_H: u32 = 16u;
 const BATCH: u32 = 256u;
 
 var<workgroup> batch: array<f32, BATCH * 9u>;
+// #if GEO
+var<workgroup> batch_geo: array<vec4<f32>, BATCH>;
+// #endif
 // Pixels in this tile that are finished (saturated or outside the image).
 var<workgroup> done_count: atomic<u32>;
 // 1 once every pixel is finished; read back uniformly to break the batch loop.
@@ -45,6 +54,9 @@ fn rasterize(
     let in_image = px < u.img_w && py < u.img_h;
 
     var accum = vec3<f32>(0.0, 0.0, 0.0);
+// #if GEO
+    var accum_geo = vec4<f32>(0.0);
+// #endif
     var trans = 1.0;
     var last = 0u;
 
@@ -69,6 +81,9 @@ fn rasterize(
                 for (var k = 0u; k < 9u; k = k + 1u) {
                     batch[s * 9u + k] = projected_splats[src + k];
                 }
+// #if GEO
+                batch_geo[s] = geo_splats[cg];
+// #endif
             }
         }
         workgroupBarrier();
@@ -91,6 +106,9 @@ fn rasterize(
                         let cg = max(batch[s * 9u + 7u], 0.0);
                         let cb = max(batch[s * 9u + 8u], 0.0);
                         accum = accum + trans * a * vec3<f32>(cr, cg, cb);
+// #if GEO
+                        accum_geo = accum_geo + trans * a * batch_geo[s];
+// #endif
                         trans = trans * (1.0 - a);
                         last = batch_start + s + 1u;
                     }
@@ -119,5 +137,8 @@ fn rasterize(
         let pix = py * u.img_w + px;
         final_t[pix] = trans;
         last_idx[pix] = last;
+// #if GEO
+        out_geo[pix] = accum_geo;
+// #endif
     }
 }

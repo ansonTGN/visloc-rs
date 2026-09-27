@@ -27,6 +27,11 @@
 @group(0) @binding(6) var<storage, read_write> grad_transforms: array<f32>;
 @group(0) @binding(7) var<storage, read_write> grad_opacity: array<f32>;
 @group(0) @binding(8) var<storage, read_write> grad_sh: array<f32>;
+// #if GEO
+// Gradients of the geometry channels per compact id: camera-space normal
+// (shortest axis, facing the camera) xyz and depth.
+@group(0) @binding(9) var<storage, read> geo_grads: array<vec4<f32>>;
+// #endif
 
 // Outer product a b^T as a mat3x3 (column c = a * b[c]).
 fn outer3(a: vec3<f32>, b: vec3<f32>) -> mat3x3<f32> {
@@ -182,6 +187,11 @@ fn project_backward_one(compact: u32, gid: u32, row: u32, rest_pc: u32) {
     gp.x = gp.x + g_u * u.fx * inv_z;
     gp.y = gp.y + g_v * u.fy * inv_z;
     gp.z = gp.z - (g_u * u.fx * p.x + g_v * u.fy * p.y) * inv_z2;
+// #if GEO
+    let g_geo = geo_grads[compact];
+    // depth = p.z
+    gp.z = gp.z + g_geo.w;
+// #endif
 
     // p = W m + t  ->  dL/dm = W^T gp.
     var gmean = transpose(w) * gp;
@@ -191,7 +201,30 @@ fn project_backward_one(compact: u32, gid: u32, row: u32, rest_pc: u32) {
     let gm3 = (gsig + transpose(gsig)) * m3;
     // M3 = Rg diag(s): column k of M3 is s_k * column k of Rg.
     let gls = vec3<f32>(dot(gm3[0], rg[0]) * s.x, dot(gm3[1], rg[1]) * s.y, dot(gm3[2], rg[2]) * s.z);
-    let gr = mat3x3<f32>(gm3[0] * s.x, gm3[1] * s.y, gm3[2] * s.z);
+    var gr = mat3x3<f32>(gm3[0] * s.x, gm3[1] * s.y, gm3[2] * s.z);
+// #if GEO
+    // normal = +-W Rg[:, k] for the smallest scale k (same choice and flip as
+    // project_geo; both are piecewise constant).
+    var k = 0u;
+    var axis = rg[0];
+    var smin = ls.x;
+    if (ls.y < smin) {
+        k = 1u;
+        axis = rg[1];
+        smin = ls.y;
+    }
+    if (ls.z < smin) {
+        k = 2u;
+        axis = rg[2];
+    }
+    var gaxis = transpose(w) * g_geo.xyz;
+    if (dot(w * axis, p) > 0.0) {
+        gaxis = -gaxis;
+    }
+    gr[0] = gr[0] + select(vec3<f32>(0.0), gaxis, k == 0u);
+    gr[1] = gr[1] + select(vec3<f32>(0.0), gaxis, k == 1u);
+    gr[2] = gr[2] + select(vec3<f32>(0.0), gaxis, k == 2u);
+// #endif
     // Rg(qn) -> normalised quaternion; R(i, k) = gr[k][i].
     let qw = qn.x;
     let qx = qn.y;
