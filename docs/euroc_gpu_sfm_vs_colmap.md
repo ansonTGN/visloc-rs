@@ -201,6 +201,68 @@ possible through `--import-features`:
 The remaining gap is accuracy on the blurred sequences and V2_01's scale
 drift.
 
+### Hybrid SP bridge / SP-seeded SIFT refinement (2026-09-28)
+
+The idea: use SuperPoint only to *connect* the blur break (topology), keep
+SIFT as the *geometry* everywhere else, hoping to get SP's connectivity at
+SIFT's accuracy. Two designs, both opt-in flags on `gsplat_euroc`, iterated
+on V2_03 and V1_03 (the fast, clearly-split sequences) before deciding.
+Both are honest negatives; the flags and code were removed.
+
+- **SP bridge correspondences, SIFT geometry.** For candidate pairs the
+  SIFT-only colmap-port mapper's own split shows it needs (probed with one
+  extra mapper run, then matched only for pairs crossing a model boundary or
+  touching an unregistered frame), match+verify SuperPoint too and merge the
+  result into the pair's SIFT matches as extra keypoints/tracks.
+  - **Targeted (boundary pairs only), V2_03:** 2-74 of a few hundred
+    boundary candidates verified, 3-42 frames gained SP keypoints — but the
+    mapper's own split never changed (`[118, 56]` before and after), so ATE
+    and registration were unchanged (3.37 cm, 118/200). The SP correspondences
+    it finds at the actual break are too few for the port's registration
+    threshold (`abs_pose_min_num_inliers=30`) to grow through, matching the
+    doc's earlier note that only ~4 pairs with ≤41 matches cross V2_03's
+    break.
+  - **Blanket (any window pair below a SIFT-match threshold), V2_03:**
+    connects into one model (`[176]` at threshold 50, `[172]`ish scale) but
+    wrecks accuracy: 8.03 cm at 176/200 (threshold 50), 13.78 cm at 174/200
+    (threshold 100), 16.08 cm at 118/200 in 2 models (threshold 30). Only an
+    almost-no-op threshold (1: only pairs SIFT verified zero matches for)
+    left accuracy untouched (3.90 cm) — and also left the split unchanged
+    (117+67 frames, no merge).
+  - V1_03 (targeted): the mapper's own 4-model split (`[67, 65, 31, 19]`)
+    did not consolidate either; bridging *added* a 5th model
+    (`[67, 65, 31, 29, 19]`) with the largest unchanged at 67/200, 2.08 cm
+    (SIFT baseline: 2.17 cm, noise-level difference).
+- **SP-seeded SIFT refinement.** Seed the colmap-port mapper's
+  `Reconstruction` directly from a single-model SuperPoint run's poses
+  (`init_sp_*.txt`, generated once from `--import-features` + `--mapper
+  colmap-port`) instead of incremental registration, triangulate the *SIFT*
+  correspondence graph through those fixed poses, then run global bundle
+  adjustment (several filter/re-adjust rounds, then
+  `iterative_global_refinement`) so SIFT's precision can correct SP's looser
+  localisation. Needed making `colmap_incremental::pipeline::reconstruction_from_cache`
+  `pub` (reverted with everything else).
+  - V2_03: 172/200 registered (matches the SP seed's own topology; COLMAP:
+    180, SIFT-only largest model: 118), but ATE only reaches 4.56-4.60 cm —
+    barely different from feeding SuperPoint's own keypoints straight into
+    the mapper (4.37 cm, see above) and well short of SIFT-only's 3.37 cm or
+    COLMAP's 2.85 cm. Three rounds of filter+re-adjust before the final
+    refinement changed almost nothing (4.60 -> 4.56 cm).
+  - V1_03: 118/200 registered (SP topology; COLMAP: 80, SIFT-only: 67), ATE
+    8.90 cm — same ballpark as SuperPoint-only (8.74 cm), far worse than
+    SIFT-only (2.17 cm) or COLMAP (1.98 cm).
+  - Conclusion: SuperPoint's own incremental solve apparently bakes pose
+    error into the seed that one (gauge-fixed, monocular-scale-free) global
+    BA pass does not fully correct, even when every observation driving that
+    BA is SIFT-precision. Re-triangulating SIFT through SP's poses recovers
+    SP's own accuracy level, not SIFT's — the connectivity SP provides and
+    the precision SIFT provides don't compose by this route.
+
+Both routes confirm the earlier finding stands: SuperPoint can reach the
+frames SIFT's mapper leaves split or unregistered, but nothing tried so far
+carries SIFT's precision across that bridge. The remaining gap on V1_03,
+V2_03 and V2_01 is still open.
+
 ## Reproduce
 
 ```text
