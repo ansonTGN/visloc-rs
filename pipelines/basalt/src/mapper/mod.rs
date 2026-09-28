@@ -2523,6 +2523,532 @@ fn global_ba_impl_in_place(
     };
     summary
 }
+
+// ===================== Joint VI global BA (15-dof/keyframe) =====================
+//
+// Everything below is additive: [`global_ba_impl_in_place`] above (and every
+// helper it calls: [`PoseBlockHessian`], [`linearize_factors`],
+// [`linearize_vision`], [`apply_pose_solve`], [`damped_landmark_system`],
+// [`back_substitute_landmarks_with`], [`solve_damped_block_system`]) is
+// unmodified and still the only code path `global_ba_with_state`/
+// `local_ba_with_state` use. [`global_ba_with_state_joint`] is a new, opt-in
+// entry point that extends the same vision/relative-pose/roll-pitch factor
+// machinery -- reused unchanged -- to a 15-dof-per-keyframe navigation state
+// (pose, velocity, gyro bias, accel bias) by embedding the existing 6-dof
+// pose system into the top-left 6x6 of each 15x15 nav-state block (vision
+// and the existing relative-pose/roll-pitch factors only ever touch pose)
+// and adding preintegrated-IMU and bias-random-walk factor blocks from
+// `mapper::imu_ba` on top.
+
+/// Block-sparse 15-dof (pose + velocity + gyro bias + accel bias) Hessian
+/// for the joint VI global BA. Mirrors [`PoseBlockHessian`]'s block-sparse
+/// layout (a `BTreeMap` of dense blocks; an absent block is an exact zero)
+/// at the larger per-keyframe dof count, using dynamically-sized 15x15
+/// blocks rather than a fixed `Matrix6`-style type to keep this addition
+/// small; see [`embed_pose_hessian_into_nav`] for how the unchanged 6-dof
+/// system embeds into it.
+#[derive(Debug, Clone)]
+struct NavBlockHessian {
+    nav_count: usize,
+    blocks: BTreeMap<(usize, usize), DMatrix<f64>>,
+}
+
+impl NavBlockHessian {
+    fn new(nav_count: usize) -> Self {
+        Self {
+            nav_count,
+            blocks: BTreeMap::new(),
+        }
+    }
+
+    fn dim(&self) -> usize {
+        self.nav_count * imu_ba::NAV_JOINT_DOF
+    }
+
+    fn add_block(&mut self, row: usize, col: usize, block: &DMatrix<f64>) {
+        self.blocks
+            .entry((row, col))
+            .or_insert_with(|| DMatrix::zeros(imu_ba::NAV_JOINT_DOF, imu_ba::NAV_JOINT_DOF))
+            .add_assign(block);
+    }
+
+    fn diagonal(&self) -> Vec<f64> {
+        let d = imu_ba::NAV_JOINT_DOF;
+        let mut diagonal = vec![0.0; self.dim()];
+        for nav in 0..self.nav_count {
+            if let Some(block) = self.blocks.get(&(nav, nav)) {
+                for axis in 0..d {
+                    diagonal[nav * d + axis] = block[(axis, axis)];
+                }
+            }
+        }
+        diagonal
+    }
+
+    fn to_dense(&self) -> DMatrix<f64> {
+        let d = imu_ba::NAV_JOINT_DOF;
+        let mut dense = DMatrix::zeros(self.dim(), self.dim());
+        for (&(row, col), block) in &self.blocks {
+            dense.view_mut((row * d, col * d), (d, d)).copy_from(block);
+        }
+        dense
+    }
+
+    /// See [`PoseBlockHessian::symmetrized_damped`]; identical construction
+    /// at the 15-dof block size.
+    fn symmetrized_damped(&self, h_diagonal: &[f64], lambda: f64, min_lambda: f64) -> Self {
+        let d = imu_ba::NAV_JOINT_DOF;
+        let zero = DMatrix::zeros(d, d);
+        let mut keys = self.blocks.keys().copied().collect::<BTreeSet<_>>();
+        keys.extend(self.blocks.keys().map(|&(row, col)| (col, row)));
+        for nav in 0..self.nav_count {
+            keys.insert((nav, nav));
+        }
+        let mut blocks = BTreeMap::new();
+        for (row, col) in keys {
+            let upper = self.blocks.get(&(row, col)).unwrap_or(&zero);
+            let lower = self.blocks.get(&(col, row)).unwrap_or(&zero);
+            let mut block = DMatrix::from_fn(d, d, |r, c| (upper[(r, c)] + lower[(c, r)]) * 0.5);
+            if row == col {
+                for axis in 0..d {
+                    let index = row * d + axis;
+                    block[(axis, axis)] += (h_diagonal[index] * lambda).max(min_lambda);
+                }
+            }
+            blocks.insert((row, col), block);
+        }
+        Self {
+            nav_count: self.nav_count,
+            blocks,
+        }
+    }
+
+    fn mul_vector(&self, x: &DVector<f64>) -> DVector<f64> {
+        let d = imu_ba::NAV_JOINT_DOF;
+        let mut y = DVector::zeros(self.dim());
+        for (&(row, col), block) in &self.blocks {
+            for c in 0..d {
+                let value = x[col * d + c];
+                for r in 0..d {
+                    y[row * d + r] += block[(r, c)] * value;
+                }
+            }
+        }
+        y
+    }
+}
+
+/// Embed the existing 6-dof pose Hessian/gradient (vision + relative-pose +
+/// roll-pitch, unchanged) into the top-left 6x6 of each 15x15 nav-state
+/// block. `pose_h`'s block indices are keyframe indices in the same
+/// enumeration order as the joint solver's own `pose_indices`, so no
+/// re-indexing is needed.
+fn embed_pose_hessian_into_nav(
+    pose_h: &PoseBlockHessian,
+    pose_b: &DVector<f64>,
+    nav_count: usize,
+) -> (NavBlockHessian, DVector<f64>) {
+    let d = imu_ba::NAV_JOINT_DOF;
+    let mut nav_h = NavBlockHessian::new(nav_count);
+    for (&(row, col), block6) in &pose_h.blocks {
+        let mut block15 = DMatrix::zeros(d, d);
+        block15.view_mut((0, 0), (6, 6)).copy_from(block6);
+        nav_h.add_block(row, col, &block15);
+    }
+    let mut nav_b = DVector::zeros(nav_count * d);
+    for pose in 0..nav_count {
+        if pose * 6 + 6 <= pose_b.len() {
+            for axis in 0..6 {
+                nav_b[pose * d + axis] = pose_b[pose * 6 + axis];
+            }
+        }
+    }
+    (nav_h, nav_b)
+}
+
+/// Extract the pose-only (6-dof/keyframe) sub-vector of a joint 15-dof
+/// solve, for feeding into the unchanged [`apply_pose_solve`] and
+/// [`back_substitute_landmarks_with`].
+fn pose_solve_from_nav_solve(nav_solve: &DVector<f64>, pose_count: usize) -> DVector<f64> {
+    let d = imu_ba::NAV_JOINT_DOF;
+    let mut pose_solve = DVector::zeros(pose_count * 6);
+    for pose in 0..pose_count {
+        if pose * d + 6 <= nav_solve.len() {
+            for axis in 0..6 {
+                pose_solve[pose * 6 + axis] = nav_solve[pose * d + axis];
+            }
+        }
+    }
+    pose_solve
+}
+
+/// Apply the velocity/gyro-bias/accel-bias (offsets 6..15) part of a joint
+/// solve, in the same `param -= x` convention as [`apply_pose_solve`]'s
+/// pose update (and as `mapper::imu_ba`'s embedded factor gradient itself
+/// expects; see that module's doc comment).
+fn apply_nav_extra_solve(
+    pose_indices: &BTreeMap<u64, usize>,
+    nav_solve: &DVector<f64>,
+    velocities: &mut BTreeMap<u64, Vector3<f64>>,
+    gyro_biases: &mut BTreeMap<u64, Vector3<f64>>,
+    accel_biases: &mut BTreeMap<u64, Vector3<f64>>,
+) {
+    let d = imu_ba::NAV_JOINT_DOF;
+    for (&id, &index) in pose_indices {
+        let offset = index * d;
+        if offset + d > nav_solve.len() {
+            continue;
+        }
+        let v = velocities.entry(id).or_default();
+        for axis in 0..3 {
+            v[axis] -= nav_solve[offset + 6 + axis];
+        }
+        let bg = gyro_biases.entry(id).or_default();
+        for axis in 0..3 {
+            bg[axis] -= nav_solve[offset + 9 + axis];
+        }
+        let ba = accel_biases.entry(id).or_default();
+        for axis in 0..3 {
+            ba[axis] -= nav_solve[offset + 12 + axis];
+        }
+    }
+}
+
+fn nav_states_at(
+    poses: &BTreeMap<u64, SE3>,
+    velocities: &BTreeMap<u64, Vector3<f64>>,
+    gyro_biases: &BTreeMap<u64, Vector3<f64>>,
+    accel_biases: &BTreeMap<u64, Vector3<f64>>,
+) -> BTreeMap<u64, imu_ba::NavState> {
+    poses
+        .iter()
+        .map(|(&id, pose)| {
+            (
+                id,
+                imu_ba::NavState::new(
+                    pose.clone(),
+                    velocities.get(&id).copied().unwrap_or_default(),
+                    gyro_biases.get(&id).copied().unwrap_or_default(),
+                    accel_biases.get(&id).copied().unwrap_or_default(),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn evaluate_imu_joint_cost(
+    nav_states: &BTreeMap<u64, imu_ba::NavState>,
+    imu_factors: &[imu_ba::ImuPreintegratedFactor],
+    bias_factors: &[imu_ba::BiasRandomWalkFactor],
+    gravity_world: Vector3<f64>,
+) -> f64 {
+    let mut cost = 0.0;
+    for factor in imu_factors {
+        cost += imu_ba::imu_preintegrated_cost(nav_states, factor, gravity_world);
+    }
+    for factor in bias_factors {
+        cost += imu_ba::bias_random_walk_cost(nav_states, factor);
+    }
+    cost
+}
+
+/// Linearize every preintegrated-IMU and bias-random-walk factor at the
+/// current `nav_states`, accumulating `H += J^T J`, `b += J^T r` into the
+/// four 15x15 blocks / two 15-vector segments touching each factor's
+/// `from`/`to` keyframe (see `mapper::imu_ba::Nav15FactorLinearization`). A
+/// factor whose keyframe is outside `pose_indices` (or that fails to
+/// linearize, e.g. a non-finite preintegrated delta) is silently skipped,
+/// matching every other factor loop in this module.
+fn linearize_imu_joint_factors(
+    nav_states: &BTreeMap<u64, imu_ba::NavState>,
+    pose_indices: &BTreeMap<u64, usize>,
+    imu_factors: &[imu_ba::ImuPreintegratedFactor],
+    bias_factors: &[imu_ba::BiasRandomWalkFactor],
+    gravity_world: Vector3<f64>,
+    nav_count: usize,
+    h: &mut NavBlockHessian,
+    b: &mut DVector<f64>,
+) {
+    let d = imu_ba::NAV_JOINT_DOF;
+    let mut accumulate = |from_id: u64, to_id: u64, lin: imu_ba::Nav15FactorLinearization| {
+        let (Some(&i), Some(&j)) = (pose_indices.get(&from_id), pose_indices.get(&to_id)) else {
+            return;
+        };
+        if i >= nav_count || j >= nav_count {
+            return;
+        }
+        h.add_block(i, i, &lin.h_ii);
+        h.add_block(i, j, &lin.h_ij);
+        h.add_block(j, i, &lin.h_ji);
+        h.add_block(j, j, &lin.h_jj);
+        for axis in 0..d {
+            b[i * d + axis] += lin.b_i[axis];
+            b[j * d + axis] += lin.b_j[axis];
+        }
+    };
+    for factor in imu_factors {
+        if let Some(lin) =
+            imu_ba::linearize_imu_preintegrated_factor(nav_states, factor, gravity_world)
+        {
+            accumulate(factor.from, factor.to, lin);
+        }
+    }
+    for factor in bias_factors {
+        if let Some(lin) = imu_ba::linearize_bias_random_walk_factor(nav_states, factor) {
+            accumulate(factor.from, factor.to, lin);
+        }
+    }
+}
+
+fn solve_damped_nav_block_system(
+    h: &NavBlockHessian,
+    b: &DVector<f64>,
+    h_diagonal: &[f64],
+    lambda: f64,
+    min_lambda: f64,
+    gauge_anchor: Option<usize>,
+) -> DVector<f64> {
+    let system = h.symmetrized_damped(h_diagonal, lambda, min_lambda);
+    let finite = system
+        .blocks
+        .values()
+        .all(|block| block.iter().all(|value| value.is_finite()));
+    if finite && b.len() == system.dim() {
+        let diagonal = system.diagonal();
+        if let Some(solution) = preconditioned_cg(
+            b,
+            1e-4,
+            |index| diagonal[index],
+            |vector| system.mul_vector(vector),
+        ) {
+            return solution;
+        }
+    }
+    solve_damped_system(
+        &h.to_dense(),
+        b,
+        h_diagonal,
+        lambda,
+        min_lambda,
+        gauge_anchor,
+    )
+}
+
+/// Report from [`global_ba_with_state_joint`]. Deliberately a separate,
+/// smaller type from [`MapperSummary`] (no per-iteration trace/hash
+/// bookkeeping): this is a new opt-in code path with no existing
+/// byte-exactness contract to preserve, unlike the pose-only solver above.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct JointGlobalBaSummary {
+    pub initial_cost: f64,
+    pub final_cost: f64,
+    pub iterations: usize,
+    pub accepted_step_count: usize,
+    pub rejected_trial_count: usize,
+    pub pose_count: usize,
+    pub track_count: usize,
+    pub final_lambda: f64,
+    pub gauge_anchor: u64,
+}
+
+/// Joint visual-inertial global bundle adjustment: extends the pose-only
+/// (6 dof/keyframe) solve above to the full 15-dof-per-keyframe navigation
+/// state (pose, velocity, gyro bias, accel bias), adding preintegrated-IMU
+/// relative-state factors and bias random-walk factors between consecutive
+/// keyframes (`mapper::imu_ba`) on top of the unchanged vision/relative-pose/
+/// roll-pitch factors. Gravity is fixed in world (`gravity_world`); this
+/// module never optimizes it, matching the VIO's own gravity-aligned world
+/// frame.
+///
+/// `velocities`/`gyro_biases`/`accel_biases` are updated in place, seeded
+/// from whatever the caller passes in (typically the VIO's own per-keyframe
+/// `MargData` estimate; a missing id defaults to zero). `poses` and
+/// `landmarks` are updated in place exactly as
+/// [`global_ba_impl_in_place`]'s pose-only solve does.
+#[allow(clippy::too_many_arguments)]
+pub fn global_ba_with_state_joint(
+    poses: &mut BTreeMap<u64, SE3>,
+    velocities: &mut BTreeMap<u64, Vector3<f64>>,
+    gyro_biases: &mut BTreeMap<u64, Vector3<f64>>,
+    accel_biases: &mut BTreeMap<u64, Vector3<f64>>,
+    factors: &MapperFactors,
+    imu_factors: &[imu_ba::ImuPreintegratedFactor],
+    bias_factors: &[imu_ba::BiasRandomWalkFactor],
+    landmarks: &mut BTreeMap<u64, MapperLandmark>,
+    calibration: &BasaltCalibration,
+    config: GlobalBaConfig,
+    gravity_world: Vector3<f64>,
+    optimizer: &mut GlobalBaOptimizerState,
+) -> JointGlobalBaSummary {
+    let pose_indices = poses
+        .keys()
+        .enumerate()
+        .map(|(index, &id)| (id, index))
+        .collect::<BTreeMap<_, _>>();
+    let pose_count = pose_indices.len();
+    let anchor = poses.keys().next().copied().unwrap_or(0);
+    let anchor_index = pose_indices.get(&anchor).copied();
+
+    let nav_states = nav_states_at(poses, velocities, gyro_biases, accel_biases);
+    let initial_cost = evaluate_costs(poses, landmarks, factors, Some(calibration), config).total()
+        + evaluate_imu_joint_cost(&nav_states, imu_factors, bias_factors, gravity_world);
+
+    if !config.enabled {
+        return JointGlobalBaSummary {
+            initial_cost,
+            final_cost: initial_cost,
+            iterations: 0,
+            accepted_step_count: 0,
+            rejected_trial_count: 0,
+            pose_count,
+            track_count: landmarks.len(),
+            final_lambda: optimizer.lambda,
+            gauge_anchor: anchor,
+        };
+    }
+
+    let mut cost = initial_cost;
+    let mut iterations = 0;
+    let mut accepted_step_count = 0;
+    let mut rejected_trial_count = 0;
+
+    for iteration in 0..config.max_iterations {
+        let nav_states = nav_states_at(poses, velocities, gyro_biases, accel_biases);
+        let mut vision = linearize_vision(
+            poses,
+            landmarks,
+            Some(calibration),
+            &pose_indices,
+            pose_count,
+            config,
+        );
+        linearize_factors(
+            poses,
+            factors,
+            &pose_indices,
+            pose_count,
+            config,
+            &mut vision.h,
+            &mut vision.b,
+        );
+
+        let mut imu_h = NavBlockHessian::new(pose_count);
+        let mut imu_b = DVector::zeros(pose_count * imu_ba::NAV_JOINT_DOF);
+        linearize_imu_joint_factors(
+            &nav_states,
+            &pose_indices,
+            imu_factors,
+            bias_factors,
+            gravity_world,
+            pose_count,
+            &mut imu_h,
+            &mut imu_b,
+        );
+
+        let mut converged = false;
+        let mut accepted_step = false;
+        let mut trial_count = 10;
+        while !accepted_step && trial_count > 0 && !converged {
+            let (damped_pose_h, damped_pose_b, damped_inverses) = if trial_count < 10 {
+                let (h, b, inverses) = damped_landmark_system(
+                    &vision.h,
+                    &vision.b,
+                    &vision.landmarks,
+                    optimizer.lambda,
+                    optimizer.min_lambda,
+                );
+                (h, b, Some(inverses))
+            } else {
+                (vision.h.clone(), vision.b.clone(), None)
+            };
+
+            let (mut nav_h, mut nav_b) =
+                embed_pose_hessian_into_nav(&damped_pose_h, &damped_pose_b, pose_count);
+            for (&(row, col), block) in &imu_h.blocks {
+                nav_h.add_block(row, col, block);
+            }
+            for index in 0..nav_b.len() {
+                nav_b[index] += imu_b[index];
+            }
+
+            let h_diagonal = nav_h.diagonal();
+            let solve = solve_damped_nav_block_system(
+                &nav_h,
+                &nav_b,
+                &h_diagonal,
+                optimizer.lambda,
+                optimizer.min_lambda,
+                anchor_index,
+            );
+            let max_increment = solve.iter().map(|v| v.abs()).fold(0.0, f64::max);
+            converged = max_increment < 1e-5;
+
+            let backup_poses = poses.clone();
+            let backup_landmarks = landmarks.clone();
+            let backup_velocities = velocities.clone();
+            let backup_gyro_biases = gyro_biases.clone();
+            let backup_accel_biases = accel_biases.clone();
+
+            let pose_solve = pose_solve_from_nav_solve(&solve, pose_count);
+            apply_pose_solve(poses, &pose_indices, &pose_solve);
+            back_substitute_landmarks_with(
+                landmarks,
+                &vision.landmarks,
+                damped_inverses.as_deref(),
+                &pose_indices,
+                &pose_solve,
+            );
+            apply_nav_extra_solve(&pose_indices, &solve, velocities, gyro_biases, accel_biases);
+
+            let after_nav_states = nav_states_at(poses, velocities, gyro_biases, accel_biases);
+            let after = evaluate_costs(poses, landmarks, factors, Some(calibration), config)
+                .total()
+                + evaluate_imu_joint_cost(
+                    &after_nav_states,
+                    imu_factors,
+                    bias_factors,
+                    gravity_world,
+                );
+            let f_diff = cost - after;
+            let accepted = f_diff >= 0.0;
+            if accepted {
+                cost = after;
+                optimizer.lambda = (optimizer.lambda / 3.0).max(optimizer.min_lambda);
+                optimizer.lambda_vee = 2.0;
+                accepted_step = true;
+                accepted_step_count += 1;
+            } else {
+                *poses = backup_poses;
+                *landmarks = backup_landmarks;
+                *velocities = backup_velocities;
+                *gyro_biases = backup_gyro_biases;
+                *accel_biases = backup_accel_biases;
+                optimizer.lambda =
+                    (optimizer.lambda_vee * optimizer.lambda).min(optimizer.max_lambda);
+                optimizer.lambda_vee *= 2.0;
+                rejected_trial_count += 1;
+            }
+            trial_count -= 1;
+        }
+        iterations = iteration + 1;
+        if converged {
+            break;
+        }
+    }
+
+    JointGlobalBaSummary {
+        initial_cost,
+        final_cost: cost,
+        iterations,
+        accepted_step_count,
+        rejected_trial_count,
+        pose_count,
+        track_count: landmarks.len(),
+        final_lambda: optimizer.lambda,
+        gauge_anchor: anchor,
+    }
+}
+
 pub fn load_margdata_directory(path: &std::path::Path) -> Result<Vec<MargData>, String> {
     let mut files = std::fs::read_dir(path)
         .map_err(|e| e.to_string())?
@@ -3906,6 +4432,270 @@ mod ba_tests {
             assert!((numeric.y - analytic[(1, axis)]).abs() < 1.0e-6);
         }
         assert_eq!(analytic.column(3).norm(), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod joint_ba_tests {
+    use super::*;
+    use crate::imu::{ImuNoiseModel, ImuPreintegrator};
+    use crate::vio::landmarks::StereographicDirection;
+
+    fn synthetic_calibration() -> BasaltCalibration {
+        let camera =
+            crate::camera::DoubleSphereCamera::new(300.0, 300.0, 320.0, 240.0, 0.5, 0.7, 640, 480)
+                .unwrap();
+        BasaltCalibration {
+            t_imu_cam: vec![SE3::identity()],
+            cameras: vec![camera],
+            resolutions: vec![(640, 480)],
+            calib_accel_bias: vec![0.0; 3],
+            calib_gyro_bias: vec![0.0; 3],
+            imu_update_rate_hz: 200.0,
+            accel_noise_std: Vector3::zeros(),
+            gyro_noise_std: Vector3::zeros(),
+            accel_bias_std: Vector3::zeros(),
+            gyro_bias_std: Vector3::zeros(),
+            t_mocap_world: SE3::identity(),
+            t_imu_marker: SE3::identity(),
+            mocap_time_offset_ns: 0,
+            mocap_to_imu_offset_ns: 0,
+            cam_time_offset_ns: 0,
+        }
+    }
+
+    /// Three keyframes, translation-only truth motion along x, one landmark
+    /// observed by all three -- the same shape of fixture as
+    /// `ba_tests::full_mapper_ba_schur_updates_pose_and_stereographic_landmark`,
+    /// reused here so the joint solver is exercised on a real (if small)
+    /// vision problem, not just synthetic IMU factors in isolation.
+    fn synthetic_scene() -> (
+        BTreeMap<u64, SE3>,
+        BTreeMap<u64, MapperLandmark>,
+        BasaltCalibration,
+    ) {
+        let calibration = synthetic_calibration();
+        let truth_poses = [
+            (1u64, SE3::identity()),
+            (
+                2,
+                SE3::new(UnitQuaternion::identity(), Vector3::new(0.2, 0.0, 0.0)),
+            ),
+            (
+                3,
+                SE3::new(UnitQuaternion::identity(), Vector3::new(0.4, 0.0, 0.0)),
+            ),
+        ];
+        let point_world = Point3::new(0.15, 0.1, 3.0);
+        let host_point = truth_poses[0].1.inverse().transform_point(&point_world);
+        let direction = StereographicDirection::from_bearing(host_point.coords).unwrap();
+        let mut observations = Vec::new();
+        for (frame_id, pose) in &truth_poses {
+            let point_camera = pose.inverse().transform_point(&point_world);
+            let pixel = calibration
+                .camera(0)
+                .unwrap()
+                .project(&point_camera)
+                .unwrap();
+            observations.push(MapperObservation {
+                image: TimeCamId::new(*frame_id, 0),
+                feature_id: *frame_id,
+                pixel,
+            });
+        }
+        let mut landmarks = BTreeMap::new();
+        landmarks.insert(
+            42,
+            MapperLandmark {
+                track_id: 42,
+                host: TimeCamId::new(1, 0),
+                second: TimeCamId::new(2, 0),
+                direction: StereographicDirection {
+                    xy: Point2::new(direction.xy.x + 0.01, direction.xy.y - 0.005),
+                },
+                inverse_distance: 1.0 / 2.8,
+                observations,
+            },
+        );
+        let poses = truth_poses.into_iter().collect::<BTreeMap<_, _>>();
+        (poses, landmarks, calibration)
+    }
+
+    fn empty_factors() -> MapperFactors {
+        MapperFactors {
+            imu_relative_pose: Vec::new(),
+            provenance_version: "synthetic".into(),
+            relative_pose: Vec::new(),
+            roll_pitch: Vec::new(),
+            ba_covisibility: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn joint_solver_matches_pose_only_solver_when_imu_factors_are_empty() {
+        let (mut joint_poses, mut joint_landmarks, calibration) = synthetic_scene();
+        let (mut pose_only_poses, mut pose_only_landmarks, _) = synthetic_scene();
+        let factors = empty_factors();
+        let config = GlobalBaConfig {
+            max_iterations: 4,
+            lambda_initial: 1.0e-3,
+            lambda_min: 1.0e-8,
+            ..Default::default()
+        };
+
+        let mut pose_only_state = GlobalBaOptimizerState::from_config(config);
+        let pose_only_summary = global_ba_with_state(
+            &mut pose_only_poses,
+            &factors,
+            &mut pose_only_landmarks,
+            &calibration,
+            config,
+            &mut pose_only_state,
+        );
+
+        let mut velocities = BTreeMap::new();
+        let mut gyro_biases = BTreeMap::new();
+        let mut accel_biases = BTreeMap::new();
+        let mut joint_state = GlobalBaOptimizerState::from_config(config);
+        let joint_summary = global_ba_with_state_joint(
+            &mut joint_poses,
+            &mut velocities,
+            &mut gyro_biases,
+            &mut accel_biases,
+            &factors,
+            &[],
+            &[],
+            &mut joint_landmarks,
+            &calibration,
+            config,
+            Vector3::new(0.0, 0.0, -9.81),
+            &mut joint_state,
+        );
+
+        assert!((joint_summary.final_cost - pose_only_summary.final_cost).abs() < 1e-9);
+        for (id, pose) in &pose_only_poses {
+            let joint_pose = &joint_poses[id];
+            assert!((joint_pose.translation - pose.translation).norm() < 1e-9);
+            assert!(
+                (joint_pose.rotation.to_rotation_matrix().into_inner()
+                    - pose.rotation.to_rotation_matrix().into_inner())
+                .norm()
+                    < 1e-9
+            );
+        }
+        assert!(
+            (joint_landmarks[&42].inverse_distance - pose_only_landmarks[&42].inverse_distance)
+                .abs()
+                < 1e-9
+        );
+    }
+
+    #[test]
+    fn joint_solver_corrects_velocity_from_chained_imu_factors() {
+        let (mut poses, mut landmarks, calibration) = synthetic_scene();
+        let factors = empty_factors();
+
+        // Truth motion is 0.2 (world units) per keyframe; model that as 1 s
+        // spacing so truth velocity is (0.2, 0, 0). Seed every keyframe with
+        // a deliberately wrong velocity guess.
+        let noise = ImuNoiseModel {
+            gyro_density: 0.02,
+            accel_density: 0.05,
+        };
+        let gravity = Vector3::new(0.0, 0.0, -9.81);
+        let mut imu_factors = Vec::new();
+        for (from, to) in [(1u64, 2u64), (2, 3)] {
+            let mut integrator = ImuPreintegrator::new(Vector3::zeros(), Vector3::zeros())
+                .with_noise(noise)
+                .unwrap();
+            // Zero net world-frame acceleration (specific force cancels
+            // gravity only): consistent with the constant-velocity truth
+            // motion above.
+            for _ in 0..10 {
+                integrator.integrate_sample(Vector3::zeros(), -gravity, 0.1);
+            }
+            imu_factors.push(imu_ba::ImuPreintegratedFactor {
+                from,
+                to,
+                delta: integrator.delta().clone(),
+                weight: 1.0,
+            });
+        }
+        // Paired bias random-walk factors, as the real online mapper always
+        // uses both together: without them, per-keyframe bias is only
+        // weakly constrained by the first-order bias-correction terms
+        // inside the preintegration factor alone (see the equivalent note
+        // and empirical finding in `mapper::imu_ba`'s own
+        // `scale_error_is_corrected_by_chained_preintegration_factors`
+        // test), which lets bias partially absorb the residual instead of
+        // velocity converging.
+        let bias_factors = [(1u64, 2u64), (2, 3)]
+            .into_iter()
+            .map(|(from, to)| imu_ba::BiasRandomWalkFactor {
+                from,
+                to,
+                dt: 1.0,
+                noise: crate::imu::BiasRandomWalkNoise {
+                    gyro_density: 1e-5,
+                    accel_density: 1e-5,
+                },
+                weight: 1.0,
+            })
+            .collect::<Vec<_>>();
+        let mut velocities = BTreeMap::new();
+        for id in [1u64, 2, 3] {
+            velocities.insert(id, Vector3::new(0.5, -0.3, 0.2));
+        }
+        let mut gyro_biases = BTreeMap::new();
+        let mut accel_biases = BTreeMap::new();
+
+        let config = GlobalBaConfig {
+            max_iterations: 15,
+            lambda_initial: 1.0e-3,
+            lambda_min: 1.0e-8,
+            ..Default::default()
+        };
+        let mut optimizer_state = GlobalBaOptimizerState::from_config(config);
+        let summary = global_ba_with_state_joint(
+            &mut poses,
+            &mut velocities,
+            &mut gyro_biases,
+            &mut accel_biases,
+            &factors,
+            &imu_factors,
+            &bias_factors,
+            &mut landmarks,
+            &calibration,
+            config,
+            gravity,
+            &mut optimizer_state,
+        );
+
+        assert!(summary.final_cost < summary.initial_cost);
+        let truth_velocity = Vector3::new(0.2, 0.0, 0.0);
+        let initial_error = (Vector3::new(0.5, -0.3, 0.2) - truth_velocity).norm();
+        // This fixture's monocular single-landmark vision terms do not fully
+        // pin scale/gauge the way `mapper::imu_ba`'s dedicated,
+        // properly-endpoint-pinned synthetic-trajectory test does (see that
+        // module's `scale_error_is_corrected_by_chained_preintegration_factors`,
+        // which *does* converge to near-zero error): the goal here is to
+        // prove the joint solver's wiring (embedding, LM accept/reject,
+        // backup/restore across pose+velocity+bias) actually pulls velocity
+        // toward physical consistency on a combined vision+IMU problem, not
+        // to reproduce full observability with only 3 keyframes / 2 links.
+        for id in [1u64, 2, 3] {
+            let error = (velocities[&id] - truth_velocity).norm();
+            assert!(
+                error < initial_error * 0.5,
+                "keyframe {id}: velocity {:?} did not move meaningfully toward truth {:?} (initial error {initial_error:e}, final error {error:e})",
+                velocities[&id],
+                truth_velocity
+            );
+        }
+        assert!(poses.values().all(|pose| {
+            pose.translation.iter().all(|value| value.is_finite())
+                && pose.rotation.coords.iter().all(|value| value.is_finite())
+        }));
     }
 }
 

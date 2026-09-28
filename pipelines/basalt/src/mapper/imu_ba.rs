@@ -265,6 +265,44 @@ pub fn preintegrate_delta_for_joint_ba(
     )
 }
 
+/// Weighted whitened cost `weight * r^T r` of one preintegrated IMU factor
+/// at the current `states`, or `0.0` if it cannot be evaluated (missing
+/// keyframe or invalid delta -- matches [`linearize_imu_preintegrated_factor`]'s
+/// own skip behavior, so the joint solver's cost and gradient stay
+/// consistent for the same factor set).
+pub fn imu_preintegrated_cost(
+    states: &BTreeMap<u64, NavState>,
+    factor: &ImuPreintegratedFactor,
+    gravity_world: Vector3<f64>,
+) -> f64 {
+    let Some(from_state) = states.get(&factor.from).map(NavState::to_basalt) else {
+        return 0.0;
+    };
+    let Some(to_state) = states.get(&factor.to).map(NavState::to_basalt) else {
+        return 0.0;
+    };
+    crate::imu::whitened_preintegration_factor(&from_state, &to_state, &factor.delta, gravity_world)
+        .map(|result| factor.weight * result.residual.dot(&result.residual))
+        .unwrap_or(0.0)
+}
+
+/// Weighted whitened cost of one bias random-walk factor, mirroring
+/// [`imu_preintegrated_cost`].
+pub fn bias_random_walk_cost(
+    states: &BTreeMap<u64, NavState>,
+    factor: &BiasRandomWalkFactor,
+) -> f64 {
+    let Some(from_state) = states.get(&factor.from).map(NavState::to_basalt) else {
+        return 0.0;
+    };
+    let Some(to_state) = states.get(&factor.to).map(NavState::to_basalt) else {
+        return 0.0;
+    };
+    crate::imu::whitened_bias_random_walk_factor(&from_state, &to_state, factor.dt, factor.noise)
+        .map(|result| factor.weight * result.residual.dot(&result.residual))
+        .unwrap_or(0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
