@@ -102,6 +102,12 @@ gpu-matcher = ["visloc-vision/gpu-matcher"]
 # adjustment) for the SfM examples, e.g. `colmap ... --SiftExtraction.use_gpu 1`.
 # Same toolchain boundary as the gsplat GPU crates (Rust >= 1.85), opt-in.
 gpu = ["dep:visloc-sift-gpu", "visloc-sift-gpu/gpu", "dep:visloc-ba-gpu", "visloc-ba-gpu/gpu"]
+# Opt-in global allocator swap (mimalloc) for allocation-heavy binaries
+# such as the Basalt VI-SLAM demos, whose LM trial loop allocates a
+# scratch buffer per factor per trial. Purely a runtime allocator swap;
+# must not change any algorithm's output (verified bit-identical via VIO
+# trajectory hash before being adopted for real measurements).
+mimalloc-global = ["dep:mimalloc"]
 
 [dependencies]
 nalgebra = { workspace = true }
@@ -120,6 +126,7 @@ visloc-basalt = { path = "pipelines/basalt", version = "0.2.0" }
 ndarray = { version = "0.17", optional = true }
 visloc-sift-gpu = { path = "crates/sift-gpu", version = "0.2.0", optional = true }
 visloc-ba-gpu = { path = "crates/ba-gpu", version = "0.2.0", optional = true }
+mimalloc = { version = "0.1", optional = true }
 
 [[example]]
 name = "colmap"

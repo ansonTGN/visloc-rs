@@ -51,6 +51,14 @@ use visloc_basalt::{
 };
 use visloc_core::geometry::SE3;
 
+// Opt-in global allocator swap (`--features mimalloc-global`): the VIO
+// estimator's LM trial loop allocates a scratch buffer per factor per
+// trial, so a faster allocator may help. Pure runtime substitution --
+// does not change any algorithm's output.
+#[cfg(feature = "mimalloc-global")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[derive(Debug)]
 struct Args {
     euroc_dir: PathBuf,
