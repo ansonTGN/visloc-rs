@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -109,7 +110,15 @@ class OpenLorisStagingTests(unittest.TestCase):
 
             first_tier = root / "tiers" / "tier-2"
             links = sorted((first_tier / "images").iterdir())
-            link_states = [path.is_symlink() for path in links]
+            # A symlink is preferred, but unprivileged Windows (no Developer
+            # Mode) cannot create one; write_tier_views then falls back to a
+            # hard link onto the same staged source file, which is an
+            # equally non-duplicating view.
+            link_states = [
+                path.is_symlink()
+                or os.path.samefile(path, root / "images" / path.name)
+                for path in links
+            ]
             images_text = (first_tier / "calibration" / "images.txt").read_text()
 
         self.assertEqual(set(views), {"2", "4"})
