@@ -14,8 +14,8 @@ struct DetectParams {
     k: f32,
     kp_cap: u32,
     max_orientations: u32,
-    pad0: u32,
-    pad1: u32,
+    subpixel: u32,
+    num_dog_levels: u32,
 };
 
 struct Candidate {
@@ -23,6 +23,9 @@ struct Candidate {
     y: u32,
     level: u32,
     value: f32,
+    dx: f32,
+    dy: f32,
+    ds: f32,
 };
 
 // Oriented keypoint: integer locus (the host maps it to the original frame
@@ -35,8 +38,9 @@ struct OrientedKp {
     bin: u32,
     orientation: f32,
     contrast: f32,
-    pad0: u32,
-    pad1: u32,
+    dx_bits: u32,
+    dy_bits: u32,
+    ds_bits: u32,
 };
 
 @group(0) @binding(0) var<uniform> p: DetectParams;
@@ -99,9 +103,94 @@ fn extrema(@builtin(global_invocation_id) g: vec3<u32>) {
     if (det <= 0.0 || tr * tr * p.edge > det * e1 * e1) {
         return;
     }
+    if (p.subpixel == 0u) {
+        let slot = atomicAdd(&counters[p.octave], 1u);
+        if (slot < p.cand_cap) {
+            cands[slot] = Candidate(g.x, g.y, level, v, 0.0, 0.0, 0.0);
+        }
+        return;
+    }
+
+    var cx: i32 = x;
+    var cy: i32 = y;
+    var clevel: u32 = level;
+    var dv = v;
+    var gx = 0.0;
+    var gy = 0.0;
+    var gs = 0.0;
+    var hxx = dxx;
+    var hyy = dyy;
+    var hxy = dxy;
+    var ox = 0.0;
+    var oy = 0.0;
+    var os = 0.0;
+    for (var iteration = 0u; iteration < 5u; iteration = iteration + 1u) {
+        // Each Newton fit is relative to the current integer sample.
+        dv = dog_at(clevel, cx, cy);
+        gx = 0.5 * (dog_at(clevel, cx + 1, cy) - dog_at(clevel, cx - 1, cy));
+        gy = 0.5 * (dog_at(clevel, cx, cy + 1) - dog_at(clevel, cx, cy - 1));
+        gs = 0.5 * (dog_at(clevel + 1u, cx, cy) - dog_at(clevel - 1u, cx, cy));
+        hxx = dog_at(clevel, cx + 1, cy) + dog_at(clevel, cx - 1, cy) - 2.0 * dv;
+        hyy = dog_at(clevel, cx, cy + 1) + dog_at(clevel, cx, cy - 1) - 2.0 * dv;
+        let hss = dog_at(clevel + 1u, cx, cy) + dog_at(clevel - 1u, cx, cy) - 2.0 * dv;
+        hxy = (dog_at(clevel, cx + 1, cy + 1) - dog_at(clevel, cx + 1, cy - 1)
+            - dog_at(clevel, cx - 1, cy + 1) + dog_at(clevel, cx - 1, cy - 1)) / 4.0;
+        let hxs = (dog_at(clevel + 1u, cx + 1, cy) - dog_at(clevel + 1u, cx - 1, cy)
+            - dog_at(clevel - 1u, cx + 1, cy) + dog_at(clevel - 1u, cx - 1, cy)) / 4.0;
+        let hys = (dog_at(clevel + 1u, cx, cy + 1) - dog_at(clevel + 1u, cx, cy - 1)
+            - dog_at(clevel - 1u, cx, cy + 1) + dog_at(clevel - 1u, cx, cy - 1)) / 4.0;
+
+        // Symmetric adjugate / Cramer's rule: H * offset = -gradient.
+        let cxx = hyy * hss - hys * hys;
+        let cxy = hxs * hys - hxy * hss;
+        let cxs = hxy * hys - hxs * hyy;
+        let cyy = hxx * hss - hxs * hxs;
+        let cys = hxy * hxs - hxx * hys;
+        let css = hxx * hyy - hxy * hxy;
+        let det3 = hxx * cxx + hxy * cxy + hxs * cxs;
+        if (abs(det3) <= 1e-6) {
+            // Preserve the original valid detection even if a retry is singular.
+            cx = x;
+            cy = y;
+            clevel = level;
+            dv = v;
+            hxx = dxx;
+            hyy = dyy;
+            hxy = dxy;
+            ox = 0.0;
+            oy = 0.0;
+            os = 0.0;
+            break;
+        }
+        ox = -(cxx * gx + cxy * gy + cxs * gs) / det3;
+        oy = -(cxy * gx + cyy * gy + cys * gs) / det3;
+        os = -(cxs * gx + cys * gy + css * gs) / det3;
+        if (abs(ox) <= 0.5 && abs(oy) <= 0.5) {
+            os = clamp(os, -1.0, 1.0);
+            break;
+        }
+        if (iteration < 4u) {
+            cx = clamp(cx + i32(round(ox)), 1, i32(p.w) - 2);
+            cy = clamp(cy + i32(round(oy)), 1, i32(p.h) - 2);
+            let new_level = clamp(i32(clevel) + i32(round(os)), 1, i32(p.num_dog_levels) - 2);
+            clevel = u32(new_level);
+        }
+    }
+    if (abs(ox) > 0.5 || abs(oy) > 0.5) {
+        return;
+    }
+    let final_tr = hxx + hyy;
+    let final_det = hxx * hyy - hxy * hxy;
+    if (final_det <= 0.0 || final_tr * final_tr * p.edge > final_det * e1 * e1) {
+        return;
+    }
+    let refined = dv + 0.5 * (gx * ox + gy * oy + gs * os);
+    if (abs(refined) < p.contrast) {
+        return;
+    }
     let slot = atomicAdd(&counters[p.octave], 1u);
     if (slot < p.cand_cap) {
-        cands[slot] = Candidate(g.x, g.y, level, v);
+        cands[slot] = Candidate(u32(cx), u32(cy), clevel, refined, ox, oy, os);
     }
 }
 
@@ -136,7 +225,7 @@ fn orientation(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_
     let c = cands[ci];
     let x = i32(c.x);
     let y = i32(c.y);
-    let hist_sigma = p.hist_base * pow(p.k, f32(c.level)) / f32(1u << p.octave);
+    let hist_sigma = p.hist_base * pow(p.k, f32(c.level) + c.ds) / f32(1u << p.octave);
     let radius = i32(ceil(hist_sigma * 3.0));
     let inv2s2 = 1.0 / (2.0 * hist_sigma * hist_sigma);
     var col_sum = 0.0;
@@ -219,7 +308,8 @@ fn orientation(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_
         deg = deg - 360.0 * floor(deg / 360.0);
         let slot = atomicAdd(&counters[KP_COUNTER], 1u);
         if (slot < p.kp_cap) {
-            kps[slot] = OrientedKp(c.x, c.y, (p.octave << 8u) | c.level, b, radians(deg), abs(c.value), 0u, 0u);
+            kps[slot] = OrientedKp(c.x, c.y, (p.octave << 8u) | c.level, b, radians(deg), abs(c.value),
+                bitcast<u32>(c.dx), bitcast<u32>(c.dy), bitcast<u32>(c.ds));
         }
     }
 }

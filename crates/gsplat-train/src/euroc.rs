@@ -481,6 +481,8 @@ pub fn apply_sift_override(cfg: &mut SiftConfig, kv: &str) -> Result<(), String>
         "edge_threshold" => cfg.edge_threshold = num()?,
         "octaves" => cfg.octaves = num()? as usize,
         "sigma_base" => cfg.sigma_base = num()?,
+        "aligned_octave0_upsample" => cfg.aligned_octave0_upsample = flag(),
+        "subpixel_localization" => cfg.subpixel_localization = flag(),
         _ => return Err(format!("--sift-opt: unknown key {key}")),
     }
     Ok(())

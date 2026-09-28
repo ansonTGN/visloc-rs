@@ -24,10 +24,11 @@ const COUNTER_WORDS: usize = 20;
 const SLOT: u64 = 256;
 const SLOT_BIND: u64 = 64;
 /// Words per oriented keypoint written by `orientation`.
-const KP_WORDS: usize = 8;
+const KP_WORDS: usize = 9;
 
 struct Pipelines {
     upsample2x: wgpu::ComputePipeline,
+    upsample2x_aligned: wgpu::ComputePipeline,
     blur_h: wgpu::ComputePipeline,
     blur_v: wgpu::ComputePipeline,
     halve: wgpu::ComputePipeline,
@@ -57,6 +58,9 @@ struct RawKp {
     bin: u32,
     orientation: f32,
     contrast: f32,
+    dx: f32,
+    dy: f32,
+    ds: f32,
 }
 
 fn gaussian_kernel(sigma: f64) -> Vec<f32> {
@@ -166,6 +170,7 @@ impl SiftGpu {
         };
         let pipes = Pipelines {
             upsample2x: mk(&image, "upsample2x"),
+            upsample2x_aligned: mk(&image, "upsample2x_aligned"),
             blur_h: mk(&image, "blur_h"),
             blur_v: mk(&image, "blur_v"),
             halve: mk(&image, "halve"),
@@ -303,7 +308,7 @@ impl SiftGpu {
             .collect();
         let cands: Vec<wgpu::Buffer> = caps
             .iter()
-            .map(|&c| storage(dev, "sift-cands", (c * 16) as u64, use_))
+            .map(|&c| storage(dev, "sift-cands", (c * 28) as u64, use_))
             .collect();
         let kp_cap: usize = caps.iter().sum::<usize>() * 2;
         let kp_buf = storage(dev, "sift-kps", (kp_cap * KP_WORDS * 4) as u64, use_);
@@ -347,8 +352,13 @@ impl SiftGpu {
             if o == 0 {
                 // Upsample into gauss level 1 (scratch), blur into level 0.
                 let slot = params.push(&[wu, hu, 0, lvl as u32, 0, 0, w0 as u32, h0 as u32]);
+                let upsample_pipe = if config.aligned_octave0_upsample {
+                    5
+                } else {
+                    0
+                };
                 ops.push(Op::Image {
-                    pipe: 0,
+                    pipe: upsample_pipe,
                     slot,
                     src: (0, 0),
                     dst: (gid(0), 0),
@@ -428,6 +438,8 @@ impl SiftGpu {
                 f(k),
                 kp_cap as u32,
                 config.max_orientations as u32,
+                config.subpixel_localization as u32,
+                (levels - 1) as u32,
             ]);
             ops.push(Op::Detect {
                 pipe: 0,
@@ -473,6 +485,7 @@ impl SiftGpu {
             &self.pipes.blur_v,
             &self.pipes.halve,
             &self.pipes.dog,
+            &self.pipes.upsample2x_aligned,
         ];
         let detect_pipes = [
             &self.pipes.extrema,
@@ -590,6 +603,9 @@ impl SiftGpu {
                     bin: c[3],
                     orientation: f32::from_bits(c[4]),
                     contrast: f32::from_bits(c[5]),
+                    dx: f32::from_bits(c[6]),
+                    dy: f32::from_bits(c[7]),
+                    ds: f32::from_bits(c[8]),
                 })
                 .collect(),
         ))
@@ -709,11 +725,15 @@ fn select_keypoints(mut raw: Vec<RawKp>, config: &SiftConfig) -> Vec<SiftKeypoin
         .iter()
         .map(|r| {
             let upsample = (1usize << r.octave) as f64 / 2.0;
-            let sigma = config.sigma_base * k.powi(r.level as i32) * upsample;
+            let sigma = if r.ds != 0.0 {
+                config.sigma_base * k.powf(r.level as f64 + r.ds as f64) * upsample
+            } else {
+                config.sigma_base * k.powi(r.level as i32) * upsample
+            };
             (
                 SiftKeypoint::from_location_scale_orientation(
-                    r.x as f64 * upsample,
-                    r.y as f64 * upsample,
+                    (r.x as f64 + r.dx as f64) * upsample,
+                    (r.y as f64 + r.dy as f64) * upsample,
                     sigma,
                     r.orientation as f64,
                 ),

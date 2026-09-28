@@ -538,6 +538,167 @@ points against COLMAP's own triangulation for the identical tracks.
   worst-offending points (e.g. point ids 97, 81, 82, 267, 100 in this
   run) first get created vs. last get re-triangulated, to see whether
   their initial 2-view seed pair was already poorly conditioned.
+### A real GPU SIFT coordinate bug, its fix, and a second subpixel attempt (2026-09-29)
+
+A direct feature-level comparison (our GPU SIFT keypoints vs COLMAP's own
+`db.db` keypoints, decoded from its 6-column affine format
+`scale = sqrt(|a11*a22-a12*a21|)`, `orientation = atan2(a21,a11)`, matched
+by mutual nearest neighbour within 2 px & a 2x scale-ratio gate, on V2_01
+and V2_03 frames) found a systematic **-0.70 to -0.75 px bias in both x
+and y**, nearly constant across octaves 0-2 (not scaling with `2^octave`),
+present on both sequences.
+
+**Root cause**: `crates/sift-gpu/src/shaders/image.wgsl`'s `upsample2x`
+(bit-identical to the CPU `double_up` in
+`crates/vision/src/features/sift.rs`) builds octave 0's doubled image with
+`sx = (x+2)/2` (integer division) — an asymmetric nearest-neighbour map
+that places source pixel `i` at doubled indices `{2i-2, 2i-1}` instead of
+the `{2i, 2i+1}` the keypoint-coordinate formula
+(`x_orig = x_doubled * upsample`) assumes. Because every higher octave is
+built by exact decimation of octave 0's (already shifted) pyramid, the
+bias is a near-constant absolute offset across all octaves, not a
+per-octave-scaled one.
+
+**Fix**: a new opt-in `SiftConfig::aligned_octave0_upsample` flag
+(`--sift-opt aligned_octave0_upsample=1`), default `false` and verified
+bit-identical to today's output when off. When on, octave 0 is built with
+align-corners bilinear upsampling instead — a new GPU kernel
+`upsample2x_aligned` in `image.wgsl` (mirroring the math of the existing,
+previously-unused CPU `double_up_vlfeat` helper), plus the CPU path
+reusing `double_up_vlfeat` directly. Re-running the feature-level
+comparison with the flag on: the bias collapses to **+0.00 to +0.03 px**
+across all octaves on both sequences — confirmed fixed.
+
+**Subpixel/subscale refinement, re-implemented from scratch**: the earlier
+subpixel work (the 2026-09-28 section above) was fully reverted, so a new
+opt-in `SiftConfig::subpixel_localization` flag
+(`--sift-opt subpixel_localization=1`) was implemented: the full
+VLFeat/Lowe-style iterative 3D (x, y, scale) Newton refinement of DoG
+extrema in `crates/sift-gpu/src/shaders/detect.wgsl`'s `extrema()` (5
+iterations, closed-form 3x3 Cramer's-rule solve, a singular-Hessian
+fallback that keeps the original integer-grid detection rather than
+discarding it, a re-check of the Lowe edge test at the converged locus,
+and the refined scale offset feeding both `hist_sigma` and the reported
+`sigma`). Default `false`, and the default-disabled path is guarded
+explicitly (`select_keypoints` only takes the `powf`-based scale formula
+when the refined offset is nonzero, otherwise keeps the exact original
+`powi` call) so GPU SIFT output is bit-identical to today's when off —
+`cargo test -p visloc-sift-gpu --features gpu` passes unchanged. A second
+feature-level comparison (aligned + subpixel together vs COLMAP, V2_01,
+V2_03, V1_02) found **no reintroduced bias** (all three within ±0.005 px
+mean, all octaves) and a *tighter* spread than the aligned-only fix alone
+(std ≈0.07-0.13 px vs ≈0.27-0.28 px) — subpixel refinement is doing
+exactly what it should positionally.
+
+**End-to-end, one fixed config each time** (doc's exact bench command,
+`--keypoints 4000` unless noted):
+
+| Sequence | Today's baseline | `aligned_octave0_upsample` alone | + `subpixel_localization` |
+| --- | ---: | ---: | ---: |
+| V1_02_medium | 1.76 cm (198/200) | 2.48 cm (200/200) | 2.69 cm (200/200) |
+| V2_03_difficult | 3.37 cm (118/200) | 3.94 cm (120/200) | **2.25 cm (119/200)** |
+| V2_01_easy | 3.30 cm (199/200) | 2.98 cm (199/200) | **2.24 cm (198/200)** |
+| V1_03_difficult | 2.17 cm (67/200) | 5.81 cm (69/200, 5 models) | **2.12 cm (62/200)** |
+| MH_01_easy | 0.35 cm (182/200) | — | 0.38 cm (172/200) |
+| MH_03_medium | 1.32 cm (166/200) | — | **1.17 cm (161/200)** |
+| MH_05_difficult | 2.58 cm (194/200) | — | **2.37 cm (197/200)** |
+| V1_01_easy | 2.40 cm (199/200) | — | 2.61 cm (191/200) |
+
+The coordinate fix alone is a mixed bag (helps V2_01, hurts V1_02/V2_03/
+V1_03), but subpixel refinement on top recovers almost all of it on
+V1_03/V2_03 (V2_03 now beats COLMAP's 2.85 cm) and further improves V2_01,
+while **V1_02 stays regressed** (1.76 → 2.69 cm) — a real, reproducible
+issue (identical ATE across repeated runs), not noise.
+
+**A per-frame diagnosis on V1_02** (Sim(3)-aligned position error computed
+per frame, since the mapper doesn't dump this) ruled out the two obvious
+culprits: the 2 frames the fix newly registers (frames 9, 14) have *low*
+error (1.6 cm) and excluding them from the RMSE changes nothing. Instead
+the regression is a broad, systematic error increase (median 1.4→2.0 cm,
+mean 1.6→2.2 cm across the 193 common frames) concentrated in the *same*
+segment (frames ≈157-176) that was already the baseline's weakest spot —
+the fix amplifies an existing weak segment rather than creating a new
+failure mode.
+
+**A principal-point convention dead end.** Given the fix's own timing
+(constant bias correction with a sequence-dependent side effect), a
+half-pixel corner-vs-centre origin convention mismatch downstream was a
+natural suspect. A thorough code trace (undistortion, the feature export/
+import round trip through `crates/gsplat-train/src/euroc.rs` and
+`pipelines/slam/src/colmap_incremental/database_cache.rs`, the two-view
+verifier, the mapper's BA/PnP) found **no convention-mismatch literal
+anywhere** — the whole pipeline consistently uses EuRoC's raw
+(pixel-centre-origin) `cx`/`cy` for undistortion, verification, PnP, BA
+and the mapper alike. Empirically, though, shifting the camera model's
+`cx`/`cy` by +0.5 px (geometry only, or at the source so undistortion
+shifts too — the two gave byte-identical results, ruling out the
+undistortion grid as a factor) recovered most of V1_02's regression
+(2.69 → 1.85 cm) but cost V2_03 21 registered frames (119 → 98) for either
+sign of shift. To settle it, COLMAP's own `bundle_adjuster
+--BundleAdjustment.refine_principal_point 1 --refine_focal_length 0` was
+run on our exported (unshifted) V1_02/MH_03/V2_01 reconstructions
+(`<work>/port/model0`, a self-consistent COLMAP-format export with no
+`+0.5` anywhere): the refined `cx` scattered across sign
+(+0.34, -0.45, -0.58 px) with barely any cost improvement (fourth-decimal
+place; MH_03 didn't even converge) — **no evidence of a shared convention
+offset**, so the cx/cy shift was dropped as a dead end rather than shipped
+as an unexplained tuning knob.
+
+**A retune sweep**, since the rest of the bench config
+(`descriptor_magnification=3`, `verify-min-inliers 15`, `keypoints 4000`,
+default contrast threshold) was tuned against the old biased features.
+Tested on V1_02/V2_03/MH_01 (`aligned_octave0_upsample` +
+`subpixel_localization` held on):
+
+| Change | V1_02 | V2_03 | MH_01 |
+| --- | ---: | ---: | ---: |
+| (none, baseline for this sweep) | 2.69 cm (200) | 2.25 cm (119) | 0.38 cm (172) |
+| `verify-min-inliers 30` | 2.00 cm (199) | 2.64 cm (**87**) | 0.38 cm (**161**) |
+| `descriptor_magnification=4` | 2.08 cm (197) | **3.90 cm (97)** | 0.38 cm (168) |
+| `keypoints 6000` | **1.96 cm (198)** | 2.30 cm (98) | **0.35 cm (195)** |
+| `contrast_threshold=0.00667` (COLMAP's) | 2.47 cm (199) | 2.24 cm (119) | — |
+
+`contrast_threshold` is a near no-op here (the 4000/6000-keypoint cap with
+`prefer_larger_scale` already saturates, so a lower peak threshold barely
+changes which keypoints survive truncation). The other three levers all
+trade V1_02 accuracy for V2_03 registration completeness to varying
+degrees; `keypoints=6000` was the best all-rounder (best V1_02 number,
+ties/beats the *original* baseline on MH_01 with *more* frames than either
+prior config), so it was carried to the full 8-sequence gate:
+
+| Sequence | Today's baseline | `aligned`+`subpixel` | + `keypoints=6000` | COLMAP |
+| --- | ---: | ---: | ---: | ---: |
+| MH_01_easy | 0.35 cm (182/200) | 0.38 cm (172/200) | **0.35 cm (195/200)** | 0.35 cm (200/200) |
+| MH_03_medium | 1.32 cm (166/200) | 1.17 cm (161/200) | 1.21 cm (170/200) | 2.61 cm (200/200) |
+| MH_05_difficult | 2.58 cm (194/200) | 2.37 cm (197/200) | 2.43 cm (199/200) | 193.66 cm (200/200) |
+| V1_01_easy | 2.40 cm (199/200) | 2.61 cm (191/200) | 2.55 cm (197/200) | 2.75 cm (200/200) |
+| V1_02_medium | 1.76 cm (198/200) | 2.69 cm (200/200) | 1.96 cm (198/200) | 1.83 cm (200/200) |
+| V2_01_easy | 3.30 cm (199/200) | 2.24 cm (198/200) | 2.22 cm (198/200) | 1.00 cm (200/200) |
+| V1_03_difficult | 2.17 cm (67/200) | 2.12 cm (62/200) | 2.96 cm (63/200) | 1.98 cm (80/200) |
+| V2_03_difficult | 3.37 cm (118/200) | 2.25 cm (119/200) | 2.30 cm (98/200) | 2.85 cm (180/200) |
+
+`keypoints=6000` gets MH_01 back to an exact tie with COLMAP (with *more*
+registered frames than either prior config) and closes most of V1_02's
+gap (1.96 vs COLMAP's 1.83 cm) — but does not close it. Win/loss count
+against COLMAP is unchanged from the plain `aligned`+`subpixel` config:
+wins MH_03/MH_05/V1_01/V2_03 (4) + ties MH_01, loses V1_02/V2_01/V1_03
+(3) — the same net win count as today, with V1_02 still flipped from a
+win to a loss. **The gate ("keep MH_03/MH_05/V1_01/V1_02 wins + MH_01 tie,
+add V2_03, no regression beyond noise") is not met by any tested config.**
+
+**Decision: both flags ship as opt-in, default off.** The coordinate fix
+and subpixel refinement are real, verified, substantial improvements
+(confirmed at the feature level against COLMAP's own ground truth, not
+just end-to-end ATE) — they close V2_01/V2_03/V1_03's regressions and
+tie MH_01 exactly, and V1_02's remaining gap is small (0.13 cm) compared
+to where it started. But because they still regress V1_02 from a win to a
+loss against COLMAP under every configuration tried (base, retuned, or
+with a since-abandoned cx/cy shift), they don't clear the bar to become
+the new default `gsplat_euroc` command documented in the README. The
+default pipeline, its numbers and the README are unchanged.
+`--sift-opt aligned_octave0_upsample=1 --sift-opt subpixel_localization=1`
+remain available for anyone who wants V2_01/V2_03/V1_03's better numbers
+and can accept V1_02's small regression.
 
 ## Reproduce
 

@@ -48,3 +48,8 @@ unsafe_code = "deny"
 name = "match_gpu_bench"
 path = "examples/match_gpu_bench.rs"
 required-features = ["gpu"]
+
+[[example]]
+name = "sift_dump_features"
+path = "examples/sift_dump_features.rs"
+required-features = ["gpu"]
