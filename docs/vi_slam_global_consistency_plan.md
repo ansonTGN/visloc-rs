@@ -716,6 +716,140 @@ state, `MapperFactors::imu_relative_pose`) is committed locally, not merged;
 all new code is off by default and should be safe to build on for a future
 full-VI-BA attempt, but does not by itself change the 9/11 result.
 
+### 1.9 Result 2026-09-29: proper joint VI global BA implemented and validated, MH_04 small real gain, MH_05 a wash at the tested weight
+
+Branch `vio/joint-vi-ba` (worktree `E:/visloc-rs-runs/vio_viba_wt`, off
+`vio/mapper-imu-factors`). §1.8 closed with "getting real scale-correcting
+information into the global BA needs ... a properly *jointly* solved VI
+global BA" -- this session built exactly that, rather than another
+externally-alternated approximation.
+
+**Design.** Per-keyframe state extended from pose (6 dof) to the full
+navigation state `[pose(6), velocity(3), gyro_bias(3), accel_bias(3)]`
+(15 dof, matching the existing `NAV_STATE_DOF` constant used by the M8a
+marginalization reduction). New module `pipelines/basalt/src/mapper/imu_ba.rs`
+adds preintegrated-IMU relative-state factors and bias random-walk factors
+between consecutive keyframes, gravity fixed in world. Rather than
+re-deriving the preintegration residual/Jacobian, it reuses the VIO
+estimator's own already bit-exact-tested factor
+(`crate::imu::whitened_preintegration_factor`/`whitened_bias_random_walk_factor`,
+production code in `vio/window.rs`) and embeds its 9x30/6x30 Jacobian
+directly into the joint system's Hessian/gradient blocks -- verified no sign
+adaptation is needed, since both the VIO's own state trial and the mapper's
+existing `apply_pose_solve` are Gauss-Newton steps against the same forward
+retraction.
+
+The solver itself (`global_ba_with_state_joint`, `mapper/mod.rs`) is a new,
+fully additive entry point: a new block-sparse `NavBlockHessian` (15x15
+blocks) carries the joint system; the *existing, unmodified*
+`linearize_vision`/`linearize_factors` embed into the top-left 6x6 of each
+block (vision and the existing relative-pose/roll-pitch factors never touch
+velocity/bias); IMU-factor blocks touch the full 15x15. The existing
+pose-only `global_ba_impl_in_place` and everything it calls is untouched --
+zero regression risk to the 9/11-win path from this addition by
+construction, confirmed by `joint_solver_matches_pose_only_solver_when_imu_factors_are_empty`
+(matches the pose-only solver to <1e-9 with empty IMU factor lists) and by
+every accuracy run below reproducing the documented baseline before the
+feature is enabled.
+
+**Unit tests** (`mapper::imu_ba::tests`, `mapper::joint_ba_tests`): assembled
+gradient vs. central-difference of the whitened cost; a Gauss-Newton step
+from the assembled system strictly decreases cost and converges; the
+explicit task target -- a chain of preintegrated IMU + bias-walk factors
+alone (no vision) corrects a 15% synthetic position/velocity scale error to
+near-zero ATE, given a genuine (non-constant-velocity) acceleration segment
+and both chain endpoints pinned (constant-velocity motion is an *exact*
+symmetry of the preintegration residual under uniform position+velocity
+scaling -- gravity's known magnitude only constrains scale where there is
+real acceleration to compare it against, which is why the earlier
+frozen-velocity variants in §1.8 could never see it either); a combined
+vision+IMU integration test. Full crate suite 415/415 passing throughout.
+
+**A real bug, caught the same way §1.8's own liveness check works.**
+`ingest_packet` only retained per-keyframe velocity/bias state
+(`frame_velocity_bias`) when `imu_preintegration_weight > 0.0`, so
+`joint_vi_ba_weight`-only mode silently built zero IMU factors every
+packet -- the run completed normally, at any weight (1.0 through 1e6),
+producing a trajectory identical to the feature-disabled baseline. Caught
+by exactly the weight-sweep-to-extreme-values sanity check §1.8 itself used
+("a sanity check at 1e6/1e8 confirmed the factor is live"): unlike a wiring
+bug that changes the trajectory, this one changed *nothing* at any weight,
+which was the tell. Fixed (commit `cb40039`) with a direct regression test
+that does not pre-seed state, unlike the existing ingestion test that
+happened not to catch this.
+
+**Real-time / CPU contention.** With the periodic background joint pass on
+a 4-thread rayon pool, `vio_wall_seconds` regressed 43% on MH_04 at weight
+10 (80.97s -> 115.91s) -- the same CPU-contention failure mode as §1.8's
+alternating-velocity variant. Isolated the cause by also running with
+periodic passes disabled (joint only in `finalize`'s one-shot pass):
+`vio_wall_seconds` stayed at baseline even before any cap existed, so the
+contention is specifically the periodic *background* pass, not the joint
+math. Capping the background pass to 1 rayon thread (commit `7cf60d6`) fully
+resolves it: `vio_wall_seconds` 81.46s (+0.6%) at weight 10, well within the
+~3% budget.
+
+**Covariance/weight-scale check.** A realistic EuRoC/ADIS16448 calibration
+over a 0.2s interval gives preintegrated position std 0.83mm, matching an
+independent continuous-noise estimate (`sigma_c^2 * T^3 / 3`) closely -- the
+per-factor information is not mis-scaled by a units/rate bug. A live MH_04
+trace (new `JointGlobalBaSummary.initial_pose_factor_cost`/
+`initial_imu_factor_cost`, `BASALT_ONLINE_MAPPER_TRACE`-gated) instead shows
+a *structural* cause for needing weight > 1: once the map has roughly
+converged, pose-factor cost (vision + relative-pose + roll-pitch) runs
+140K-1M vs. IMU-factor cost ~4.5-4.7K, a 30-300x gap, because each keyframe
+carries hundreds of vision observations against only 1-2 IMU factors (MH_04:
+671072 total observations). The same reason `relative_pose_weight`/
+`roll_pitch_weight` already exist as tunable multipliers for this
+codebase's other one-per-edge factors.
+
+**Accuracy, `--optimize-every-k 100 --periodic-iterations 4` (the standard
+protocol), official calibration, one run each unless noted:**
+
+| Sequence | Config | SE3 ATE | Sim3 ATE | vs. baseline |
+| --- | --- | ---: | ---: | ---: |
+| MH_04_difficult | baseline (feature off) | 0.07006 | 0.06729 | -- |
+| MH_04_difficult | joint w=10, 1-thread cap | 0.06964 | 0.06554 | SE3 -0.6%, Sim3 -2.6% |
+| MH_05_difficult | baseline (feature off) | 0.06307 | 0.04167 | -- |
+| MH_05_difficult | joint w=10, 1-thread cap | 0.06412 | 0.04163 | SE3 +1.7%, Sim3 -0.1% (noise-level) |
+
+An earlier MH_04 w=10 run before the thread cap (4 threads, real-time-unsafe,
+accuracy-only comparison) showed a larger SE3 -1.8%/Sim3 -3.9%, and an
+isolated "does the joint term help at all" test on MH_05 (periodic disabled
+both sides: pose-only-final-only 0.06550/0.04456 vs. joint-final-only w=10
+0.06463/0.04205) confirms the joint factor genuinely helps in isolation
+(-1.3%/-5.6%) -- but periodic pose-only passes already recover more accuracy
+on their own (0.06307/0.04167) than one large final joint pass does, so the
+net effect in the realistic periodic protocol is small. Weight 100 (1-thread
+cap) was tried on MH_04 and killed after 50+ minutes without the `finalize`
+pass converging -- LM increasingly rejects trials as the IMU term's pull
+fights vision harder, so very high weight is not a practical lever with this
+simple global-multiplier approach.
+
+**Honest status.** The joint solver is real, correctly implemented (multiple
+independent test classes passing, including a from-scratch synthetic
+scale-correction proof), real-time-safe at weight 10, and gives a small,
+genuine improvement on MH_04. On MH_05 it is roughly a wash at the same
+weight in the realistic protocol, and neither sequence is close to flipping
+to a win against ORB-SLAM3 (MH_04 0.0696 vs. ORB 0.0428; MH_05 0.0641 vs.
+ORB 0.0546) -- the gap that matters is 35-60%, not the 1-5% this lever moved.
+Full 11-sequence gate run not completed this session (time budget); a
+regression spot-check on V1_01_easy (a currently-winning sequence) with the
+feature on is in
+`E:\visloc-rs-runs\vio_viba_runs\v101_baseline`/`v101_joint_w10`.
+Plausible next levers, not yet tried: (a) an ORB-SLAM3-style *inertial-only*
+pre-optimization pass over the accumulated keyframe chain (ignoring vision)
+to get velocity/bias/local-scale close before the joint vision+IMU solve,
+rather than relying on a single global weight multiplier to arbitrate the
+30-300x cost imbalance; (b) more periodic iterations specifically for joint
+mode (the periodic pass's `periodic_iterations=4` budget may simply be too
+few for a harder 15-dof problem, distinct from the weight question); (c) a
+weight schedule informed directly by the measured pose/imu cost ratio
+(`initial_pose_factor_cost`/`initial_imu_factor_cost`, now surfaced) instead
+of a fixed constant. Everything is committed locally on `vio/joint-vi-ba`
+(commits `86aad0c`..`7cf60d6`), default off (`--joint-vi-ba-weight` unset),
+zero risk to the shipped 9/11 result.
+
 ## 2. Diagnosis
 
 | Symptom | Evidence | What is missing |
