@@ -55,9 +55,6 @@ pub struct TrainConfig {
     pub opac_loss_weight: f32,
     pub scale_loss_weight: f32,
     pub aux_loss_time: f32,
-    /// Update the SH block only for the gaussians visible this frame (see
-    /// `shaders/adam.wgsl`).
-    pub sparse_sh_adam: bool,
     /// Per-training-image affine colour transform (3x4) applied to the
     /// render before the loss (see `shaders/appearance.wgsl`); held-out
     /// views render without it.
@@ -90,7 +87,6 @@ impl Default for TrainConfig {
             opac_loss_weight: 0.0,
             scale_loss_weight: 0.0,
             aux_loss_time: 0.9,
-            sparse_sh_adam: false,
             appearance: false,
             appearance_lr: 2e-3,
             appearance_reg: 1e-2,
@@ -162,8 +158,8 @@ struct AdamUniforms {
     bc2: f32,
     aux_kind: u32,
     aux_coef: f32,
-    sparse: u32,
-    num_visible: u32,
+    pad0: u32,
+    pad1: u32,
 }
 
 #[repr(C)]
@@ -678,10 +674,7 @@ impl Trainer {
             grads.opacity.clone(),
             grads.sh.clone(),
         );
-        let (counts, gfc) = {
-            let (c, g) = renderer.visibility_buffers();
-            (c.clone(), g.clone())
-        };
+        let counts = renderer.intersect_counts_buffer().clone();
         let mk_group = |label: &str,
                         p: &wgpu::Buffer,
                         g: &wgpu::Buffer,
@@ -701,7 +694,7 @@ impl Trainer {
                 &dev,
                 &self.adam_pipeline,
                 label,
-                &[&u, p, g, &m1, &m2, &counts, &gfc],
+                &[&u, p, g, &m1, &m2, &counts],
             );
             AdamGroup {
                 uniforms: u,
@@ -1038,7 +1031,6 @@ impl Trainer {
                     _ => (0, 0.0),
                 };
                 let aux_kind = if aux_coef > 0.0 { aux_kind } else { 0 };
-                let sparse = k == 2 && self.cfg.sparse_sh_adam && g.stride % 4 == 0;
                 let u = AdamUniforms {
                     n: g.n,
                     stride: g.stride,
@@ -1054,19 +1046,13 @@ impl Trainer {
                     bc2: 1.0 - beta2.powf(t),
                     aux_kind,
                     aux_coef,
-                    sparse: sparse as u32,
-                    num_visible: nv,
+                    pad0: 0,
+                    pad1: 0,
                 };
                 queue.write_buffer(&g.uniforms, 0, bytemuck::bytes_of(&u));
                 pass.set_bind_group(0, &g.bind, &[]);
-                // One thread per vec4 of elements, or of visible records
-                // (see adam.wgsl).
-                let threads = if sparse {
-                    nv * (g.stride / 4)
-                } else {
-                    g.n.div_ceil(4)
-                };
-                let (x, y) = groups_2d(threads);
+                // One thread per vec4 of elements (see adam.wgsl).
+                let (x, y) = groups_2d(g.n.div_ceil(4));
                 pass.dispatch_workgroups(x, y, 1);
             }
         }
