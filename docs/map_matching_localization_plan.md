@@ -363,3 +363,12 @@ issues one tiny match per landmark, so per-call upload dominates and the
 median rises to 1.2 s. On the CPU, projection-guided tracking remains the
 fast path (99 / 601 ms). On the checker corridor, `--gpu` changes speed only
 (p50 33 ms); accuracy is still limited by aliasing.
+
+**Checker corridor with SuperPoint (2026-09-28, negative).** The map
+landmarks got SuperPoint descriptors from the nearest keypoint to each
+observation; 5,890 of 8,849 landmarks had one within 3 px. The queries used
+SuperPoint too. At Lowe ratios of 0.8, 0.9, 0.95 and none, at most 19 of 400
+queries localized. SIFT localized 53–203, with ATE of 1.6–1.8 m either way.
+The corridor needs a map built from learned features plus learned retrieval,
+not a descriptor swap on the SIFT map. `--ratio` (`none` disables the test)
+remains on the localizer for such sweeps.

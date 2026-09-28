@@ -72,24 +72,6 @@ pub struct EurocSfmConfig {
     /// linked only to kept frames within `window` (no skip pairs, no
     /// static-static pairs), so the mapper registers them by PnP.
     pub register_gated: bool,
-    /// With `register_gated`: kept frames linked on each side of a gated one.
-    /// More links register more gated frames (MH_01 182 -> 190, V1_02 198
-    /// -> 200 with 3) but destabilise the mapper elsewhere (MH_03 ATE 1.32
-    /// -> 3.70 cm with 2, 13.1 cm with 3), so the default stays 1.
-    pub register_gated_links: usize,
-    /// Merge disconnected COLMAP-port models by a similarity estimated from
-    /// cross-model matches, then re-triangulate + bundle-adjust the union.
-    pub merge_models: bool,
-    /// After the COLMAP-port mapper: re-triangulate all verified pairs and
-    /// bundle-adjust the model once more.
-    pub polish: bool,
-    /// Re-match weak links (fewer verified matches than this; 0 = off) with
-    /// a relaxed matcher, see `rescue_window` / `rescue_ratio`.
-    pub rescue_weak: usize,
-    pub rescue_window: usize,
-    pub rescue_ratio: f32,
-    /// Only add pairs that failed verification; keep verified ones as is.
-    pub rescue_add_only: bool,
     /// Inlier floor for a verified pair; `None` = `min_matches`.
     pub verify_min_inliers: Option<usize>,
     /// Diagnostic: replace the SIFT features and verified pairs with an
@@ -139,13 +121,6 @@ impl Default for EurocSfmConfig {
             keep_planar: false,
             keep_planar_no_panoramic: false,
             register_gated: false,
-            register_gated_links: 1,
-            merge_models: false,
-            polish: false,
-            rescue_weak: 0,
-            rescue_window: 3,
-            rescue_ratio: 0.9,
-            rescue_add_only: false,
             verify_min_inliers: None,
             import_colmap: None,
             init_poses: None,
@@ -426,169 +401,6 @@ fn read_port_model(model_dir: &Path, features: &[FeatureSet]) -> Result<PortMode
         });
     }
     Ok((poses, tracks, err_sum / err_n.max(1) as f64))
-}
-
-/// Least-squares similarity `dst ~ s R src + t` (Umeyama).
-fn umeyama(
-    src: &[nalgebra::Point3<f64>],
-    dst: &[nalgebra::Point3<f64>],
-) -> Option<(f64, nalgebra::Rotation3<f64>, Vector3<f64>)> {
-    let n = src.len() as f64;
-    if src.len() < 3 {
-        return None;
-    }
-    let ms = src.iter().fold(Vector3::zeros(), |a, p| a + p.coords) / n;
-    let md = dst.iter().fold(Vector3::zeros(), |a, p| a + p.coords) / n;
-    let mut cov = nalgebra::Matrix3::zeros();
-    let mut var = 0.0;
-    for (a, b) in src.iter().zip(dst) {
-        let da = a.coords - ms;
-        cov += (b.coords - md) * da.transpose();
-        var += da.norm_squared();
-    }
-    cov /= n;
-    var /= n;
-    if var <= 0.0 {
-        return None;
-    }
-    let svd = cov.svd(true, true);
-    let (u, vt) = (svd.u?, svd.v_t?);
-    let mut d = nalgebra::Matrix3::identity();
-    if (u * vt).determinant() < 0.0 {
-        d[(2, 2)] = -1.0;
-    }
-    let r = u * d * vt;
-    let scale = (svd.singular_values.component_mul(&d.diagonal())).sum() / var;
-    let t = md - scale * r * ms;
-    Some((scale, nalgebra::Rotation3::from_matrix_unchecked(r), t))
-}
-
-/// Merge disconnected port models into the largest one: 3D-3D
-/// correspondences come from verified matches whose two keypoints are each
-/// observed by a point of the two models; a RANSAC similarity (Umeyama on
-/// minimal samples, refit on inliers) maps the smaller model's poses into
-/// the reference frame. Returns merged initial poses (`None` = unregistered).
-fn merge_port_models(
-    models: &[PortModel],
-    pairwise: &[PairwiseMatches],
-    log: &mut dyn FnMut(&str),
-) -> Vec<Option<visloc_core::geometry::Pose>> {
-    use std::collections::HashMap;
-    let mut merged = models[0].0.clone();
-    // (frame, keypoint) -> point position, in the merged frame so far.
-    let point_map = |m: &PortModel| -> HashMap<(usize, usize), nalgebra::Point3<f64>> {
-        let mut map = HashMap::new();
-        for t in &m.1 {
-            for &(f, k, _) in &t.observations {
-                map.insert((f, k), t.position);
-            }
-        }
-        map
-    };
-    let mut reference = point_map(&models[0]);
-    let extent = {
-        let pts: Vec<_> = reference.values().collect();
-        let c = pts.iter().fold(Vector3::zeros(), |a, p| a + p.coords) / pts.len().max(1) as f64;
-        let mut d: Vec<f64> = pts.iter().map(|p| (p.coords - c).norm()).collect();
-        d.sort_by(f64::total_cmp);
-        d.get(d.len() / 2).copied().unwrap_or(1.0)
-    };
-    let tau = 0.05 * extent;
-    for (k, model) in models.iter().enumerate().skip(1) {
-        let other = point_map(model);
-        let mut src = Vec::new();
-        let mut dst = Vec::new();
-        for p in pairwise {
-            for &(a, b) in &p.matches {
-                for ((fa, ka), (fb, kb)) in [
-                    ((p.image_i, a), (p.image_j, b)),
-                    ((p.image_j, b), (p.image_i, a)),
-                ] {
-                    if let (Some(x_ref), Some(x_other)) =
-                        (reference.get(&(fa, ka)), other.get(&(fb, kb)))
-                    {
-                        if merged[fb].is_none() {
-                            src.push(*x_other);
-                            dst.push(*x_ref);
-                        }
-                    }
-                }
-            }
-        }
-        if src.len() < 30 {
-            log(&format!(
-                "merge: model {k} has {} links, skipped",
-                src.len()
-            ));
-            continue;
-        }
-        // RANSAC over minimal 3-point similarity samples (deterministic LCG).
-        let mut state = 0x9E37_79B9_7F4A_7C15u64;
-        let mut next = || {
-            state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            (state >> 33) as usize
-        };
-        let count = |s: f64, r: &nalgebra::Rotation3<f64>, t: &Vector3<f64>| -> Vec<usize> {
-            (0..src.len())
-                .filter(|&i| ((s * (r * src[i].coords) + t) - dst[i].coords).norm() < tau)
-                .collect()
-        };
-        let mut best: Vec<usize> = Vec::new();
-        for _ in 0..2000 {
-            let idx = [next() % src.len(), next() % src.len(), next() % src.len()];
-            let (a, b): (Vec<_>, Vec<_>) = idx.iter().map(|&i| (src[i], dst[i])).unzip();
-            if let Some((s, r, t)) = umeyama(&a, &b) {
-                let inl = count(s, &r, &t);
-                if inl.len() > best.len() {
-                    best = inl;
-                }
-            }
-        }
-        let ratio = best.len() as f64 / src.len() as f64;
-        if best.len() < 30 || ratio < 0.3 {
-            log(&format!(
-                "merge: model {k} rejected ({} / {} inliers)",
-                best.len(),
-                src.len()
-            ));
-            continue;
-        }
-        let (a, b): (Vec<_>, Vec<_>) = best.iter().map(|&i| (src[i], dst[i])).unzip();
-        let Some((s, r, t)) = umeyama(&a, &b) else {
-            continue;
-        };
-        // x_ref = s R x_other + t; camera: x_cam' = s x_cam.
-        let mut added = 0;
-        for (f, pose) in model.0.iter().enumerate() {
-            let (Some(pose), None) = (pose, &merged[f]) else {
-                continue;
-            };
-            let w2c = &pose.world_to_camera;
-            let rb = w2c.rotation.to_rotation_matrix();
-            let new_r = rb * r.inverse();
-            let new_t = s * w2c.translation - new_r * t;
-            merged[f] = Some(visloc_core::geometry::Pose::from_world_to_camera(
-                nalgebra::UnitQuaternion::from_rotation_matrix(&new_r),
-                new_t,
-            ));
-            added += 1;
-        }
-        for tr in &model.1 {
-            for &(f, kp, _) in &tr.observations {
-                reference
-                    .entry((f, kp))
-                    .or_insert_with(|| nalgebra::Point3::from(s * (r * tr.position.coords) + t));
-            }
-        }
-        log(&format!(
-            "merge: model {k} joined ({} / {} inliers, scale {s:.3}, +{added} frames)",
-            best.len(),
-            src.len()
-        ));
-    }
-    merged
 }
 
 /// Load `export_colmap_db.py` output: per-frame keypoints (no descriptors)
@@ -958,8 +770,14 @@ pub fn build_euroc_dataset(
             f.keypoints = (0..n)
                 .map(|j| Point2::new(f32_at(2 * j) as f64, f32_at(2 * j + 1) as f64))
                 .collect();
+            // Descriptor length from the file size (SIFT 128, SuperPoint 256).
+            let dim = if n == 0 {
+                128
+            } else {
+                (bytes.len() / 4 - 1 - 2 * n) / n
+            };
             f.descriptors = (0..n)
-                .map(|j| (0..128).map(|c| f32_at(2 * n + 128 * j + c)).collect())
+                .map(|j| (0..dim).map(|c| f32_at(2 * n + dim * j + c)).collect())
                 .collect();
         }
         log("import-features: replaced keypoints/descriptors");
@@ -1059,13 +877,9 @@ pub fn build_euroc_dataset(
         // each side (it sees nearly the same view).
         let mut have: std::collections::HashSet<(usize, usize)> = kept.iter().copied().collect();
         for g in (0..n).filter(|&g| !keep[g]) {
-            // The nearest `register_gated_links` kept frames on each side:
-            // a single link fails when that one frame has few 3D points or
-            // is not registered itself.
-            let links = cfg.register_gated_links.max(1);
-            let before = (0..g).rev().filter(|&k| keep[k]).take(links);
-            let after = ((g + 1)..n).filter(|&k| keep[k]).take(links);
-            for k in before.chain(after) {
+            let before = (0..g).rev().find(|&k| keep[k]);
+            let after = ((g + 1)..n).find(|&k| keep[k]);
+            for k in [before, after].into_iter().flatten() {
                 let pair = (g.min(k), g.max(k));
                 if have.insert(pair) {
                     kept.push(pair);
@@ -1132,74 +946,6 @@ pub fn build_euroc_dataset(
     ));
     log(&format!("{} verified pairs", pairwise.len()));
 
-    if cfg.rescue_weak > 0 {
-        // Bridge weak links (motion blur): pairs of kept frames at most
-        // `rescue_window` apart whose verified matches are missing or fewer
-        // than `rescue_weak` are re-matched with a relaxed ratio and no
-        // cross-check, then pass through the same verifier; a result with
-        // more inliers replaces the original.
-        let t = std::time::Instant::now();
-        let mut slot: std::collections::HashMap<(usize, usize), usize> = pairwise
-            .iter()
-            .enumerate()
-            .map(|(k, p)| ((p.image_i, p.image_j), k))
-            .collect();
-        let weak: Vec<(usize, usize)> = (0..n)
-            .flat_map(|i| ((i + 1)..(i + 1 + cfg.rescue_window).min(n)).map(move |j| (i, j)))
-            .filter(|&(i, j)| keep[i] && keep[j])
-            .filter(|p| {
-                slot.get(p)
-                    .is_none_or(|&k| pairwise[k].matches.len() < cfg.rescue_weak)
-            })
-            .collect();
-        #[cfg(feature = "gpu")]
-        let relaxed: Vec<Vec<DescriptorMatch>> = match &gpu_match {
-            Some((ctx, bank, m)) => m.match_pairs(ctx, bank, &weak, Some(cfg.rescue_ratio), false),
-            None => weak
-                .par_iter()
-                .map(|&(i, j)| {
-                    BruteForceMatcher {
-                        ratio: Some(cfg.rescue_ratio),
-                    }
-                    .match_descriptors(&features[i].descriptors, &features[j].descriptors)
-                })
-                .collect(),
-        };
-        #[cfg(not(feature = "gpu"))]
-        let relaxed: Vec<Vec<DescriptorMatch>> = weak
-            .par_iter()
-            .map(|&(i, j)| {
-                BruteForceMatcher {
-                    ratio: Some(cfg.rescue_ratio),
-                }
-                .match_descriptors(&features[i].descriptors, &features[j].descriptors)
-            })
-            .collect();
-        let rescued = verify_chunk(&weak, relaxed);
-        let (mut added, mut improved) = (0, 0);
-        for p in rescued {
-            let key = (p.image_i, p.image_j);
-            match slot.get(&key) {
-                Some(&k) => {
-                    if !cfg.rescue_add_only && p.matches.len() > pairwise[k].matches.len() {
-                        pairwise[k] = p;
-                        improved += 1;
-                    }
-                }
-                None => {
-                    slot.insert(key, pairwise.len());
-                    pairwise.push(p);
-                    added += 1;
-                }
-            }
-        }
-        log(&format!(
-            "rescue: {} weak pairs re-matched, {added} added, {improved} improved ({:.1}s)",
-            weak.len(),
-            t.elapsed().as_secs_f64()
-        ));
-    }
-
     let mut sfm_cfg = IncrementalSfmConfig {
         min_seed_matches: cfg.min_matches,
         colmap_style_mapper: true,
@@ -1255,67 +1001,12 @@ pub fn build_euroc_dataset(
     };
     let result = if cfg.colmap_port_mapper {
         let models = run_colmap_port(out_dir, &camera, width, height, &features, &pairwise, log)?;
-        if cfg.merge_models && models.len() > 1 {
-            let merged = merge_port_models(&models, &pairwise, log);
-            let joined = merged.iter().filter(|p| p.is_some()).count();
-            if joined > models[0].0.iter().filter(|p| p.is_some()).count() {
-                // Re-triangulate and bundle-adjust the union (poses start
-                // fixed, then all become BA variables).
-                let r = visloc_slam::incremental_sfm_with_initial_poses(
-                    &camera,
-                    &features,
-                    &pairwise,
-                    &sfm_cfg,
-                    Some(&merged),
-                )
-                .map_err(|e| EurocError::Sfm(e.to_string()))?;
-                SfmOutcome {
-                    poses: r.poses,
-                    tracks: r.tracks,
-                    mean_reprojection_px: r.mean_reprojection_px,
-                    refined_camera: r.refined_camera,
-                }
-            } else {
-                let (poses, tracks, mean_reprojection_px) = models.into_iter().next().unwrap();
-                SfmOutcome {
-                    poses,
-                    tracks,
-                    mean_reprojection_px,
-                    refined_camera: None,
-                }
-            }
-        } else {
-            let (poses, tracks, mean_reprojection_px) = models.into_iter().next().unwrap();
-            if cfg.polish {
-                // Re-triangulate every verified pair's tracks against the
-                // mapper's poses and bundle-adjust the whole model once more.
-                let r = visloc_slam::incremental_sfm_with_initial_poses(
-                    &camera,
-                    &features,
-                    &pairwise,
-                    &sfm_cfg,
-                    Some(&poses),
-                )
-                .map_err(|e| EurocError::Sfm(e.to_string()))?;
-                log(&format!(
-                    "polish: {} -> {} tracks",
-                    tracks.len(),
-                    r.tracks.len()
-                ));
-                SfmOutcome {
-                    poses: r.poses,
-                    tracks: r.tracks,
-                    mean_reprojection_px: r.mean_reprojection_px,
-                    refined_camera: r.refined_camera,
-                }
-            } else {
-                SfmOutcome {
-                    poses,
-                    tracks,
-                    mean_reprojection_px,
-                    refined_camera: None,
-                }
-            }
+        let (poses, tracks, mean_reprojection_px) = models.into_iter().next().unwrap();
+        SfmOutcome {
+            poses,
+            tracks,
+            mean_reprojection_px,
+            refined_camera: None,
         }
     } else {
         let r = visloc_slam::incremental_sfm_with_initial_poses(

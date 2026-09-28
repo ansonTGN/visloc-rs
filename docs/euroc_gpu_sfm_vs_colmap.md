@@ -152,8 +152,8 @@ splitting the sequence into several models; only the largest is scored.
 - **V1_03:** two of the models overlap in time, sharing 35 verified pairs
   and 1,074 matches.
 
-Nothing below moved the table without a regression somewhere, so none of it
-is the default:
+Nothing below moved the table without a regression somewhere. The options
+were removed from `gsplat_euroc` on 2026-09-28; this table is their record.
 
 | Change | Gains | Regressions |
 | --- | --- | --- |
@@ -162,7 +162,8 @@ is the default:
 | `--keypoints 8000` (COLMAP's cap is 8,192) | V2_01 ATE 3.30 → 2.02 cm | MH_05 2.58 → 5.09 cm; V1_02 1.76 → 2.89 cm; fewer frames registered |
 | `--polish` (re-triangulate all pairs + global BA) | MH_03 198/200 at 2.27 cm; V2_01, V1_02 and MH_05 200/200; V1_03 96 frames | MH_01 ATE 0.35 → 1.10 cm; V1_03 2.17 → 7.34 cm |
 
-Two more attempts, also opt-in:
+Three more attempts. The first two were also removed; the third remains
+possible through `--import-features`:
 
 - **Weak-link rescue.** `--rescue-weak 100 [--rescue-ratio 0.9]
   [--rescue-add-only]` re-matches nearby pairs that have fewer than 100
@@ -180,10 +181,21 @@ Two more attempts, also opt-in:
   - The sequence never revisits a view, so there is no loop to close the
     drift.
 
-The remaining gap is bridging blurred stretches (V2_03, V1_03) and V2_01's
-accuracy. The options above stay available for single-sequence use: for
-example, `--polish` suits MH_03-like sequences, where it both registers more
-frames and beats COLMAP's ATE.
+- **SuperPoint features.** `scripts/export_superpoint_bins.py` feeds
+  `--import-features`, which now takes any descriptor length.
+  - SuperPoint bridges the blur on both hard sequences:
+    - V2_03 registers 172/200 frames in a single model (COLMAP: 180; SIFT:
+      118).
+    - V1_03 registers 118 (COLMAP: 80).
+  - Accuracy drops: V2_03 goes to 4.37 cm (SIFT 3.37, COLMAP 2.85) and V1_03
+    to 8.74 cm (SIFT 2.17, COLMAP 1.98). A likely cause is that the ONNX
+    export returns integer-pixel keypoints; the next step is sub-pixel
+    SuperPoint keypoints.
+- **Denser skip pairs on V2_01.** Skips every 10 frames out to 190 give
+  200/200 frames at 2.90 cm, against 199 frames at 3.30 cm.
+
+The remaining gap is accuracy on the blurred sequences and V2_01's scale
+drift.
 
 ## Reproduce
 

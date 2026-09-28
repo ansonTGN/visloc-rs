@@ -170,6 +170,7 @@ fn nearest_prior(priors: &[(i64, Pose)], timestamp_ns: i64, tolerance_ns: i64) -
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     let out_dir = parse_flag(&mut args, "--out-dir").map(PathBuf::from);
+    let ratio_flag = parse_flag(&mut args, "--ratio");
     let radius_m: f64 = parse_flag(&mut args, "--radius-m")
         .map(|value| value.parse())
         .transpose()?
@@ -248,7 +249,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         query_paths.len(),
     );
 
-    let config = LocalizationConfig::default();
+    let mut config = LocalizationConfig::default();
+    if let Some(r) = ratio_flag {
+        // Lowe ratio for the descriptor search; "none" disables the test.
+        config.ratio = if r == "none" { None } else { Some(r.parse()?) };
+    }
     let matcher = if use_gpu {
         #[cfg(feature = "gpu")]
         {
