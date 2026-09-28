@@ -12,8 +12,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/photos_to_mesh.gif" alt="south-building: each raw input photo next to the trained Gaussian splat and the extracted mesh rendered from the same recovered pose" width="900"><br>
-  <sub>128 raw photos &rarr; camera poses &rarr; Gaussian splat &rarr; mesh, one command, no COLMAP or Python. <a href="#photos-to-splat-and-mesh-3d-gaussian-splatting">Details</a>.</sub>
+  <img src="docs/assets/hero_reconstruction.gif" alt="One continuous orbit camera circling the south-building reconstruction from a viewpoint no input photo has: the sparse SfM point cloud and recovered camera frustums pop in, dissolve into the photoreal 3D Gaussian splat rendered with visloc-rs's own Rust + wgpu renderer, then dissolve into the extracted mesh." width="720"><br>
+  <sub>128 raw photos &rarr; camera poses &rarr; Gaussian splat &rarr; mesh, one command, no COLMAP or Python, orbited from a viewpoint none of the input photos have. <a href="#photos-to-splat-and-mesh-3d-gaussian-splatting">Details</a>.</sub>
 </p>
 
 ## In a nutshell
@@ -218,7 +218,11 @@ cargo run --release -p visloc-gsplat-train --features gpu,euroc --example gsplat
   --images /path/to/my_photos --out /path/to/runs/my-scene
 ```
 
-The GIF at the top of this page is the 128 raw south-building JPGs. Every image registered, focal refined from EXIF 796 px to 847.0 px (COLMAP: 847.2), held-out PSNR 22.77 at 30k steps, 37 min end to end ([GIF script](scripts/make_photos_demo_gif.py)).
+<p align="center">
+  <img src="docs/assets/photos_to_mesh.gif" alt="south-building: each raw input photo next to the trained Gaussian splat and the extracted mesh rendered from the same recovered pose" width="900">
+</p>
+
+The GIF above is the 128 raw south-building JPGs, each next to the trained Gaussian splat and the extracted mesh rendered from that photo's own recovered pose. Every image registered, focal refined from EXIF 796 px to 847.0 px (COLMAP: 847.2), held-out PSNR 22.77 at 30k steps, 37 min end to end ([GIF script](scripts/make_photos_demo_gif.py)). The orbiting GIF at the top of this page is the same run, viewed from a camera path none of the input photos have; its generator is [`scripts/make_readme_hero.py`](scripts/make_readme_hero.py).
 
 To reproduce the run and the GIF, use the raw `images/` of COLMAP's
 south-building dataset. `gsplat_photos` prints the focal refinement and

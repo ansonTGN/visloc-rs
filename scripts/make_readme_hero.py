@@ -1,0 +1,629 @@
+#!/usr/bin/env python3
+"""Generate the README hero GIF: one continuous orbit camera circling the
+south-building reconstruction from above/outside, showing (1) the sparse SfM
+point cloud + recovered camera frustums popping in, (2) a dissolve into the
+photoreal 3D Gaussian splat rendered with visloc-rs's own Rust/wgpu renderer,
+and (3) a dissolve into the extracted, shaded mesh, looping back smoothly.
+
+Why this exists: a flythrough at the original (ground-level) photo poses was
+rejected because it "just looks like normal photos" -- nothing in frame told
+the viewer this was a 3D reconstruction rather than a photo slideshow. This
+script instead orbits the camera around a viewpoint NO input photo has (an
+elevated ring around the whole building), and visibly grows/dissolves through
+the three pipeline stages, so the 3D-ness is obvious at a glance.
+
+Inputs (already produced by `gsplat_photos` on the raw south-building photos):
+  E:/visloc-rs-runs/gs_bench/photos/sb30k/{scene.ply, mesh.ply,
+    sparse/0/{cameras.txt,images.txt,points3D.txt}, images/}
+
+Pipeline:
+  - Points + camera frustums (phase 1) and the shaded mesh (phase 3) are
+    rasterized with a small headless OpenGL renderer (moderngl), reusing the
+    exact same per-frame camera intrinsics/poses as the splat phase so the
+    crossfades line up.
+  - The Gaussian splat (phase 2) -- the project's actual accuracy/speed claim
+    -- is rendered by the project's own Rust `gsplat_eval` binary, which is
+    the same renderer used elsewhere in the README. A copy of scene.ply with
+    the small fraction of pathologically large/likely-floater gaussians
+    dropped is used only so the elevated orbit view (which the ground-level
+    training photos never saw) doesn't wash out in sky-sized floaters; the
+    mesh is similarly cropped to the SfM point-cloud bounding box.
+  - Frames are alpha-crossfaded at the phase boundaries, labelled, and
+    assembled into a palette-quantized GIF with ffmpeg.
+
+Exact commands used to (re)produce docs/assets/hero_reconstruction.gif:
+
+    # one-time venv setup (Python 3.12; a 3.12 interpreter is required for
+    # the open3d/moderngl wheels used during development -- only moderngl,
+    # numpy, scipy and pillow are actually needed to run this script)
+    py -3.12 -m venv E:/visloc-rs-runs/readme_hero/venv312
+    E:/visloc-rs-runs/readme_hero/venv312/Scripts/python.exe -m pip install \
+        numpy scipy pillow moderngl plyfile
+
+    # render all frames + assemble the GIF (needs the Rust gsplat_eval.exe
+    # built from this repo: cargo build --release -p visloc-gsplat-train
+    # --features gpu,euroc --example gsplat_eval)
+    E:/visloc-rs-runs/readme_hero/venv312/Scripts/python.exe \
+        scripts/make_readme_hero.py --gsplat-eval \
+        E:/visloc-rs-runs/gsplat_wt/target/release/examples/gsplat_eval.exe \
+        --out docs/assets/hero_reconstruction.gif
+
+ffmpeg (palettegen/paletteuse, matching what the script shells out to):
+
+    ffmpeg -y -framerate 12 -i work/final_%04d.png -vf "palettegen=max_colors=192" work/palette.png
+    ffmpeg -y -framerate 12 -i work/final_%04d.png -i work/palette.png \
+        -lavfi "paletteuse=dither=sierra2_4a" -loop 0 docs/assets/hero_reconstruction.gif
+"""
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+
+import numpy as np
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    Image = None
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+SRC = 'E:/visloc-rs-runs/gs_bench/photos/sb30k'
+WORK = 'E:/visloc-rs-runs/readme_hero/final'
+
+W, H = 1024, 768
+FX, FY, CX, CY = 847.0203155243536, 857.9783006002741, 514.6578180869523, 381.1077943900985
+
+FPS = 12
+N_FRAMES = 120           # one full revolution, ~10s at 12fps
+ELEV_DEG = 18.0          # orbit elevation above the horizontal camera ring
+RADIUS_MULT = 1.35       # orbit radius as a multiple of the training-camera ring radius
+PHASE0_DEG = 45.0        # orbit start angle; keeps the splat's viewing window
+                          # (frames ~36-84, azimuth ~153-297 deg) inside the
+                          # arc with the best photo coverage (see below)
+
+P1_END = 36               # 0..P1_END-1: pure points+frustums
+XF1 = 8                   # crossfade length at the phase1->2 boundary
+P2_START = P1_END + XF1   # 44
+P2_END = 84                # pure splat through here, then crossfade
+XF2 = 8
+P3_START = P2_END + XF2   # 92 .. actually recomputed below to keep 120 total
+
+REVEAL_FRAMES = 32.0      # points/frustums finish popping in by this frame
+
+OUT_W = 720               # final GIF width in pixels (kept <= 8 MB at 256-color GIF depth)
+
+FILTER_MARGIN = 0.5       # world-unit padding beyond the SfM point cloud bbox
+FILTER_SCALE_RAW = 1.0    # drop gaussians with raw (log-space) max-axis scale above this
+
+FONT_BOLD = 'C:/Windows/Fonts/segoeuib.ttf'
+FONT_REG = 'C:/Windows/Fonts/segoeui.ttf'
+
+
+# ---------------------------------------------------------------------------
+# Geometry: COLMAP text I/O, building frame fit, orbit path
+# ---------------------------------------------------------------------------
+
+def load_images_txt(path):
+    lines = [l.split() for l in open(path) if l.strip() and not l.startswith('#')]
+    lines = [l for l in lines if len(l) == 10]
+    lines.sort(key=lambda l: int(l[0]))
+    q = np.array([[float(x) for x in l[1:5]] for l in lines])
+    t = np.array([[float(x) for x in l[5:8]] for l in lines])
+    return q, t
+
+
+def quat_to_R(q):
+    from scipy.spatial.transform import Rotation as Rt
+    return Rt.from_quat(q[..., [1, 2, 3, 0]]).as_matrix()
+
+
+def R_to_quat(R):
+    from scipy.spatial.transform import Rotation as Rt
+    q = Rt.from_matrix(R).as_quat()
+    return np.array([q[3], q[0], q[1], q[2]])
+
+
+def camera_centers(q, t):
+    R = quat_to_R(q)
+    C = -np.einsum('nji,nj->ni', R, t)
+    return C, R
+
+
+def load_points3d(path):
+    pos, col, first_img = [], [], []
+    with open(path) as f:
+        for line in f:
+            if not line.strip() or line.startswith('#'):
+                continue
+            parts = line.split()
+            pos.append([float(parts[1]), float(parts[2]), float(parts[3])])
+            col.append([int(parts[4]), int(parts[5]), int(parts[6])])
+            track = parts[8:]
+            img_ids = [int(track[i]) for i in range(0, len(track), 2)]
+            first_img.append(min(img_ids) if img_ids else 10 ** 9)
+    return np.array(pos), np.array(col, dtype=np.uint8), np.array(first_img)
+
+
+def build_basis(up):
+    a = np.array([1.0, 0.0, 0.0])
+    if abs(np.dot(a, up)) > 0.9:
+        a = np.array([0.0, 0.0, 1.0])
+    e1 = a - up * np.dot(a, up)
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(up, e1)
+    return e1, e2
+
+
+def fit_building_frame(q, t):
+    C, R = camera_centers(q, t)
+    up_cam_est = -R[:, 1, :]
+    centroid = C.mean(axis=0)
+    Cc = C - centroid
+    cov = Cc.T @ Cc
+    w, v = np.linalg.eigh(cov)
+    up = v[:, 0]
+    if np.dot(up, up_cam_est.mean(axis=0)) < 0:
+        up = -up
+    up /= np.linalg.norm(up)
+    rel = C - centroid
+    rel_h = rel - np.outer(rel @ up, up)
+    ring_radius = np.linalg.norm(rel_h, axis=1).mean()
+    return centroid, up, ring_radius, C
+
+
+def orbit_path(center, up, radius, elevation_deg, n_frames, phase0_deg, target):
+    e1, e2 = build_basis(up)
+    height = radius * np.tan(np.radians(elevation_deg))
+    angles = np.radians(phase0_deg) + np.linspace(0, 2 * np.pi, n_frames, endpoint=False)
+    Cs = np.array([center + radius * (np.cos(a) * e1 + np.sin(a) * e2) + height * up for a in angles])
+    targets = np.tile(target, (n_frames, 1))
+    return Cs, targets, angles
+
+
+def poses_from_lookat(Cs, targets, up):
+    n = len(Cs)
+    Rs = np.zeros((n, 3, 3))
+    ts = np.zeros((n, 3))
+    for i in range(n):
+        z = targets[i] - Cs[i]
+        z /= np.linalg.norm(z)
+        y = -up
+        y = y - z * np.dot(y, z)
+        y /= np.linalg.norm(y)
+        x = np.cross(y, z)
+        Rcw = np.stack([x, y, z])
+        Rs[i] = Rcw
+        ts[i] = -Rcw @ Cs[i]
+    return Rs, ts
+
+
+def write_colmap_pose_dir(out_dir, Rs, ts, indices, cam_line, dummy_image):
+    os.makedirs(f'{out_dir}/sparse/0', exist_ok=True)
+    os.makedirs(f'{out_dir}/images', exist_ok=True)
+    with open(f'{out_dir}/sparse/0/cameras.txt', 'w') as f:
+        f.write('# Camera list\n' + cam_line + '\n')
+    open(f'{out_dir}/sparse/0/points3D.txt', 'w').write('# 3D point list\n0 0 0 0 128 128 128 0\n')
+    with open(f'{out_dir}/sparse/0/images.txt', 'w') as fo:
+        fo.write('# Image list\n')
+        for j, i in enumerate(indices):
+            qq = R_to_quat(Rs[i])
+            name = f'f{i:04d}.png'
+            fo.write(f'{j+1} {qq[0]} {qq[1]} {qq[2]} {qq[3]} {ts[i][0]} {ts[i][1]} {ts[i][2]} 1 {name}\n\n')
+            p = f'{out_dir}/images/{name}'
+            if not os.path.exists(p):
+                try:
+                    os.link(dummy_image, p)
+                except OSError:
+                    shutil.copy(dummy_image, p)
+
+
+# ---------------------------------------------------------------------------
+# Headless OpenGL rendering (points+frustums, mesh) via moderngl
+# ---------------------------------------------------------------------------
+
+def cv_to_gl_Rt(Rcw, tcw):
+    flip = np.diag([1.0, -1.0, -1.0])
+    return flip @ Rcw, flip @ tcw
+
+
+def gl_view_matrix(Rcw, tcw):
+    Rgl, tgl = cv_to_gl_Rt(Rcw, tcw)
+    V = np.eye(4)
+    V[:3, :3] = Rgl
+    V[:3, 3] = tgl
+    return V
+
+
+def gl_projection_matrix(fx, fy, cx, cy, w, h, near, far):
+    P = np.zeros((4, 4))
+    P[0, 0] = 2.0 * fx / w
+    P[0, 2] = 1.0 - 2.0 * cx / w
+    P[1, 1] = 2.0 * fy / h
+    P[1, 2] = 2.0 * cy / h - 1.0
+    P[2, 2] = -(far + near) / (far - near)
+    P[2, 3] = -2.0 * far * near / (far - near)
+    P[3, 2] = -1.0
+    return P
+
+
+class GLRenderer:
+    def __init__(self, w, h, bg=(0.043, 0.047, 0.06, 1.0)):
+        import moderngl
+        self.moderngl = moderngl
+        self.w, self.h = w, h
+        self.ctx = moderngl.create_context(standalone=True, require=330)
+        self.bg = bg
+        self.fbo = self.ctx.simple_framebuffer((w, h), components=4, samples=0)
+        self.fbo.use()
+        self.pt_prog = self.ctx.program(
+            vertex_shader='''
+                #version 330
+                uniform mat4 mvp; uniform float point_size;
+                in vec3 in_pos; in vec3 in_color; out vec3 v_color;
+                void main() { gl_Position = mvp*vec4(in_pos,1.0); gl_PointSize = point_size; v_color = in_color; }
+            ''',
+            fragment_shader='''
+                #version 330
+                in vec3 v_color; out vec4 f_color;
+                void main() { vec2 d = gl_PointCoord - vec2(0.5); if (dot(d,d) > 0.25) discard; f_color = vec4(v_color,1.0); }
+            ''')
+        self.line_prog = self.ctx.program(
+            vertex_shader='''
+                #version 330
+                uniform mat4 mvp; in vec3 in_pos; in vec3 in_color; out vec3 v_color;
+                void main() { gl_Position = mvp*vec4(in_pos,1.0); v_color = in_color; }
+            ''',
+            fragment_shader='''
+                #version 330
+                in vec3 v_color; out vec4 f_color; void main() { f_color = vec4(v_color,1.0); }
+            ''')
+        self.mesh_prog = self.ctx.program(
+            vertex_shader='''
+                #version 330
+                uniform mat4 mvp; uniform vec3 light_dir;
+                in vec3 in_pos; in vec3 in_normal; in vec3 in_color; out vec3 v_color;
+                void main() {
+                    gl_Position = mvp*vec4(in_pos,1.0);
+                    float ndl = max(dot(normalize(in_normal), -light_dir), 0.0);
+                    float amb = 0.42;
+                    v_color = in_color * (amb + (1.0-amb)*ndl);
+                }
+            ''',
+            fragment_shader='''
+                #version 330
+                in vec3 v_color; out vec4 f_color; void main() { f_color = vec4(v_color,1.0); }
+            ''')
+
+    def clear(self):
+        self.fbo.use()
+        self.ctx.enable(self.moderngl.DEPTH_TEST)
+        self.ctx.disable(self.moderngl.BLEND)
+        self.fbo.clear(*self.bg)
+
+    def read(self):
+        data = self.fbo.read(components=4, alignment=1)
+        arr = np.frombuffer(data, dtype=np.uint8).reshape(self.h, self.w, 4)
+        return np.flipud(arr)
+
+    def draw_points(self, pos, color01, mvp, point_size=3.0):
+        mgl = self.moderngl
+        vbo = self.ctx.buffer(np.hstack([pos, color01]).astype('f4').tobytes())
+        vao = self.ctx.vertex_array(self.pt_prog, [(vbo, '3f 3f', 'in_pos', 'in_color')])
+        self.ctx.enable(mgl.PROGRAM_POINT_SIZE)
+        self.pt_prog['mvp'].write(np.ascontiguousarray(mvp.T).astype('f4').tobytes())
+        self.pt_prog['point_size'].value = point_size
+        vao.render(mgl.POINTS)
+        vao.release(); vbo.release()
+
+    def draw_lines(self, pos, color01, mvp):
+        mgl = self.moderngl
+        vbo = self.ctx.buffer(np.hstack([pos, color01]).astype('f4').tobytes())
+        vao = self.ctx.vertex_array(self.line_prog, [(vbo, '3f 3f', 'in_pos', 'in_color')])
+        self.line_prog['mvp'].write(np.ascontiguousarray(mvp.T).astype('f4').tobytes())
+        vao.render(mgl.LINES)
+        vao.release(); vbo.release()
+
+    def draw_mesh(self, pos, normal, color01, faces_idx, mvp, light_dir):
+        mgl = self.moderngl
+        vbo = self.ctx.buffer(np.hstack([pos, normal, color01]).astype('f4').tobytes())
+        ibo = self.ctx.buffer(faces_idx.astype('i4').tobytes())
+        vao = self.ctx.vertex_array(self.mesh_prog, [(vbo, '3f 3f 3f', 'in_pos', 'in_normal', 'in_color')], ibo)
+        self.mesh_prog['mvp'].write(np.ascontiguousarray(mvp.T).astype('f4').tobytes())
+        ld = np.array(light_dir, dtype='f4'); ld /= np.linalg.norm(ld)
+        self.mesh_prog['light_dir'].value = tuple(ld.tolist())
+        self.ctx.disable(mgl.PROGRAM_POINT_SIZE)
+        vao.render(mgl.TRIANGLES)
+        vao.release(); vbo.release(); ibo.release()
+
+
+def frustum_segments(Ctr, Rtr, indices, scale=0.28):
+    segs = []
+    edges = [[0, 1], [0, 2], [0, 3], [0, 4], [1, 2], [2, 3], [3, 4], [4, 1]]
+    corners_cam = np.array([[-1, -0.75, 1.4], [1, -0.75, 1.4], [1, 0.75, 1.4], [-1, 0.75, 1.4]]) * scale
+    for i in indices:
+        Rcw = Rtr[i].T
+        corners_world = Ctr[i] + corners_cam @ Rcw.T
+        pts = np.vstack([Ctr[i][None, :], corners_world])
+        for a, b in edges:
+            segs.append(pts[a]); segs.append(pts[b])
+    return np.array(segs) if segs else np.zeros((0, 3))
+
+
+# ---------------------------------------------------------------------------
+# Gaussian-splat PLY filtering (drop likely-floater gaussians for the
+# elevated orbit view the ground-level training photos never covered)
+# ---------------------------------------------------------------------------
+
+NFLOAT_PLY = 62  # x,y,z,nx,ny,nz,f_dc(3),f_rest(45),opacity,scale(3),rot(4)
+
+
+def read_ply_header(f):
+    header = b''
+    while True:
+        line = f.readline()
+        header += line
+        if line.strip() == b'end_header':
+            break
+    return header
+
+
+def filter_scene_ply(src_ply, out_ply, center, up, e1, e2, bounds, margin, scale_raw_thr):
+    with open(src_ply, 'rb') as f:
+        header = read_ply_header(f)
+        data = np.fromfile(f, dtype='<f4')
+    arr = data.reshape(-1, NFLOAT_PLY)
+    pos = arr[:, 0:3]
+    h = (pos - center) @ up
+    h1 = (pos - center) @ e1
+    h2 = (pos - center) @ e2
+    lo_h, hi_h, lo_1, hi_1, lo_2, hi_2 = bounds
+    keep = ((h > lo_h - margin) & (h < hi_h + margin) &
+            (h1 > lo_1 - margin) & (h1 < hi_1 + margin) &
+            (h2 > lo_2 - margin) & (h2 < hi_2 + margin))
+    keep &= arr[:, 52:55].max(1) < scale_raw_thr
+    kept = arr[keep]
+    lines = header.split(b'\n')
+    out_lines = [f'element vertex {kept.shape[0]}'.encode() if l.startswith(b'element vertex') else l
+                 for l in lines]
+    with open(out_ply, 'wb') as f:
+        f.write(b'\n'.join(out_lines))
+        kept.astype('<f4').tofile(f)
+    return kept.shape[0], arr.shape[0]
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--gsplat-eval', default='E:/visloc-rs-runs/gsplat_wt/target/release/examples/gsplat_eval.exe')
+    ap.add_argument('--ffmpeg', default='C:/Program Files/ffmpeg/bin/ffmpeg.exe')
+    ap.add_argument('--work', default=WORK)
+    ap.add_argument('--out', default='docs/assets/hero_reconstruction.gif')
+    ap.add_argument('--skip-render', action='store_true', help='reuse frames already in --work')
+    ap.add_argument('--width', type=int, default=OUT_W)
+    ap.add_argument('--colors', type=int, default=140)
+    ap.add_argument('--dither', default='bayer:bayer_scale=3')
+    ap.add_argument('--stride', type=int, default=2,
+                     help='keep every Nth composited frame (GIF size vs. smoothness); '
+                          'output fps is FPS/stride so total duration is unchanged')
+    ap.add_argument('--skip-composite', action='store_true', help='reuse final_*.png, only re-run ffmpeg')
+    args = ap.parse_args()
+
+    work = args.work
+    os.makedirs(work, exist_ok=True)
+
+    q, t = load_images_txt(f'{SRC}/sparse/0/images.txt')
+    center, up, ring_radius, Ctr = fit_building_frame(q, t)
+    _, Rtr = camera_centers(q, t)
+    pos_pts, col_pts, first_img = load_points3d(f'{SRC}/sparse/0/points3D.txt')
+    e1, e2 = build_basis(up)
+
+    hh = (pos_pts - center) @ up
+    h1 = (pos_pts - center) @ e1
+    h2 = (pos_pts - center) @ e2
+    lo_h, hi_h = np.percentile(hh, 1), np.percentile(hh, 99)
+    lo_1, hi_1 = np.percentile(h1, 1), np.percentile(h1, 99)
+    lo_2, hi_2 = np.percentile(h2, 1), np.percentile(h2, 99)
+    bounds = (lo_h - 0.5, hi_h + 0.35, lo_1, hi_1, lo_2, hi_2)
+    target = center + up * (lo_h + hi_h) / 2.0
+
+    radius = ring_radius * RADIUS_MULT
+    Cs, targets, angles = orbit_path(center, up, radius, ELEV_DEG, N_FRAMES, PHASE0_DEG, target)
+    Rs, ts = poses_from_lookat(Cs, targets, up)
+    P = gl_projection_matrix(FX, FY, CX, CY, W, H, 0.05, 60.0)
+
+    n_train_images = len(q)
+    n_points = len(pos_pts)
+
+    if not args.skip_render:
+        # ---- phase 1: points + frustums, frames 0..P2_START-1 (through the
+        # crossfade-in, so the blend at the boundary has real content) ----
+        renderer = GLRenderer(W, H)
+        pt_range = range(0, P2_START)
+        for k in pt_range:
+            reveal = min(1.0, k / REVEAL_FRAMES)
+            cutoff = reveal * n_train_images
+            pmask = first_img <= cutoff
+            fmask_idx = [i for i in range(n_train_images) if i + 1 <= cutoff]
+            V = gl_view_matrix(Rs[k], ts[k]); mvp = P @ V
+            renderer.clear()
+            if pmask.any():
+                renderer.draw_points(pos_pts[pmask].astype(np.float32),
+                                      (col_pts[pmask].astype(np.float32) / 255.0), mvp, point_size=3.0)
+            if fmask_idx:
+                segs = frustum_segments(Ctr, Rtr, fmask_idx).astype(np.float32)
+                if len(segs):
+                    accent = np.tile(np.array([1.0, 0.55, 0.12], dtype=np.float32), (segs.shape[0], 1))
+                    renderer.draw_lines(segs, accent, mvp)
+            img = renderer.read()
+            Image.fromarray(img, 'RGBA').convert('RGB').save(f'{work}/pts_{k:04d}.png')
+        print('points+frustums done', flush=True)
+
+        # ---- phase 3: mesh, frames P1_END..N_FRAMES-1 (from the crossfade-out
+        # of phase 2 through the end) ----
+        mpos = np.load(f'{work}/mesh_pos.npy') if os.path.exists(f'{work}/mesh_pos.npy') else None
+        if mpos is None:
+            from plyfile import PlyData
+            ply = PlyData.read(f'{SRC}/mesh.ply')
+            v = ply['vertex']
+            mpos = np.stack([v['x'], v['y'], v['z']], 1).astype(np.float32)
+            mcol = np.stack([v['red'], v['green'], v['blue']], 1).astype(np.float32) / 255.0
+            mfaces = np.array([list(x) for x in ply['face']['vertex_indices']], dtype=np.int32)
+            v0, v1, v2 = mpos[mfaces[:, 0]], mpos[mfaces[:, 1]], mpos[mfaces[:, 2]]
+            fn = np.cross(v1 - v0, v2 - v0)
+            mnorm = np.zeros_like(mpos)
+            np.add.at(mnorm, mfaces[:, 0], fn); np.add.at(mnorm, mfaces[:, 1], fn); np.add.at(mnorm, mfaces[:, 2], fn)
+            norm_len = np.linalg.norm(mnorm, axis=1, keepdims=True); norm_len[norm_len < 1e-12] = 1.0
+            mnorm = (mnorm / norm_len).astype(np.float32)
+            np.save(f'{work}/mesh_pos.npy', mpos); np.save(f'{work}/mesh_col.npy', mcol)
+            np.save(f'{work}/mesh_normal.npy', mnorm); np.save(f'{work}/mesh_faces.npy', mfaces)
+        else:
+            mcol = np.load(f'{work}/mesh_col.npy'); mnorm = np.load(f'{work}/mesh_normal.npy')
+            mfaces = np.load(f'{work}/mesh_faces.npy')
+
+        mh = (mpos - center) @ up; m1 = (mpos - center) @ e1; m2 = (mpos - center) @ e2
+        inside = ((mh > bounds[0]) & (mh < bounds[1]) & (m1 > bounds[2] - 0.35) & (m1 < bounds[3] + 0.35) &
+                  (m2 > bounds[4] - 0.35) & (m2 < bounds[5] + 0.35))
+        face_ok = inside[mfaces[:, 0]] & inside[mfaces[:, 1]] & inside[mfaces[:, 2]]
+        mfaces_c = mfaces[face_ok]
+
+        for k in range(P2_END, N_FRAMES):
+            V = gl_view_matrix(Rs[k], ts[k]); mvp = P @ V
+            view_dir = targets[k] - Cs[k]; view_dir = view_dir / np.linalg.norm(view_dir)
+            renderer.clear()
+            renderer.draw_mesh(mpos, mnorm, mcol, mfaces_c, mvp, light_dir=tuple(view_dir))
+            img = renderer.read()
+            Image.fromarray(img, 'RGBA').convert('RGB').save(f'{work}/mesh_{k:04d}.png')
+        print('mesh done', flush=True)
+
+        # ---- phase 2: the Gaussian splat, rendered with the project's own
+        # Rust wgpu renderer, frames P1_END..P2_END+XF2-1 ----
+        filtered_ply = f'{work}/scene_filtered.ply'
+        kept, total = filter_scene_ply(f'{SRC}/scene.ply', filtered_ply, center, up, e1, e2,
+                                        bounds, FILTER_MARGIN, FILTER_SCALE_RAW)
+        print(f'splat filter: kept {kept}/{total} gaussians', flush=True)
+
+        splat_dir = f'{work}/splat_poses'
+        splat_indices = list(range(P1_END, P2_END + XF2))
+        cam_line = f'1 PINHOLE {W} {H} {FX} {FY} {CX} {CY}'
+        dummy = f'{SRC}/images/frame_00000.png'
+        write_colmap_pose_dir(splat_dir, Rs, ts, splat_indices, cam_line, dummy)
+        splat_out = f'{work}/splat_out'
+        subprocess.run([args.gsplat_eval, '--ply', filtered_ply, '--data', splat_dir,
+                         '--eval-every', '1', '--save-dir', splat_out], check=True)
+        for j, k in enumerate(splat_indices):
+            shutil.copy(f'{splat_out}/f{k:04d}.png', f'{work}/splat_{k:04d}.png')
+        print('splat done', flush=True)
+
+    # ---- composite + encode ----
+    if not args.skip_composite:
+        composite(work, args, n_train_images, n_points)
+    encode_gif(work, args)
+
+
+def composite(work, args, n_train_images, n_points):
+    font_title = ImageFont.truetype(FONT_BOLD, 26)
+    font_sub = ImageFont.truetype(FONT_REG, 16)
+    font_foot = ImageFont.truetype(FONT_REG, 14)
+
+    titles = {
+        1: (f'1 \u00b7 Structure from Motion', f'{n_train_images} photos, {n_train_images} cameras, {n_points} points'),
+        2: ('2 \u00b7 3D Gaussian Splatting', 'trained scene, rendered with our Rust + wgpu rasterizer'),
+        3: ('3 \u00b7 Mesh', 'extracted from the splat (TSDF + surface nets)'),
+    }
+
+    def draw_label(img, phase, alpha):
+        if alpha <= 0.01:
+            return img
+        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(overlay)
+        title, sub = titles[phase]
+        pad = 14
+        tw = max(d.textlength(title, font=font_title), d.textlength(sub, font=font_sub))
+        box_w, box_h = int(tw + pad * 2), 64
+        d.rounded_rectangle([20, 18, 20 + box_w, 18 + box_h], radius=10,
+                             fill=(8, 9, 14, int(150 * alpha)))
+        d.text((20 + pad, 18 + 10), title, font=font_title, fill=(255, 255, 255, int(255 * alpha)))
+        d.text((20 + pad, 18 + 40), sub, font=font_sub, fill=(205, 210, 222, int(230 * alpha)))
+        return Image.alpha_composite(img.convert('RGBA'), overlay)
+
+    def draw_footer(img):
+        overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(overlay)
+        text = 'visloc-rs \u00b7 one command \u00b7 pure Rust + wgpu'
+        tw = d.textlength(text, font=font_foot)
+        x = (img.size[0] - tw) / 2
+        y = img.size[1] - 30
+        d.rounded_rectangle([x - 10, y - 5, x + tw + 10, y + 20], radius=8, fill=(6, 7, 11, 130))
+        d.text((x, y), text, font=font_foot, fill=(225, 227, 235, 235))
+        return Image.alpha_composite(img.convert('RGBA'), overlay)
+
+    def load(prefix, k):
+        return Image.open(f'{work}/{prefix}_{k:04d}.png').convert('RGBA')
+
+    for k in range(N_FRAMES):
+        if k < P1_END:
+            base = load('pts', k); label = (1, 1.0)
+        elif k < P2_START:
+            a = (k - P1_END + 1) / (XF1 + 1)
+            base = Image.blend(load('pts', k), load('splat', k), a)
+            label = (1, 1 - a) if a < 0.5 else (2, (a - 0.5) * 2)
+        elif k < P2_END:
+            base = load('splat', k); label = (2, 1.0)
+        elif k < P2_END + XF2:
+            a = (k - P2_END + 1) / (XF2 + 1)
+            base = Image.blend(load('splat', k), load('mesh', k), a)
+            label = (2, 1 - a) if a < 0.5 else (3, (a - 0.5) * 2)
+        else:
+            base = load('mesh', k); label = (3, 1.0)
+
+        base = draw_label(base, label[0], label[1])
+        base = draw_footer(base)
+        out_w = args.width
+        out_h = int(round(H * out_w / W))
+        base = base.convert('RGB').resize((out_w, out_h), Image.LANCZOS)
+        base.save(f'{work}/final_{k:04d}.png')
+    print('composite done', flush=True)
+
+
+def encode_gif(work, args):
+    ffmpeg = args.ffmpeg
+    stride = max(1, args.stride)
+    out_fps = FPS / stride
+
+    frame_dir = f'{work}/final_%04d.png'
+    if stride > 1:
+        # GIF size is dominated by frame count far more than by color/dither
+        # settings for this kind of high-frequency photoreal content; keep
+        # every Nth composited frame and play back proportionally slower so
+        # total duration (and the real-time orbit speed) is unchanged.
+        dec_dir = f'{work}/decimated'
+        os.makedirs(dec_dir, exist_ok=True)
+        for f in os.listdir(dec_dir):
+            os.remove(os.path.join(dec_dir, f))
+        j = 0
+        for k in range(0, N_FRAMES, stride):
+            shutil.copy(f'{work}/final_{k:04d}.png', f'{dec_dir}/final_{j:04d}.png')
+            j += 1
+        frame_dir = f'{dec_dir}/final_%04d.png'
+
+    palette = f'{work}/palette.png'
+    subprocess.run([ffmpeg, '-y', '-framerate', str(out_fps), '-i', frame_dir,
+                     '-vf', f'palettegen=max_colors={args.colors}', '-update', '1', palette], check=True)
+    out_path = args.out
+    os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
+    subprocess.run([ffmpeg, '-y', '-framerate', str(out_fps), '-i', frame_dir,
+                     '-i', palette, '-lavfi', f'paletteuse=dither={args.dither}', '-loop', '0',
+                     out_path], check=True)
+    size = os.path.getsize(out_path)
+    print(f'wrote {out_path} ({size/1e6:.2f} MB, {out_fps:.1f} fps)', flush=True)
+
+
+if __name__ == '__main__':
+    main()
