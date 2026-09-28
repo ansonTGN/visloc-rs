@@ -1,7 +1,7 @@
 <h1 align="center">visloc-rs</h1>
 
 <p align="center">
-  <strong>GPS-denied visual localization, VO/SfM, and SLAM building blocks for robots and UAVs &mdash; in pure Rust.</strong>
+  <strong>Structure from Motion, visual-inertial SLAM, 3D Gaussian Splatting and map-based localization &mdash; in pure Rust.</strong>
 </p>
 
 <p align="center">
@@ -11,39 +11,45 @@
   <img src="https://img.shields.io/badge/core-no%20mandatory%20ML%20runtime-35d0ba" alt="No mandatory ML runtime">
 </p>
 
-## Measured at a glance
+<p align="center">
+  <img src="docs/assets/hero_reconstruction.gif" alt="One continuous orbit camera circling the south-building reconstruction from a viewpoint no input photo has: the sparse SfM point cloud and recovered camera frustums pop in, dissolve into the photoreal 3D Gaussian splat rendered with visloc-rs's own Rust + wgpu renderer, then dissolve into the extracted mesh." width="640"><br>
+  <sub>128 raw photos &rarr; camera poses &rarr; Gaussian splat &rarr; mesh, one command, no COLMAP or Python, orbited from a viewpoint none of the input photos have. <a href="#photos-to-splat-and-mesh-3d-gaussian-splatting">Details</a>.</sub>
+</p>
 
-| Real-data result | visloc-rs | COLMAP 3.9.1 CPU | Outcome |
-| --- | ---: | ---: | ---: |
-| ETH3D Electro 1,200, same-input CPU8 end to end | **27:29** | 1:35:05 | **3.46× faster** |
-| ETH3D Electro registered cameras | **1200/1200** | **1200/1200** | parity |
-| ETH3D Electro camera-centre RMSE | **3.50 cm** | 4.68 cm | **25.2% lower** |
-| ETH3D Courtyard camera-centre RMSE | **0.5379 cm** | 1.6166 cm | **66.7% lower** |
+## In a nutshell
 
-The comparisons use real images and measured runs; the
-[SfM benchmark details](docs/sfm_benchmarks.md) state where inputs or accounting
-differ. Separately, on the connected
-OpenLORIS 10k stress set, streamed VLAD + LSH cuts visloc-rs candidate
-generation from 49:49 to **8:51 (5.63×)**. That is a visloc retrieval A/B,
-not an end-to-end COLMAP comparison. The frozen measurements
-and output hashes are in
-[`m6-ann-streaming.json`](benchmarks/electro/m6-ann-streaming.json).
+visloc-rs turns camera images (optionally with an IMU) into camera poses, 3D
+maps and photorealistic scenes, and localizes new images against those maps.
+Everything is Rust: no C++, OpenCV or CUDA toolchain to build. GPU work runs
+on any GPU through wgpu. Models are read and written in COLMAP format, so
+results plug into existing tools.
 
-Separately, the [Visual-Inertial SLAM (Basalt Rust port)](#visual-inertial-slam-basalt-rust-port)
-— a distinct, tightly-coupled stereo-inertial VIO stack, not the vision-only
-SfM/SLAM pipeline above — matches native Basalt's ATE to **within 0.1%** on
-every one of the 11 EuRoC sequences at seed 7, with **0.563×** native's peak
-RSS on the same-domain Linux runtime/RSS gate (1.133× runtime ratio). With
-EuRoC's official calibration and its offline mapper stage, the same estimator
-**beats measured ORB-SLAM3 (full-trajectory SE(3) ATE) on 8 of 11 EuRoC
-sequences**, same evaluator, one run each.
+| What | Headline result (measured, real data) | vs |
+| --- | --- | --- |
+| **Photo SfM** (unordered images) | ETH3D Electro 1,200 images: **3.46× faster**, **25% lower** camera-centre error; 9,996 / 10,008 cameras registered across all ten ETH3D many-view scenes | COLMAP 3.9 CPU |
+| **GPU SfM** (video frames) | EuRoC: **faster on 8/8** sequences (1.4–7.5×), **more accurate on 4/8**, equal on 1; COLMAP breaks on MH_05 (194 cm vs 2.6 cm) | COLMAP 4.1 CUDA |
+| **Stereo-inertial VI-SLAM** (Basalt port + online mapper) | **Beats ORB-SLAM3 on 8/11** EuRoC sequences; within **0.1%** of native Basalt's ATE on all 11 | ORB-SLAM3, Basalt |
+| **Photos → 3D Gaussian Splatting + mesh** | **Faster than brush on 5/5** benchmark scenes, PSNR within 0.05 dB on 4 | brush 0.3 |
+| **Localization against a prebuilt map** | OpenLORIS robot rig: **98.96%** of 1,250 held-out frames localized, median 2.9 mm; simulated house: 38 ms / frame | — |
+| **Stereo / RGB-D VO** | KITTI 00 **1.23 m** and 09 **2.07 m** (ORB-SLAM2: 1.3 m / 3.2 m); TUM fr1_xyz 1.4 cm | ORB-SLAM2 |
 
-On the connected OpenLORIS 10k stress set, visloc's experimental
-observation-backed atlas preserves the connected frame counts and meets the p95
-target, but **RMSE parity is still open** (0.3890 m vs the 0.3843 m COLMAP
-control); the native diagnostic completes all 17 stages **20.41×** faster with
-**17.0%** lower peak RSS. Full comparison tables and caveats:
-[SfM benchmark details](docs/sfm_benchmarks.md).
+**Where it still loses**, measured the same way: COLMAP CUDA is more
+accurate on 3 of the 8 EuRoC sequences and registers more of the blurred
+frames; ORB-SLAM3 wins 3 of 11 EuRoC sequences (MH_04, MH_05, V2_03); the
+VI-SLAM runs at 0.09–0.38× real time; OpenLORIS 10k rig SfM is not yet at
+COLMAP's RMSE. Every number above links to a benchmark doc with the
+commands to reproduce it.
+
+### Contents
+
+- [Sensor support](#sensor-support)
+- [Try it](#try-it)
+- [Structure from Motion](#structure-from-motion) — ETH3D, EuRoC GPU SfM vs COLMAP CUDA
+- [Photos to splat and mesh](#photos-to-splat-and-mesh-3d-gaussian-splatting)
+- [Visual-inertial SLAM](#visual-inertial-slam-basalt-rust-port)
+- [Localize against a map](#localize-against-a-map)
+- [More results](#more-results) — KITTI, TUM RGB-D, sequential SfM
+- [Documentation](#documentation)
 
 ## Sensor support
 
@@ -67,7 +73,25 @@ the docs record open gaps.
 
 LiDAR and wheel odometry are not supported.
 
-## SfM and SLAM benchmarks
+## Try it
+
+Requires Rust 1.83+ only. Datasets are external inputs and are not bundled.
+
+```bash
+# Photos -> camera poses, Gaussian splat and mesh (GPU via wgpu)
+cargo run --release -p visloc-gsplat-train --features gpu,euroc --example gsplat_photos --   --images /path/to/my_photos --out runs/my-scene
+
+# Stereo-inertial VI-SLAM on a EuRoC sequence
+cargo run --release --example basalt_euroc_online_slam_demo --features basalt-lm-workspace-reuse --   --euroc-dir /path/to/MH_01_easy   --calibration configs/basalt/variants/official_euroc_ds/euroc_ds_calib.json   --config configs/basalt/variants/official_euroc_ds/euroc_config.json   --out-dir target/basalt_mh01_online
+
+# Smallest end-to-end check: localize a synthetic query, no data needed
+cargo run --example localize_dummy
+```
+
+Full options for each are in the sections below; `scripts/check.sh` runs the
+complete local quality gate (`fmt`, `clippy`, `test`, `doc`).
+
+## Structure from Motion
 
 visloc-rs registers **9,996/10,008 cameras (99.88%)** across every ETH3D
 low-resolution many-view scene with no mapper run above 3.32 GiB, reconstructs
@@ -99,6 +123,18 @@ camera-centre RMSE, and beats official COLMAP on the 38-image courtyard control
 </p>
 
 <p align="center"><sub>Same-input CPU8 Electro 1,200: visloc-rs <b>3.46× faster</b> and <b>25.2% lower</b> camera-centre RMSE than COLMAP. Unordered SfM, sequential SfM vs COLMAP, and EuRoC reconstruction evidence are in the <a href="docs/unordered_sfm_benchmark.md">SfM benchmark docs</a>.</sub></p>
+
+### Large connected collections
+
+On the connected OpenLORIS 10k stress set, streamed VLAD + LSH cuts visloc-rs
+candidate generation from 49:49 to **8:51 (5.63×)** (a retrieval A/B, not an
+end-to-end COLMAP comparison; frozen measurements and output hashes in
+[`m6-ann-streaming.json`](benchmarks/electro/m6-ann-streaming.json)). The
+experimental observation-backed atlas preserves the connected frame counts and
+meets the p95 target, but **RMSE parity is still open** (0.3890 m vs the
+0.3843 m COLMAP control); the native diagnostic completes all 17 stages
+**20.41×** faster with **17.0%** lower peak RSS. Full tables and caveats:
+[SfM benchmark details](docs/sfm_benchmarks.md).
 
 ### GPU SfM vs COLMAP (CUDA) on EuRoC
 
@@ -185,7 +221,8 @@ cargo run --release -p visloc-gsplat-train --features gpu,euroc --example gsplat
 <p align="center">
   <img src="docs/assets/photos_to_mesh.gif" alt="south-building: each raw input photo next to the trained Gaussian splat and the extracted mesh rendered from the same recovered pose" width="900">
 </p>
-<p align="center"><sub>The 128 raw south-building JPGs: every image registered, focal refined from EXIF 796 px to 847.0 px (COLMAP: 847.2), held-out PSNR 22.77 at 30k steps, 37 min end to end. <a href="scripts/make_photos_demo_gif.py">Script</a>.</sub></p>
+
+The GIF above is the 128 raw south-building JPGs, each next to the trained Gaussian splat and the extracted mesh rendered from that photo's own recovered pose. Every image registered, focal refined from EXIF 796 px to 847.0 px (COLMAP: 847.2), held-out PSNR 22.77 at 30k steps, 37 min end to end ([GIF script](scripts/make_photos_demo_gif.py)). The orbiting GIF at the top of this page is the same run, viewed from a camera path none of the input photos have; its generator is [`scripts/make_readme_hero.py`](scripts/make_readme_hero.py).
 
 To reproduce the run and the GIF, use the raw `images/` of COLMAP's
 south-building dataset. `gsplat_photos` prints the focal refinement and
@@ -300,9 +337,7 @@ cargo run --release --example basalt_euroc_vio_demo --features basalt-lm-workspa
   --pipeline --pipeline-capacity 4 --threads 12
 ```
 
-## Quickstart
-
-Requires Rust 1.83+ only — no C++/OpenCV/CUDA toolchain.
+## Localize against a map
 
 Smallest end-to-end: localize a synthetic query against a 1-landmark map.
 
@@ -347,7 +382,7 @@ More runnable demos and the full index are in the
 [demo strategy](docs/demo_strategy.md) and the
 [archived README details](docs/readme_details.md#demos).
 
-## Verified results
+## More results
 
 Local public-data development measurements, not official leaderboard submissions.
 The headline snapshot is registry-backed by
