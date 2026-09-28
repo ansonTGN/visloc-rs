@@ -36,6 +36,21 @@ members = [
 ]
 resolver = "2"
 
+# Build-level speed lever for the real-time VI-SLAM push: fat LTO,
+# single codegen unit, and no unwind tables, layered on top of the
+# default `release` profile without changing it (other binaries/tests
+# keep the historical release profile). Build with
+# `cargo build --profile release-rt ...`; output lands in
+# `target/release-rt/` instead of `target/release/`. This is a pure
+# codegen change -- it must not alter any algorithm's output, so any use
+# of it is verified bit-identical (VIO trajectory hash) against the
+# `release` profile before being adopted for real measurements.
+[profile.release-rt]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
