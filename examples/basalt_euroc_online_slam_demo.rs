@@ -139,6 +139,13 @@ struct Args {
     relative_pose_weight: Option<f64>,
     /// Weight for raw preintegrated-IMU mapper edges; None means disabled (0.0).
     imu_preintegration_weight: Option<f64>,
+    /// Weight for the joint visual-inertial global BA (full 15-dof-per-
+    /// keyframe navigation state: pose + velocity + gyro/accel bias, solved
+    /// jointly with preintegrated-IMU and bias-random-walk factors between
+    /// consecutive keyframes; see `mapper::imu_ba`). A materially different,
+    /// more expensive lever than `imu_preintegration_weight`'s frozen-
+    /// velocity edges; None means disabled (0.0).
+    joint_vi_ba_weight: Option<f64>,
     /// Scalar multiplier on the marginalisation-derived roll/pitch
     /// (gravity-direction) factors (`MapperFactors::roll_pitch`, only
     /// emitted when the source `MargData` used IMU). `None` keeps
@@ -301,11 +308,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         num_opt_iter: args.num_opt_iter,
         ..visloc_basalt::mapper::NfrMapperHeadlessConfig::default()
     };
-    let imu_samples_for_mapper = if args.imu_preintegration_weight.is_some() {
-        std::sync::Arc::from(dataset.imu_samples())
-    } else {
-        std::sync::Arc::from([])
-    };
+    let imu_samples_for_mapper =
+        if args.imu_preintegration_weight.is_some() || args.joint_vi_ba_weight.is_some() {
+            std::sync::Arc::from(dataset.imu_samples())
+        } else {
+            std::sync::Arc::from([])
+        };
     let online_mapper = OnlineNfrMapper::new(
         mapper_config,
         dataset.calibration().clone(),
@@ -314,6 +322,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         OnlineMapperConfig {
             imu_samples: imu_samples_for_mapper,
             imu_preintegration_weight: args.imu_preintegration_weight.unwrap_or(0.0),
+            joint_vi_ba_weight: args.joint_vi_ba_weight.unwrap_or(0.0),
             optimize_every_k: args.optimize_every_k,
             periodic_iterations: args.periodic_iterations,
             headless,
@@ -1035,6 +1044,7 @@ impl Args {
         let mut local_ba_window = OnlineMapperConfig::default().local_ba_window;
         let mut local_ba_iterations = OnlineMapperConfig::default().local_ba_iterations;
         let mut imu_preintegration_weight = None;
+        let mut joint_vi_ba_weight = None;
         let mut relative_pose_weight = None;
         let mut roll_pitch_weight = None;
         let mut arguments = arguments.into_iter();
@@ -1178,6 +1188,14 @@ impl Args {
                             })?,
                     );
                 }
+                "--joint-vi-ba-weight" => {
+                    joint_vi_ba_weight = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<f64>()
+                            .map_err(|error| format!("invalid --joint-vi-ba-weight: {error}"))?,
+                    );
+                }
                 "--relative-pose-weight" => {
                     relative_pose_weight = Some(
                         next(&mut arguments, &option)?
@@ -1260,6 +1278,7 @@ impl Args {
             local_ba_window,
             local_ba_iterations,
             imu_preintegration_weight,
+            joint_vi_ba_weight,
             relative_pose_weight,
             roll_pitch_weight,
         })
@@ -1274,7 +1293,8 @@ impl Args {
          [--match-top-k N] [--frontend-stats-csv <path>]          [--projection-rematch] [--local-mapping] [--imu-seed-klt]          [--projection-host-window N] [--projection-radius PX] \
          [--loop-closure-factors] [--loop-closure-min-corr N] [--loop-closure-weight W] \
          [--loop-closure-max-rot-error DEG] [--local-ba-window N] [--local-ba-iterations N] \
-         [--relative-pose-weight W] [--roll-pitch-weight W] [--imu-preintegration-weight W]"
+         [--relative-pose-weight W] [--roll-pitch-weight W] [--imu-preintegration-weight W] \
+         [--joint-vi-ba-weight W]"
             .into()
     }
 }
@@ -1313,6 +1333,7 @@ mod tests {
             OnlineMapperConfig::default().periodic_iterations
         );
         assert_eq!(args.imu_preintegration_weight, None);
+        assert_eq!(args.joint_vi_ba_weight, None);
         assert_eq!(args.relative_pose_weight, None);
         assert_eq!(args.roll_pitch_weight, None);
     }
@@ -1332,6 +1353,23 @@ mod tests {
         )
         .expect("parses");
         assert_eq!(args.imu_preintegration_weight, Some(3.5));
+    }
+
+    #[test]
+    fn parser_accepts_joint_vi_ba_weight() {
+        let args = Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--joint-vi-ba-weight",
+                "2.5",
+            ]
+            .map(Into::into),
+        )
+        .expect("parses");
+        assert_eq!(args.joint_vi_ba_weight, Some(2.5));
     }
 
     #[test]
