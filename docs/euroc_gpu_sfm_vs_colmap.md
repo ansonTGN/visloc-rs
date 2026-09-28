@@ -189,8 +189,12 @@ possible through `--import-features`:
     - V1_03 registers 118 (COLMAP: 80).
   - Accuracy drops: V2_03 goes to 4.37 cm (SIFT 3.37, COLMAP 2.85) and V1_03
     to 8.74 cm (SIFT 2.17, COLMAP 1.98). A likely cause is that the ONNX
-    export returns integer-pixel keypoints; the next step is sub-pixel
-    SuperPoint keypoints.
+    export returns integer-pixel keypoints. Refining them on the image with
+    `cv2.cornerSubPix` (5×5 window, shifts under 1 px) did not settle it:
+    - V2_03 got worse (5.03 cm at 172 frames).
+    - V1_03 got better but registered fewer frames (3.46 cm at 98 frames).
+    - So quantisation is not the main cause. SuperPoint's keypoint
+      localisation is simply looser than SIFT's sub-pixel extrema.
 - **Denser skip pairs on V2_01.** Skips every 10 frames out to 190 give
   200/200 frames at 2.90 cm, against 199 frames at 3.30 cm.
 
