@@ -562,8 +562,10 @@ impl OnlineNfrMapper {
         );
 
         mapper_trace!("ingest_packet: add_marg_data start");
+        let retain_velocity_bias =
+            self.config.imu_preintegration_weight > 0.0 || self.config.joint_vi_ba_weight > 0.0;
         self.mapper
-            .add_marg_data_with_velocity_bias(data, self.config.imu_preintegration_weight > 0.0)
+            .add_marg_data_with_velocity_bias(data, retain_velocity_bias)
             .map_err(OnlineMapperError::Ingest)?;
         if self.config.imu_preintegration_weight > 0.0 {
             use std::ops::Bound::{Excluded, Unbounded};
@@ -2799,6 +2801,42 @@ mod tests {
                 assert!(online.imu_pairs.is_empty());
             }
         }
+    }
+
+    /// Direct regression test for a real bug caught while running the joint
+    /// solver online: `ingest_packet` only retained navigation states
+    /// (`frame_velocity_bias`) when `imu_preintegration_weight > 0.0`, so
+    /// `joint_vi_ba_weight`-only mode built zero `imu_ba_pairs` (the ingest
+    /// block's `self.mapper.frame_velocity_bias.get(&prev_id)` was always
+    /// `None`) despite loading raw IMU samples and appearing to run
+    /// normally -- a silent no-op, not a crash, which the manual
+    /// `frame_velocity_bias` pre-seed in the test above did not catch since
+    /// it bypassed real ingestion. This test does not pre-seed anything: it
+    /// only checks that `ingest_packet` itself populates
+    /// `mapper.frame_velocity_bias` when only `joint_vi_ba_weight` is set.
+    #[test]
+    fn joint_vi_ba_only_mode_retains_velocity_bias_at_ingest() {
+        let mut packet = fixture_packet();
+        let calibration = feature_calibration();
+        let mut online = OnlineNfrMapper::new(
+            MapperConfig::default(),
+            calibration,
+            OfflineMapperConfig::default(),
+            GlobalBaConfig::default(),
+            OnlineMapperConfig {
+                imu_samples: Arc::from([]),
+                imu_preintegration_weight: 0.0,
+                joint_vi_ba_weight: 5.0,
+                ..OnlineMapperConfig::default()
+            },
+        );
+        assert!(online.mapper.frame_velocity_bias.is_empty());
+        online.ingest_packet(&mut packet, Some(TEST_SEED)).unwrap();
+        assert!(
+            !online.mapper.frame_velocity_bias.is_empty(),
+            "joint_vi_ba_weight-only ingest must retain navigation states, \
+             the same way imu_preintegration_weight-only ingest does"
+        );
     }
 
     #[test]
