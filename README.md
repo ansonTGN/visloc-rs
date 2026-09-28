@@ -28,15 +28,15 @@ results plug into existing tools.
 | --- | --- | --- |
 | **Photo SfM** (unordered images) | ETH3D Electro 1,200 images: **3.46× faster**, **25% lower** camera-centre error; 9,996 / 10,008 cameras registered across all ten ETH3D many-view scenes | COLMAP 3.9 CPU |
 | **GPU SfM** (video frames) | EuRoC: **faster on 8/8** sequences (1.4–7.5×), **more accurate on 4/8**, equal on 1; COLMAP breaks on MH_05 (194 cm vs 2.6 cm) | COLMAP 4.1 CUDA |
-| **Stereo-inertial VI-SLAM** (Basalt port + online mapper) | **Beats ORB-SLAM3 on 8/11** EuRoC sequences; within **0.1%** of native Basalt's ATE on all 11 | ORB-SLAM3, Basalt |
+| **Stereo-inertial VI-SLAM** (Basalt port + online mapper) | **Real time on 11/11** EuRoC sequences (1.06–1.68×); **beats ORB-SLAM3 on 9/11** | ORB-SLAM3, Basalt |
 | **Photos → 3D Gaussian Splatting + mesh** | **Faster than brush on 5/5** benchmark scenes, PSNR within 0.05 dB on 4 | brush 0.3 |
 | **Localization against a prebuilt map** | OpenLORIS robot rig: **98.96%** of 1,250 held-out frames localized, median 2.9 mm; simulated house: 38 ms / frame | — |
 | **Stereo / RGB-D VO** | KITTI 00 **1.23 m** and 09 **2.07 m** (ORB-SLAM2: 1.3 m / 3.2 m); TUM fr1_xyz 1.4 cm | ORB-SLAM2 |
 
 **Where it still loses**, measured the same way: COLMAP CUDA is more
 accurate on 3 of the 8 EuRoC sequences and registers more of the blurred
-frames; ORB-SLAM3 wins 3 of 11 EuRoC sequences (MH_04, MH_05, V2_03); the
-VI-SLAM runs at 0.09–0.38× real time; OpenLORIS 10k rig SfM is not yet at
+frames; ORB-SLAM3 wins 2 of 11 EuRoC sequences (MH_04, MH_05); OpenLORIS
+10k rig SfM is not yet at
 COLMAP's RMSE. Every number above links to a benchmark doc with the
 commands to reproduce it.
 
