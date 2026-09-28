@@ -263,6 +263,117 @@ frames SIFT's mapper leaves split or unregistered, but nothing tried so far
 carries SIFT's precision across that bridge. The remaining gap on V1_03,
 V2_03 and V2_01 is still open.
 
+### Bisecting the gap: mapper vs. frontend (2026-09-28)
+
+To localize where V2_01, V1_03 and V2_03's remaining gap lives, COLMAP's own
+keypoints and verified two-view matches (from its `db.db`) were fed straight
+into the colmap-port mapper two ways: **A1** (COLMAP features *and* COLMAP
+matches, via `--import-colmap`, bypassing our matching/verification
+entirely) and **A2** (COLMAP features, but our own matching/verification,
+via `--import-features`), compared against **A3** (our full pipeline,
+i.e. the table above).
+
+| Sequence | A3 (ours) | A1 (COLMAP feat+match → our mapper) | A2 (COLMAP feat + our matching) | COLMAP |
+| --- | ---: | ---: | ---: | ---: |
+| V2_01 | 199/200, 3.30 cm | 198/200, **1.00 cm** | 196/200, 1.20 cm | 200/200, 1.00 cm |
+| V1_03 | 67/200, 2.17 cm | 62/200, 2.96 cm | 60/200, 12.40 cm | 80/200, 1.98 cm |
+| V2_03 | 118/200, 3.37 cm | 126/200, 6.95 cm | 176/200, **3.22 cm** | 180/200, 2.85 cm |
+
+- **V2_01 and V2_03: the mapper is not the problem.** A1 on V2_01 ties
+  COLMAP's own ATE almost exactly (1.00 vs 1.00 cm) using our mapper on
+  COLMAP's exact features and matches. A2 on V2_03 (COLMAP's features
+  through our own matching) nearly matches COLMAP's registration and
+  accuracy (176/200 at 3.22 cm vs COLMAP's 180/200 at 2.85 cm). On both
+  sequences the gap is SIFT feature quality: our GPU SIFT's own keypoints,
+  not the mapper or the matcher, are what cost accuracy.
+- **V1_03: the mapper itself is short of COLMAP.** A1 gives the port mapper
+  the *exact same* features and matches COLMAP used (756 verified pairs) and
+  it still only registers 62/200 at 2.96 cm, against COLMAP's 80/200 at 1.98
+  cm on that identical input. This is a real mapper-vs-mapper gap (growth/
+  registration-order/recovery), independent of the frontend. A2 makes it
+  much worse (60/200, 12.40 cm) — our own matching on COLMAP's features
+  introduces bad correspondences the verified-COLMAP-matches in A1 don't
+  have. Not investigated further this round; the next step is diffing the
+  port's register-next-image loop (registration trials per image, local BA
+  after each registration, init-pair retries, `min_num_matches`,
+  re-registration after global BA) against COLMAP's
+  `incremental_pipeline.cc`/`incremental_mapper.cc` on the A1 inputs.
+
+  A first diagnostic pass on A1 (COLMAP's own features and matches, so the
+  input is byte-identical to what COLMAP itself grew to 80/200 in one
+  model): the colmap-port mapper produces **4 separate models, sizes
+  `[62, 60, 49, 25]`**, against COLMAP's single 80-frame model spanning
+  frames 0-122 (continuously 0-59, then 63-69, 69-90, 119-122 — COLMAP
+  itself leaves 60-62, 70-81 and 91-118 unregistered, so even COLMAP
+  doesn't reach every frame, it just keeps growing *one* model through the
+  gaps instead of abandoning it and starting over). So the gap isn't
+  "our mapper can't register frame X" in isolation — several of COLMAP's
+  registered frames do get registered by our port, just split across four
+  separate reconstructions instead of accumulating into one. That points
+  at the mapper's stall/restart behavior: once `find_next_images`'s
+  candidate pool empties (every remaining unregistered image has either
+  `< abs_pose_min_num_inliers` visible points or has exhausted
+  `max_reg_trials`), `reconstruct_sub_model` ends and `run()` starts a
+  fresh model from a new seed pair rather than ever revisiting the
+  abandoned frontier. Whether COLMAP's own mapper hits the same stall
+  condition but recovers (e.g. a different filtering/BA schedule leaves
+  more points visible per candidate, so fewer images exhaust their trial
+  budget before clearing 30 inliers) is the open question — it needs
+  frame-by-frame visibility-count instrumentation on both sides, which
+  wasn't done this round.
+
+### GPU SIFT subpixel localization (2026-09-28)
+
+Given A1/A2 point at feature quality on V2_01/V2_03, the GPU SIFT extrema
+detector was audited against COLMAP's. Neither our CPU "legacy" DoG detector
+(`detect_extremum` in `crates/vision/src/features/sift.rs`) nor its GPU port
+(`crates/sift-gpu`) do any subpixel refinement — extrema stay on the
+integer pixel/octave grid. COLMAP's SiftGPU (and VLFeat, which COLMAP's CPU
+SIFT is based on) refine each extremum to subpixel (x, y, scale) precision
+with a quadratic Newton fit, iterating into a neighbouring sample when the
+fitted offset exceeds half a pixel. This is a real, previously-unexamined
+gap, not on the earlier negative-lever list.
+
+Implemented as an opt-in `--sift-opt subpixel_localization=1` flag (default
+off, verified bit-identical to the existing GPU SIFT output when off) and
+tried three variants on V2_01/V1_03/V2_03, all reverted after the results
+below (the flag no longer exists in the tree):
+
+| Variant | V2_01 ATE (reg.) | V1_03 ATE (reg.) | V2_03 ATE (reg.) |
+| --- | ---: | ---: | ---: |
+| Baseline (A3, no refinement) | 3.30 cm (199) | 2.17 cm (67) | 3.37 cm (118) |
+| 2D (x,y) single-shot, clamp offset to ±0.6 | 1.53 cm (197) | 2.99 cm (99) | 16.56 cm (118) |
+| 2D (x,y) single-shot, reject if offset > 0.5 | 3.91 cm (198) | **1.19 cm (62)** | 12.78 cm (118) |
+| Full 3D (x,y,scale) iterative, VLFeat/Lowe-style (5 iters, neighbour-shift, refined contrast/edge retest) | 2.76 cm (197) | 2.89 cm (86) | 11.91 cm (119) |
+| Full 3D + refine only extrema with `|v| > 2×contrast` | 2.75 cm (197) | 2.89 cm (86) | 11.91 cm (119) |
+
+- **V2_01 improves under every variant** (3.30 → 1.53–3.91 cm; best with the
+  permissive clamp policy), consistent with A1's finding that V2_01's gap is
+  feature-localization quality — but no variant reaches COLMAP's 1.00 cm.
+- **V2_03 regresses badly under every variant** (3.37 → 11.9–16.6 cm), even
+  the theoretically-correct full iterative version with edge/contrast
+  retests at the converged location, and even after gating refinement to
+  only comfortably-above-threshold extrema (which changed nothing —
+  ruling out marginal-contrast points as the cause). Four independent
+  implementations landing in the same place is strong evidence this is a
+  real property of V2_03's blur interacting with subpixel correction, not
+  an implementation bug: refining keypoint positions on already-ambiguous,
+  motion-blurred DoG surfaces moves points in ways that hurt the mapper's
+  BA more than the integer-grid position did.
+- **V1_03 is mixed**: worse under the clamp and iterative-3D variants,
+  clearly better under the plain reject policy (2.17 → 1.19 cm, though at
+  fewer registered frames, 67 → 62).
+- No variant flips any of the three losing sequences into a win, and the
+  best V2_01 result still trades off a large V2_03 regression under the
+  same flag — the gate requires one fixed config across all 8 sequences, so
+  none of these are adoptable as-is. Honest negative; recorded here, code
+  reverted.
+
+The remaining gap on V2_01 and V2_03 is confirmed to be GPU SIFT feature
+quality (not the mapper or matcher), but subpixel localization alone isn't
+the fix — something about it interacts badly with blur. V1_03 is a
+separate, mapper-side gap.
+
 ## Reproduce
 
 ```text
