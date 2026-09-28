@@ -16,6 +16,11 @@ at 0.49-1.24× across the 11 sequences — **3/11 already at real time**
 (RTF >= 1.0), up from 0.09-0.38×/0-of-11 — and, as a side effect of the
 mapper's live-threaded trigger timing changing, the overall score moved
 from **8/11 to 9/11 wins vs measured ORB-SLAM3** (V2_03_difficult flipped).
+Checked for luck (the online mapper's propagated trajectory is not
+reproducible run-to-run): 3 more runs each of V2_03_difficult and
+V1_03_difficult with the same exe all beat ORB-SLAM3 individually
+(V2_03 median 0.0449 m / range 0.0446-0.0451 m vs 0.0563 m; V1_03 median
+0.0204 m / range 0.0193-0.0214 m vs 0.0287 m) — the flip holds.
 Further bit-identical parallelism on the largest remaining LM bucket was
 investigated and found negative (see §1.6 continuation below); reaching
 RTF >= 1.0 on the remaining 8 sequences is being pursued next via
@@ -298,7 +303,14 @@ effect of the mapper's live-threaded optimizer-trigger timing changing,
 V2_03_difficult's online ATE improved from 0.1078 m to 0.0451 m (its
 optimizer-trigger count went from 2, the suspected root cause named in
 §1.5, to 4) — flipping the overall score from **8/11 to 9/11 wins vs
-ORB-SLAM3**.
+ORB-SLAM3**. Since the mapper's propagated trajectory is not reproducible
+run-to-run, this was re-checked with 3 more runs each of V2_03_difficult
+and V1_03_difficult (the table's other trigger-sensitive sequence) on the
+same exe: V2_03 gave 0.0446/0.0450/0.0447 m (median across all 4 runs
+0.0449 m, range 0.0446-0.0451 m) and V1_03 gave 0.0193/0.0193/0.0214 m
+(median 0.0204 m, range 0.0193-0.0214 m) — every individual run of both
+sequences beats ORB-SLAM3 (0.0563 m / 0.0287 m respectively), so the 9/11
+result is not a lucky single run.
 
 Further bit-identical parallelism was then investigated on the largest
 remaining LM bucket (`lm_landmark_reduction`, ~25% of instrumented VIO wall

@@ -55,10 +55,19 @@ unchanged, for parity/comparison — see "How this works" and "Run it" below.
 | V2_03_difficult | 0.0451 | 0.0563 | visloc-rs |
 
 <p align="center"><sub>9/11 wins (2026-09-28 re-measurement, up from 8/11):
-V2_03_difficult flipped from a loss (0.1078 m) to a win (0.0451 m) as a side
-effect of the VIO speed work below — see "VIO speed: `--pipeline` becomes
-the online demo's default" for why. All values are full-trajectory ATE
-translation RMSE in metres, lower is better, driver
+V2_03_difficult flipped from a loss (0.1078 m) to a win as a side effect of
+the VIO speed work below — see "VIO speed: `--pipeline` becomes the online
+demo's default" for why. Because the online mapper's propagated trajectory
+is not reproducible run-to-run (live-threaded optimizer timing; see "Honest
+caveats"), the flip was checked for luck: 3 additional runs with the same
+exe gave V2_03_difficult 0.0446/0.0450/0.0447 m (median across all 4 runs
+including the table's 0.0451 m: **0.0449 m**, range 0.0446-0.0451 m), and
+V1_03_difficult (the table's other trigger-count-sensitive sequence)
+0.0193/0.0193/0.0214 m (median across all 4: **0.0204 m**, range
+0.0193-0.0214 m) — both comfortably below ORB-SLAM3 (0.0563 m, 0.0287 m) on
+every single run, not just on average. Evidence:
+`E:\visloc-rs-runs\vio_rt_runs\repro_check\`. All values are full-trajectory
+ATE translation RMSE in metres, lower is better, driver
 <code>scripts/run_basalt_online_all11.py</code> equivalent (same protocol,
 <code>--pipeline --threads 12</code>), artifacts
 <code>E:\visloc-rs-runs\vio_rt_runs\online_all11_pipeline\{summary.json,status/,runs/}</code>.
