@@ -519,14 +519,40 @@ impl IncrementalMapper {
             confidence: None,
         };
         let Some(report) = ransac.estimate(&correspondences, &camera) else {
+            if std::env::var_os("VISLOC_DEBUG_REG_FAIL").is_some() {
+                eprintln!(
+                    "REG_FAIL frame={} image={} correspondences={} reason=no_pose",
+                    recon.image(image_id).frame_id,
+                    image_id,
+                    correspondences.len()
+                );
+            }
             return false;
         };
         if report.inliers.len() < options.abs_pose_min_num_inliers {
+            if std::env::var_os("VISLOC_DEBUG_REG_FAIL").is_some() {
+                eprintln!(
+                    "REG_FAIL frame={} image={} correspondences={} inliers={} reason=too_few_inliers",
+                    recon.image(image_id).frame_id,
+                    image_id,
+                    correspondences.len(),
+                    report.inliers.len()
+                );
+            }
             return false;
         }
         if (report.inliers.len() as f64) / (correspondences.len() as f64)
             < options.abs_pose_min_inlier_ratio
         {
+            if std::env::var_os("VISLOC_DEBUG_REG_FAIL").is_some() {
+                eprintln!(
+                    "REG_FAIL frame={} image={} correspondences={} inliers={} reason=low_ratio",
+                    recon.image(image_id).frame_id,
+                    image_id,
+                    correspondences.len(),
+                    report.inliers.len()
+                );
+            }
             return false;
         }
 

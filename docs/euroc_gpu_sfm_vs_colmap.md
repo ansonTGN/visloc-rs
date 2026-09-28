@@ -374,6 +374,78 @@ quality (not the mapper or matcher), but subpixel localization alone isn't
 the fix — something about it interacts badly with blur. V1_03 is a
 separate, mapper-side gap.
 
+### V1_03's 4-model split: not a mapper-logic bug (2026-09-28/29)
+
+Followed up the previous round's open question — does COLMAP hit the same
+stall on A1 (COLMAP's own features+matches) but recover? — with instrumented
+event diffing on both sides (`VISLOC_DEBUG_BOUNDARY_FRAMES`/
+`VISLOC_DEBUG_REG_FAIL` env-gated logging added to `pipeline.rs`/`mapper.rs`;
+COLMAP re-run with its own verbose `LOG(INFO)` registration trace against the
+identical A1 database).
+
+- **The frontier stall is real but symmetric.** After registering frames
+  0-59, both the port and COLMAP's own mapper fail to register frames 60/61/62
+  (visible 3D points 21/12/0, all under `abs_pose_min_num_inliers=30`) —
+  COLMAP's log shows the *same* three frames permanently unregistered in its
+  final model. COLMAP's own sequential matcher adds long-range "skip" pairs
+  (e.g. `58↔122`, 35 raw matches — quadratic-overlap bridge pairs, not just
+  the window-10 neighbours), and COLMAP's mapper log shows it registers
+  frame 122 next (not 60/61/62), then 121/120/119, then 82-90, then 63-69 —
+  bridging the gap sideways through a different frame cluster it had not
+  touched yet, all *inside the same reconstruction*.
+- **The port's `find_next_images` finds the identical bridge candidate.**
+  At the exact point the port's frontier stalls, image 122 is ranked the
+  #1 (and only) candidate, with 31 visible points — matching COLMAP's own
+  reported 32 at the equivalent point almost exactly. So `find_next_images`,
+  the multi-model retry loop in `pipeline.rs`, and the visibility-propagation
+  machinery in `observation_manager.rs` are correct, faithful ports; nothing
+  here "abandons the frontier" via a control-flow bug. The stall triggers
+  `reconstruct_sub_model`'s ordinary 2-consecutive-failure exit (also a
+  faithful port of `incremental_pipeline.cc:628`), and `run()` correctly
+  starts a fresh model from a new seed, same as COLMAP would if a *different*
+  candidate had failed there.
+- **The actual gap is in `RegisterNextImage`'s RANSAC, on that one marginal
+  candidate.** `VISLOC_DEBUG_REG_FAIL` shows the port's P3P RANSAC finds only
+  20/31 geometric inliers for image 122 (needs 30) where COLMAP succeeds.
+  COLMAP's `EstimateAbsolutePose` uses `LORANSAC<P3PEstimator, EPnPEstimator>`
+  (`optim/loransac.h`): once a P3P sample beats the running best, it
+  recursively re-fits on the *growing* inlier set (up to 10 rounds) before
+  scoring — our port did a single post-hoc refine only. Implemented COLMAP's
+  loop in `crates/vision/src/ransac/mod.rs`'s `PnPRansac::search_best_pose`.
+  First attempt reused the project's `DltPnP` as the non-minimal local
+  refit step (COLMAP uses EPnP); this was a **real regression**, not
+  neutral: `DltPnP`'s own module doc already warns it is "degenerate on
+  coplanar points", and refitting on a locally-planar inlier window
+  corrupted poses badly enough that Sim(3) ATE alignment failed outright
+  (`ATE n/a`) on every EuRoC sequence tried. Re-tried using the existing
+  `GaussNewtonPoseRefiner` (nonlinear, seeded from the current best pose)
+  for the growing-inlier-set refit instead — numerically safe, all 22
+  `ransac` unit tests still pass — but it **did not change V1_03's model
+  split** (`[62, 60, 49, 25]` before and after): image 122 still tops out
+  around 20/31 inliers even with iterative local optimization. It also
+  measurably *hurt* accuracy on the untouched 62-frame block that both
+  versions register identically (ATE 2.96 → 7.22 cm, same exact frame set),
+  so **the LO-RANSAC change was reverted** (`ransac/mod.rs` is back to the
+  original single-shot-refine behaviour; confirmed byte-identical output
+  after revert: `[62, 60, 49, 25]`, ATE 2.96 cm, 2118 points).
+- **Conclusion:** the ~35% "outlier" rate on image 122's correspondence set
+  is not a RANSAC-robustness/marginal-recovery gap (COLMAP's own more
+  powerful local optimizer doesn't close it either, going by our port's
+  attempt at replicating it) — it points at the *correspondence set itself*
+  (triangulated 3D point accuracy for the 0-59 block, or the specific 2D
+  features on frame 122) being measurably worse than COLMAP's, i.e. the same
+  family as the already-documented SIFT/triangulation-quality gap on
+  blurred/transitional frames, not a mapper defect. Not closed this round;
+  next steps for whoever picks this up: dump per-correspondence reprojection
+  residuals for image 122 (is it a clean bimodal 20-good/11-bad split, or a
+  smeared distribution suggesting systematic BA drift on the 0-59 block?),
+  and compare the Sim(3)-aligned 3D positions of those tracks against
+  COLMAP's own triangulation for the same points.
+- **Debug logging kept** (env-gated, off by default, harmless):
+  `VISLOC_DEBUG_REG_FAIL=1` prints the correspondence/inlier counts and
+  reason for every failed `RegisterNextImage` attempt in
+  `colmap_incremental/mapper.rs`.
+
 ## Reproduce
 
 ```text
