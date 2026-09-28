@@ -132,6 +132,7 @@ fn calibration() -> BasaltCalibration {
 
 const fn config() -> DirectKltConfig {
     DirectKltConfig {
+        imu_seed_rotation: false,
         pyramid_levels: 2,
         max_iterations: 5,
         fb_squared_threshold: 0.04,

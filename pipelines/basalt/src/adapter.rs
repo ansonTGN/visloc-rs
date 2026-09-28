@@ -8,6 +8,7 @@
 
 use std::sync::mpsc;
 
+use nalgebra::Vector3;
 use thiserror::Error;
 
 use crate::{
@@ -35,6 +36,15 @@ pub struct BasaltVioEstimatorAdapter {
     pub frontend: DirectKltStream,
     pub estimator: BasaltVioEstimator,
     timing: TimingBreakdown,
+    /// The estimator's gyro-bias estimate as of the end of the previous
+    /// frame (IMU frame, rad/s), used only to bias-correct the optional
+    /// `imu_seed_rotation` frontend seed on the serial path -- the frontend
+    /// has no other access to estimator state (that would break the
+    /// architecture's frontend/estimator separation). Zero until the first
+    /// estimator update. The pipelined frontend thread does not have access
+    /// to this (it runs concurrently with, and ahead of, the estimator
+    /// thread), so it always seeds with zero bias.
+    last_gyro_bias: Vector3<f64>,
 }
 
 impl BasaltVioEstimatorAdapter {
@@ -91,6 +101,7 @@ impl BasaltVioEstimatorAdapter {
             frontend,
             estimator,
             timing: TimingBreakdown::from_env(),
+            last_gyro_bias: Vector3::zeros(),
         })
     }
 
@@ -191,9 +202,12 @@ impl BasaltVioEstimatorAdapter {
         let stereo =
             crate::StereoFrame::new(frame.frame_id, frame.timestamp_ns, frame.cam0, frame.cam1);
         let frontend_started = self.timing.start();
-        let tracks_result = self
-            .frontend
-            .process_frame_with_timing(stereo, &mut self.timing);
+        let tracks_result = self.frontend.process_frame_with_timing_imu(
+            stereo,
+            &frame.imu,
+            self.last_gyro_bias,
+            &mut self.timing,
+        );
         self.timing
             .finish(TimingBucket::AdapterFrontend, frontend_started);
         let tracks = tracks_result?;
@@ -212,6 +226,10 @@ impl BasaltVioEstimatorAdapter {
         self.timing
             .finish(TimingBucket::AdapterEstimator, estimator_started);
         let estimator = estimator_result?;
+        // Updated after use above, so this frame's frontend seed used the
+        // PREVIOUS frame's bias estimate -- the only one available before
+        // this frame's own estimator update runs.
+        self.last_gyro_bias = estimator.state.gyro_bias_rad_s;
         let output_started = self.timing.start();
         let output = BasaltAdapterOutput {
             tracks,
@@ -501,7 +519,17 @@ fn run_pipeline_frontend(
         let stereo =
             crate::StereoFrame::new(frame.frame_id, frame.timestamp_ns, frame.cam0, frame.cam1);
         let frontend_started = timing.start();
-        let tracks_result = frontend.process_frame_with_timing(stereo, &mut timing);
+        // The pipelined frontend thread runs concurrently with, and ahead
+        // of, the estimator thread, so it has no live access to the
+        // estimator's gyro-bias estimate; seed with zero bias here. (The
+        // serial path above threads the real bias through
+        // `BasaltVioEstimatorAdapter::last_gyro_bias`.)
+        let tracks_result = frontend.process_frame_with_timing_imu(
+            stereo,
+            &frame.imu,
+            Vector3::zeros(),
+            &mut timing,
+        );
         timing.finish(TimingBucket::AdapterFrontend, frontend_started);
         let tracks = match tracks_result {
             Ok(tracks) => tracks,
@@ -654,6 +682,11 @@ pub fn direct_klt_config(config: &BasaltConfig) -> Result<DirectKltConfig, Confi
         }
     };
     Ok(DirectKltConfig {
+        imu_seed_rotation: config
+            .values
+            .get("config.optical_flow_imu_seed_rotation")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         pyramid_levels: positive_usize("config.optical_flow_levels")?,
         max_iterations: positive_usize("config.optical_flow_max_iterations")?,
         fb_squared_threshold: positive_f32("config.optical_flow_max_recovered_dist2")?,

@@ -45,6 +45,32 @@ structural fragility to any VIO-numerics change (via the mapper's
 live-threaded optimizer-trigger timing) is a candidate root cause worth
 investigating separately if further accuracy-gated speed levers are
 wanted later.
+**Update 2026-09-29 (Stage 5, branch `vio/frontend-robust`):** measured where
+the frontend actually struggles on MH_04/MH_05 (per-frame reject-reason
+correlation with RPE — see §1.8) and found it is track *churn* under
+motion blur (forward-backward KLT rejections), not point starvation, which
+ruled out an adaptive-replenish lever before it was built. The winning
+lever found instead — `optical_flow_levels` 3->4 (more KLT pyramid
+coarse-to-fine range) — cuts MH_04 ATE 0.0702->0.0619 m (**-11.8%**) and
+MH_05 0.0633->0.0569 m (**-10.1%**), narrowing the ORB-SLAM3 gap from
+64%/16% to 45%/4% respectively, while holding **9/11 wins** (same as
+today's shipped config; V2_03/V1_02/several others also improved, V1_03
+regressed +16.7% by 3-run median but stays a decisive win, V2_01 regressed
++14.4% but stays a decisive win). This is a real, validated improvement but
+does **not** clear the Stage 6 bar (>9/11): MH_04/MH_05 stay losses, just
+much closer ones. An IMU/gyro-rotation-seeded KLT initialization lever was
+also tried (predict each track's new-frame position from integrated
+gyro instead of assuming zero motion) and is an honest negative after three
+careful variants (sign convention verified against this codebase's own
+preintegration convention, extrinsic conjugation verified numerically
+against the real ~90°-rotated EuRoC cam0/IMU extrinsic, gyro-bias
+correction added) — all three still regressed at least one of the two
+target sequences. Full detail, numbers, and the frontend diagnosis
+methodology: §1.8 below and
+[the VI-SLAM benchmark details](vi_slam_benchmarks.md). The
+`euroc_config_levels4.json` variant is committed as an available,
+validated option; the checked-in default config is unchanged pending a
+lever that actually clears >9/11.
 Owner goal: beat existing OSS visual-inertial SLAM on EuRoC — ORB-SLAM3
 stereo-inertial first, VINS-Mono second — while keeping the Basalt Rust
 port's runtime/memory edge.
@@ -442,6 +468,122 @@ each periodic optimize on a cloned snapshot in its own thread so ingestion
 is never blocked by it. See the `feat/basalt-online-mapper` branch history
 for the measured before/after evidence on each.
 
+### 1.8 Stage 5 result 2026-09-29: frontend measurement, `optical_flow_levels`
+### 4 wins, IMU-seed KLT is an honest negative (branch `vio/frontend-robust`)
+
+**Measurement.** Added an opt-in `--frontend-stats-csv <path>` flag to
+`basalt_euroc_online_slam_demo` (zero cost/output when absent) that dumps,
+per processed frame: `num_observations`/`num_created`/`num_retained`/
+`num_rejected` plus every `RejectReason` bucket from
+`pipelines/basalt/src/stream.rs`'s `TrackFrameOutput::reject_counters`.
+Correlated this against per-frame consecutive-pose RPE (translation error
+between frame *k-1* and *k* vs. ground truth — local, independent of
+accumulated drift, unlike the headline ATE) on raw `trajectory_vio.tum` for
+MH_04/MH_05. Result on both sequences: `num_observations` has essentially
+zero correlation with RPE (MH_04 r=-0.032, MH_05 r=-0.011; both stay well
+above the ~135-point single-frame grid-capacity floor throughout, and
+`FastNoCandidate` — FAST finding no corner even at the minimum threshold —
+fires under 40 times total per ~2000-frame sequence), while `num_created`
+and `RejectReason::FrameFbSquared` (temporal forward-backward KLT
+inconsistency) both rise monotonically across RPE deciles (MH_04 fb_sq
+0->24, MH_05 0->22.5 from decile 0 to 9) and roughly double in the few
+contiguous high-RPE "bad windows" found (RPE > 3x the sequence median for
+>=5 consecutive frames). **Conclusion: the frontend is not point-starved on
+MH_04/MH_05 — corners are always found — the problem is track *churn*: KLT
+locks onto points during fast-motion/blur bursts but its forward-backward
+round-trip increasingly fails, so points get dropped and replaced faster.**
+This directly contradicts the natural "raise FAST count on low-confidence
+frames" reading of Stage 5 lever (a) and matches §1.7's earlier, coarser
+400-frame-prefix finding that MH_04's frontend was "healthy" by track count.
+
+**Lever: `optical_flow_levels` 3->4 (config-only, WINS).** More KLT pyramid
+levels widen the coarse-to-fine search range for large inter-frame
+displacement, directly targeting the FB-failure mechanism above without
+touching any faithful-port algorithm code. Measured (this session's
+same-machine, same-binary numbers; see
+[the benchmark doc](vi_slam_benchmarks.md) for the full table and 3-run
+medians on the fragile sequences):
+
+| Sequence | Baseline ATE | `levels4` ATE | Change | vs ORB-SLAM3 |
+| --- | ---: | ---: | ---: | :---: |
+| MH_04_difficult | 0.0702 | 0.0619 | **-11.8%** | loss, gap 64%->45% |
+| MH_05_difficult | 0.0633 | 0.0569 | **-10.1%** | loss, gap 16%->4% |
+| V2_03_difficult (3-run median) | 0.0445 | 0.0379 | -14.8% | win, larger margin |
+| V1_02_medium | 0.0139 | 0.0119 | -14.4% | win, larger margin |
+| V1_03_difficult (3-run median) | 0.0210 | 0.0245 | **+16.7%** | win, smaller margin |
+| V2_01_easy | 0.0153 | 0.0175 | **+14.4%** | win, smaller margin |
+
+**9/11 wins held** (identical win/loss pattern to the shipped config — only
+MH_04/MH_05 lose). `optical_flow_levels=5` was also tried: better on MH_04
+(0.0533, -24.1%) but worse than `levels4` on MH_05 (0.0595, -6.0%) — a real
+trade-off, not a strictly-dominant further win, so `levels4` is the
+recommended variant. RTF impact measured inconsistently across repeated
+same-session A/B pairs (e.g. MH_05 baseline vs. `levels4` back-to-back:
+1.249 vs. 1.252, no measurable cost; other pairs on V2_01/V2_02 showed
+`levels4` costing roughly 20-25% wall time relative to *that session's own*
+baseline) — this session's absolute RTF numbers were also generally lower
+than the historically documented clean table on sequences neither config
+touches (e.g. today's own baseline V2_01/V2_02 measured 0.919/0.854 vs. the
+documented 1.098/1.230), pointing at session/machine-level variance rather
+than a `levels4`-specific regression; a dedicated clean re-run is warranted
+before shipping. Two intermittent crashes (`exit code 1`, no panic/error
+message in stderr) were also observed on `levels4` runs during this
+session's gate and initially looked lever-specific, but coincided in time
+with another concurrent agent's session on this shared machine
+(`vio/joint-vi-ba`, which was independently confirmed to have been killing
+its own long-running same-named processes around the same window); re-runs
+after that agent's session ended completed with zero failures, so this is
+attributed to external process termination, not a `levels4` bug — flagged
+here rather than fully closed, since it was not reproduced under a
+controlled/isolated re-test.
+
+`euroc_config_levels4.json` is committed as an available variant
+(`configs/basalt/variants/official_euroc_ds/`); the checked-in default
+config is unchanged, since 9/11 (not >9/11) does not clear the Stage 6 bar.
+
+**Lever: IMU/gyro-rotation-seeded KLT initialization (honest negative).**
+Basalt's frame-to-frame KLT seeds its search at the *same pixel* as the
+previous frame (zero-motion assumption); this lever instead predicts each
+cam0 track's new-frame position by integrating raw gyro over the frame's
+IMU interval and rotating the point's old bearing (via the Double Sphere
+camera model) by the camera-frame delta rotation, replacing only the
+search seed (the KLT reference patch stays anchored at the true old
+pixel — Codex CLI's first draft caught this distinction before writing the
+wrong version). Implemented as `--imu-seed-klt` /
+`config.optical_flow_imu_seed_rotation`, default off, verified
+byte-identical (`trajectory_vio.tum` SHA-256 match) against the pre-change
+binary when disabled, full existing test suite green throughout. Three
+variants tested on MH_04/MH_05 (baseline 0.0702/0.0633):
+
+1. Original sign (bearing rotated by the *negated* integrated gyro vector,
+   matching `R(t2)=R(t1)*exp([theta]_x)`, this codebase's own
+   preintegration convention found in `vio/estimator.rs`), no bias
+   correction: 0.0836/0.0694 — both worse.
+2. Flipped sign, no bias correction: 0.0787/0.0584 — mixed (MH_05 would be
+   a win alone, MH_04 worse).
+3. Original sign + gyro-bias correction (added
+   `BasaltVioEstimatorAdapter::last_gyro_bias`, the estimator's bias
+   estimate as of the previous frame, subtracted from each raw gyro sample
+   before integration; serial path only — the pipelined frontend thread has
+   no live access to estimator state): 0.0862/0.0697 — both worse, the
+   worst of the three.
+
+The camera-frame conjugation was independently verified numerically against
+the real EuRoC cam0/IMU extrinsic (`T_imu_cam` rotation quaternion
+`qx=-0.0077, qy=0.0105, qz=0.7018, qw=0.7123`, i.e. almost exactly 90° about
+one axis — not a near-identity extrinsic that could mask a frame bug): a
+Python check comparing the code's vector-rotation shortcut
+(`theta_cam = R_ci * theta_imu`) against the explicit matrix conjugation
+`R_ci * exp([theta_imu]_x) * R_ci^-1` for this exact extrinsic gave a
+max absolute difference of 2.2e-16 (machine epsilon) — the two are the same
+operation, so the conjugation was applied correctly, not skipped. With sign,
+frame convention, and bias correction all checked and still regressing,
+this is closed as a genuine negative rather than a remaining bug: raw
+2-5-sample gyro integration over one ~20-50ms frame interval is apparently
+too noisy a rotation estimate on these sequences to beat the zero-motion
+seed once projected through the wide-FOV Double Sphere model. Code stays in
+the tree (default off, zero cost, fully tested) as a documented negative.
+
 ## 2. Diagnosis
 
 | Symptom | Evidence | What is missing |
@@ -531,7 +673,7 @@ same-protocol measurements in §1.1; every claim cites an artifact path.
 | 0 (done, 3/11) | Native Basalt mapper on all 11, upstream calibration | — | superseded by the calibration fix, §1.3/§1.4 |
 | 1 (paused, ≈ Stage 0) | Custom L1 (persistent map) + L2 (global BA) offline post-process | — | roughly matched, did not beat, the simpler native-mapper path; paused pending evidence the gap is elsewhere |
 | 1c (done, 8/11) | Official-calibration VIO input (GT-free conversion) + unchanged native mapper, all 11 | Beats ORB-SLAM3 on ≥ 6/11 | — passed; this is the shipped PR #147 result |
-| 5 | **VIO tracking robustness on MH_04/MH_05 (fast motion / motion blur) and V2_03 (dark, fast)**: (a) raise FAST-9 corner count and lower the grid non-max-suppression radius specifically where flow confidence drops; (b) extend patch lifetime / reduce the window's forced-marginalization rate so fewer landmarks are lost mid-difficult-segment; (c) SuperPoint descriptors for frame-to-frame association in place of the Pattern51 patch tracker on these sequences, reusing the repository's existing SP-ONNX frontend; (d) relocalisation inside the mapper (or as a VIO-side fallback) when the tracker loses the window entirely, instead of only forward-marginalizing through a bad segment | Each of MH_04, MH_05, V2_03 VIO ATE improves without regressing the 8 already-winning sequences | A lever that does not move the failing three within its own sequence is dropped before trying the next; if all four (a–d) fail, the honest conclusion is that these three need a different frontend, not a differently-tuned Basalt one |
+| 5 (in progress, see §1.8) | **VIO tracking robustness on MH_04/MH_05 (fast motion / motion blur) and V2_03 (dark, fast)**: (a) raise FAST-9 corner count and lower the grid non-max-suppression radius specifically where flow confidence drops; (b) extend patch lifetime / reduce the window's forced-marginalization rate so fewer landmarks are lost mid-difficult-segment; (c) SuperPoint descriptors for frame-to-frame association in place of the Pattern51 patch tracker on these sequences, reusing the repository's existing SP-ONNX frontend; (d) relocalisation inside the mapper (or as a VIO-side fallback) when the tracker loses the window entirely, instead of only forward-marginalizing through a bad segment | Each of MH_04, MH_05, V2_03 VIO ATE improves without regressing the 8 already-winning sequences | A lever that does not move the failing three within its own sequence is dropped before trying the next; if all four (a–d) fail, the honest conclusion is that these three need a different frontend, not a differently-tuned Basalt one — 2026-09-29: measurement (§1.8) found MH_04/MH_05's problem is FB-rejection churn under blur, not point scarcity, ruling out (a) in its naive form before it was built; `optical_flow_levels` 3->4 (not one of the original a–d list, found via the measurement instead) cut MH_04/MH_05 ATE 11.8%/10.1% and held 9/11 wins but did not flip either to a win; an IMU-seed KLT variant of (a)/(b)'s "reduce forced churn" spirit is a verified honest negative (§1.8); V2_03 already wins and was not separately targeted; (c)/(d) not yet attempted |
 | 6 | Re-run the official-calibration + mapper sweep on all 11 with whatever Stage 5 levers passed | ≥ 9/11 wins vs ORB-SLAM3 measured | < 8/11 (regression from PR #147) → revert the Stage 5 change that caused it |
 | 7 (done, owner override — see §1.5) | Online: mapper in a background thread behind the live VIO, incremental solve — this is the same online-mapping goal as the original plan's Stage 3, run now (owner-approved override) directly on the existing 8/11 PR #147 result instead of after Stage 5/6's VIO-robustness work | Accuracy within ~10 % of the offline mapper's result, mapper keeps up with the VIO (whole-system wall ≈ VIO-alone wall) | — passed on all 11 (§1.5); Stage 5/6 (VIO tracking robustness on MH_04/MH_05/V2_03) remain open, unaffected by this stage |
 | 7b (done, see §1.6) | **VIO speed:** compact `lean_marg_data` LM path — skip per-trial diagnostic landmark re-factorization and the duplicate pre-solve linearization while keeping the MargData factor snapshot | Byte-identical trajectory and MargData; material wall-time reduction on MH_03 | — passed: 3.2x total VIO, 4.2x LM, RTF 0.128 -> 0.349; diagnostic path preserved behind `--retained-marg-diagnostics` |

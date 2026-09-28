@@ -33,6 +33,7 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     env, fs,
+    io::{BufWriter, Write},
     path::PathBuf,
     process,
     sync::{mpsc, Arc, Mutex},
@@ -47,7 +48,7 @@ use visloc_basalt::{
     },
     vio::MargData,
     BasaltAdapterError, BasaltAdapterOutput, BasaltVioEstimatorAdapter, EurocSensorDataset,
-    TimingBreakdown,
+    RejectReason, TimingBreakdown,
 };
 use visloc_core::geometry::SE3;
 
@@ -65,6 +66,8 @@ struct Args {
     calibration: PathBuf,
     config: PathBuf,
     out_dir: PathBuf,
+    /// Optional per-frame frontend tracking diagnostics CSV.
+    frontend_stats_csv: Option<PathBuf>,
     max_frames: Option<usize>,
     optimize_every_k: usize,
     periodic_iterations: usize,
@@ -85,6 +88,7 @@ struct Args {
     threads: Option<usize>,
     mapper_queue_capacity: usize,
     no_urgent_keyframes: bool,
+    imu_seed_klt: bool,
     /// Restores the legacy diagnostic MargData LM path (per-trial landmark
     /// re-factorization + pre-solve diagnostic linearization).  Off by default:
     /// the compact path is byte-identical in trajectory and MargData bytes, so
@@ -238,6 +242,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // (V2_03 −17%, MH_04 −16%), left 3 unchanged and cost MH_02 +5%. Config
     // values win; `--no-urgent-keyframes` restores the upstream decision.
     let mut vio_config = dataset.config().clone();
+    if args.imu_seed_klt {
+        vio_config.values.insert(
+            "config.optical_flow_imu_seed_rotation".to_string(),
+            json!(true),
+        );
+    }
     if !args.no_urgent_keyframes {
         for (key, value) in [
             ("config.vio_urgent_kf_keypoints_thresh", json!(0.5)),
@@ -379,6 +389,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // every frame (see `propagate_to_all_frames` below) -- the same rigid
     // spanning-tree convention as scripts/propagate_basalt_mapper_corrections.py.
     let mut vio_trajectory: BTreeMap<u64, (i64, SE3)> = BTreeMap::new();
+    let mut frontend_stats_csv = args
+        .frontend_stats_csv
+        .as_ref()
+        .map(|path| fs::File::create(path).map(BufWriter::new))
+        .transpose()?;
     let vio_start = Instant::now();
 
     // Shared per-frame handler for both the serial loop and the `--pipeline`
@@ -429,6 +444,62 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "frame={} timestamp_ns={} mapper_packets={} imu={}",
                 output.tracks.frame.frame_id, timestamp_ns, mapper_packet_count, total_imu,
             );
+        }
+        if let Some(writer) = frontend_stats_csv.as_mut() {
+            if demo_index == 0 {
+                writeln!(
+                    writer,
+                    "frame_index,frame_id,timestamp_ns,num_observations,num_created,num_retained,num_rejected,\
+                     reject_frame_forward,reject_frame_backward,reject_frame_fb_squared,\
+                     reject_existing_stereo_forward,reject_existing_stereo_backward,reject_existing_stereo_fb_squared,\
+                     reject_fast_no_candidate,reject_stereo_forward,reject_stereo_backward,\
+                     reject_stereo_fb_squared,reject_stereo_bearing_invalid,reject_stereo_essential_residual"
+                )
+                .map_err(|error| BasaltAdapterError::Output(error.to_string()))?;
+            }
+            let mut frame_forward = 0usize;
+            let mut frame_backward = 0usize;
+            let mut frame_fb_squared = 0usize;
+            let mut existing_stereo_forward = 0usize;
+            let mut existing_stereo_backward = 0usize;
+            let mut existing_stereo_fb_squared = 0usize;
+            let mut fast_no_candidate = 0usize;
+            let mut stereo_forward = 0usize;
+            let mut stereo_backward = 0usize;
+            let mut stereo_fb_squared = 0usize;
+            let mut stereo_bearing_invalid = 0usize;
+            let mut stereo_essential_residual = 0usize;
+            for (reason, count) in output.tracks.reject_counters.iter() {
+                let bucket = match reason {
+                    RejectReason::FrameForward(..) => &mut frame_forward,
+                    RejectReason::FrameBackward(..) => &mut frame_backward,
+                    RejectReason::FrameFbSquared => &mut frame_fb_squared,
+                    RejectReason::ExistingStereoForward(..) => &mut existing_stereo_forward,
+                    RejectReason::ExistingStereoBackward(..) => &mut existing_stereo_backward,
+                    RejectReason::ExistingStereoFbSquared => &mut existing_stereo_fb_squared,
+                    RejectReason::FastNoCandidate => &mut fast_no_candidate,
+                    RejectReason::StereoForward(..) => &mut stereo_forward,
+                    RejectReason::StereoBackward(..) => &mut stereo_backward,
+                    RejectReason::StereoFbSquared => &mut stereo_fb_squared,
+                    RejectReason::StereoBearingInvalid => &mut stereo_bearing_invalid,
+                    RejectReason::StereoEssentialResidual => &mut stereo_essential_residual,
+                };
+                *bucket += *count;
+            }
+            writeln!(
+                writer,
+                "{demo_index},{},{timestamp_ns},{},{},{},{},\
+                 {frame_forward},{frame_backward},{frame_fb_squared},\
+                 {existing_stereo_forward},{existing_stereo_backward},{existing_stereo_fb_squared},\
+                 {fast_no_candidate},{stereo_forward},{stereo_backward},\
+                 {stereo_fb_squared},{stereo_bearing_invalid},{stereo_essential_residual}",
+                output.tracks.frame.frame_id,
+                output.tracks.observations.len(),
+                output.tracks.created_track_ids.len(),
+                output.tracks.retained_track_ids.len(),
+                output.tracks.rejected_track_ids.len(),
+            )
+            .map_err(|error| BasaltAdapterError::Output(error.to_string()))?;
         }
         demo_index += 1;
         Ok(())
@@ -646,6 +717,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // ATE compared with the piecewise-constant propagation, which is kept as
     // `trajectory_online_nearest.tum`. `trajectory_vio.tum` is the
     // uncorrected VIO, for reference.
+    if let Some(writer) = frontend_stats_csv.as_mut() {
+        writer.flush()?;
+    }
     fs::write(
         args.out_dir.join("trajectory_online.tum"),
         &interpolated_trajectory_tum,
@@ -894,6 +968,7 @@ impl Args {
         let mut calibration = None;
         let mut config = PathBuf::from("configs/basalt/euroc_config.json");
         let mut out_dir = PathBuf::from("target/basalt_euroc_online_slam_demo");
+        let mut frontend_stats_csv = None;
         let mut max_frames = None;
         let mut optimize_every_k = OnlineMapperConfig::default().optimize_every_k;
         let mut periodic_iterations = OnlineMapperConfig::default().periodic_iterations;
@@ -911,6 +986,7 @@ impl Args {
         let mut threads = None;
         let mut mapper_queue_capacity = DEFAULT_MAPPER_QUEUE_CAPACITY;
         let mut no_urgent_keyframes = false;
+        let mut imu_seed_klt = false;
         let mut retained_marg_diagnostics = false;
         let mut num_opt_iter = 10usize;
         let mut match_top_k = None;
@@ -939,6 +1015,9 @@ impl Args {
                 }
                 "--config" => config = PathBuf::from(next(&mut arguments, &option)?),
                 "--out-dir" => out_dir = PathBuf::from(next(&mut arguments, &option)?),
+                "--frontend-stats-csv" => {
+                    frontend_stats_csv = Some(PathBuf::from(next(&mut arguments, &option)?))
+                }
                 "--max-frames" => {
                     max_frames = Some(
                         next(&mut arguments, &option)?
@@ -970,6 +1049,7 @@ impl Args {
                     pipeline_explicit = true;
                 }
                 "--no-urgent-keyframes" => no_urgent_keyframes = true,
+                "--imu-seed-klt" => imu_seed_klt = true,
                 "--pipeline-capacity" => {
                     pipeline_capacity = next(&mut arguments, &option)?
                         .to_string_lossy()
@@ -1092,6 +1172,7 @@ impl Args {
                 .ok_or_else(|| format!("--calibration is required\n\n{}", Self::usage()))?,
             config,
             out_dir,
+            frontend_stats_csv,
             max_frames,
             optimize_every_k,
             periodic_iterations,
@@ -1103,6 +1184,7 @@ impl Args {
             threads,
             mapper_queue_capacity,
             no_urgent_keyframes,
+            imu_seed_klt,
             retained_marg_diagnostics,
             num_opt_iter,
             match_top_k,
@@ -1127,8 +1209,7 @@ impl Args {
          [--periodic-iterations N] [--realtime | --as-fast-as-possible] \
          [--pipeline | --no-pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
          [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N] \
-         [--match-top-k N] [--projection-rematch] [--local-mapping] \
-         [--projection-host-window N] [--projection-radius PX] \
+         [--match-top-k N] [--frontend-stats-csv <path>]          [--projection-rematch] [--local-mapping] [--imu-seed-klt]          [--projection-host-window N] [--projection-radius PX] \
          [--loop-closure-factors] [--loop-closure-min-corr N] [--loop-closure-weight W] \
          [--loop-closure-max-rot-error DEG] [--local-ba-window N] [--local-ba-iterations N]"
             .into()
@@ -1159,6 +1240,7 @@ mod tests {
         let args = Args::parse(["--euroc-dir", "d", "--calibration", "c.json"].map(Into::into))
             .expect("parses");
         assert!(!args.realtime);
+        assert_eq!(args.frontend_stats_csv, None);
         assert_eq!(
             args.optimize_every_k,
             OnlineMapperConfig::default().optimize_every_k
@@ -1167,6 +1249,33 @@ mod tests {
             args.periodic_iterations,
             OnlineMapperConfig::default().periodic_iterations
         );
+    }
+
+    #[test]
+    fn imu_seed_klt_defaults_off_and_can_be_enabled() {
+        let base = ["--euroc-dir", "d", "--calibration", "c.json"];
+        let args = Args::parse(base.map(Into::into)).expect("parses");
+        assert!(!args.imu_seed_klt);
+        let args = Args::parse(base.into_iter().chain(["--imu-seed-klt"]).map(Into::into))
+            .expect("parses");
+        assert!(args.imu_seed_klt);
+    }
+
+    #[test]
+    fn parser_accepts_frontend_stats_csv() {
+        let args = Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--frontend-stats-csv",
+                "foo.csv",
+            ]
+            .map(Into::into),
+        )
+        .expect("parses");
+        assert_eq!(args.frontend_stats_csv, Some(PathBuf::from("foo.csv")));
     }
 
     #[test]

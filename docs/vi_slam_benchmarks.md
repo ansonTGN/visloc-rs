@@ -363,6 +363,59 @@ fast/motion-blurred sequences, not mapper or calibration limits — see
 [`vi_slam_global_consistency_plan.md`](vi_slam_global_consistency_plan.md)
 for next steps.
 
+### VIO accuracy: frontend robustness on MH_04/MH_05 (2026-09-29)
+
+Per-frame frontend diagnostics (`--frontend-stats-csv`, new opt-in flag on
+`basalt_euroc_online_slam_demo`) correlated against per-frame consecutive-pose
+RPE showed MH_04/MH_05's accuracy gap is driven by track *churn* under
+motion blur (rising `RejectReason::FrameFbSquared` — forward-backward KLT
+inconsistency — and replacement-track creation during fast-motion bursts),
+not by point starvation (`num_observations` stays well above grid capacity
+throughout; `FastNoCandidate`, FAST finding no corner anywhere, fires under
+40 times total per ~2000-frame sequence). Full diagnosis methodology and
+numbers: [the global-consistency plan §1.8](vi_slam_global_consistency_plan.md).
+
+**`optical_flow_levels` 3 -> 4 (config-only)** targets this directly by
+widening the KLT pyramid's coarse-to-fine displacement range:
+
+| Sequence | Baseline ATE (m) | `levels4` ATE (m) | Change | vs ORB-SLAM3 |
+| --- | ---: | ---: | ---: | :---: |
+| MH_01_easy | 0.0155 | 0.0144 | -7.1% | WIN (larger margin) |
+| MH_02_easy | 0.0254 | 0.0235-0.0238 | -6.7% | WIN (larger margin) |
+| MH_03_medium | 0.0256 | 0.0236 | -7.8% | WIN (larger margin) |
+| MH_04_difficult | 0.0702 | 0.0619-0.0621 | **-11.8%** | LOSS (gap 64%->45%) |
+| MH_05_difficult | 0.0633 | 0.0568-0.0572 | **-10.1%** | LOSS (gap 16%->4%) |
+| V1_01_easy | 0.0355 | 0.0361 | +1.7% | WIN (~same margin) |
+| V1_02_medium | 0.0139 | 0.0119-0.0120 | -14.4% | WIN (larger margin) |
+| V1_03_difficult | 0.0210 (3-run median) | 0.0245 (3-run median) | +16.7% | WIN (smaller margin) |
+| V2_01_easy | 0.0153 (today's baseline) | 0.0175 | +14.4% | WIN (smaller margin) |
+| V2_02_medium | 0.0119 (today's baseline) | 0.0112 | -5.9% | WIN (~same margin) |
+| V2_03_difficult | 0.0445 (3-run median) | 0.0379-0.0383 (3-run median) | -14.8% | WIN (larger margin) |
+
+**9/11 wins held** — identical win/loss pattern to the shipped config; the
+two losses narrow substantially but neither flips, so this does not clear
+the ">9/11" bar and the checked-in default config is unchanged.
+`optical_flow_levels=5` was also tried: MH_04 improves further (0.0533,
+-24.1%) but MH_05 is worse than `levels4` (0.0595, -6.0% vs. baseline) — a
+real trade-off between the two target sequences, not a strict further win,
+so `levels4` is the better single fixed config of the two. RTF measurements
+this session were noisy machine-to-machine (a same-session, back-to-back
+MH_05 baseline-vs-`levels4` pair showed 1.249 vs. 1.252, no measurable
+cost, while other pairs on V2_01/V2_02 showed `levels4` costing ~20-25%
+wall time relative to that session's own baseline, itself already well
+below the historically documented clean numbers) — a dedicated clean
+re-measurement is needed before treating RTF as settled either way.
+`configs/basalt/variants/official_euroc_ds/euroc_config_levels4.json` is
+committed as the available variant.
+
+An IMU/gyro-rotation-seeded KLT initialization lever (`--imu-seed-klt`,
+predicting each track's new-frame search position from integrated gyro
+instead of a zero-motion seed) was also tried and is a verified honest
+negative after three variants (sign, extrinsic frame convention, and gyro
+bias correction were each checked against this codebase's own conventions
+and the real EuRoC calibration, not just re-derived) — see §1.8 of the
+plan doc for the full investigation.
+
 ## Pipeline
 
 ```mermaid
