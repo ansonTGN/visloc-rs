@@ -8,7 +8,7 @@
 //! Usage:
 //! ```text
 //! cargo run --release --example localize_rne_map_sequence -- \
-//!   --out-dir <dir> [--radius-m 5.0] [--min-inliers 6] [--projection-px 30] [--motion-model] \
+//!   --out-dir <dir> [--radius-m 5.0] [--min-inliers 6] [--projection-px 30] [--motion-model] [--gpu] \
 //!   <colmap_text_dir> <landmark_descriptors.txt> <camera_id> \
 //!   <query_features.txt> [query_features_2.txt ...]
 //! ```
@@ -25,7 +25,33 @@ use visloc_rs::core::geometry::Pose;
 use visloc_rs::core::types::{LandmarkDescriptorStore, LocalizationResult, QueryImage, VisualMap};
 use visloc_rs::io::colmap::ColmapMapProvider;
 use visloc_rs::io::query_features::read_query_features_txt;
-use visloc_rs::{DescriptorProvider, LocalizationPipeline, MapProvider, RadiusLandmarkSelector};
+use visloc_rs::{
+    AllLandmarksSelector, BruteForceMatcher, DescriptorMatch, DescriptorProvider,
+    LocalizationConfig, LocalizationPipeline, MapProvider, Matcher, PnPRansac,
+    RadiusLandmarkSelector,
+};
+
+/// CPU brute force, or (feature `gpu`, `--gpu`) the wgpu matcher: the same
+/// matches up to f32 summation order, much faster for the global fallback's
+/// query x every-landmark search.
+#[derive(Clone)]
+enum AnyMatcher {
+    Cpu(BruteForceMatcher),
+    #[cfg(feature = "gpu")]
+    Gpu(visloc_sift_gpu::WgpuDescriptorMatcher),
+}
+
+impl Matcher for AnyMatcher {
+    fn match_descriptors(&self, query: &[Vec<f32>], train: &[Vec<f32>]) -> Vec<DescriptorMatch> {
+        match self {
+            Self::Cpu(m) => m.match_descriptors(query, train),
+            #[cfg(feature = "gpu")]
+            Self::Gpu(m) => m.match_descriptors(query, train),
+        }
+    }
+}
+
+type Pipeline = LocalizationPipeline<AnyMatcher, AllLandmarksSelector, PnPRansac>;
 
 fn parse_flag(args: &mut Vec<String>, name: &str) -> Option<String> {
     let index = args.iter().position(|arg| arg == name)?;
@@ -38,7 +64,7 @@ fn parse_flag(args: &mut Vec<String>, name: &str) -> Option<String> {
 }
 
 fn localize_with_prior(
-    pipeline: &LocalizationPipeline,
+    pipeline: &Pipeline,
     query: &QueryImage,
     map: &VisualMap,
     store: &LandmarkDescriptorStore,
@@ -152,6 +178,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|value| value.parse())
         .transpose()?
         .unwrap_or(6);
+    let use_gpu = if let Some(pos) = args.iter().position(|a| a == "--gpu") {
+        args.remove(pos);
+        true
+    } else {
+        false
+    };
     let motion_model = if let Some(pos) = args.iter().position(|a| a == "--motion-model") {
         args.remove(pos);
         true
@@ -216,7 +248,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         query_paths.len(),
     );
 
-    let pipeline = LocalizationPipeline::default();
+    let config = LocalizationConfig::default();
+    let matcher = if use_gpu {
+        #[cfg(feature = "gpu")]
+        {
+            let ctx = visloc_sift_gpu::GpuContext::new()?;
+            AnyMatcher::Gpu(visloc_sift_gpu::WgpuDescriptorMatcher::new(
+                ctx,
+                config.ratio,
+            ))
+        }
+        #[cfg(not(feature = "gpu"))]
+        return Err("--gpu needs the `gpu` feature".into());
+    } else {
+        AnyMatcher::Cpu(BruteForceMatcher {
+            ratio: config.ratio,
+        })
+    };
+    let pipeline: Pipeline = LocalizationPipeline::new(matcher, config);
     // Seed the prior from the earliest map keyframe (GT-free; the query
     // starts near the map start in the held-out split).
     let mut prior: Option<Pose> = map
