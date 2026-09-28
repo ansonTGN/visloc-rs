@@ -62,7 +62,7 @@ the docs record open gaps.
 | RGB-D (as virtual stereo) | VO | **Benchmarked** | TUM fr1_xyz 0.014 m, fr1_desk 0.026 m (about 1.3–1.6× ORB-SLAM2 RGB-D) | [TUM RGB-D](docs/tum_rgbd_benchmark.md) |
 | Multi-camera rig | SfM | Experimental | OpenLORIS 10k: 9,998/10,000 registered; RMSE parity with COLMAP still open | `generalized_rig_sfm` |
 | Robot rig cameras vs. a prebuilt map | Relocalization | **Benchmarked** | OpenLORIS (robot-mounted rig): 98.96% of 1,250 held-out frames localized against a map built from other frames, median 2.9 mm | `localize_openloris_map` |
-| Robot camera sequence vs. a prebuilt map | Sequential map-matching localization | Experimental | Simulated robot corridor (RNE): 105/400 frames localized, 1.39 m ATE; limited by repetitive texture | `localize_rne_map_sequence` |
+| Robot camera sequence vs. a prebuilt map | Sequential map-matching localization | **Benchmarked** (simulation) | RNE house (drjohnson): 387/400 frames at 5.6 cm ATE, 38 ms per frame (median) with `--gpu --motion-model`. RNE checker corridor: 203/400 at 1.57 m, limited by repetitive texture | `localize_rne_map_sequence` |
 | Camera + GNSS prior | Tracking | Example only | Synthetic smoke test; no tight GNSS fusion | `track_sequence_with_gnss_prior` |
 
 LiDAR and wheel odometry are not supported.
@@ -134,6 +134,20 @@ MH_05 failed in both runs. visloc-rs is deterministic.
 Configuration, caveats and the ablation that got here:
 [EuRoC GPU SfM vs COLMAP](docs/euroc_gpu_sfm_vs_colmap.md).
 
+To reproduce the table, run this per sequence. The script also runs
+COLMAP, unless `--ours-only` is given:
+
+```bash
+cargo build --release -p visloc-gsplat-train --features gpu,euroc --example gsplat_euroc
+python scripts/benchmark_euroc_vs_colmap.py MH_01_easy \
+  --euroc-root <EuRoC dir with <seq>/mav0> --colmap <colmap exe> \
+  --ours-exe target/release/examples/gsplat_euroc --out-root <out> --tag _final \
+  --ours-args "--mapper colmap-port --sift-l1-root --keep-planar --verify-min-inliers 15 --sift-opt descriptor_magnification=3 --sift-opt max_orientations=2 --keypoints 4000 --sift-opt prefer_larger_scale=1 --register-gated"
+```
+
+Registration and ATE are deterministic for visloc-rs. Times depend on the
+machine.
+
 ### Run the SfM demo
 
 Reconstruct an unordered photo set in one command — SIFT features estimated
@@ -173,6 +187,18 @@ cargo run --release -p visloc-gsplat-train --features gpu,euroc --example gsplat
 </p>
 <p align="center"><sub>The 128 raw south-building JPGs: every image registered, focal refined from EXIF 796 px to 847.0 px (COLMAP: 847.2), held-out PSNR 22.77 at 30k steps, 37 min end to end. <a href="scripts/make_photos_demo_gif.py">Script</a>.</sub></p>
 
+To reproduce the run and the GIF, use the raw `images/` of COLMAP's
+south-building dataset. `gsplat_photos` prints the focal refinement and
+the held-out PSNR:
+
+```bash
+cargo run --release -p visloc-gsplat-train --features gpu,euroc --example gsplat_photos -- \
+  --images <south-building>/images --out runs/sb --max-size 1024 --steps 30000 --normal-weight 0.005
+cargo run --release -p visloc-gsplat-train --features gpu --example gsplat_eval -- \
+  --ply runs/sb/scene.ply --data runs/sb --eval-every 1 --save-dir runs/sb/renders
+python scripts/make_photos_demo_gif.py --run runs/sb --out photos_to_mesh.gif --every 3 --panel-width 300 --fps 6
+```
+
 The pipeline has three stages:
 
 1. **SfM.** Takes the focal length from EXIF, then runs GPU SIFT and
@@ -184,7 +210,9 @@ The pipeline has three stages:
    and backward passes. On the same GPU, at 30k steps, it is faster than
    brush 0.3 on all five benchmark scenes (14–30%). PSNR is within
    0.05 dB of brush on four of them; details in
-   [the 3DGS plan](docs/rust_3dgs_plan.md).
+   [the 3DGS plan](docs/rust_3dgs_plan.md). Reproduce the table with
+   [`scripts/benchmark_gsplat_vs_brush.py`](scripts/benchmark_gsplat_vs_brush.py);
+   the dataset layout and the command are in its header.
 3. **Mesh.** Median-depth rendering, TSDF fusion and surface nets. Surfaces
    with no SfM point nearby, such as the sky, are dropped. The
    `--normal-weight 0.005` depth-normal loss makes surfaces smoother for

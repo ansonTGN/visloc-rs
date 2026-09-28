@@ -359,13 +359,9 @@ impl Renderer {
         ))
     }
 
-    /// Per gaussian: screen tiles hit by the last frame (0 = not
-    /// projected), and the compact (visible) -> gaussian index map.
-    pub fn visibility_buffers(&self) -> (&wgpu::Buffer, &wgpu::Buffer) {
-        (
-            &self.scratch.intersect_counts,
-            &self.scratch.global_from_compact,
-        )
+    /// Per gaussian: screen tiles hit by the last frame (0 = not projected).
+    pub fn intersect_counts_buffer(&self) -> &wgpu::Buffer {
+        &self.scratch.intersect_counts
     }
 
     /// Read the current parameters back into a [`crate::packing::PackedScene`]

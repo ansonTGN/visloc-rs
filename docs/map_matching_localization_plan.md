@@ -372,3 +372,21 @@ queries localized. SIFT localized 53–203, with ATE of 1.6–1.8 m either way.
 The corridor needs a map built from learned features plus learned retrieval,
 not a descriptor swap on the SIFT map. `--ratio` (`none` disables the test)
 remains on the localizer for such sweeps.
+
+## Reproduce (2026-09-28 numbers)
+
+Each scene needs a COLMAP map of one RNE episode, and query features from
+another episode of the same scene. `scripts/export_rne_localization_map.py`
+writes `landmark_descriptors.txt` and `query_features/` from the COLMAP
+databases. `gt.tum` is the query episode's ground truth (RNE EuRoC export).
+
+```bash
+cargo build --release --example localize_rne_map_sequence --features gpu
+target/release/examples/localize_rne_map_sequence --out-dir loc --gpu --motion-model   <map_text> <loc_package>/landmark_descriptors.txt 1 <loc_package>/query_features/*.txt
+python scripts/eval_localization_tum.py loc/localization.tum <gt.tum> loc/per_frame.csv
+```
+
+On drjohnson this prints 387/400 localized, ATE RMSE 0.056 m, latency p50
+38 ms. Localization is deterministic; latency depends on the machine. Drop
+`--gpu --motion-model` for the CPU baseline: 387/400, 0.055 m, p50 488 ms.
+The checker corridor with no flags gives 203/400 at 1.57 m.
