@@ -2842,6 +2842,14 @@ fn solve_damped_nav_block_system(
 pub struct JointGlobalBaSummary {
     pub initial_cost: f64,
     pub final_cost: f64,
+    /// `initial_cost`'s split between the vision/relative-pose/roll-pitch
+    /// terms (identical to the pose-only solver's own cost) and the new
+    /// preintegrated-IMU/bias-random-walk terms. Diagnostic only, to make
+    /// the relative scale of the two factor families visible without a
+    /// separate instrumentation pass -- `initial_pose_factor_cost +
+    /// initial_imu_factor_cost == initial_cost`.
+    pub initial_pose_factor_cost: f64,
+    pub initial_imu_factor_cost: f64,
     pub iterations: usize,
     pub accepted_step_count: usize,
     pub rejected_trial_count: usize,
@@ -2890,12 +2898,17 @@ pub fn global_ba_with_state_joint(
     let anchor_index = pose_indices.get(&anchor).copied();
 
     let nav_states = nav_states_at(poses, velocities, gyro_biases, accel_biases);
-    let initial_cost = evaluate_costs(poses, landmarks, factors, Some(calibration), config).total()
-        + evaluate_imu_joint_cost(&nav_states, imu_factors, bias_factors, gravity_world);
+    let initial_pose_factor_cost =
+        evaluate_costs(poses, landmarks, factors, Some(calibration), config).total();
+    let initial_imu_factor_cost =
+        evaluate_imu_joint_cost(&nav_states, imu_factors, bias_factors, gravity_world);
+    let initial_cost = initial_pose_factor_cost + initial_imu_factor_cost;
 
     if !config.enabled {
         return JointGlobalBaSummary {
             initial_cost,
+            initial_pose_factor_cost,
+            initial_imu_factor_cost,
             final_cost: initial_cost,
             iterations: 0,
             accepted_step_count: 0,
@@ -3038,6 +3051,8 @@ pub fn global_ba_with_state_joint(
 
     JointGlobalBaSummary {
         initial_cost,
+        initial_pose_factor_cost,
+        initial_imu_factor_cost,
         final_cost: cost,
         iterations,
         accepted_step_count,

@@ -1607,6 +1607,18 @@ impl NfrMapper {
             &mut self.optimizer_state,
         );
         self.lmdb.rebuild_observation_index();
+        if std::env::var_os("BASALT_ONLINE_MAPPER_TRACE").is_some() {
+            eprintln!(
+                "[mapper-trace] joint_ba cost: pose_factor={:.3} imu_factor={:.3} total={:.3}->{:.3} \
+                 accepted={} rejected={}",
+                summary.initial_pose_factor_cost,
+                summary.initial_imu_factor_cost,
+                summary.initial_cost,
+                summary.final_cost,
+                summary.accepted_step_count,
+                summary.rejected_trial_count,
+            );
+        }
 
         Ok(NfrMapperOptimizeReport {
             requested_iterations,

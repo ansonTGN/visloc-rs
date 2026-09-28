@@ -313,6 +313,58 @@ mod tests {
         super::super::imu_factor::gravity_world()
     }
 
+    #[test]
+    fn scratch_realistic_covariance_diagnostic() {
+        // Temporary diagnostic (not a correctness assertion): realistic
+        // EuRoC/ADIS16448 calibration noise densities
+        // (configs/basalt/variants/official_euroc_ds/euroc_ds_calib.json),
+        // ~0.2s interval at 200 Hz, gravity-only specific force (stationary).
+        // Prints covariance/information diagonals to sanity-check relative
+        // scale against the vision term's observation_std_dev=0.25 (pixel)
+        // weight of 1/0.25^2 = 16 per observation.
+        let accel_noise_std = 0.016_f64;
+        let gyro_noise_std = 0.000282_f64;
+        let rate_hz = 200.0_f64;
+        let noise = ImuNoiseModel {
+            gyro_density: gyro_noise_std * rate_hz.sqrt(),
+            accel_density: accel_noise_std * rate_hz.sqrt(),
+        };
+        let mut integrator = ImuPreintegrator::new(Vector3::zeros(), Vector3::zeros())
+            .with_noise(noise)
+            .unwrap();
+        let dt = 1.0 / rate_hz;
+        let n = 40; // 0.2s
+        for _ in 0..n {
+            integrator.integrate_sample(Vector3::zeros(), -gravity(), dt);
+        }
+        let delta = integrator.delta().clone();
+        let cov = delta.covariance;
+        eprintln!("dt_total={}", delta.delta_time);
+        eprintln!(
+            "position std (m): {:?}",
+            (0..3).map(|i| cov[(i, i)].sqrt()).collect::<Vec<_>>()
+        );
+        eprintln!(
+            "rotation std (rad): {:?}",
+            (3..6).map(|i| cov[(i, i)].sqrt()).collect::<Vec<_>>()
+        );
+        eprintln!(
+            "velocity std (m/s): {:?}",
+            (6..9).map(|i| cov[(i, i)].sqrt()).collect::<Vec<_>>()
+        );
+        if let Ok(sqrt_info) = crate::imu::sqrt_information(&cov) {
+            let info = sqrt_info.transpose() * sqrt_info;
+            eprintln!(
+                "information diagonal (position rows): {:?}",
+                (0..3).map(|i| info[(i, i)]).collect::<Vec<_>>()
+            );
+            eprintln!(
+                "information diagonal (velocity rows): {:?}",
+                (6..9).map(|i| info[(i, i)]).collect::<Vec<_>>()
+            );
+        }
+    }
+
     /// A short, non-degenerate preintegrated delta with a real (invertible)
     /// covariance, built from a handful of constant-ish synthetic samples.
     fn synthetic_delta() -> ImuPreintegratedDelta {
