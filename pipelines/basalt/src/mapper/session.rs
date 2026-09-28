@@ -573,6 +573,15 @@ pub struct NfrMapper {
     /// `frame_velocity_bias` and updated by periodic IMU velocity refinement;
     /// distinct from the frozen original VIO estimates in `frame_velocity_bias`.
     pub frame_velocities: BTreeMap<u64, Vector3<f64>>,
+    /// Live, joint-VI-BA-refined per-keyframe gyro bias, seeded from
+    /// `frame_velocity_bias` and updated by [`Self::optimize_joint_with_extra_factors`].
+    /// Distinct from `frame_velocity_bias`'s frozen original VIO estimate, the
+    /// same way `frame_velocities` is distinct from it. Unused (stays empty)
+    /// unless the joint solver runs.
+    pub frame_gyro_bias: BTreeMap<u64, Vector3<f64>>,
+    /// Live, joint-VI-BA-refined per-keyframe accel bias; see
+    /// `frame_gyro_bias`.
+    pub frame_accel_bias: BTreeMap<u64, Vector3<f64>>,
     /// Recovered factors are appended in packet order, matching upstream's
     /// persistent `rel_pose_factors` and `roll_pitch_factors` vectors.
     pub factors: MapperFactors,
@@ -630,11 +639,21 @@ impl NfrMapper {
     /// poses, factors, calibration and optimizer configuration and state.
     /// `build_tracks` always replaces `feature_tracks`, and `setup_opt`
     /// (given calibration) always replaces `lmdb`. Descriptors, rays, BoW,
-    /// match payloads, raw images, frozen velocity/bias history, live velocities and the old
-    /// tracks and landmarks are therefore dead weight in the snapshot. IMU
-    /// factors are refreshed at periodic optimization, before this snapshot, and retained
-    /// in `factors`. A full clone doubled the
-    /// mapper's persistent memory at every periodic optimize.
+    /// match payloads, raw images, frozen velocity/bias history and the old
+    /// tracks and landmarks are therefore dead weight in the snapshot. For
+    /// the pose-only frozen-velocity IMU factor (`imu_relative_pose`), that
+    /// used to include the live velocities too: they are refreshed into
+    /// baked relative-pose factors (retained in `factors`) *before* this
+    /// snapshot is taken, so `optimize()` on the snapshot never reads
+    /// `frame_velocities` itself. The joint solver
+    /// (`optimize_joint_with_extra_factors`) is different: it optimizes
+    /// velocity/gyro-bias/accel-bias as first-class state alongside pose, so
+    /// those three maps *are* cloned into the snapshot (cheap -- one
+    /// `Vector3` per keyframe) so a background joint pass has real state to
+    /// iterate from and `merge_background_result` has something to merge
+    /// back. A full clone doubled the mapper's persistent memory at every
+    /// periodic optimize, which this snapshot still avoids for every other
+    /// (large) container.
     ///
     /// Without calibration `setup_opt` would keep the old `lmdb`, so the
     /// full clone is returned in that case.
@@ -666,7 +685,9 @@ impl NfrMapper {
             frame_poses: self.frame_poses.clone(),
             frame_timestamps: self.frame_timestamps.clone(),
             frame_velocity_bias: BTreeMap::new(),
-            frame_velocities: BTreeMap::new(),
+            frame_velocities: self.frame_velocities.clone(),
+            frame_gyro_bias: self.frame_gyro_bias.clone(),
+            frame_accel_bias: self.frame_accel_bias.clone(),
             factors: self.factors.clone(),
             img_data: BTreeMap::new(),
             feature_corners,
@@ -759,6 +780,8 @@ impl NfrMapper {
             frame_timestamps: BTreeMap::new(),
             frame_velocity_bias: BTreeMap::new(),
             frame_velocities: BTreeMap::new(),
+            frame_gyro_bias: BTreeMap::new(),
+            frame_accel_bias: BTreeMap::new(),
             factors: MapperFactors {
                 imu_relative_pose: Vec::new(),
                 provenance_version: String::new(),
@@ -910,6 +933,12 @@ impl NfrMapper {
                 self.frame_velocities
                     .entry(frame_id)
                     .or_insert(velocity_bias.0);
+                self.frame_gyro_bias
+                    .entry(frame_id)
+                    .or_insert(velocity_bias.1);
+                self.frame_accel_bias
+                    .entry(frame_id)
+                    .or_insert(velocity_bias.2);
             }
         }
         for state in &data.frame_states {
@@ -1525,6 +1554,78 @@ impl NfrMapper {
             final_state_hash: summary.final_state_hash,
             trace_hash: summary.trace_hash,
             trace: summary.trace,
+        })
+    }
+
+    /// Joint visual-inertial global BA: like [`Self::optimize_with_extra_factors`],
+    /// but solves the full 15-dof-per-keyframe navigation state (pose,
+    /// velocity, gyro bias, accel bias) via
+    /// [`super::global_ba_with_state_joint`], adding `imu_factors`
+    /// (preintegrated relative-state) and `bias_factors` (bias random-walk)
+    /// between consecutive keyframes on top of the same persistent
+    /// vision/relative-pose/roll-pitch factor set. `frame_velocities`,
+    /// `frame_gyro_bias` and `frame_accel_bias` are updated in place;
+    /// missing entries (a keyframe never seeded with a VIO velocity/bias
+    /// estimate) default to zero, matching
+    /// `global_ba_with_state_joint`'s own contract.
+    ///
+    /// `final_state_hash`/`trace_hash` on the returned report are always
+    /// `0`: this path keeps no per-iteration LM trace (see
+    /// [`super::JointGlobalBaSummary`]), unlike the pose-only solver's
+    /// provenance-hashed trace.
+    pub fn optimize_joint_with_extra_factors(
+        &mut self,
+        extra_relative_pose: &[RelativePoseFactor],
+        imu_factors: &[super::imu_ba::ImuPreintegratedFactor],
+        bias_factors: &[super::imu_ba::BiasRandomWalkFactor],
+        gravity_world: Vector3<f64>,
+        num_iterations: usize,
+    ) -> Result<NfrMapperOptimizeReport, NfrMapperOptimizeError> {
+        let calibration = self
+            .calibration
+            .as_ref()
+            .ok_or(NfrMapperOptimizeError::MissingCalibration)?;
+        let requested_iterations = num_iterations;
+        let initial_lambda = self.optimizer_state.lambda;
+        let initial_lambda_vee = self.optimizer_state.lambda_vee;
+        let mut config = self.optimize_config;
+        config.max_iterations = requested_iterations;
+        let mut factors = self.factors.clone();
+        factors.relative_pose.extend_from_slice(extra_relative_pose);
+        let summary = super::global_ba_with_state_joint(
+            &mut self.frame_poses,
+            &mut self.frame_velocities,
+            &mut self.frame_gyro_bias,
+            &mut self.frame_accel_bias,
+            &factors,
+            imu_factors,
+            bias_factors,
+            &mut self.lmdb.landmarks,
+            calibration,
+            config,
+            gravity_world,
+            &mut self.optimizer_state,
+        );
+        self.lmdb.rebuild_observation_index();
+
+        Ok(NfrMapperOptimizeReport {
+            requested_iterations,
+            iterations: summary.iterations,
+            pose_count: summary.pose_count,
+            landmark_count: summary.track_count,
+            initial_cost: summary.initial_cost,
+            final_cost: summary.final_cost,
+            accepted_step_count: summary.accepted_step_count,
+            rejected_trial_count: summary.rejected_trial_count,
+            initial_lambda,
+            min_lambda: self.optimizer_state.min_lambda,
+            max_lambda: self.optimizer_state.max_lambda,
+            initial_lambda_vee,
+            final_lambda: self.optimizer_state.lambda,
+            final_lambda_vee: self.optimizer_state.lambda_vee,
+            final_state_hash: 0,
+            trace_hash: 0,
+            trace: Vec::new(),
         })
     }
 

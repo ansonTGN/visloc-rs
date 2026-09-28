@@ -2375,8 +2375,18 @@ mod tests {
         mapper.add_marg_data(&mut repeated_packet).unwrap();
         assert_eq!(mapper.frame_velocities[&states[0].frame_id], refined);
         mapper.calibration = Some(feature_calibration());
-        assert!(mapper.optimizer_snapshot().frame_velocity_bias.is_empty());
-        assert!(mapper.optimizer_snapshot().frame_velocities.is_empty());
+        // `frame_velocity_bias` (the frozen original VIO estimate) is dead
+        // weight in every snapshot and stays empty. `frame_velocities` used
+        // to be dropped too, back when only the pose-only frozen-velocity
+        // IMU factor existed (it bakes the live velocity into a relative-pose
+        // factor *before* the snapshot is taken, so the snapshot's own
+        // `optimize()` call never reads it). The joint VI-BA solver
+        // (`optimize_joint_with_extra_factors`) optimizes velocity as
+        // first-class state instead, so it now needs the live value carried
+        // into the snapshot; see `optimizer_snapshot`'s doc comment.
+        let snapshot = mapper.optimizer_snapshot();
+        assert!(snapshot.frame_velocity_bias.is_empty());
+        assert_eq!(snapshot.frame_velocities[&states[0].frame_id], refined);
     }
 
     #[test]
@@ -2490,7 +2500,12 @@ mod tests {
                     snapshot.factors.imu_relative_pose,
                     online.mapper.factors.imu_relative_pose
                 );
-                assert!(snapshot.frame_velocities.is_empty());
+                // `frame_velocities` is now carried into every snapshot (see
+                // `optimizer_snapshot`'s doc comment): the joint VI-BA solver
+                // needs it as first-class state, and carrying it is harmless
+                // for this pose-only frozen-velocity factor path, which never
+                // reads it back off the snapshot.
+                assert_eq!(snapshot.frame_velocities, online.mapper.frame_velocities);
             }
         }
     }
