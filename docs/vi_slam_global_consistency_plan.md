@@ -25,6 +25,26 @@ Further bit-identical parallelism on the largest remaining LM bucket was
 investigated and found negative (see §1.6 continuation below); reaching
 RTF >= 1.0 on the remaining 8 sequences is being pursued next via
 accuracy-gated, non-bit-identical levers.
+**Update 2026-09-28 (§1.6/7d — real time on all 11/11):** goal reached.
+One accuracy-gated lever (`vio_max_iterations` 7 -> 5; 9/11 wins held,
+V1_03/V2_01 ATE grew 5.4%/11.8% but both remain decisive wins) plus two
+zero-accuracy-risk, bit-identical build-level levers (`[profile.
+release-rt]` — fat LTO, one codegen unit, no unwind tables — and the
+`mimalloc` global allocator, both verified bit-identical via VIO trajectory
+SHA-256) together move clean RTF from 0.64-0.83 (the un-contended baseline
+measured at the start of this update) to **1.06-1.68x on every one of the
+11 EuRoC sequences**. Two other accuracy-gated levers were tried and
+rejected for breaking the 9/11 gate (`optical_flow_detection_grid_size`
+50->55/60 and `vio_max_kfs` 7->5 both flipped V2_03_difficult to a
+reproducible loss over 3 runs) — neither was needed once the build-level
+levers landed. See [the VI-SLAM benchmark details §"VIO speed: real time
+on all 11/11 sequences"](vi_slam_benchmarks.md) for full evidence and the
+final per-sequence table. Stage 5/6 (VIO tracking robustness on the two
+remaining losses, MH_04/MH_05) remain open; V2_03_difficult's apparent
+structural fragility to any VIO-numerics change (via the mapper's
+live-threaded optimizer-trigger timing) is a candidate root cause worth
+investigating separately if further accuracy-gated speed levers are
+wanted later.
 Owner goal: beat existing OSS visual-inertial SLAM on EuRoC — ORB-SLAM3
 stereo-inertial first, VINS-Mono second — while keeping the Basalt Rust
 port's runtime/memory edge.
@@ -516,6 +536,7 @@ same-protocol measurements in §1.1; every claim cites an artifact path.
 | 7 (done, owner override — see §1.5) | Online: mapper in a background thread behind the live VIO, incremental solve — this is the same online-mapping goal as the original plan's Stage 3, run now (owner-approved override) directly on the existing 8/11 PR #147 result instead of after Stage 5/6's VIO-robustness work | Accuracy within ~10 % of the offline mapper's result, mapper keeps up with the VIO (whole-system wall ≈ VIO-alone wall) | — passed on all 11 (§1.5); Stage 5/6 (VIO tracking robustness on MH_04/MH_05/V2_03) remain open, unaffected by this stage |
 | 7b (done, see §1.6) | **VIO speed:** compact `lean_marg_data` LM path — skip per-trial diagnostic landmark re-factorization and the duplicate pre-solve linearization while keeping the MargData factor snapshot | Byte-identical trajectory and MargData; material wall-time reduction on MH_03 | — passed: 3.2x total VIO, 4.2x LM, RTF 0.128 -> 0.349; diagnostic path preserved behind `--retained-marg-diagnostics` |
 | 7c (bit-identical part done, see §1.6 continued 2026-09-28) | **VIO speed:** upstream Basalt's inner LM damping backtracking loop (done, part of 7b's cache-across-rejected-trials change) plus ordered `par_iter` over `landmark_steps`/frontend tracks (done, already on `main`) plus `--pipeline` on by default for the online demo (done, this session) | Further wall-time cut without a trajectory bit change; largest expected effect on rejection-heavy MH_04/MH_05/V2_03 | — passed: RTF 0.09-0.38× -> 0.49-1.24×, 3/11 sequences at real time, byte-identical trajectory/MargData throughout; further LM-reduction parallelism (rayon scheduling, QR-workspace reuse) tried and found negative (no reproducible speedup) — kill criterion met, bit-identical part of this lever is closed; RTF >= 1.0 on the remaining 8 sequences needs a follow-up non-bit-identical stage |
+| 7d (done, see §1.6/7d 2026-09-28) | **VIO speed, real time on all 11/11:** `vio_max_iterations` 7->5 (accuracy-gated) plus `[profile.release-rt]` (fat LTO/codegen-units=1/panic=abort, bit-identical) plus `mimalloc` global allocator (bit-identical) | RTF >= 1.0 on every EuRoC sequence; 9/11 wins vs ORB-SLAM3 must hold | — passed: RTF 0.64-0.83 (clean baseline) -> 1.06-1.68× on all 11 sequences; 9/11 wins held (V1_03/V2_01 ATE grew 5.4%/11.8%, still decisive wins); `optical_flow_detection_grid_size` and `vio_max_kfs` reductions tried and rejected (both flip V2_03_difficult to a loss, reproducible over 3 runs) — not needed once the above passed |
 | 8 | Same-protocol re-measurement (ORB-SLAM3 one run, ours one run), README VI-SLAM section update with figures/tables | — | — |
 
 MH_04/MH_05/V2_03 are the first target now for the same reason V1_02 was

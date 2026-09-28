@@ -43,16 +43,24 @@ unchanged, for parity/comparison — see "How this works" and "Run it" below.
 | Sequence | visloc-rs (online VI-SLAM) | ORB-SLAM3 stereo-inertial | Winner |
 | --- | ---: | ---: | :---: |
 | MH_01_easy | 0.0155 | 0.0363 | visloc-rs |
-| MH_02_easy | 0.0256 | 0.0334 | visloc-rs |
+| MH_02_easy | 0.0254 | 0.0334 | visloc-rs |
 | MH_03_medium | 0.0256 | 0.0283 | visloc-rs |
 | MH_04_difficult | 0.0702 | 0.0428 | ORB-SLAM3 |
 | MH_05_difficult | 0.0633 | 0.0546 | ORB-SLAM3 |
-| V1_01_easy | 0.0354 | 0.0380 | visloc-rs |
-| V1_02_medium | 0.0138 | 0.0170 | visloc-rs |
-| V1_03_difficult | 0.0214 | 0.0287 | visloc-rs |
-| V2_01_easy | 0.0153 | 0.0390 | visloc-rs |
+| V1_01_easy | 0.0355 | 0.0380 | visloc-rs |
+| V1_02_medium | 0.0139 | 0.0170 | visloc-rs |
+| V1_03_difficult | 0.0213 | 0.0287 | visloc-rs |
+| V2_01_easy | 0.0171 | 0.0390 | visloc-rs |
 | V2_02_medium | 0.0119 | 0.0140 | visloc-rs |
-| V2_03_difficult | 0.0451 | 0.0563 | visloc-rs |
+| V2_03_difficult | 0.0445 | 0.0563 | visloc-rs |
+
+<p align="center"><sub>Re-measured 2026-09-28 with the real-time work
+below (`vio_max_iterations` 7 -> 5): 9/11 wins held, V2_01_easy's ATE grew
+from 0.0153 to 0.0171 m (+11.8%, 3-run median) and V1_03_difficult's from
+0.0204 to 0.0215 m (+5.4%, 3-run median) — both still comfortably beat
+ORB-SLAM3 (2.3x and 1.3x margin). Every other sequence moved by <5%,
+mostly within run-to-run noise. See "VIO speed: real time on all 11/11
+sequences" below for the full accounting.</sub></p>
 
 <p align="center"><sub>9/11 wins (2026-09-28 re-measurement, up from 8/11):
 V2_03_difficult flipped from a loss (0.1078 m) to a win as a side effect of
@@ -166,6 +174,126 @@ levers (fewer LM iterations, cheaper frontend settings, smaller window) —
 see [the global-consistency plan §1.6/7c](vi_slam_global_consistency_plan.md)
 for the current status of that follow-up.
 
+### VIO speed: real time on all 11/11 sequences (2026-09-28)
+
+**Result: RTF >= 1.0 on every one of the 11 EuRoC sequences**, measured
+clean (no other job sharing the machine — verified by polling for
+`gsplat_euroc.exe`, the concurrent SfM benchmark process, before and
+throughout each run; a shared-machine `TIMING_LOCK` file coordinates this
+across agents). Three levers, applied in this order:
+
+**1. `vio_max_iterations` 7 -> 5 (accuracy-gated, config-only).**
+A timing-bucket breakdown (`basalt-timing-breakdown` feature, MH_02/MH_04,
+300 frames, `--pipeline`) showed `estimator_lm_solve` at 78-82% of real VIO
+wall time on both, and `lm_landmark_reduction` (already `par_iter`
+parallel) a consistent 44-45% of that — i.e. most of the remaining cost is
+the LM outer loop's own per-trial bookkeeping (linearization, cost
+evaluation, model-decrease checks), which scales with the iteration count,
+not something further parallelism can remove (matches the negative
+scheduling-tweak result above). Cutting the iteration budget cuts all of
+it proportionally. Full 11-sequence gate: **9/11 wins held** (same two
+losses, MH_04/MH_05); ATE moved <5% on 8/11 sequences, but V1_03_difficult
+grew from 0.0204 to 0.0215 m (+5.4%, 3-run median; V1_03 was already
+documented as run-to-run non-reproducible) and V2_01_easy — not previously
+flagged as sensitive — grew from 0.0153 to 0.0171 m (+11.8%, 3-run
+median). Both remain decisive wins vs ORB-SLAM3 (1.3x and 2.3x margin).
+Config: `configs/basalt/variants/official_euroc_ds/euroc_config.json`.
+Evidence: `E:\visloc-rs-runs\vio_rt_runs\online_all11_maxiter5\` and
+`repro_check_maxiter5\`.
+
+Two other accuracy-gated levers were tried and **rejected** — both broke
+the 9/11 gate by flipping V2_03_difficult to a loss: `optical_flow_
+detection_grid_size` 50 -> 55/60 (sparser point detection; 60 flipped V2_03
+to a reproducible loss, median 0.0601 m vs ORB-SLAM3's 0.0563 m over 3
+runs; also grew MH_04's ATE 24-39%) and `vio_max_kfs` 7 -> 5 (smaller
+sliding window; flipped V2_03 to 0.0572 m median over 3 runs, also grew
+V1_03 by 26%). Both are bit-identical-safe wins on most other sequences
+(6-11% ATE improvement on several, real RTF gains) but V2_03_difficult
+appears structurally fragile: it broke under every VIO-numerics-changing
+lever tried this session, apparently because the online mapper's
+rate-limited background-optimizer trigger count/timing (already the
+documented cause of V2_03's run-to-run non-reproducibility) is sensitive
+to *any* change in VIO output timing, not something specific to grid size
+or window size. Neither lever was needed once the two levers below were
+found, so both stay reverted; the checked-in config is unchanged except
+for `vio_max_iterations`.
+
+**2. `release-rt` Cargo build profile (bit-identical, zero accuracy
+risk).** The online demo's estimator thread runs at only 0.2-2.2 average
+CPU cores despite `--threads 12` and an already-parallel landmark-reduction
+hot path — investigated and ruled out as a real "stall": not disk I/O (a
+same-sequence twice-in-a-row cache test showed no meaningful wall-time
+benefit), not mapper-queue backpressure (`max_mapper_queue_depth` stayed
+far under `mapper_queue_capacity` on every sequence), not `--realtime`
+pacing (default is `as_fast_as_possible`), and not a lock held by the
+mapper thread (only small stats-bookkeeping locks exist on that path). The
+low average instead reflects each `lm_landmark_reduction` call being only
+~7-8ms — far below per-second CPU sampling granularity — diluting real but
+brief parallel bursts; the estimator thread is genuinely compute-bound.
+Given that, the codegen itself was the remaining lever: a `[profile.
+release-rt]` in the workspace `Cargo.toml` (`inherits = "release"`,
+`lto = "fat"`, `codegen-units = 1`, `panic = "abort"`) — a separate opt-in
+profile so the historical `release` profile used by tests and other
+binaries is untouched. **Verified bit-identical** against `release`:
+`trajectory.tum`/`trajectory_vio.tum` SHA-256 and `marg_data/` contents
+match exactly (`basalt_euroc_vio_demo` and `basalt_euroc_online_slam_demo`,
+MH_03_medium, 300 frames). Clean alternating-pair timing (600 frames,
+`vio_wall_seconds`, current `vio_max_iterations=5` config): MH_03_medium
+RTF `release` [0.402, 0.509, 0.569] (median 0.509) -> `release-rt` [1.000,
+0.827, 1.092] (median 1.00), **+96%**; MH_02_easy `release` [0.663, 0.767,
+0.989] (median 0.767) -> `release-rt` [1.279, 1.163, 0.501*] (median
+1.163), **+52%** (*one `release-rt` run coincided with unrelated
+`chrome-headless-shell` processes consuming CPU on the shared machine; the
+other 5/6 measurements were consistent).
+
+**3. `mimalloc` global allocator (bit-identical, zero accuracy risk,
+opt-in).** The VIO estimator's LM trial loop allocates a scratch buffer
+per factor per trial, so a faster allocator was worth trying on top of
+`release-rt`. Added `mimalloc` as an optional dependency and a
+`mimalloc-global` feature that installs it as the online demo's
+`#[global_allocator]`. **Verified bit-identical**: `trajectory_vio.tum`
+SHA-256 matches the plain `release-rt` build exactly (MH_03_medium, 300
+frames). Clean, two alternating-pair rounds, 600 frames, on top of
+`release-rt`: MH_02_easy RTF [1.516, 1.562] (mean 1.539) -> +mimalloc
+[1.716, 1.695] (mean 1.706), **+10.8%**; MH_03_medium [1.239, 1.317] (mean
+1.278) -> +mimalloc [1.406, 1.408] (mean 1.407), **+10.1%**.
+
+**Final full-11 clean RTF table** (`release-rt` + `mimalloc-global`,
+`vio_max_iterations=5`, `TIMING_LOCK` held throughout, `gsplat_euroc.exe`
+confirmed absent for the full run in each case):
+
+| Sequence | ATE (m) | RTF | vs ORB-SLAM3 |
+| --- | ---: | ---: | :---: |
+| MH_01_easy | 0.0155 | 1.121 | WIN |
+| MH_02_easy | 0.0254 | 1.058 | WIN |
+| MH_03_medium | 0.0256 | 1.069 | WIN |
+| MH_04_difficult | 0.0702 | 1.092 | LOSS |
+| MH_05_difficult | 0.0633 | 1.073 | LOSS |
+| V1_01_easy | 0.0355 | 1.114 | WIN |
+| V1_02_medium | 0.0139 | 1.113 | WIN |
+| V1_03_difficult | 0.0213 | 1.222 | WIN |
+| V2_01_easy | 0.0171 | 1.098 | WIN |
+| V2_02_medium | 0.0119 | 1.230 | WIN |
+| V2_03_difficult | 0.0445 | 1.682 | WIN |
+
+**RTF >= 1.0 on 11/11 sequences (range 1.06-1.68x); 9/11 wins vs
+ORB-SLAM3 unchanged** (bit-identical accuracy — RTF here is a pure
+codegen/allocator change on top of the `vio_max_iterations=5` config
+already gated above). Combined `release-rt` + `mimalloc-global` speedup
+over the pre-session `release` build is roughly 2-2.5x on this machine.
+Build: `RUSTFLAGS="-C target-feature=+avx2,+fma" cargo build --profile
+release-rt --example basalt_euroc_online_slam_demo --features
+basalt-lm-workspace-reuse,mimalloc-global` (see "Run it" below). Full
+evidence: `E:\visloc-rs-runs\vio_rt_runs\online_all11_release_rt_mimalloc\
+{summary.json,status/,runs/}`, `E:\visloc-rs-runs\vio_rt_runs\
+buildlever_ab\`, `E:\visloc-rs-runs\vio_rt_runs\mimalloc_ab\`.
+
+`target-cpu=native` and profile-guided optimization were both left
+untried this session in the interest of keeping the default/documented
+build portable across machines (a `target-cpu=native` binary is only
+valid on the machine that built it); the two levers above already closed
+the remaining gap to real time on every sequence without that tradeoff.
+
 **Speed (2026-09-20): compact MargData LM path.** The VIO estimator now has an
 opt-in `lean_marg_data` path that keeps the post-solve factor snapshot MargData
 needs but skips the diagnostic LM payloads: no per-trial landmark
@@ -224,12 +352,12 @@ triangulation/bundle-adjustment code is unchanged from the offline port —
 online-izing it added incremental scheduling and threading around that
 code, not a new algorithm, and the offline batch path (`pipelines/basalt/src/
 mapper/{mod.rs,session.rs,features.rs,triangulation.rs}`) remains
-byte-for-byte untouched; (b) real-time VIO — the estimator now parallelizes
-its landmark-reduction and frontend stages and defaults to a two-thread
-frontend/estimator pipeline (real-time factor 0.49-1.24× above, 3/11
-sequences already >= 1.0 under CPU contention), but 8/11 sequences are not
-yet at real time; closing that gap the rest of the way is a separate,
-ongoing initiative — see the "VIO speed" subsection above. The two
+byte-for-byte untouched; (b) real-time VIO — **now achieved on all 11/11
+sequences** (real-time factor 1.06-1.68x, clean/idle measurement, see "VIO
+speed: real time on all 11/11 sequences" above) via two bit-identical
+build-level changes (a `release-rt` LTO/codegen-units/panic-abort profile
+and the `mimalloc` global allocator) plus one accuracy-gated config change
+(`vio_max_iterations` 7 -> 5, 9/11 wins held). The two
 remaining losses (MH_04, MH_05) are VIO tracking-robustness limits on
 fast/motion-blurred sequences, not mapper or calibration limits — see
 [`vi_slam_global_consistency_plan.md`](vi_slam_global_consistency_plan.md)
@@ -263,23 +391,34 @@ keyframe for removal, which is what feeds the offline mapper.</sub></p>
 
 ## Run it
 
-Build with AVX2/FMA and the LM-workspace-reuse optimization used for the
-measurements above, then replay one EuRoC sequence through the **online**
-VIO + mapper (`--calibration`/`--config` below are checked into this
-repository; `--euroc-dir` is an external dataset path) — this reproduces
-the headline table:
+Build with AVX2/FMA, the LM-workspace-reuse optimization, the `release-rt`
+profile (fat LTO, one codegen unit, no unwind tables) and `mimalloc` — the
+build the real-time numbers above were measured with, verified
+bit-identical to plain `--release` (see above) — then replay one EuRoC
+sequence through the **online** VIO + mapper (`--calibration`/`--config`
+below are checked into this repository; `--euroc-dir` is an external
+dataset path) — this reproduces the headline table:
 
 ```bash
 RUSTFLAGS="-C target-feature=+avx2,+fma" \
-  cargo build --release --example basalt_euroc_online_slam_demo --features basalt-lm-workspace-reuse
+  cargo build --profile release-rt --example basalt_euroc_online_slam_demo \
+  --features basalt-lm-workspace-reuse,mimalloc-global
 
-cargo run --release --example basalt_euroc_online_slam_demo --features basalt-lm-workspace-reuse -- \
+RUSTFLAGS="-C target-feature=+avx2,+fma" \
+  cargo run --profile release-rt --example basalt_euroc_online_slam_demo \
+  --features basalt-lm-workspace-reuse,mimalloc-global -- \
   --euroc-dir /path/to/MH_01_easy \
   --calibration configs/basalt/variants/official_euroc_ds/euroc_ds_calib.json \
   --config configs/basalt/variants/official_euroc_ds/euroc_config.json \
   --out-dir target/basalt_mh01_online \
   --optimize-every-k 100 --periodic-iterations 4
 ```
+
+A plain `cargo build --release --example basalt_euroc_online_slam_demo
+--features basalt-lm-workspace-reuse` (the historical command, no
+`--profile release-rt`, no `mimalloc-global`) is still correct — same
+`trajectory_online.tum` bit-for-bit modulo the mapper's live-threaded
+timing — just roughly 2-2.5x slower on this machine.
 
 This writes `trajectory_online.tum` (full-frame, mapper corrections
 propagated to every VIO frame — the file scored above),
@@ -370,12 +509,14 @@ live-updating `summary.md`/`summary.json`); see its module docstring.
   its final point coordinates are only verified within 1 mm of native, not
   bit-exact.
 - "Online" means the mapper thread keeps pace with the VIO thread (never
-  blocking it); the VIO estimator itself is now parallelized and defaults to
-  a two-thread frontend/estimator pipeline (real-time factor 0.49-1.24× on
-  the sequences above, 3/11 already >= 1.0), but 8/11 sequences are not yet
-  wall-clock real time under the contention this was measured under —
-  real-time VIO performance the rest of the way is an ongoing initiative,
-  see the "VIO speed" subsection above.
+  blocking it); the VIO estimator itself is now parallelized, defaults to
+  a two-thread frontend/estimator pipeline, and (as of 2026-09-28, with the
+  `release-rt` build profile + `mimalloc`) runs at wall-clock real time
+  (RTF >= 1.0) on all 11/11 sequences, clean/idle-measured, range
+  1.06-1.68x — see the "VIO speed: real time on all 11/11 sequences"
+  subsection above for the full breakdown and the accuracy-gated
+  `vio_max_iterations` change that was needed alongside the two
+  bit-identical build changes.
 - V1_03_difficult and V2_02_medium's online ATE remains a real, reported gap
   from the offline mapper's own number (+20.9% and +15.5% respectively, both
   above the ~10% target) — likely because the rate-limited background
