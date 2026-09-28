@@ -28,7 +28,7 @@ results plug into existing tools.
 | --- | --- | --- |
 | **Photo SfM** (unordered images) | ETH3D Electro 1,200 images: **3.46× faster**, **25% lower** camera-centre error; 9,996 / 10,008 cameras registered across all ten ETH3D many-view scenes | COLMAP 3.9 CPU |
 | **GPU SfM** (video frames) | EuRoC: **faster on 8/8** sequences (1.4–7.5×), **more accurate on 4/8**, equal on 1; COLMAP breaks on MH_05 (194 cm vs 2.6 cm) | COLMAP 4.1 CUDA |
-| **Stereo-inertial VI-SLAM** (Basalt port + online mapper) | **Real time on 11/11** EuRoC sequences (1.06–1.68×); **beats ORB-SLAM3 on 9/11** | ORB-SLAM3, Basalt |
+| **Stereo-inertial VI-SLAM** (Basalt port + online mapper) | **Real time on 11/11** EuRoC sequences on the dev machine (1.06–1.68×, thin margin on the slowest); **beats ORB-SLAM3 on 9/11** | ORB-SLAM3, Basalt |
 | **Photos → 3D Gaussian Splatting + mesh** | **Faster than brush on 5/5** benchmark scenes, PSNR within 0.05 dB on 4 | brush 0.3 |
 | **Localization against a prebuilt map** | OpenLORIS robot rig: **98.96%** of 1,250 held-out frames localized, median 2.9 mm; simulated house: 38 ms / frame | — |
 | **Stereo / RGB-D VO** | KITTI 00 **1.23 m** and 09 **2.07 m** (ORB-SLAM2: 1.3 m / 3.2 m); TUM fr1_xyz 1.4 cm | ORB-SLAM2 |
@@ -64,7 +64,7 @@ the docs record open gaps.
 | Monocular video | VO (DPVO port) | Experimental | MH_01 prefix 0.16 m, about 2× DPVO's published error; CPU only | `euroc_dpvo_vo_demo` |
 | Monocular + IMU | VIO | Experimental | No headline result; IMU coupling is still open | [DPVO plan](docs/dpvo_droid_port_plan.md) |
 | Stereo | VO / SLAM | **Benchmarked** | KITTI seq00 1.23 m and seq09 2.07 m, vs 1.3 m and 3.2 m for ORB-SLAM2 | `deep_stereo_slam`, `online_slam_stereo_vo_kitti_demo` |
-| Stereo + IMU | VIO + mapping (Basalt port) | **Benchmarked** | Beats ORB-SLAM3 on 9/11 EuRoC sequences; native-Basalt parity within 0.1%; real time (RTF >= 1.0) on all 11/11 EuRoC sequences | `basalt_euroc_online_slam_demo` |
+| Stereo + IMU | VIO + mapping (Basalt port) | **Benchmarked** | Beats ORB-SLAM3 on 9/11 EuRoC sequences; native-Basalt parity within 0.1%; real time (RTF 1.06–1.68) on all 11/11 EuRoC sequences on the dev machine, thin margin on the slowest | `basalt_euroc_online_slam_demo` |
 | RGB-D (as virtual stereo) | VO | **Benchmarked** | TUM fr1_xyz 0.014 m, fr1_desk 0.026 m (about 1.3–1.6× ORB-SLAM2 RGB-D) | [TUM RGB-D](docs/tum_rgbd_benchmark.md) |
 | Multi-camera rig | SfM | Experimental | OpenLORIS 10k: 9,998/10,000 registered; RMSE parity with COLMAP still open | `generalized_rig_sfm` |
 | Robot rig cameras vs. a prebuilt map | Relocalization | **Benchmarked** | OpenLORIS (robot-mounted rig): 98.96% of 1,250 held-out frames localized against a map built from other frames, median 2.9 mm | `localize_openloris_map` |
@@ -266,8 +266,11 @@ sequences (**1.13×** runtime, **0.56×** peak RSS). With EuRoC's official
 calibration, the mapper now runs **online** — a dedicated thread ingesting
 each keyframe as the VIO produces it, not a separate offline batch job — and
 beats measured ORB-SLAM3 (full-trajectory SE(3) ATE) on **9 of 11** EuRoC
-sequences; the VIO+mapper pipeline now also runs at **real time on all
-11/11 sequences** (RTF >= 1.0, dataset duration / VIO wall time), the
+sequences; on the development machine (12-thread CPU) the VIO+mapper
+pipeline now also runs at **real time on all 11/11 sequences** (RTF
+1.06–1.68, dataset duration / VIO wall time). The slowest sequences have
+only a few percent of headroom, so RTF can dip below 1.0 depending on
+machine state (one later clean MH_01 run measured 0.95). This is the
 result of a `vio_max_iterations` reduction (7 -> 5, small accuracy-gated
 change) plus two zero-accuracy-risk, bit-identical build-level changes (a
 fat-LTO/single-codegen-unit/no-unwind-tables build profile and the
