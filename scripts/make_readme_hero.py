@@ -23,10 +23,12 @@ Pipeline:
     crossfades line up.
   - The Gaussian splat (phase 2) -- the project's actual accuracy/speed claim
     -- is rendered by the project's own Rust `gsplat_eval` binary, which is
-    the same renderer used elsewhere in the README. A copy of scene.ply with
-    the small fraction of pathologically large/likely-floater gaussians
-    dropped is used only so the elevated orbit view (which the ground-level
-    training photos never saw) doesn't wash out in sky-sized floaters; the
+    the same renderer used elsewhere in the README. A copy of scene.ply is
+    used, filtered with a KD-tree so only gaussians within a couple of the
+    SfM point cloud's own nearest-neighbour spacings of some real triangulated
+    point survive (plus a roofline height cap and a large+low-opacity drop);
+    this is what keeps the elevated orbit view -- which the ground-level
+    training photos never saw -- from washing out in sky/ground floaters. The
     mesh is similarly cropped to the SfM point-cloud bounding box.
   - Frames are alpha-crossfaded at the phase boundaries, labelled, and
     assembled into a palette-quantized GIF with ffmpeg.
@@ -77,27 +79,42 @@ WORK = 'E:/visloc-rs-runs/readme_hero/final'
 W, H = 1024, 768
 FX, FY, CX, CY = 847.0203155243536, 857.9783006002741, 514.6578180869523, 381.1077943900985
 
-FPS = 12
-N_FRAMES = 120           # one full revolution, ~10s at 12fps
+FPS = 10
+N_FRAMES = 80             # one full revolution, 8s at 10fps (native frame rate;
+                          # no frame-drop/stride trick -- 10fps was chosen over
+                          # decimating a 12fps render, which looked choppy)
 ELEV_DEG = 18.0          # orbit elevation above the horizontal camera ring
 RADIUS_MULT = 1.35       # orbit radius as a multiple of the training-camera ring radius
-PHASE0_DEG = 45.0        # orbit start angle; keeps the splat's viewing window
-                          # (frames ~36-84, azimuth ~153-297 deg) inside the
-                          # arc with the best photo coverage (see below)
+PHASE0_DEG = 45.0        # orbit start angle
 
-P1_END = 36               # 0..P1_END-1: pure points+frustums
-XF1 = 8                   # crossfade length at the phase1->2 boundary
-P2_START = P1_END + XF1   # 44
-P2_END = 84                # pure splat through here, then crossfade
-XF2 = 8
-P3_START = P2_END + XF2   # 92 .. actually recomputed below to keep 120 total
+P1_END = 24               # 0..P1_END-1: pure points+frustums (2.4s)
+XF1 = 6                   # crossfade length at the phase1->2 boundary (0.6s)
+P2_START = P1_END + XF1   # 30
+P2_END = 58                # pure splat through here, then crossfade (2.8s pure)
+XF2 = 6                    # 0.6s
+P3_START = P2_END + XF2   # 64 .. pure mesh 64..79 (1.6s)
 
-REVEAL_FRAMES = 32.0      # points/frustums finish popping in by this frame
+REVEAL_FRAMES = 20.0      # points/frustums finish popping in by this frame
+REVEAL_START_FRAC = 0.18  # fraction of points/frustums already visible at frame 0
+                          # (no empty black opening frames)
 
-OUT_W = 720               # final GIF width in pixels (kept <= 8 MB at 256-color GIF depth)
+OUT_W = 560               # final GIF width in pixels (kept <= 8 MB at 256-color GIF depth;
+                          # the point-cloud glow and photoreal splat/mesh detail are high
+                          # entropy for a palette GIF, so this ended up needing to be
+                          # narrower than a first guess of ~720-800px)
 
-FILTER_MARGIN = 0.5       # world-unit padding beyond the SfM point cloud bbox
-FILTER_SCALE_RAW = 1.0    # drop gaussians with raw (log-space) max-axis scale above this
+# Gaussian-splat floater filtering: keep a gaussian only if it is within
+# DIST_MULT x the SfM point cloud's own median nearest-neighbour spacing of
+# some SfM point (kills anything not actually near real triangulated
+# geometry -- this is what removes the big sky/ground floater smears), is
+# not above the highest SfM point (+ UP_MARGIN) along the building's up
+# axis, and is not simultaneously large *and* low-opacity.
+FILTER_DIST_MULT = 2.5
+FILTER_UP_MARGIN = 0.3
+FILTER_LARGE_SCALE_RAW = 0.3   # raw (log-space) max-axis scale considered "large"
+FILTER_LOW_OPACITY_RAW = 0.0   # raw (logit-space) opacity considered "low" (sigmoid(0)=0.5)
+
+MESH_MARGIN = 0.5        # world-unit padding beyond the SfM point cloud bbox for the mesh crop
 
 FONT_BOLD = 'C:/Windows/Fonts/segoeuib.ttf'
 FONT_REG = 'C:/Windows/Fonts/segoeui.ttf'
@@ -268,8 +285,15 @@ class GLRenderer:
             ''',
             fragment_shader='''
                 #version 330
+                uniform float alpha_mult;
                 in vec3 v_color; out vec4 f_color;
-                void main() { vec2 d = gl_PointCoord - vec2(0.5); if (dot(d,d) > 0.25) discard; f_color = vec4(v_color,1.0); }
+                void main() {
+                    vec2 d = gl_PointCoord - vec2(0.5);
+                    float r2 = dot(d, d);
+                    if (r2 > 0.25) discard;
+                    float a = 1.0 - smoothstep(0.0, 0.25, r2);
+                    f_color = vec4(v_color, a * alpha_mult);
+                }
             ''')
         self.line_prog = self.ctx.program(
             vertex_shader='''
@@ -301,6 +325,7 @@ class GLRenderer:
     def clear(self):
         self.fbo.use()
         self.ctx.enable(self.moderngl.DEPTH_TEST)
+        self.ctx.depth_func = '<='  # so a same-depth glow+core point pair both pass
         self.ctx.disable(self.moderngl.BLEND)
         self.fbo.clear(*self.bg)
 
@@ -309,15 +334,25 @@ class GLRenderer:
         arr = np.frombuffer(data, dtype=np.uint8).reshape(self.h, self.w, 4)
         return np.flipud(arr)
 
-    def draw_points(self, pos, color01, mvp, point_size=3.0):
+    def draw_points(self, pos, color01, mvp, point_size=7.0, alpha=1.0, additive=False):
         mgl = self.moderngl
         vbo = self.ctx.buffer(np.hstack([pos, color01]).astype('f4').tobytes())
         vao = self.ctx.vertex_array(self.pt_prog, [(vbo, '3f 3f', 'in_pos', 'in_color')])
         self.ctx.enable(mgl.PROGRAM_POINT_SIZE)
+        self.ctx.enable(mgl.BLEND)
+        self.ctx.blend_func = (mgl.SRC_ALPHA, mgl.ONE) if additive else (mgl.SRC_ALPHA, mgl.ONE_MINUS_SRC_ALPHA)
         self.pt_prog['mvp'].write(np.ascontiguousarray(mvp.T).astype('f4').tobytes())
         self.pt_prog['point_size'].value = point_size
+        self.pt_prog['alpha_mult'].value = alpha
         vao.render(mgl.POINTS)
+        self.ctx.disable(mgl.BLEND)
         vao.release(); vbo.release()
+
+    def draw_points_glow(self, pos, color01, mvp, core_size=7.0, glow_size=20.0, glow_alpha=0.22):
+        """Bright core disc + a larger, dim, additively-blended glow halo, so
+        the sparse point cloud reads clearly against the dark background."""
+        self.draw_points(pos, color01, mvp, point_size=glow_size, alpha=glow_alpha, additive=True)
+        self.draw_points(pos, color01, mvp, point_size=core_size, alpha=1.0, additive=False)
 
     def draw_lines(self, pos, color01, mvp):
         mgl = self.moderngl
@@ -371,20 +406,34 @@ def read_ply_header(f):
     return header
 
 
-def filter_scene_ply(src_ply, out_ply, center, up, e1, e2, bounds, margin, scale_raw_thr):
+def filter_scene_ply(src_ply, out_ply, pos_pts, center, up, dist_mult, up_margin,
+                      large_scale_raw, low_opacity_raw):
+    """Keep a gaussian only if it is close to some real SfM point (kills the
+    sky/ground floater smears an elevated, never-photographed viewpoint would
+    otherwise expose), is not above the reconstructed roofline, and is not
+    simultaneously large *and* low-opacity."""
+    from scipy.spatial import cKDTree
+
     with open(src_ply, 'rb') as f:
         header = read_ply_header(f)
         data = np.fromfile(f, dtype='<f4')
     arr = data.reshape(-1, NFLOAT_PLY)
     pos = arr[:, 0:3]
-    h = (pos - center) @ up
-    h1 = (pos - center) @ e1
-    h2 = (pos - center) @ e2
-    lo_h, hi_h, lo_1, hi_1, lo_2, hi_2 = bounds
-    keep = ((h > lo_h - margin) & (h < hi_h + margin) &
-            (h1 > lo_1 - margin) & (h1 < hi_1 + margin) &
-            (h2 > lo_2 - margin) & (h2 < hi_2 + margin))
-    keep &= arr[:, 52:55].max(1) < scale_raw_thr
+
+    tree = cKDTree(pos_pts)
+    d_self, _ = tree.query(pos_pts, k=2, workers=-1)
+    med_spacing = np.median(d_self[:, 1])
+    dist_thr = dist_mult * med_spacing
+    d_near, _ = tree.query(pos, k=1, workers=-1)
+    keep = d_near < dist_thr
+
+    top = ((pos_pts - center) @ up).max()
+    keep &= ((pos - center) @ up) < (top + up_margin)
+
+    maxraw_scale = arr[:, 52:55].max(1)
+    opacity_raw = arr[:, 51]
+    keep &= ~((maxraw_scale > large_scale_raw) & (opacity_raw < low_opacity_raw))
+
     kept = arr[keep]
     lines = header.split(b'\n')
     out_lines = [f'element vertex {kept.shape[0]}'.encode() if l.startswith(b'element vertex') else l
@@ -392,7 +441,7 @@ def filter_scene_ply(src_ply, out_ply, center, up, e1, e2, bounds, margin, scale
     with open(out_ply, 'wb') as f:
         f.write(b'\n'.join(out_lines))
         kept.astype('<f4').tofile(f)
-    return kept.shape[0], arr.shape[0]
+    return kept.shape[0], arr.shape[0], dist_thr
 
 
 # ---------------------------------------------------------------------------
@@ -407,13 +456,19 @@ def main():
     ap.add_argument('--out', default='docs/assets/hero_reconstruction.gif')
     ap.add_argument('--skip-render', action='store_true', help='reuse frames already in --work')
     ap.add_argument('--width', type=int, default=OUT_W)
-    ap.add_argument('--colors', type=int, default=140)
-    ap.add_argument('--dither', default='bayer:bayer_scale=3')
-    ap.add_argument('--stride', type=int, default=2,
+    ap.add_argument('--colors', type=int, default=100)
+    ap.add_argument('--dither', default='none')
+    ap.add_argument('--stride', type=int, default=1,
                      help='keep every Nth composited frame (GIF size vs. smoothness); '
-                          'output fps is FPS/stride so total duration is unchanged')
+                          'output fps is FPS/stride so total duration is unchanged. '
+                          'Prefer lowering --width over raising this -- dropping frames '
+                          'from an already-smooth render looks choppier than it needs to.')
     ap.add_argument('--skip-composite', action='store_true', help='reuse final_*.png, only re-run ffmpeg')
+    ap.add_argument('--stages', default='points,mesh,splat',
+                     help='comma list of render stages to (re)run, e.g. --stages points '
+                          'to only re-render phase 1 after tweaking its look')
     args = ap.parse_args()
+    stages = set(args.stages.split(','))
 
     work = args.work
     os.makedirs(work, exist_ok=True)
@@ -422,6 +477,15 @@ def main():
     center, up, ring_radius, Ctr = fit_building_frame(q, t)
     _, Rtr = camera_centers(q, t)
     pos_pts, col_pts, first_img = load_points3d(f'{SRC}/sparse/0/points3D.txt')
+    if (first_img > len(q)).all():
+        # gsplat_photos's points3D.txt carries no per-point track/image list
+        # (unlike a full COLMAP export), so there is no real "first image
+        # that saw this point" to grow the cloud by. Approximate it with the
+        # nearest training camera instead, so points still pop in roughly in
+        # image/capture order together with that camera's frustum.
+        from scipy.spatial import cKDTree
+        _, nearest_cam = cKDTree(Ctr).query(pos_pts, k=1, workers=-1)
+        first_img = nearest_cam + 1
     e1, e2 = build_basis(up)
 
     hh = (pos_pts - center) @ up
@@ -441,23 +505,26 @@ def main():
     n_train_images = len(q)
     n_points = len(pos_pts)
 
-    if not args.skip_render:
+    if not args.skip_render and ({'points', 'mesh'} & stages):
+        renderer = GLRenderer(W, H)
+
+    if not args.skip_render and 'points' in stages:
         # ---- phase 1: points + frustums, frames 0..P2_START-1 (through the
         # crossfade-in, so the blend at the boundary has real content) ----
-        renderer = GLRenderer(W, H)
         pt_range = range(0, P2_START)
         for k in pt_range:
-            reveal = min(1.0, k / REVEAL_FRAMES)
+            reveal = REVEAL_START_FRAC + (1.0 - REVEAL_START_FRAC) * min(1.0, k / REVEAL_FRAMES)
             cutoff = reveal * n_train_images
             pmask = first_img <= cutoff
             fmask_idx = [i for i in range(n_train_images) if i + 1 <= cutoff]
             V = gl_view_matrix(Rs[k], ts[k]); mvp = P @ V
             renderer.clear()
             if pmask.any():
-                renderer.draw_points(pos_pts[pmask].astype(np.float32),
-                                      (col_pts[pmask].astype(np.float32) / 255.0), mvp, point_size=3.0)
+                renderer.draw_points_glow(pos_pts[pmask].astype(np.float32),
+                                           (col_pts[pmask].astype(np.float32) / 255.0), mvp,
+                                           core_size=8.0, glow_size=13.0, glow_alpha=0.16)
             if fmask_idx:
-                segs = frustum_segments(Ctr, Rtr, fmask_idx).astype(np.float32)
+                segs = frustum_segments(Ctr, Rtr, fmask_idx, scale=0.14).astype(np.float32)
                 if len(segs):
                     accent = np.tile(np.array([1.0, 0.55, 0.12], dtype=np.float32), (segs.shape[0], 1))
                     renderer.draw_lines(segs, accent, mvp)
@@ -465,6 +532,7 @@ def main():
             Image.fromarray(img, 'RGBA').convert('RGB').save(f'{work}/pts_{k:04d}.png')
         print('points+frustums done', flush=True)
 
+    if not args.skip_render and 'mesh' in stages:
         # ---- phase 3: mesh, frames P1_END..N_FRAMES-1 (from the crossfade-out
         # of phase 2 through the end) ----
         mpos = np.load(f'{work}/mesh_pos.npy') if os.path.exists(f'{work}/mesh_pos.npy') else None
@@ -502,12 +570,14 @@ def main():
             Image.fromarray(img, 'RGBA').convert('RGB').save(f'{work}/mesh_{k:04d}.png')
         print('mesh done', flush=True)
 
+    if not args.skip_render and 'splat' in stages:
         # ---- phase 2: the Gaussian splat, rendered with the project's own
         # Rust wgpu renderer, frames P1_END..P2_END+XF2-1 ----
         filtered_ply = f'{work}/scene_filtered.ply'
-        kept, total = filter_scene_ply(f'{SRC}/scene.ply', filtered_ply, center, up, e1, e2,
-                                        bounds, FILTER_MARGIN, FILTER_SCALE_RAW)
-        print(f'splat filter: kept {kept}/{total} gaussians', flush=True)
+        kept, total, dist_thr = filter_scene_ply(f'{SRC}/scene.ply', filtered_ply, pos_pts, center, up,
+                                                  FILTER_DIST_MULT, FILTER_UP_MARGIN,
+                                                  FILTER_LARGE_SCALE_RAW, FILTER_LOW_OPACITY_RAW)
+        print(f'splat filter: kept {kept}/{total} gaussians (dist_thr={dist_thr:.4f})', flush=True)
 
         splat_dir = f'{work}/splat_poses'
         splat_indices = list(range(P1_END, P2_END + XF2))

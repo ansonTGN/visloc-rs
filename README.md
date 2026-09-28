@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/hero_reconstruction.gif" alt="One continuous orbit camera circling the south-building reconstruction from a viewpoint no input photo has: the sparse SfM point cloud and recovered camera frustums pop in, dissolve into the photoreal 3D Gaussian splat rendered with visloc-rs's own Rust + wgpu renderer, then dissolve into the extracted mesh." width="720"><br>
+  <img src="docs/assets/hero_reconstruction.gif" alt="One continuous orbit camera circling the south-building reconstruction from a viewpoint no input photo has: the sparse SfM point cloud and recovered camera frustums pop in, dissolve into the photoreal 3D Gaussian splat rendered with visloc-rs's own Rust + wgpu renderer, then dissolve into the extracted mesh." width="640"><br>
   <sub>128 raw photos &rarr; camera poses &rarr; Gaussian splat &rarr; mesh, one command, no COLMAP or Python, orbited from a viewpoint none of the input photos have. <a href="#photos-to-splat-and-mesh-3d-gaussian-splatting">Details</a>.</sub>
 </p>
 
