@@ -602,6 +602,120 @@ too noisy a rotation estimate on these sequences to beat the zero-motion
 seed once projected through the wide-FOV Double Sphere model. Code stays in
 the tree (default off, zero cost, fully tested) as a documented negative.
 
+### 1.8b Result 2026-09-29: IMU-derived global-BA factors do not flip MH_04/MH_05 (honest negative), and the free-velocity variant regresses VIO wall time
+
+Branch `vio/mapper-imu-factors` (worktree `E:/visloc-rs-runs/vio_imu_wt`, off
+`perf/basalt-vio-rt` / PR #236's release-rt + mimalloc-global profile).
+Baseline reproduced on this exe: MH_04 SE3 0.0704 m, MH_05 SE3 0.0631 m /
+Sim3 ~0.0415 m (matches the 0.0702/0.0633 cited in the task almost exactly),
+RTF 1.12-1.35, confirming the build/protocol match. Goal was §2's "Global BA
+does not bite ... marginalisation-derived relative factors ... to keep
+VIO-grade local precision and gravity" — three variants were tried, all
+evaluated on MH_04_difficult/MH_05_difficult with
+`scripts/run_basalt_online_all11_rt.py`-style driver,
+`configs/basalt/variants/official_euroc_ds/` + the repo's `euroc_config_maxiter5.json`
+override, `--optimize-every-k 100 --periodic-iterations 4`:
+
+1. **Reweight the NFR marginalization-derived factors already in the mapper**
+   (`MapperFactors::relative_pose`/`roll_pitch`, recovered from every
+   `MargData` packet's marginalization covariance in
+   `extract_nonlinear_factors` — this is real IMU-informed information (gated
+   on `data.used_imu`), already wired into the global BA at
+   `MapperConfig::default()` weight 1.0, just never exposed as a CLI knob).
+   Added `--relative-pose-weight`/`--roll-pitch-weight` to
+   `basalt_euroc_online_slam_demo`. Swept 0.2x-10x, combined and decoupled:
+   MH_04 never moved more than ~3% (0.0704 → 0.0686 best case, at 10x, already
+   plateaued between 5x and 10x); MH_05 got *worse* with more weight (SE3
+   0.0631 → 0.064, Sim3 0.0415 → 0.044 at 2x-10x) and only marginally better
+   with *less* weight (0.2x: SE3 0.0616, Sim3 0.0398 — best result of this
+   family, still an 11-13% gap from ORB's 0.0546/0.0428, not close to a flip).
+   Diagnosis: these edges connect temporally *adjacent* marginalized
+   keyframes and are built from that same local window's own marginalization
+   Hessian, so their information is self-consistent with the VIO's own
+   (already-biased) short-baseline answer — amplifying them just reinforces
+   VIO's local answer against the vision/loop terms that pull toward a
+   different, more globally-corrected scale. Negative; option abandoned.
+
+2. **New preintegrated-IMU relative-pose factor, frozen velocity/bias.**
+   Added `pipelines/basalt/src/mapper/imu_factor.rs`:
+   `imu_preintegration_relative_pose_factor` double-integrates real
+   accel/gyro (reusing the existing, already-tested
+   `pipelines/basalt/src/imu::preintegration::ImuPreintegrator`, sample
+   convention copied from `vio::estimator::fallback_integrate`) between
+   consecutive *mapper* keyframes and folds the result into a
+   `RelativePoseFactor` measurement fed through the mapper's unmodified
+   pose-only BA residual/Jacobian (`rel_pose_error`/`linearize_factors`) —
+   zero new solver code. `from_velocity_world`/bias were FROZEN at the VIO's
+   own per-keyframe estimate (`NfrMapper::frame_velocity_bias`, populated
+   from `MargData`'s `FrameStateData`, previously dropped by the mapper).
+   Gated behind `--imu-preintegration-weight` (unset = fully disabled, zero
+   extra cost). Swept 1/10/100/1000: MH_04 and MH_05 stayed flat (within
+   noise of baseline) across three orders of magnitude of weight. A sanity
+   check at 1e6/1e8 confirmed the factor *is* live (1e8 made MH_04 much
+   *worse*, 0.166 m) — not a wiring bug, but the residual is ~zero at any
+   sane weight: frozen velocity carries the VIO's own scale, so `p_j - p_i -
+   v_i*dt - 0.5*g*dt^2` is satisfied almost exactly by construction at
+   adjacent-keyframe spacing, regardless of where the global BA has moved
+   the poses to. Negative.
+
+3. **Free velocity, alternating refinement (Δv/Δp residual), periodic-only.**
+   Per-request bounded-risk design: rather than expanding the core
+   `PoseBlockHessian`/`Matrix6`/`POSE_DOF` dense pose solver to jointly
+   optimize velocity (the "proper" fix, touches every BA function, high risk
+   to the 9/11 existing wins), added a second, purely additive
+   `MapperFactors::imu_relative_pose: Vec<RelativePoseFactor>` field with
+   duplicate (not shared) loops in `linearize_factors`/`evaluate_costs`, and
+   a mapper-owned `NfrMapper::frame_velocities` state seeded from VIO and
+   then refined *outside* the pose solver: `imu_factor::refine_pair_velocities`
+   solves a dense normal-equations position+velocity-continuity system
+   (world-frame reformulation so rotation cancels: `J_p = dt*I`, `J_v =
+   [-I, I]`) over the cumulative keyframe-pair chain (capped at 2000 pairs;
+   measured 0.61 s at 700 keyframes / 17.8 s at 2001 keyframes,
+   release-rt), with poses held fixed. Runs only at periodic/final optimize
+   passes (`OnlineNfrMapper::refresh_imu_factors`, called from
+   `optimize_pass`/`spawn_background_optimize`), never per-packet. Result:
+   accuracy stayed just as flat as variant 2 (MH_04 0.070-0.071, MH_05
+   0.0627-0.0633 across weight 1/10/100) — likely because
+   `optimize_trigger_count` is only ~3 for a sequence like MH_04, so the
+   pose↔velocity alternation gets very few outer iterations to pull the
+   fit away from self-consistency with whatever the vision-dominated
+   solution already is. Worse, it **regressed `vio_wall_seconds` 25-45%**
+   (MH_04 ~75-79s → 96-109s, MH_05 ~85-86s → 118-127s; RTF dropped below 1.0
+   on most runs) — the dense per-pass velocity solve on the mapper's
+   background thread competes for CPU with the VIO thread on this machine,
+   exactly the failure mode flagged before implementing it. Negative, and
+   fails the wall-time gate at any tested weight; a default-off run
+   (`--imu-preintegration-weight` unset) on MH_02/V1_02 confirmed the
+   feature is fully inert when disabled (all three variants' new code is
+   gated behind the CLI flag / `imu_preintegration_weight > 0.0`; MH_02/V1_02
+   with it unset showed no behavior change from before this session's code
+   — the one default-off timing sample taken was itself contention-affected
+   (RTF 0.81 on MH_02), consistent with this being a shared, loaded machine
+   rather than a regression, since the changed code paths are unreachable
+   when the flag is unset).
+
+**Conclusion:** all three MargData/marginalization-adjacent and
+adjacent-mapper-keyframe IMU levers are exhausted — they only ever supply
+*local* (adjacent-keyframe) consistency information, which cannot correct
+the *global* scale/drift error diagnosed in §1.7/the parent task (MH_05's
+34% Sim3-vs-SE3 gap, MH_04's uniform 1.4-2x drift). Getting real
+scale-correcting information into the global BA needs either (a) a properly
+*jointly* solved VI global BA — per-keyframe `[pose, velocity, bias]` states,
+preintegrated residual with bias Jacobians, bias random-walk between
+keyframes, gravity fixed in world frame, actually expanding the dense
+pose-block solver (`PoseBlockHessian`/`Matrix6`) to carry velocity/bias as
+first-class optimized state rather than an externally-alternated
+approximation — or (b) far more frequent periodic global-optimize triggers
+so an alternating scheme like variant 3 gets enough outer iterations to
+converge, which has its own wall-time cost to manage. Both are materially
+larger, higher-risk undertakings than anything else in §4's stage list;
+not started this session. Branch `vio/mapper-imu-factors` (commit history:
+add `--relative-pose-weight`/`--roll-pitch-weight`/`--imu-preintegration-weight`
+CLI flags, `pipelines/basalt/src/mapper/imu_factor.rs`, `NfrMapper` velocity/bias
+state, `MapperFactors::imu_relative_pose`) is committed locally, not merged;
+all new code is off by default and should be safe to build on for a future
+full-VI-BA attempt, but does not by itself change the 9/11 result.
+
 ## 2. Diagnosis
 
 | Symptom | Evidence | What is missing |

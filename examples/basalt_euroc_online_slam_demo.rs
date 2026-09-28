@@ -127,6 +127,23 @@ struct Args {
     local_ba_window: usize,
     /// LM iterations for the local windowed BA.
     local_ba_iterations: usize,
+    /// Scalar multiplier on the marginalisation-derived (IMU-informed)
+    /// relative-pose factors the NFR mapper already recovers from each
+    /// `MargData` packet (`MapperFactors::relative_pose`,
+    /// `pipelines/basalt/src/mapper/mod.rs::extract_nonlinear_factors`).
+    /// `None` keeps `MapperConfig::default()`'s weight of `1.0` (unchanged
+    /// behavior). These edges carry the VIO window's own covariance
+    /// (position + yaw), so raising this weight strengthens the global BA's
+    /// metric-scale/drift constraint relative to its vision-only reprojection
+    /// and loop-closure terms without adding any per-frame VIO cost.
+    relative_pose_weight: Option<f64>,
+    /// Weight for raw preintegrated-IMU mapper edges; None means disabled (0.0).
+    imu_preintegration_weight: Option<f64>,
+    /// Scalar multiplier on the marginalisation-derived roll/pitch
+    /// (gravity-direction) factors (`MapperFactors::roll_pitch`, only
+    /// emitted when the source `MargData` used IMU). `None` keeps
+    /// `MapperConfig::default()`'s weight of `1.0`.
+    roll_pitch_weight: Option<f64>,
 }
 
 /// Default bound on the VIO-to-mapper `MargData` channel (see
@@ -271,12 +288,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("EuRoC cam0 manifest has no frames".into());
     }
 
-    let mapper_config = dataset.config().mapper_config()?;
+    let mut mapper_config = dataset.config().mapper_config()?;
+    if let Some(weight) = args.relative_pose_weight {
+        mapper_config.relative_pose_weight = weight;
+    }
+    if let Some(weight) = args.roll_pitch_weight {
+        mapper_config.roll_pitch_weight = weight;
+    }
     let feature_config = dataset.config().offline_mapper_config()?;
     let optimize_config = dataset.config().mapper_global_ba_config()?;
     let headless = visloc_basalt::mapper::NfrMapperHeadlessConfig {
         num_opt_iter: args.num_opt_iter,
         ..visloc_basalt::mapper::NfrMapperHeadlessConfig::default()
+    };
+    let imu_samples_for_mapper = if args.imu_preintegration_weight.is_some() {
+        std::sync::Arc::from(dataset.imu_samples())
+    } else {
+        std::sync::Arc::from([])
     };
     let online_mapper = OnlineNfrMapper::new(
         mapper_config,
@@ -284,6 +312,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         feature_config,
         optimize_config,
         OnlineMapperConfig {
+            imu_samples: imu_samples_for_mapper,
+            imu_preintegration_weight: args.imu_preintegration_weight.unwrap_or(0.0),
             optimize_every_k: args.optimize_every_k,
             periodic_iterations: args.periodic_iterations,
             headless,
@@ -1004,6 +1034,9 @@ impl Args {
             OnlineMapperConfig::default().loop_closure_max_rotation_error_deg;
         let mut local_ba_window = OnlineMapperConfig::default().local_ba_window;
         let mut local_ba_iterations = OnlineMapperConfig::default().local_ba_iterations;
+        let mut imu_preintegration_weight = None;
+        let mut relative_pose_weight = None;
+        let mut roll_pitch_weight = None;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy().into_owned();
@@ -1135,6 +1168,32 @@ impl Args {
                             .map_err(|error| format!("invalid --match-top-k: {error}"))?,
                     );
                 }
+                "--imu-preintegration-weight" => {
+                    imu_preintegration_weight = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<f64>()
+                            .map_err(|error| {
+                                format!("invalid --imu-preintegration-weight: {error}")
+                            })?,
+                    );
+                }
+                "--relative-pose-weight" => {
+                    relative_pose_weight = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<f64>()
+                            .map_err(|error| format!("invalid --relative-pose-weight: {error}"))?,
+                    );
+                }
+                "--roll-pitch-weight" => {
+                    roll_pitch_weight = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<f64>()
+                            .map_err(|error| format!("invalid --roll-pitch-weight: {error}"))?,
+                    );
+                }
                 "--projection-host-window" => {
                     projection_host_window = Some(
                         next(&mut arguments, &option)?
@@ -1200,6 +1259,9 @@ impl Args {
             loop_closure_max_rotation_error_deg,
             local_ba_window,
             local_ba_iterations,
+            imu_preintegration_weight,
+            relative_pose_weight,
+            roll_pitch_weight,
         })
     }
 
@@ -1211,7 +1273,8 @@ impl Args {
          [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N] \
          [--match-top-k N] [--frontend-stats-csv <path>]          [--projection-rematch] [--local-mapping] [--imu-seed-klt]          [--projection-host-window N] [--projection-radius PX] \
          [--loop-closure-factors] [--loop-closure-min-corr N] [--loop-closure-weight W] \
-         [--loop-closure-max-rot-error DEG] [--local-ba-window N] [--local-ba-iterations N]"
+         [--loop-closure-max-rot-error DEG] [--local-ba-window N] [--local-ba-iterations N] \
+         [--relative-pose-weight W] [--roll-pitch-weight W] [--imu-preintegration-weight W]"
             .into()
     }
 }
@@ -1249,6 +1312,46 @@ mod tests {
             args.periodic_iterations,
             OnlineMapperConfig::default().periodic_iterations
         );
+        assert_eq!(args.imu_preintegration_weight, None);
+        assert_eq!(args.relative_pose_weight, None);
+        assert_eq!(args.roll_pitch_weight, None);
+    }
+
+    #[test]
+    fn parser_accepts_imu_preintegration_weight() {
+        let args = Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--imu-preintegration-weight",
+                "3.5",
+            ]
+            .map(Into::into),
+        )
+        .expect("parses");
+        assert_eq!(args.imu_preintegration_weight, Some(3.5));
+    }
+
+    #[test]
+    fn parser_accepts_relative_pose_and_roll_pitch_weight() {
+        let args = Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--relative-pose-weight",
+                "4",
+                "--roll-pitch-weight",
+                "2.5",
+            ]
+            .map(Into::into),
+        )
+        .expect("parses");
+        assert_eq!(args.relative_pose_weight, Some(4.0));
+        assert_eq!(args.roll_pitch_weight, Some(2.5));
     }
 
     #[test]

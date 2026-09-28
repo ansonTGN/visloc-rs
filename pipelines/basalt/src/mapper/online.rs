@@ -41,7 +41,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -54,6 +54,7 @@ use crate::{
     calibration::BasaltCalibration,
     pyramid::{ImageError, RawU16Image},
     vio::margdata::{MargData, OfImageData},
+    ImuSample,
 };
 
 use crate::mapper::{
@@ -137,8 +138,14 @@ pub enum OnlineMapperError {
 /// ([`OnlineNfrMapper::finalize`]) runs the full unbounded
 /// `headless.num_opt_iter` budget -- literally `run_headless`'s tail, not a
 /// capped approximation of it.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct OnlineMapperConfig {
+    /// Full sorted raw IMU stream, used only when `imu_preintegration_weight > 0.0`.
+    /// Empty by default; no sample copies or scans when unused.
+    pub imu_samples: Arc<[ImuSample]>,
+    /// Scalar weight for preintegrated-IMU factors between consecutive keyframes.
+    /// <= 0.0 (the default) disables retention, keyframe scans and IMU integration.
+    pub imu_preintegration_weight: f64,
     /// Run a periodic `build_tracks -> setup_opt -> optimize ->
     /// filter -> optimize` pass (capped at `periodic_iterations` LM
     /// iterations per `optimize` call) after this many newly accepted
@@ -275,6 +282,8 @@ pub struct OnlineMapperConfig {
 impl Default for OnlineMapperConfig {
     fn default() -> Self {
         Self {
+            imu_samples: Arc::from([]),
+            imu_preintegration_weight: 0.0,
             optimize_every_k: 100,
             periodic_iterations: 4,
             loop_gap_keyframes: 30,
@@ -360,6 +369,9 @@ pub struct OnlineFinalReport {
 pub struct OnlineNfrMapper {
     mapper: NfrMapper,
     config: OnlineMapperConfig,
+    last_imu_factor_keyframe: Option<u64>,
+    // Cumulative history; poses are looked up afresh at each optimize pass.
+    imu_pairs: Vec<(u64, u64, crate::mapper::imu_factor::CorrectedDelta)>,
     keyframes_since_optimize: usize,
     total_accepted_loops: usize,
     total_optimize_passes: usize,
@@ -447,6 +459,8 @@ impl OnlineNfrMapper {
         Self {
             mapper,
             config,
+            last_imu_factor_keyframe: None,
+            imu_pairs: Vec::new(),
             keyframes_since_optimize: 0,
             total_accepted_loops: 0,
             total_optimize_passes: 0,
@@ -516,8 +530,54 @@ impl OnlineNfrMapper {
 
         mapper_trace!("ingest_packet: add_marg_data start");
         self.mapper
-            .add_marg_data(data)
+            .add_marg_data_with_velocity_bias(data, self.config.imu_preintegration_weight > 0.0)
             .map_err(OnlineMapperError::Ingest)?;
+        if self.config.imu_preintegration_weight > 0.0 {
+            use std::ops::Bound::{Excluded, Unbounded};
+            // An unbounded initial range includes the legitimate frame ID zero.
+            let lower = self.last_imu_factor_keyframe.map_or(Unbounded, Excluded);
+            let new_ids = self
+                .mapper
+                .frame_poses
+                .range((lower, Unbounded))
+                .map(|(&id, _)| id)
+                .collect::<Vec<_>>();
+            let ids = self
+                .last_imu_factor_keyframe
+                .iter()
+                .copied()
+                .chain(new_ids.iter().copied())
+                .collect::<Vec<_>>();
+            for pair in ids.windows(2) {
+                let (prev_id, cur_id) = (pair[0], pair[1]);
+                let (Some(&start), Some(&end), Some(&(_, bg, ba))) = (
+                    self.mapper.frame_timestamps.get(&prev_id),
+                    self.mapper.frame_timestamps.get(&cur_id),
+                    self.mapper.frame_velocity_bias.get(&prev_id),
+                ) else {
+                    continue;
+                };
+                if end <= start {
+                    continue;
+                }
+                let samples = &self.config.imu_samples;
+                let first = samples.partition_point(|sample| sample.timestamp_ns <= start);
+                let last = samples.partition_point(|sample| sample.timestamp_ns <= end);
+                if let Some(delta) = crate::mapper::imu_factor::preintegrate_corrected_delta(
+                    bg,
+                    ba,
+                    start,
+                    end,
+                    &samples[first..last],
+                ) {
+                    self.imu_pairs.push((prev_id, cur_id, delta));
+                }
+            }
+            if let Some(&last) = new_ids.last() {
+                self.last_imu_factor_keyframe = Some(last);
+            }
+        }
+
         mapper_trace!("ingest_packet: add_marg_data done");
         let calibration = self
             .mapper
@@ -1432,6 +1492,55 @@ impl OnlineNfrMapper {
         factors
     }
 
+    /// Cumulative refinement uses current poses, including background BA merges.
+    /// Bound the dense 3N solve (quadratic storage, cubic worst-case work).
+    fn refresh_imu_factors(&mut self) {
+        if self.config.imu_preintegration_weight > 0.0 && !self.imu_pairs.is_empty() {
+            const MAX_IMU_PAIRS: usize = 2000;
+            if self.imu_pairs.len() > MAX_IMU_PAIRS {
+                mapper_trace!(
+                    "imu velocity refresh skipped: {} pairs",
+                    self.imu_pairs.len()
+                );
+                return;
+            }
+            let pairs = self
+                .imu_pairs
+                .iter()
+                .filter_map(|(from, to, delta)| {
+                    Some((
+                        *from,
+                        *to,
+                        self.mapper.frame_poses.get(from)?.clone(),
+                        self.mapper.frame_poses.get(to)?.clone(),
+                        delta.dt,
+                        delta.position,
+                        delta.velocity,
+                    ))
+                })
+                .collect::<Vec<_>>();
+            self.mapper.frame_velocities = crate::mapper::imu_factor::refine_pair_velocities(
+                &pairs,
+                &self.mapper.frame_velocities,
+            );
+            self.mapper.factors.imu_relative_pose = self
+                .imu_pairs
+                .iter()
+                .filter_map(|(from, to, delta)| {
+                    self.mapper.frame_poses.get(to)?;
+                    crate::mapper::imu_factor::relative_pose_factor_from_delta(
+                        *from,
+                        *to,
+                        self.mapper.frame_poses.get(from)?.clone(),
+                        *self.mapper.frame_velocities.get(from)?,
+                        delta,
+                        self.config.imu_preintegration_weight,
+                    )
+                })
+                .collect();
+        }
+    }
+
     fn optimize_pass(
         &mut self,
         num_opt_iter: usize,
@@ -1452,6 +1561,7 @@ impl OnlineNfrMapper {
         // consistent with the current landmark positions rather than stale
         // snapshots from when the loop was first matched.
         let loop_factors = self.rebuild_loop_factors();
+        self.refresh_imu_factors();
         let first_optimize = self
             .mapper
             .optimize_with_extra_factors(&loop_factors, num_opt_iter)
@@ -1574,6 +1684,7 @@ impl OnlineNfrMapper {
     /// [`Self::poll_pending_optimizer`] or [`Self::finalize`] merges the
     /// result back.
     fn spawn_background_optimize(&mut self) {
+        self.refresh_imu_factors();
         let mut snapshot = self.mapper.optimizer_snapshot();
         let periodic_iterations = self.config.periodic_iterations;
         let outlier_threshold = self.config.headless.outlier_threshold;
@@ -2228,6 +2339,162 @@ mod tests {
     /// every time -- the exact bug an MH_01 smoke run caught (every packet
     /// reporting `new_key_count=16`, the full window, with per-packet match
     /// cost growing monotonically as a result).
+    #[test]
+    fn imu_ingestion_retains_navigation_states_before_pose_conversion() {
+        let mut packet = fixture_packet();
+        let states = packet
+            .frame_states
+            .iter()
+            .filter(|state| packet.kfs_all.contains(&state.frame_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(!states.is_empty());
+        let mut mapper = NfrMapper::new(MapperConfig::default());
+        let mut repeated_packet = packet.clone();
+        assert!(mapper.add_marg_data(&mut packet).unwrap().accepted);
+        for state in &states {
+            assert_eq!(
+                mapper.frame_velocities[&state.frame_id],
+                Vector3::from(state.velocity)
+            );
+            assert!(!packet
+                .frame_states
+                .iter()
+                .any(|s| s.frame_id == state.frame_id));
+            assert_eq!(
+                mapper.frame_velocity_bias[&state.frame_id],
+                (
+                    Vector3::from(state.velocity),
+                    Vector3::from(state.gyro_bias),
+                    Vector3::from(state.accel_bias)
+                )
+            );
+        }
+        let refined = Vector3::new(123.0, 456.0, 789.0);
+        mapper.frame_velocities.insert(states[0].frame_id, refined);
+        mapper.add_marg_data(&mut repeated_packet).unwrap();
+        assert_eq!(mapper.frame_velocities[&states[0].frame_id], refined);
+        mapper.calibration = Some(feature_calibration());
+        assert!(mapper.optimizer_snapshot().frame_velocity_bias.is_empty());
+        assert!(mapper.optimizer_snapshot().frame_velocities.is_empty());
+    }
+
+    #[test]
+    fn imu_ingestion_connects_packets_once_and_is_disabled_by_default() {
+        let mut base = fixture_packet();
+        // Supplement pose-only fixture entries with navigation estimates as if
+        // retained from earlier VIO packets, including frame ID zero.
+        base.frame_poses.push(FramePoseData {
+            frame_id: 0,
+            timestamp_ns: 0,
+            pose: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            is_keyframe: true,
+        });
+        base.kfs_all.push(0);
+        let mut all_ids = base.kfs_all.clone();
+        all_ids.sort_unstable();
+        all_ids.dedup();
+        let last = *all_ids.last().unwrap();
+        let mut next = base.clone();
+        next.frame_poses.push(FramePoseData {
+            frame_id: last + 1,
+            timestamp_ns: last as i64 + 1_000_000_000,
+            pose: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            is_keyframe: true,
+        });
+        next.kfs_all.push(last + 1);
+        let samples: Arc<[ImuSample]> = all_ids
+            .iter()
+            .skip(1)
+            .map(|&id| ImuSample::new(id as i64, Vector3::zeros(), Vector3::zeros()))
+            .chain(std::iter::once(ImuSample::new(
+                last as i64 + 1_000_000_000,
+                Vector3::zeros(),
+                Vector3::zeros(),
+            )))
+            .collect::<Vec<_>>()
+            .into();
+        for weight in [0.0, 7.0] {
+            let mut online = OnlineNfrMapper::new(
+                MapperConfig::default(),
+                feature_calibration(),
+                OfflineMapperConfig::default(),
+                GlobalBaConfig::default(),
+                OnlineMapperConfig {
+                    imu_samples: samples.clone(),
+                    imu_preintegration_weight: weight,
+                    optimize_every_k: usize::MAX,
+                    ..OnlineMapperConfig::default()
+                },
+            );
+            if weight > 0.0 {
+                // Pose-only entries have already lost their navigation fields;
+                // model the history retained from their original VIO packets.
+                for &id in &all_ids {
+                    online
+                        .mapper
+                        .frame_velocity_bias
+                        .insert(id, (Vector3::zeros(), Vector3::zeros(), Vector3::zeros()));
+                }
+            }
+            online
+                .ingest_packet(&mut base.clone(), Some(TEST_SEED))
+                .unwrap();
+            online
+                .ingest_packet(&mut next.clone(), Some(TEST_SEED))
+                .unwrap();
+            online
+                .ingest_packet(&mut next.clone(), Some(TEST_SEED))
+                .unwrap();
+            assert!(online.mapper.factors.imu_relative_pose.is_empty());
+            online.refresh_imu_factors();
+            let pairs = online
+                .mapper
+                .factors
+                .imu_relative_pose
+                .iter()
+                .filter(|f| f.weight == 7.0)
+                .map(|f| (f.from, f.to))
+                .collect::<Vec<_>>();
+            if weight == 0.0 {
+                assert!(pairs.is_empty());
+                assert!(online.mapper.frame_velocity_bias.is_empty());
+                assert!(online.mapper.frame_velocities.is_empty());
+                assert!(online.imu_pairs.is_empty());
+                assert_eq!(online.last_imu_factor_keyframe, None);
+            } else {
+                let mut expected = all_ids
+                    .windows(2)
+                    .map(|ids| (ids[0], ids[1]))
+                    .collect::<Vec<_>>();
+                expected.push((last, last + 1));
+                assert_eq!(pairs, expected);
+                let original = online.mapper.factors.imu_relative_pose.clone();
+                // A later pass must rebuild old pairs from the latest poses,
+                // not append duplicate factors or reuse ingestion-time poses.
+                online
+                    .mapper
+                    .frame_poses
+                    .get_mut(&(last + 1))
+                    .unwrap()
+                    .translation
+                    .x += 1.0;
+                online.refresh_imu_factors();
+                assert_eq!(
+                    online.mapper.factors.imu_relative_pose.len(),
+                    expected.len()
+                );
+                assert_ne!(online.mapper.factors.imu_relative_pose, original);
+                let snapshot = online.mapper.optimizer_snapshot();
+                assert_eq!(
+                    snapshot.factors.imu_relative_pose,
+                    online.mapper.factors.imu_relative_pose
+                );
+                assert!(snapshot.frame_velocities.is_empty());
+            }
+        }
+    }
+
     #[test]
     fn overlapping_packet_window_only_processes_new_images() {
         let (mut packet_one, mut packet_two) = overlapping_packets_with_images();

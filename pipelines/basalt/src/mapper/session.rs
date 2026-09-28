@@ -567,6 +567,12 @@ pub struct NfrMapper {
     /// compact frame index and timestamp as distinct fields, so retaining this
     /// side table is required for faithful trajectory export.
     pub frame_timestamps: BTreeMap<u64, i64>,
+    /// Frozen (velocity_world, gyro_bias, accel_bias) per keyframe.
+    pub frame_velocity_bias: BTreeMap<u64, (Vector3<f64>, Vector3<f64>, Vector3<f64>)>,
+    /// Live, mapper-refined per-keyframe world velocity, seeded from
+    /// `frame_velocity_bias` and updated by periodic IMU velocity refinement;
+    /// distinct from the frozen original VIO estimates in `frame_velocity_bias`.
+    pub frame_velocities: BTreeMap<u64, Vector3<f64>>,
     /// Recovered factors are appended in packet order, matching upstream's
     /// persistent `rel_pose_factors` and `roll_pitch_factors` vectors.
     pub factors: MapperFactors,
@@ -624,8 +630,10 @@ impl NfrMapper {
     /// poses, factors, calibration and optimizer configuration and state.
     /// `build_tracks` always replaces `feature_tracks`, and `setup_opt`
     /// (given calibration) always replaces `lmdb`. Descriptors, rays, BoW,
-    /// match payloads, raw images and the old tracks and landmarks are
-    /// therefore dead weight in the snapshot. A full clone doubled the
+    /// match payloads, raw images, frozen velocity/bias history, live velocities and the old
+    /// tracks and landmarks are therefore dead weight in the snapshot. IMU
+    /// factors are refreshed at periodic optimization, before this snapshot, and retained
+    /// in `factors`. A full clone doubled the
     /// mapper's persistent memory at every periodic optimize.
     ///
     /// Without calibration `setup_opt` would keep the old `lmdb`, so the
@@ -657,6 +665,8 @@ impl NfrMapper {
             feature_config: self.feature_config,
             frame_poses: self.frame_poses.clone(),
             frame_timestamps: self.frame_timestamps.clone(),
+            frame_velocity_bias: BTreeMap::new(),
+            frame_velocities: BTreeMap::new(),
             factors: self.factors.clone(),
             img_data: BTreeMap::new(),
             feature_corners,
@@ -747,7 +757,10 @@ impl NfrMapper {
             feature_config: OfflineMapperConfig::default(),
             frame_poses: BTreeMap::new(),
             frame_timestamps: BTreeMap::new(),
+            frame_velocity_bias: BTreeMap::new(),
+            frame_velocities: BTreeMap::new(),
             factors: MapperFactors {
+                imu_relative_pose: Vec::new(),
                 provenance_version: String::new(),
                 relative_pose: Vec::new(),
                 roll_pitch: Vec::new(),
@@ -827,10 +840,38 @@ impl NfrMapper {
         &mut self,
         data: &mut MargData,
     ) -> Result<NfrMapperIngestReport, NfrMapperError> {
+        self.add_marg_data_with_velocity_bias(data, true)
+    }
+
+    /// Online ingestion can skip navigation-state retention when IMU factors are off.
+    pub(crate) fn add_marg_data_with_velocity_bias(
+        &mut self,
+        data: &mut MargData,
+        retain_velocity_bias: bool,
+    ) -> Result<NfrMapperIngestReport, NfrMapperError> {
         // Contract validation is deliberately the first operation.  In
         // particular, process_marg_data mutates its input and retain_images
         // mutates the long-lived mapper before the rank gate.
         Self::validate_marg_data_ingress(data)?;
+        // Processing removes navigation states as it converts keyframes to poses.
+        // Capture first, but publish only after successful factor recovery below.
+        let navigation_states = if retain_velocity_bias {
+            data.frame_states
+                .iter()
+                .map(|state| {
+                    (
+                        state.frame_id,
+                        (
+                            Vector3::from(state.velocity),
+                            Vector3::from(state.gyro_bias),
+                            Vector3::from(state.accel_bias),
+                        ),
+                    )
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let process = process_marg_data(data).map_err(NfrMapperError::MargData)?;
         self.retain_images(data);
         let factors = match extract_nonlinear_factors(data, self.config) {
@@ -863,6 +904,14 @@ impl NfrMapper {
                 .insert(pose.frame_id, pose.timestamp_ns);
         }
         let keyframes = data.kfs_all.iter().copied().collect::<BTreeSet<_>>();
+        for (frame_id, velocity_bias) in navigation_states {
+            if keyframes.contains(&frame_id) {
+                self.frame_velocity_bias.insert(frame_id, velocity_bias);
+                self.frame_velocities
+                    .entry(frame_id)
+                    .or_insert(velocity_bias.0);
+            }
+        }
         for state in &data.frame_states {
             if keyframes.contains(&state.frame_id) {
                 self.frame_poses

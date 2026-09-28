@@ -5,6 +5,10 @@
 //! `marg_helper.cpp`, and `utils/nfr.h`).  See `benchmarks/basalt/` for the
 //! pinned fixture and provenance report.
 pub mod features;
+pub(crate) mod imu_factor;
+pub use imu_factor::{
+    imu_preintegration_relative_pose_factor, refine_pair_velocities, VelocityPair,
+};
 pub mod session;
 pub mod triangulation;
 
@@ -196,6 +200,8 @@ pub struct BaCovisibilityFactor {
 pub struct MapperFactors {
     pub provenance_version: String,
     pub relative_pose: Vec<RelativePoseFactor>,
+    #[serde(default)]
+    pub imu_relative_pose: Vec<RelativePoseFactor>,
     pub roll_pitch: Vec<RollPitchFactor>,
     pub ba_covisibility: Vec<BaCovisibilityFactor>,
 }
@@ -1450,6 +1456,44 @@ fn linearize_factors(
         add_factor_pose_gradient(b, from, ji.transpose() * wi * residual, pose_count);
         add_factor_pose_gradient(b, to, jj.transpose() * wi * residual, pose_count);
     }
+    for factor in &factors.imu_relative_pose {
+        let (Some(&from), Some(&to), Some(pose_i), Some(pose_j)) = (
+            pose_indices.get(&factor.from),
+            pose_indices.get(&factor.to),
+            poses.get(&factor.from),
+            poses.get(&factor.to),
+        ) else {
+            continue;
+        };
+        let Some(info) = info6(&factor.information) else {
+            continue;
+        };
+        let measured = pose_from_array([
+            factor.translation[0],
+            factor.translation[1],
+            factor.translation[2],
+            factor.rotation[0],
+            factor.rotation[1],
+            factor.rotation[2],
+            factor.rotation[3],
+        ]);
+        let (residual, ji_arr, jj_arr) = rel_pose_error(
+            se3_to_pose_array(&measured),
+            se3_to_pose_array(pose_i),
+            se3_to_pose_array(pose_j),
+        );
+        let ji = matrix6x6_from_arrays(ji_arr);
+        let jj = matrix6x6_from_arrays(jj_arr);
+        let residual = vector6_from_array(residual);
+        let w = factor.weight;
+        let wi = w * info;
+        add_factor_pose_block(h, from, from, ji.transpose() * wi * ji, pose_count);
+        add_factor_pose_block(h, from, to, ji.transpose() * wi * jj, pose_count);
+        add_factor_pose_block(h, to, from, jj.transpose() * wi * ji, pose_count);
+        add_factor_pose_block(h, to, to, jj.transpose() * wi * jj, pose_count);
+        add_factor_pose_gradient(b, from, ji.transpose() * wi * residual, pose_count);
+        add_factor_pose_gradient(b, to, jj.transpose() * wi * residual, pose_count);
+    }
     for factor in &factors.roll_pitch {
         let (Some(&index), Some(pose)) = (
             pose_indices.get(&factor.frame_id),
@@ -1645,6 +1689,30 @@ fn evaluate_costs(
     }
     let mut relative = 0.0;
     for factor in &factors.relative_pose {
+        let (Some(pose_i), Some(pose_j)) = (poses.get(&factor.from), poses.get(&factor.to)) else {
+            continue;
+        };
+        let Some(info) = info6(&factor.information) else {
+            continue;
+        };
+        let measured = pose_from_array([
+            factor.translation[0],
+            factor.translation[1],
+            factor.translation[2],
+            factor.rotation[0],
+            factor.rotation[1],
+            factor.rotation[2],
+            factor.rotation[3],
+        ]);
+        let (residual, _, _) = rel_pose_error(
+            se3_to_pose_array(&measured),
+            se3_to_pose_array(pose_i),
+            se3_to_pose_array(pose_j),
+        );
+        let residual = vector6_from_array(residual);
+        relative += factor.weight * (residual.transpose() * info * residual)[(0, 0)];
+    }
+    for factor in &factors.imu_relative_pose {
         let (Some(pose_i), Some(pose_j)) = (poses.get(&factor.from), poses.get(&factor.to)) else {
             continue;
         };
@@ -3061,6 +3129,7 @@ pub fn extract_nonlinear_factors(
 ) -> Result<MapperFactors, NfrExtractionError> {
     if !config.enabled {
         return Ok(MapperFactors {
+            imu_relative_pose: Vec::new(),
             provenance_version: data.provenance_version.clone(),
             relative_pose: Vec::new(),
             roll_pitch: Vec::new(),
@@ -3174,6 +3243,7 @@ pub fn extract_nonlinear_factors(
         }
     }
     Ok(MapperFactors {
+        imu_relative_pose: Vec::new(),
         provenance_version: data.provenance_version.clone(),
         relative_pose,
         roll_pitch,
@@ -3289,6 +3359,7 @@ pub fn try_recover_factors(
 ) -> Result<MapperFactors, NfrExtractionError> {
     if !config.enabled {
         return Ok(MapperFactors {
+            imu_relative_pose: Vec::new(),
             provenance_version: data.provenance_version.clone(),
             relative_pose: Vec::new(),
             roll_pitch: Vec::new(),
@@ -3311,6 +3382,7 @@ pub fn extractNonlinearFactors(
 pub fn recover_factors(data: &MargData, config: MapperConfig) -> MapperFactors {
     if !config.enabled {
         return MapperFactors {
+            imu_relative_pose: Vec::new(),
             provenance_version: data.provenance_version.clone(),
             relative_pose: Vec::new(),
             roll_pitch: Vec::new(),
@@ -3330,6 +3402,7 @@ pub fn recover_factors(data: &MargData, config: MapperConfig) -> MapperFactors {
         .is_some_and(|matrix| matrix.rows > 0 && matrix.cols > 0)
     {
         return MapperFactors {
+            imu_relative_pose: Vec::new(),
             provenance_version: data.provenance_version.clone(),
             relative_pose: Vec::new(),
             roll_pitch: Vec::new(),
@@ -3342,6 +3415,7 @@ pub fn recover_factors(data: &MargData, config: MapperConfig) -> MapperFactors {
 fn legacy_recover_factors(data: &MargData, config: MapperConfig) -> MapperFactors {
     if !config.enabled {
         return MapperFactors {
+            imu_relative_pose: Vec::new(),
             provenance_version: data.provenance_version.clone(),
             relative_pose: Vec::new(),
             roll_pitch: Vec::new(),
@@ -3398,6 +3472,7 @@ fn legacy_recover_factors(data: &MargData, config: MapperConfig) -> MapperFactor
         }
     }
     MapperFactors {
+        imu_relative_pose: Vec::new(),
         provenance_version: data.provenance_version.clone(),
         relative_pose: rp,
         roll_pitch,
@@ -3782,6 +3857,7 @@ mod ba_tests {
             },
         );
         let factors = MapperFactors {
+            imu_relative_pose: Vec::new(),
             provenance_version: "synthetic".into(),
             relative_pose: Vec::new(),
             roll_pitch: Vec::new(),
