@@ -63,6 +63,53 @@ pub(crate) fn preintegrate_corrected_delta(
     to_timestamp_ns: i64,
     imu_samples_in_interval: &[ImuSample],
 ) -> Option<CorrectedDelta> {
+    let delta = preintegrate_raw_delta(
+        from_gyro_bias,
+        from_accel_bias,
+        from_timestamp_ns,
+        to_timestamp_ns,
+        imu_samples_in_interval,
+        None,
+    )?;
+    let dt = delta.delta_time;
+    // Biases match the linearization point, but keep the IMU factor convention.
+    let (rotation, velocity, position) = delta.corrected(from_gyro_bias, from_accel_bias);
+    if !dt.is_finite()
+        || dt <= 0.0
+        || !position
+            .iter()
+            .chain(velocity.iter())
+            .chain(rotation.coords.iter())
+            .all(|x| x.is_finite())
+    {
+        return None;
+    }
+    Some(CorrectedDelta {
+        dt,
+        position,
+        velocity,
+        rotation,
+    })
+}
+
+/// Preintegrate `(from_timestamp_ns, to_timestamp_ns]` into a raw
+/// [`crate::imu::ImuPreintegratedDelta`], retaining the first-order
+/// bias-correction Jacobians and (when `noise` is supplied) the
+/// preintegration covariance. Shares the exact sample-selection/edge-case
+/// contract with [`preintegrate_corrected_delta`], which now calls this
+/// helper (with `noise: None`) and immediately collapses the result to a
+/// single bias-corrected translation for the frozen-velocity relative-pose
+/// factor. The joint VI-BA module (`mapper::imu_ba`) uses the raw delta
+/// directly instead, so it can relinearize around the current bias estimate
+/// at every LM iteration without re-touching raw IMU samples.
+pub(crate) fn preintegrate_raw_delta(
+    from_gyro_bias: Vector3<f64>,
+    from_accel_bias: Vector3<f64>,
+    from_timestamp_ns: i64,
+    to_timestamp_ns: i64,
+    imu_samples_in_interval: &[ImuSample],
+    noise: Option<crate::imu::ImuNoiseModel>,
+) -> Option<crate::imu::ImuPreintegratedDelta> {
     if imu_samples_in_interval.is_empty()
         || to_timestamp_ns <= from_timestamp_ns
         || imu_samples_in_interval
@@ -72,6 +119,9 @@ pub(crate) fn preintegrate_corrected_delta(
         return None;
     }
     let mut integrator = ImuPreintegrator::new(from_gyro_bias, from_accel_bias);
+    if let Some(noise) = noise {
+        integrator = integrator.with_noise(noise)?;
+    }
     let selected = imu_samples_in_interval
         .iter()
         .filter(|sample| {
@@ -95,29 +145,14 @@ pub(crate) fn preintegrate_corrected_delta(
         }
         integrator.integrate_sample(last.gyro_rad_s, last.accel_m_s2, dt);
     }
-    let delta = integrator.delta();
-    let dt = delta.delta_time;
-    // Biases match the linearization point, but keep the IMU factor convention.
-    let (rotation, velocity, position) = delta.corrected(from_gyro_bias, from_accel_bias);
-    if !dt.is_finite()
-        || dt <= 0.0
-        || !position
-            .iter()
-            .chain(velocity.iter())
-            .chain(rotation.coords.iter())
-            .all(|x| x.is_finite())
-    {
+    let delta = integrator.delta().clone();
+    if !delta.delta_time.is_finite() || delta.delta_time <= 0.0 {
         return None;
     }
-    Some(CorrectedDelta {
-        dt,
-        position,
-        velocity,
-        rotation,
-    })
+    Some(delta)
 }
 
-fn gravity_world() -> Vector3<f64> {
+pub(crate) fn gravity_world() -> Vector3<f64> {
     Vector3::new(0.0, 0.0, -9.81)
 }
 

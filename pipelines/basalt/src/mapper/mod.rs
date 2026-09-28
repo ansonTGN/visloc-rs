@@ -9,6 +9,7 @@ pub(crate) mod imu_factor;
 pub use imu_factor::{
     imu_preintegration_relative_pose_factor, refine_pair_velocities, VelocityPair,
 };
+pub mod imu_ba;
 pub mod session;
 pub mod triangulation;
 
