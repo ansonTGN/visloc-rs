@@ -9,6 +9,17 @@ speed stage done (§1.6): the compact `lean_marg_data` LM path cuts VIO wall
 time **3.2x** (LM solve **4.2x**) with byte-identical trajectory and
 MargData, online-mapper RTF 0.128 -> 0.349. Stage 5/6 (VIO tracking
 robustness on the three remaining losses) remain open.
+**Update 2026-09-28 (§1.6/7c continued):** re-measuring after
+parallelization that had already landed on `main` plus this session's
+`--pipeline`-default flip (bit-identical, verified) puts online-mapper RTF
+at 0.49-1.24× across the 11 sequences — **3/11 already at real time**
+(RTF >= 1.0), up from 0.09-0.38×/0-of-11 — and, as a side effect of the
+mapper's live-threaded trigger timing changing, the overall score moved
+from **8/11 to 9/11 wins vs measured ORB-SLAM3** (V2_03_difficult flipped).
+Further bit-identical parallelism on the largest remaining LM bucket was
+investigated and found negative (see §1.6 continuation below); reaching
+RTF >= 1.0 on the remaining 8 sequences is being pursued next via
+accuracy-gated, non-bit-identical levers.
 Owner goal: beat existing OSS visual-inertial SLAM on EuRoC — ORB-SLAM3
 stereo-inertial first, VINS-Mono second — while keeping the Basalt Rust
 port's runtime/memory edge.
@@ -258,6 +269,56 @@ which also improves MH_04/V2_03 accuracy.
 Dataset note: MH_01/02/04/05 were recovered from the local `machine_hall.zip`
 bundle; only V2_03_difficult is still missing locally.
 
+### 1.6 continued (2026-09-28): 7c landed as free parallelism + `--pipeline`-by-default; further LM parallelism is negative
+
+Between the 2026-09-20 measurement above and this update, `main` picked up
+the landmark-reduction/frontend `par_iter` parallelism stage 7c called for
+(`reduce_landmark_factors_f32_checked_with_options`'s per-factor QR
+projection and visual-gram accumulation, `stream.rs`'s per-track temporal
+KLT and FAST replenish, `rayon::join`'d stereo pyramids) — all with the
+same bit-identity discipline as 7b (ordered fold after parallel map,
+verified against the serial code path). This was not new work in this
+session; it had simply not been re-measured against RTF since it landed.
+Re-measuring it (400 MH_03 frames, solo/idle) already showed VIO wall time
+~4.2x faster than the 2026-09-20 baseline before any new change.
+
+On top of that, this session made one further bit-identical change: PR
+#153's `--pipeline` flag (two-thread frontend/estimator overlap) was
+opt-in and unused by the online-demo benchmark driver; it is now the
+default (`examples/basalt_euroc_online_slam_demo.rs`, `--no-pipeline`
+restores serial). Verified byte-identical `trajectory.tum` SHA-256 and
+`marg_data/` between serial and `--pipeline --threads 12` on MH_03/MH_04
+(300 frames each, via `basalt_euroc_vio_demo`, which has no mapper thread).
+Combined effect on the full 11-sequence online-demo sweep (same protocol as
+§1.5, `--pipeline --threads 12`, measured under CPU contention from a
+concurrent job on the shared benchmark machine): RTF 0.09-0.38× ->
+**0.49-1.24×**, 3/11 sequences (V1_03, V2_01, V2_03) already at real time.
+Full table: [VI-SLAM benchmark details](vi_slam_benchmarks.md). As a side
+effect of the mapper's live-threaded optimizer-trigger timing changing,
+V2_03_difficult's online ATE improved from 0.1078 m to 0.0451 m (its
+optimizer-trigger count went from 2, the suspected root cause named in
+§1.5, to 4) — flipping the overall score from **8/11 to 9/11 wins vs
+ORB-SLAM3**.
+
+Further bit-identical parallelism was then investigated on the largest
+remaining LM bucket (`lm_landmark_reduction`, ~25% of instrumented VIO wall
+time) via Codex CLI: a rayon `with_min_len` scheduling tweak, and a
+thread-local QR-workspace-reuse variant (behind `basalt-lm-workspace-reuse`).
+Both were built and verified byte-identical (trajectory.tum SHA-256 and
+`marg_data/` diff, MH_03/MH_04). Neither showed a reproducible speedup
+under paired alternating timing against the unmodified baseline (median
+2-3% *slower*, within this machine's run-to-run contention noise); both
+were reverted. Full evidence:
+`E:\visloc-rs-runs\vio_rt_runs\codex_work\reduction_investigation\report.md`.
+This matches stage 7c's own kill criterion ("if reduction is already
+negligible after 7b on the measured window size, stop") — the hot path
+already appears to be at the limit of what bit-identical parallelism alone
+can extract on this window size. Getting the remaining 8 sequences to
+RTF >= 1.0 is expected to require either an idle machine (all of the above
+was measured under contention) or accuracy-gated, non-bit-identical levers
+(fewer LM iterations, cheaper frontend settings, smaller window) — tracked
+as the 7c follow-up rather than a new stage number.
+
 ### 1.7 Accuracy diagnosis 2026-09-20: the remaining gap is map information, not the solver
 
 Full-sequence local online runs with the lean path reproduce the documented
@@ -442,7 +503,7 @@ same-protocol measurements in §1.1; every claim cites an artifact path.
 | 6 | Re-run the official-calibration + mapper sweep on all 11 with whatever Stage 5 levers passed | ≥ 9/11 wins vs ORB-SLAM3 measured | < 8/11 (regression from PR #147) → revert the Stage 5 change that caused it |
 | 7 (done, owner override — see §1.5) | Online: mapper in a background thread behind the live VIO, incremental solve — this is the same online-mapping goal as the original plan's Stage 3, run now (owner-approved override) directly on the existing 8/11 PR #147 result instead of after Stage 5/6's VIO-robustness work | Accuracy within ~10 % of the offline mapper's result, mapper keeps up with the VIO (whole-system wall ≈ VIO-alone wall) | — passed on all 11 (§1.5); Stage 5/6 (VIO tracking robustness on MH_04/MH_05/V2_03) remain open, unaffected by this stage |
 | 7b (done, see §1.6) | **VIO speed:** compact `lean_marg_data` LM path — skip per-trial diagnostic landmark re-factorization and the duplicate pre-solve linearization while keeping the MargData factor snapshot | Byte-identical trajectory and MargData; material wall-time reduction on MH_03 | — passed: 3.2x total VIO, 4.2x LM, RTF 0.128 -> 0.349; diagnostic path preserved behind `--retained-marg-diagnostics` |
-| 7c (next) | **VIO speed, next lever:** upstream Basalt's inner LM damping backtracking loop — reduce landmarks once per outer iteration and re-solve only the tiny dense reduced system per rejected lambda; consume the compact model-decrease payload instead of re-factoring; parallelize `landmark_steps` over landmarks with ordered `par_iter` | Further wall-time cut without a trajectory bit change; largest expected effect on rejection-heavy MH_04/MH_05/V2_03 | A lever that changes trajectory bits is rejected; if reduction is already negligible after 7b on the measured window size, stop |
+| 7c (bit-identical part done, see §1.6 continued 2026-09-28) | **VIO speed:** upstream Basalt's inner LM damping backtracking loop (done, part of 7b's cache-across-rejected-trials change) plus ordered `par_iter` over `landmark_steps`/frontend tracks (done, already on `main`) plus `--pipeline` on by default for the online demo (done, this session) | Further wall-time cut without a trajectory bit change; largest expected effect on rejection-heavy MH_04/MH_05/V2_03 | — passed: RTF 0.09-0.38× -> 0.49-1.24×, 3/11 sequences at real time, byte-identical trajectory/MargData throughout; further LM-reduction parallelism (rayon scheduling, QR-workspace reuse) tried and found negative (no reproducible speedup) — kill criterion met, bit-identical part of this lever is closed; RTF >= 1.0 on the remaining 8 sequences needs a follow-up non-bit-identical stage |
 | 8 | Same-protocol re-measurement (ORB-SLAM3 one run, ours one run), README VI-SLAM section update with figures/tables | — | — |
 
 MH_04/MH_05/V2_03 are the first target now for the same reason V1_02 was

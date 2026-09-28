@@ -61,7 +61,17 @@ struct Args {
     optimize_every_k: usize,
     periodic_iterations: usize,
     realtime: bool,
+    /// Two-thread frontend/estimator overlap (PR #153). On by default: it is
+    /// bit-identical to the serial path (verified: identical trajectory.tum
+    /// SHA-256 and identical marg_data/ contents on MH_03/MH_04) and
+    /// materially faster, so there is no reason to ship the slower serial
+    /// default. `--no-pipeline` restores the serial path.
     pipeline: bool,
+    /// True when `--pipeline` or `--no-pipeline` was typed explicitly, so
+    /// `--realtime`'s serial-only pacing can silently fall back to serial
+    /// when `pipeline` is just the default, while still rejecting an
+    /// explicit `--pipeline --realtime` request.
+    pipeline_explicit: bool,
     pipeline_capacity: usize,
     decode_threads: usize,
     threads: Option<usize>,
@@ -173,18 +183,32 @@ impl MapperAggregate {
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::parse(env::args_os().skip(1))
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
-    if args.pipeline && args.realtime {
-        // The pipelined frontend decodes ahead of the estimator by design
-        // (that overlap is the whole point); there is no clean per-frame
-        // insertion point for dataset-rate pacing without reaching into
-        // `process_euroc_stream_pipelined` itself, which must stay
-        // untouched for bit-identical VIO output. `--realtime` only paces
-        // the serial path.
-        return Err("--realtime is not supported together with --pipeline".into());
+/// Resolves the `--pipeline`/`--realtime` interaction: `--realtime`'s
+/// dataset-rate pacing only exists on the serial path (`--pipeline`'s
+/// frontend/estimator overlap is incompatible with per-frame pacing by
+/// design). Since `--pipeline` defaults on, an unqualified `--realtime`
+/// silently falls back to serial instead of erroring on a flag combination
+/// the caller never typed; an *explicit* `--pipeline --realtime` request is
+/// still rejected rather than silently downgraded.
+fn resolve_pipeline_realtime(
+    pipeline: bool,
+    pipeline_explicit: bool,
+    realtime: bool,
+) -> Result<bool, &'static str> {
+    if !(pipeline && realtime) {
+        return Ok(pipeline);
     }
+    if pipeline_explicit {
+        return Err("--realtime is not supported together with --pipeline");
+    }
+    Ok(false)
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let mut args = Args::parse(env::args_os().skip(1))
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+    args.pipeline =
+        resolve_pipeline_realtime(args.pipeline, args.pipeline_explicit, args.realtime)?;
     // Sizes the process-wide rayon pool used by data-parallel stages inside
     // the adapter/estimator (PR #153). Same flag/behavior as
     // examples/basalt_euroc_vio_demo.rs's `--threads`.
@@ -866,7 +890,8 @@ impl Args {
         // reused unmodified via `BasaltVioEstimatorAdapter::
         // process_euroc_stream_pipelined` below -- this demo only supplies
         // the same `on_output` callback the serial path already used.
-        let mut pipeline = false;
+        let mut pipeline = true;
+        let mut pipeline_explicit = false;
         let mut pipeline_capacity = 4usize;
         let mut decode_threads = 3usize;
         let mut threads = None;
@@ -921,7 +946,14 @@ impl Args {
                 }
                 "--realtime" => realtime = true,
                 "--as-fast-as-possible" => realtime = false,
-                "--pipeline" => pipeline = true,
+                "--pipeline" => {
+                    pipeline = true;
+                    pipeline_explicit = true;
+                }
+                "--no-pipeline" => {
+                    pipeline = false;
+                    pipeline_explicit = true;
+                }
                 "--no-urgent-keyframes" => no_urgent_keyframes = true,
                 "--pipeline-capacity" => {
                     pipeline_capacity = next(&mut arguments, &option)?
@@ -1042,6 +1074,7 @@ impl Args {
             periodic_iterations,
             realtime,
             pipeline,
+            pipeline_explicit,
             pipeline_capacity,
             decode_threads,
             threads,
@@ -1068,7 +1101,7 @@ impl Args {
         "usage: basalt_euroc_online_slam_demo --euroc-dir DIR --calibration FILE \
          [--config FILE] [--out-dir DIR] [--max-frames N] [--optimize-every-k K] \
          [--periodic-iterations N] [--realtime | --as-fast-as-possible] \
-         [--pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
+         [--pipeline | --no-pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
          [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N] \
          [--projection-rematch] [--local-mapping] \
          [--projection-host-window N] [--projection-radius PX] \
@@ -1135,14 +1168,55 @@ mod tests {
     }
 
     #[test]
-    fn parser_defaults_pipeline_off_with_vio_demo_matching_defaults() {
+    fn parser_defaults_pipeline_on_bit_identical_to_serial() {
+        // `--pipeline` defaults on: it is bit-identical to the serial path
+        // (verified separately: identical trajectory.tum SHA-256 and
+        // identical marg_data/ contents on MH_03/MH_04) and materially
+        // faster, so it is the canonical default rather than an opt-in.
         let args = Args::parse(["--euroc-dir", "d", "--calibration", "c.json"].map(Into::into))
             .expect("parses");
-        assert!(!args.pipeline);
+        assert!(args.pipeline);
+        assert!(!args.pipeline_explicit);
         assert_eq!(args.pipeline_capacity, 4);
         assert_eq!(args.decode_threads, 3);
         assert_eq!(args.threads, None);
         assert_eq!(args.mapper_queue_capacity, DEFAULT_MAPPER_QUEUE_CAPACITY);
+    }
+
+    #[test]
+    fn parser_accepts_no_pipeline_to_restore_serial_default() {
+        let args = Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--no-pipeline",
+            ]
+            .map(Into::into),
+        )
+        .expect("parses");
+        assert!(!args.pipeline);
+        assert!(args.pipeline_explicit);
+    }
+
+    #[test]
+    fn realtime_silently_falls_back_to_serial_when_pipeline_is_only_the_default() {
+        assert_eq!(resolve_pipeline_realtime(true, false, true), Ok(false));
+    }
+
+    #[test]
+    fn realtime_rejects_explicit_pipeline_request() {
+        assert_eq!(
+            resolve_pipeline_realtime(true, true, true),
+            Err("--realtime is not supported together with --pipeline")
+        );
+    }
+
+    #[test]
+    fn realtime_leaves_pipeline_alone_when_not_paced() {
+        assert_eq!(resolve_pipeline_realtime(true, false, false), Ok(true));
+        assert_eq!(resolve_pipeline_realtime(false, true, true), Ok(false));
     }
 
     #[test]

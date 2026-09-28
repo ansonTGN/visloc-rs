@@ -64,7 +64,7 @@ the docs record open gaps.
 | Monocular video | VO (DPVO port) | Experimental | MH_01 prefix 0.16 m, about 2× DPVO's published error; CPU only | `euroc_dpvo_vo_demo` |
 | Monocular + IMU | VIO | Experimental | No headline result; IMU coupling is still open | [DPVO plan](docs/dpvo_droid_port_plan.md) |
 | Stereo | VO / SLAM | **Benchmarked** | KITTI seq00 1.23 m and seq09 2.07 m, vs 1.3 m and 3.2 m for ORB-SLAM2 | `deep_stereo_slam`, `online_slam_stereo_vo_kitti_demo` |
-| Stereo + IMU | VIO + mapping (Basalt port) | **Benchmarked** | Beats ORB-SLAM3 on 8/11 EuRoC sequences; native-Basalt parity within 0.1%; not yet real time | `basalt_euroc_online_slam_demo` |
+| Stereo + IMU | VIO + mapping (Basalt port) | **Benchmarked** | Beats ORB-SLAM3 on 9/11 EuRoC sequences; native-Basalt parity within 0.1%; 3/11 sequences at real time (RTF >= 1.0) under load, most others close | `basalt_euroc_online_slam_demo` |
 | RGB-D (as virtual stereo) | VO | **Benchmarked** | TUM fr1_xyz 0.014 m, fr1_desk 0.026 m (about 1.3–1.6× ORB-SLAM2 RGB-D) | [TUM RGB-D](docs/tum_rgbd_benchmark.md) |
 | Multi-camera rig | SfM | Experimental | OpenLORIS 10k: 9,998/10,000 registered; RMSE parity with COLMAP still open | `generalized_rig_sfm` |
 | Robot rig cameras vs. a prebuilt map | Relocalization | **Benchmarked** | OpenLORIS (robot-mounted rig): 98.96% of 1,250 held-out frames localized against a map built from other frames, median 2.9 mm | `localize_openloris_map` |
@@ -276,23 +276,23 @@ alone already wins MH_01_easy and V2_01_easy.
 
 | Sequence | visloc-rs (online VI-SLAM) | ORB-SLAM3 stereo-inertial | Winner |
 | --- | ---: | ---: | :---: |
-| MH_01_easy | 0.017 | 0.036 | visloc-rs |
-| MH_02_easy | 0.025 | 0.033 | visloc-rs |
-| MH_03_medium | 0.027 | 0.028 | visloc-rs |
-| MH_04_difficult | 0.082 | 0.043 | ORB-SLAM3 |
-| MH_05_difficult | 0.059 | 0.055 | ORB-SLAM3 |
+| MH_01_easy | 0.016 | 0.036 | visloc-rs |
+| MH_02_easy | 0.026 | 0.033 | visloc-rs |
+| MH_03_medium | 0.026 | 0.028 | visloc-rs |
+| MH_04_difficult | 0.070 | 0.043 | ORB-SLAM3 |
+| MH_05_difficult | 0.063 | 0.055 | ORB-SLAM3 |
 | V1_01_easy | 0.035 | 0.038 | visloc-rs |
 | V1_02_medium | 0.014 | 0.017 | visloc-rs |
-| V1_03_difficult | 0.022 | 0.029 | visloc-rs |
-| V2_01_easy | 0.016 | 0.039 | visloc-rs |
+| V1_03_difficult | 0.021 | 0.029 | visloc-rs |
+| V2_01_easy | 0.015 | 0.039 | visloc-rs |
 | V2_02_medium | 0.012 | 0.014 | visloc-rs |
-| V2_03_difficult | 0.108 | 0.056 | ORB-SLAM3 |
+| V2_03_difficult | 0.045 | 0.056 | visloc-rs |
 
 <p align="center">
   <img src="docs/assets/basalt_online_vs_orbslam3.png" alt="Bar chart of full-trajectory SE(3) ATE, visloc-rs online VI-SLAM vs measured ORB-SLAM3, across all 11 EuRoC sequences" width="820">
 </p>
 
-<p align="center"><sub>8/11 wins; full-trajectory ATE translation RMSE in metres, lower is better, same protocol as the prior offline-mapper result. The mapper thread never blocked the VIO thread on any sequence (whole-run wall time stayed within ~10% of VIO-alone wall time; peak queue lag ≤4.5s) — see <a href="docs/vi_slam_benchmarks.md">VI-SLAM benchmark details</a> for the per-sequence RTF/lag/loop/RSS numbers and the two sequences (V1_03, V2_03) whose online ATE is a real, reported gap from the offline number rather than a match. RTF (dataset duration / wall time, 0.09-0.38× here) is bounded by the VIO estimator, which is still single-threaded on this branch — real-time VIO performance is a separate initiative (PR #153), not this stage's claim. The prior offline (batch, 2-18 min / 3-6 GB) mapper path still exists, unchanged and byte-for-byte untouched, for parity/comparison. Parity evidence: <a href="work/m11_basalt_faithful_port_final_closure_20260914.md">faithful-port closure report</a> and <a href="benchmarks/basalt/README.md">upstream oracle / provenance</a>; design and next steps: <a href="docs/basalt_online_mapper_design.md">online mapper design</a> and <a href="docs/vi_slam_global_consistency_plan.md">global-consistency plan</a>.</sub></p>
+<p align="center"><sub>9/11 wins (up from 8/11 — see <a href="docs/vi_slam_benchmarks.md">VI-SLAM benchmark details</a> for how the VIO speed work below flipped V2_03_difficult); full-trajectory ATE translation RMSE in metres, lower is better, same protocol as the prior offline-mapper result. The mapper thread never blocked the VIO thread on any sequence — see the benchmark details for the per-sequence RTF/lag/loop/RSS numbers and the two sequences (V1_03, V2_02) whose online ATE remains a real, reported gap from the offline number. RTF (dataset duration / VIO wall time) is now 0.49-1.24× (3/11 sequences already at real time, RTF >= 1.0, measured under contention from another job on the shared benchmark machine) — up from 0.09-0.38× before this session's `--pipeline`-by-default change plus parallelization already on `main`; closing the remaining gap to real time on every sequence is ongoing (see the plan doc). The prior offline (batch, 2-18 min / 3-6 GB) mapper path still exists, unchanged and byte-for-byte untouched, for parity/comparison. Parity evidence: <a href="work/m11_basalt_faithful_port_final_closure_20260914.md">faithful-port closure report</a> and <a href="benchmarks/basalt/README.md">upstream oracle / provenance</a>; design and next steps: <a href="docs/basalt_online_mapper_design.md">online mapper design</a> and <a href="docs/vi_slam_global_consistency_plan.md">global-consistency plan</a>.</sub></p>
 
 ### Run the VI-SLAM demo
 
@@ -319,14 +319,18 @@ corrections propagated to every VIO frame — what the table above scores),
 VIO + batch-mapper commands are unchanged and still documented in the
 [VI-SLAM benchmark details](docs/vi_slam_benchmarks.md#run-it).
 
-Add `--pipeline` to run the frontend (dataset decode + optical flow) and the
+`--pipeline` runs the frontend (dataset decode + optical flow) and the
 estimator on two threads instead of one -- mirroring upstream Basalt's
-`OpticalFlow` thread / estimator thread split -- and `--threads N` to size
-the `rayon` pool used by the frontend's per-track temporal KLT (unset lets
-`rayon` size itself to `std::thread::available_parallelism()`). Both are
-pure wall-clock optimizations: every frame is still processed in the same
-order with the same arithmetic, so `trajectory.tum` is byte-for-byte
-identical to a serial `--threads 1` run given the same inputs.
+`OpticalFlow` thread / estimator thread split -- and `--threads N` sizes
+the `rayon` pool used by the frontend's per-track temporal KLT and the
+estimator's per-landmark LM reduction (unset lets `rayon` size itself to
+`std::thread::available_parallelism()`). Both are pure wall-clock
+optimizations: every frame is still processed in the same order with the
+same arithmetic, so `trajectory.tum` is byte-for-byte identical to a serial
+`--threads 1` run given the same inputs (verified on MH_03/MH_04). The
+online demo enables `--pipeline` by default for this reason -- pass
+`--no-pipeline` to restore the serial path; the VIO demo below still
+defaults to serial and takes `--pipeline` as an opt-in flag.
 
 ```bash
 cargo run --release --example basalt_euroc_vio_demo --features basalt-lm-workspace-reuse -- \
