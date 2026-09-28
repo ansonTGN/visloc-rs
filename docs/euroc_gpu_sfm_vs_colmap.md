@@ -446,6 +446,99 @@ identical A1 database).
   reason for every failed `RegisterNextImage` attempt in
   `colmap_incremental/mapper.rs`.
 
+### Frame 122's 31 correspondences: a real triangulation-precision gap, not RANSAC or the correspondence graph (2026-09-28)
+
+Picked up the previous round's "next steps": dumped the per-correspondence
+detail behind the `20/31 inliers` number and compared the underlying 3D
+points against COLMAP's own triangulation for the identical tracks.
+
+- **New debug hook**: `VISLOC_DEBUG_REG_FAIL_DUMP=<image_id>` (added next to
+  `VISLOC_DEBUG_REG_FAIL`, same env-gated/off-by-default/harmless shape)
+  prints, for every correspondence considered when that specific image's
+  registration attempt fails on `too_few_inliers`, the 2D point index, 3D
+  point id, track length, current XYZ, the observed pixel, the reprojection
+  residual at the RANSAC report's best pose, and inlier/outlier status
+  (`REG_FAIL_DUMP` lines in `colmap_incremental/mapper.rs`).
+- **The 31 correspondences are not a clean bimodal split.** Residuals for
+  the 11 rejected ones cluster 9.9-15.4 px (comfortably over the 12 px
+  gate); residuals for the 20 accepted ones are mostly under 3 px but
+  include a few right at the edge (8.5-11.8 px). There's a visible gap in
+  image-x between the two groups (roughly x<498 fails, x>540 passes,
+  nothing observed in between), i.e. the two groups occupy different parts
+  of the frame rather than being randomly interleaved.
+- **Sim(3)-aligning our 0-59 block to COLMAP's 80-frame model (via the 60
+  shared camera centers) isolates the fault to the 3D points, not the
+  poses.** Camera-center RMSE after alignment is 11.7 cm (max 82 cm) over
+  those 60 frames — small relative to the scene. But the 26 of 31
+  correspondences whose 3D point survives to the final (abandoned) model
+  and has a same-point2D-index match in COLMAP's own reconstruction land
+  0.25-5.49 m from COLMAP's position after the same alignment (mean 1.98 m,
+  median 1.13 m) — an order of magnitude bigger than the pose error, at a
+  scene depth of roughly 8 units in COLMAP's own (arbitrary monocular)
+  scale. This directly answers the previous round's question: it's
+  triangulated-point accuracy, not camera pose.
+- **Instability between the failed attempt and the model's final state.**
+  Comparing the dump-time XYZ (captured the instant `RegisterNextImage`
+  rejected frame 122) against the same point ids' XYZ in the final exported
+  sub-model shows several points moving by multiple metres (e.g. point id
+  49 moves 3.2 units in X) while their tracks *shrink* — some drastically
+  (83→25, 58→4, 59→33 observations) — during the local/global BA and
+  filter passes that run on later registration attempts before the model
+  is abandoned. The points that end up worst (5+ m from COLMAP's position)
+  cluster in a second, spatially-incoherent group (X≈-6 to -11 in our
+  scale, vs. the coherent main cloud's X≈1-9) — a signature of a
+  poorly-conditioned/low-parallax triangulation that a few extra
+  observations pull further from truth rather than correcting, since
+  `FilterPoints3DWithLargeReprojectionError` only prunes individual bad
+  *observations* against the point's current position; it never
+  re-triangulates, so a bad point stays bad (or gets worse) until the next
+  full bundle adjustment, and by the last iteration of
+  `IterativeGlobalRefinement` there isn't always another one.
+- **Not a merge-tracks bug.** The initial suspect — two different point3d
+  ids sharing near-identical XYZ mid-registration (e.g. ids 48/49 both at
+  `(5.118123, -5.426774, 28.248629)` to 6 decimals) — turned out to be
+  expected COLMAP behaviour, not a divergence: COLMAP's own 80-frame model
+  has the *same* pattern at the matching correspondences (point ids 20/21
+  both at `(0.702, -0.61x, 7.95x)`). `Merge`'s all-track-elements-must-fit
+  rule (`merge_max_reproj_error=4px`, checked against every observation of
+  *both* tracks) legitimately rejects merging when either track has one
+  observation that doesn't fit the weighted-average position — COLMAP
+  keeps them as two points too. Our `try_merge_once`
+  (`incremental_triangulator.rs`) matches COLMAP's `Merge` line for line:
+  same canonical merge-trial key, same weighted average, same
+  all-track-elements check, same threshold.
+- **Not a `TriangulateTrack`/`EstimateTriangulation` implementation bug**,
+  as far as a careful re-read against `colmap_src/incremental_triangulator.cc`
+  can tell: `estimate_triangulation`'s LORANSAC loop (exhaustive
+  `CombinationSampler` below `EXHAUSTIVE_SAMPLING_THRESHOLD=15`, the same
+  `TRIANGULATION_{MIN_INLIER_RATIO,CONFIDENCE,MAX_NUM_TRIALS}` constants,
+  the same dynamic-trial-count shrink, the same local-optimization refit
+  loop in `local_optimize_triangulation`/`estimate_multiview_triangulation`)
+  reproduces COLMAP's `Create`/`TriangulateTrack` faithfully; all 33
+  `colmap_incremental` unit tests (including
+  `triangulate_image_recovers_synthetic_points`,
+  `create_recursive_remainder_terminates_and_creates_two_points`) still
+  pass.
+- **Conclusion: this is a genuine triangulation-precision gap on
+  low-parallax/marginal tracks in the 0-59 block**, confirmed by direct
+  3D comparison against COLMAP rather than inferred from registration
+  counts — not a coding defect in registration RANSAC (already ruled out
+  last round via the LO-RANSAC port), the correspondence graph (identical
+  by A1's construction), or merge-tracks/triangulation-estimator logic
+  (both read faithful against `colmap_src/` this round). No fix was found
+  this round that doesn't amount to re-deriving COLMAP's exact
+  floating-point BA/retriangulation trajectory; nothing was changed in the
+  default pipeline. The one artifact kept is the debug dump itself
+  (env-gated, off by default).
+- **For whoever picks this up next**: the two live leads are (1) whether
+  COLMAP's `IterativeGlobalRefinement` gets one more BA pass than ours
+  after the last `FilterPoints` call in some configuration (would need an
+  iteration-by-iteration counter compare, not just the final point
+  count), and (2) instrumenting *when* (which frame index) the
+  worst-offending points (e.g. point ids 97, 81, 82, 267, 100 in this
+  run) first get created vs. last get re-triangulated, to see whether
+  their initial 2-view seed pair was already poorly conditioned.
+
 ## Reproduce
 
 ```text
