@@ -13,10 +13,14 @@
 //! callers can fall back to the CPU extractor.
 
 #[cfg(feature = "gpu")]
+mod descriptor_matcher;
+#[cfg(feature = "gpu")]
 mod extractor;
 #[cfg(feature = "gpu")]
 mod matcher;
 
+#[cfg(feature = "gpu")]
+pub use descriptor_matcher::WgpuDescriptorMatcher;
 #[cfg(feature = "gpu")]
 pub use extractor::{SiftGpu, SiftGpuError};
 #[cfg(feature = "gpu")]

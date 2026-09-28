@@ -343,3 +343,32 @@ tracking stage in three ways:
   better-predicted matching localizes more frames but also more wrong ones.
   This scene needs distinctive descriptors or learned retrieval (L4), not
   tracking changes.
+
+## GPU descriptor search (2026-09-28)
+
+`localize_rne_map_sequence --gpu` (feature `gpu`) runs the appearance
+descriptor search on the wgpu matcher (`visloc_sift_gpu::WgpuDescriptorMatcher`,
+a `Matcher` adapter; same matches as the CPU brute force up to f32 summation
+order). The per-frame cost was that search: a query against all 52,324
+landmarks took 1,589 ms on the CPU and takes 132 ms on the GPU.
+
+| drjohnson (400 queries) | localized | ATE RMSE | latency p50 / p90 |
+| --- | ---: | ---: | ---: |
+| CPU, radius prior (before) | 387 | 0.055 m | 488 / 2747 ms |
+| `--gpu`, radius prior | 387 | 0.055 m | 39 / 144 ms |
+| `--gpu --motion-model`, radius prior | 387 | 0.056 m | **38 / 123 ms** |
+
+Do not combine `--gpu` with `--projection-px`. Projection-guided matching
+issues one tiny match per landmark, so per-call upload dominates and the
+median rises to 1.2 s. On the CPU, projection-guided tracking remains the
+fast path (99 / 601 ms). On the checker corridor, `--gpu` changes speed only
+(p50 33 ms); accuracy is still limited by aliasing.
+
+**Checker corridor with SuperPoint (2026-09-28, negative).** The map
+landmarks got SuperPoint descriptors from the nearest keypoint to each
+observation; 5,890 of 8,849 landmarks had one within 3 px. The queries used
+SuperPoint too. At Lowe ratios of 0.8, 0.9, 0.95 and none, at most 19 of 400
+queries localized. SIFT localized 53–203, with ATE of 1.6–1.8 m either way.
+The corridor needs a map built from learned features plus learned retrieval,
+not a descriptor swap on the SIFT map. `--ratio` (`none` disables the test)
+remains on the localizer for such sweeps.
