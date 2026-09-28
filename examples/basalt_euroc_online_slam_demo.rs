@@ -94,6 +94,9 @@ struct Args {
     /// (`NfrMapperHeadlessConfig::num_opt_iter`).  Defaults to the mapper
     /// contract's 10.
     num_opt_iter: usize,
+    /// Loop/temporal-match candidate count per new keyframe query override
+    /// (None keeps the mapper default, `OnlineMapperConfig::match_top_k`).
+    match_top_k: Option<usize>,
     /// Enable L1 projection-based persistent-landmark re-observation.
     projection_rematch: bool,
     /// Enable incremental local mapping (per-keyframe triangulation into the
@@ -274,6 +277,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             optimize_every_k: args.optimize_every_k,
             periodic_iterations: args.periodic_iterations,
             headless,
+            match_top_k: args
+                .match_top_k
+                .unwrap_or(OnlineMapperConfig::default().match_top_k),
             projection_rematch: args.projection_rematch,
             incremental_local_mapping: args.incremental_local_mapping,
             projection_host_window: args
@@ -907,6 +913,7 @@ impl Args {
         let mut no_urgent_keyframes = false;
         let mut retained_marg_diagnostics = false;
         let mut num_opt_iter = 10usize;
+        let mut match_top_k = None;
         let mut projection_rematch = false;
         let mut incremental_local_mapping = false;
         let mut projection_host_window = None;
@@ -1040,6 +1047,14 @@ impl Args {
                         .parse::<f64>()
                         .map_err(|error| format!("invalid --loop-closure-weight: {error}"))?;
                 }
+                "--match-top-k" => {
+                    match_top_k = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<usize>()
+                            .map_err(|error| format!("invalid --match-top-k: {error}"))?,
+                    );
+                }
                 "--projection-host-window" => {
                     projection_host_window = Some(
                         next(&mut arguments, &option)?
@@ -1090,6 +1105,7 @@ impl Args {
             no_urgent_keyframes,
             retained_marg_diagnostics,
             num_opt_iter,
+            match_top_k,
             projection_rematch,
             incremental_local_mapping,
             projection_host_window,
@@ -1111,7 +1127,7 @@ impl Args {
          [--periodic-iterations N] [--realtime | --as-fast-as-possible] \
          [--pipeline | --no-pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
          [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N] \
-         [--projection-rematch] [--local-mapping] \
+         [--match-top-k N] [--projection-rematch] [--local-mapping] \
          [--projection-host-window N] [--projection-radius PX] \
          [--loop-closure-factors] [--loop-closure-min-corr N] [--loop-closure-weight W] \
          [--loop-closure-max-rot-error DEG] [--local-ba-window N] [--local-ba-iterations N]"
