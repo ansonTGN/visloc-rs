@@ -2874,7 +2874,7 @@ pub struct JointGlobalBaSummary {
 /// from whatever the caller passes in (typically the VIO's own per-keyframe
 /// `MargData` estimate; a missing id defaults to zero). `poses` and
 /// `landmarks` are updated in place exactly as
-/// [`global_ba_impl_in_place`]'s pose-only solve does.
+/// `global_ba_impl_in_place`'s pose-only solve does.
 #[allow(clippy::too_many_arguments)]
 pub fn global_ba_with_state_joint(
     poses: &mut BTreeMap<u64, SE3>,

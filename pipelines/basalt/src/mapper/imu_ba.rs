@@ -23,7 +23,7 @@
 //! step is `state(x*)` with `x* = -H^-1 b`, i.e. `state0` "moved forward by
 //! `-H^-1 b`", which is exactly what `param -= H^-1 b` computes. So the VIO
 //! factor's analytic Jacobian can be embedded with no sign adaptation at
-//! all: [`embed`] accumulates `H += J^T J` and `b += J^T r` block-wise,
+//! all: `embed` accumulates `H += J^T J` and `b += J^T r` block-wise,
 //! identically to the mapper's existing `add_factor_pose_block`/
 //! `add_factor_pose_gradient` pattern for `relative_pose`/`roll_pitch`
 //! factors. The `tests` module below verifies this by comparing the
