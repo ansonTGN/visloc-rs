@@ -70,6 +70,15 @@ basalt-timing-breakdown = []
 # Capacity-only reuse of the clean LM landmark QR scratch buffers.  Disabled
 # by default so canonical builds retain the historical allocation path.
 basalt-lm-workspace-reuse = []
+# Best-effort OS thread priority hints for the online real-time VI-SLAM demo
+# (see `src/rt_priority.rs`): above-normal for the frontend/decode/estimator
+# threads, below-normal for the mapper thread, via the small `thread-priority`
+# crate. Purely a scheduler hint -- every call ignores its `Result`, so a
+# platform/permission failure (e.g. an unprivileged Linux process trying to
+# raise priority) silently no-ops rather than changing behavior; it must not
+# and does not touch VIO arithmetic. Disabled by default so canonical builds
+# stay free of the extra dependency until this is adopted for real runs.
+basalt-rt-priority = ["dep:thread-priority"]
 [dependencies]
 base64 = "0.23"
 image = { version = "=0.25.5", default-features = false, features = ["png"] }
@@ -78,4 +87,5 @@ rayon = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = { workspace = true }
+thread-priority = { version = "1.2.0", optional = true }
 visloc-core = { path = "../../crates/core", version = "0.2.0" }

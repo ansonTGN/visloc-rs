@@ -108,6 +108,16 @@ gpu = ["dep:visloc-sift-gpu", "visloc-sift-gpu/gpu", "dep:visloc-ba-gpu", "vislo
 # must not change any algorithm's output (verified bit-identical via VIO
 # trajectory hash before being adopted for real measurements).
 mimalloc-global = ["dep:mimalloc"]
+# Best-effort OS thread priority hints (above-normal for the online demo's
+# frontend/decode/estimator threads, below-normal for its mapper thread) so
+# the real-time VI-SLAM demo keeps up under CPU contention from other
+# processes on a shared machine. Purely a scheduler hint via the small
+# `thread-priority` crate; every call ignores its `Result`, so an
+# unsupported platform or missing OS privilege silently no-ops. Must not and
+# does not change any algorithm's output (verified bit-identical via VIO
+# trajectory/MargData hash before being adopted for real measurements). See
+# `pipelines/basalt/src/rt_priority.rs`.
+basalt-rt-priority = ["visloc-basalt/basalt-rt-priority"]
 
 [dependencies]
 nalgebra = { workspace = true }
