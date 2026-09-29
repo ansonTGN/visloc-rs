@@ -319,7 +319,9 @@ def releasing_extract_callback(archive):
                 self.malloc_trim = self.libc.malloc_trim
                 self.malloc_trim.argtypes = [ctypes.c_size_t]
                 self.malloc_trim.restype = ctypes.c_int
-            except (AttributeError, OSError):
+            except (AttributeError, OSError, TypeError):
+                # glibc-only tuning knob. ``ctypes.CDLL(None)`` also raises
+                # TypeError (not OSError) on Windows, which has no malloc_trim.
                 self.malloc_trim = None
 
         def report_start_preparation(self) -> None:
@@ -360,7 +362,9 @@ def trim_allocator() -> None:
         malloc_trim.argtypes = [ctypes.c_size_t]
         malloc_trim.restype = ctypes.c_int
         malloc_trim(0)
-    except (AttributeError, OSError):
+    except (AttributeError, OSError, TypeError):
+        # glibc-only tuning knob; also unavailable on Windows, where
+        # ``ctypes.CDLL(None)`` raises TypeError instead of OSError.
         pass
 
 
@@ -649,6 +653,33 @@ def write_calibration(root: Path, intrinsics: dict[int, tuple[float, ...]], reco
     write_atomic(calibration / "points3D.txt", b"# Empty intrinsics-only model.\n")
 
 
+def _link_tier_image(link: Path, target: Path, source: Path) -> bool:
+    """Materialize one deterministic tier view entry; return True if a hard-link
+    fallback was used instead of a symlink.
+
+    Windows requires an elevated privilege (or Developer Mode) to create
+    symlinks; unprivileged processes raise ``OSError: [WinError 1314]``. A
+    hard link on the same NTFS volume is an equally non-duplicating fallback,
+    so unprivileged Windows staging degrades to it instead of failing after a
+    full download+undistort pass.
+    """
+
+    if link.is_symlink():
+        if Path(os.readlink(link)) != target:
+            raise ValueError(f"unexpected tier image link target: {link}")
+        return False
+    if link.exists():
+        if link.is_file() and os.path.samefile(link, source):
+            return True
+        raise ValueError(f"tier image path is not a symlink or matching hard link: {link}")
+    try:
+        link.symlink_to(target)
+        return False
+    except OSError:
+        os.link(source, link)
+        return True
+
+
 def write_tier_views(
     root: Path,
     intrinsics: dict[int, tuple[float, ...]],
@@ -666,22 +697,23 @@ def write_tier_views(
         tier_root = root / "tiers" / f"tier-{count}"
         images = tier_root / "images"
         images.mkdir(parents=True, exist_ok=True)
+        used_hardlink_fallback = False
         for record in records[:count]:
             link = images / record["name"]
             target = Path("../../..") / "images" / record["name"]
-            if link.is_symlink():
-                if Path(os.readlink(link)) != target:
-                    raise ValueError(f"unexpected tier image link target: {link}")
-            elif link.exists():
-                raise ValueError(f"tier image path is not a symlink: {link}")
-            else:
-                link.symlink_to(target)
+            source = root / "images" / record["name"]
+            if _link_tier_image(link, target, source):
+                used_hardlink_fallback = True
         write_calibration(tier_root, intrinsics, records[:count])
         tiers[str(count)] = {
             "images": str(images),
             "calibration": str(tier_root / "calibration"),
             "image_count": count,
-            "storage": "relative symlinks to the full staged image set",
+            "storage": (
+                "hard links to the full staged image set (symlink privilege unavailable)"
+                if used_hardlink_fallback
+                else "relative symlinks to the full staged image set"
+            ),
         }
     return tiers
 

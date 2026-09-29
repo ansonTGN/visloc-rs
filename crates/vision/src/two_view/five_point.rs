@@ -11,6 +11,7 @@
 //! Reference: D. Nister, "An efficient solution to the five-point relative
 //! pose problem", IEEE-T-PAMI 26(6), 2004.
 
+use nalgebra::linalg::SymmetricEigen;
 use nalgebra::{DMatrix, Matrix3, Matrix3x2, Vector3};
 
 /// Degree of the Nister determinant polynomial and its Sturm sequence.
@@ -53,7 +54,20 @@ pub(crate) fn relpose_5pt(rays1: &[Vector3<f64>], rays2: &[Vector3<f64>]) -> Vec
     // four-dimensional subspace as COLMAP / PoseLib's
     // `fullPivHouseholderQr().matrixQ().rightCols(4)`.
     let ata = m_transpose.transpose() * &m_transpose;
-    let eig = nalgebra::SymmetricEigen::new(ata);
+    // A degenerate minimal sample (coincident/collinear rays, a failed-to-
+    // normalize bearing upstream) can put a NaN/Inf into `ata`.
+    // `SymmetricEigen::new` calls the unbounded `try_new(.., max_niter=0)`
+    // ("continues indefinitely until convergence" per its own doc), which
+    // never converges on such input -- same class of hang as
+    // `pnp/gp3p.rs::real_roots_of_degree_le_8`. Bound it and reject the
+    // sample (no hypotheses) instead of hanging the RANSAC loop that calls
+    // this on every trial.
+    if !ata.iter().all(|value| value.is_finite()) {
+        return Vec::new();
+    }
+    let Some(eig) = SymmetricEigen::try_new(ata, f64::EPSILON, 10_000) else {
+        return Vec::new();
+    };
     let mut order: Vec<usize> = (0..9).collect();
     order.sort_by(|&a, &b| {
         eig.eigenvalues[a]

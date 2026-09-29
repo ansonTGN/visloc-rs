@@ -694,7 +694,9 @@ fn pose_from_essential_matrix(
     rays1: &[Vector3<f64>],
     rays2: &[Vector3<f64>],
 ) -> (Matrix3<f64>, Vector3<f64>, Vec<usize>) {
-    let svd = essential.svd(true, true);
+    let Some(svd) = essential.try_svd(true, true, f64::EPSILON * 5.0, 10_000) else {
+        return (Matrix3::identity(), Vector3::zeros(), Vec::new());
+    };
     let (Some(u), Some(v_t)) = (svd.u, svd.v_t) else {
         return (Matrix3::identity(), Vector3::zeros(), Vec::new());
     };
@@ -784,7 +786,7 @@ fn triangulate_rays(
     }
     a[(2, 3)] = current.x * translation.z - translation.x;
     a[(3, 3)] = current.y * translation.z - translation.y;
-    let svd = a.svd(true, true);
+    let svd = a.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
     let v_t = svd.v_t?;
     let solution = v_t.row(v_t.nrows() - 1);
     let w = solution[3];

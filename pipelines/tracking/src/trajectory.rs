@@ -287,8 +287,11 @@ pub fn umeyama_similarity_transform(
     if source_variance <= f64::EPSILON {
         return None;
     }
+    if !sigma.iter().all(|value| value.is_finite()) {
+        return None;
+    }
 
-    let svd = sigma.svd(true, true);
+    let svd = sigma.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
     let u = svd.u?;
     let v_t = svd.v_t?;
     let singular_values = svd.singular_values;

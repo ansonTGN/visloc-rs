@@ -86,7 +86,7 @@ pub fn estimate_homography_dlt(correspondences: &[TwoViewCorrespondence]) -> Opt
     // Same A^T A product; the 9x9 SVD runs on a fixed-size matrix (same
     // algorithm and operation order as the former DMatrix path, no heap).
     let ata = nalgebra::SMatrix::<f64, 9, 9>::from_iterator((a.transpose() * a).iter().copied());
-    let svd = ata.svd(true, true);
+    let svd = ata.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
     let v_t = svd.v_t?;
     let h = v_t.row(v_t.nrows() - 1);
     let homography = Matrix3::new(h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], h[8]);
@@ -280,7 +280,9 @@ pub fn decompose_homography_matrix(
     let mut h_normalized = k2_inv * homography * k1;
 
     // Remove scale: divide by the middle (median) singular value.
-    let svd = h_normalized.svd(false, false);
+    let Some(svd) = h_normalized.try_svd(false, false, f64::EPSILON * 5.0, 10_000) else {
+        return Vec::new();
+    };
     let sigma_mid = svd.singular_values[1];
     if sigma_mid.abs() < 1e-12 {
         return Vec::new();
@@ -432,7 +434,7 @@ fn triangulate_dlt(
         a[(2, column)] = ray2.x * p2[(2, column)] - p2[(0, column)];
         a[(3, column)] = ray2.y * p2[(2, column)] - p2[(1, column)];
     }
-    let svd = a.svd(false, true);
+    let svd = a.try_svd(false, true, f64::EPSILON * 5.0, 10_000)?;
     let v_t = svd.v_t?;
     let solution = v_t.row(v_t.nrows() - 1);
     let w = solution[3];
