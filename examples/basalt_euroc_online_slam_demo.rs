@@ -1290,7 +1290,9 @@ impl Args {
          [--periodic-iterations N] [--realtime | --as-fast-as-possible] \
          [--pipeline | --no-pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
          [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N] \
-         [--match-top-k N] [--frontend-stats-csv <path>]          [--projection-rematch] [--local-mapping] [--imu-seed-klt]          [--projection-host-window N] [--projection-radius PX] \
+         [--match-top-k N] [--frontend-stats-csv <path>] \
+         [--projection-rematch] [--local-mapping] [--imu-seed-klt] \
+         [--projection-host-window N] [--projection-radius PX] \
          [--loop-closure-factors] [--loop-closure-min-corr N] [--loop-closure-weight W] \
          [--loop-closure-max-rot-error DEG] [--local-ba-window N] [--local-ba-iterations N] \
          [--relative-pose-weight W] [--roll-pitch-weight W] [--imu-preintegration-weight W] \
