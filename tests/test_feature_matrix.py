@@ -29,6 +29,7 @@ class FeatureMatrixTests(unittest.TestCase):
                 # user-facing support-surface table below.
                 "basalt-timing-breakdown",
                 "basalt-lm-workspace-reuse",
+                "mimalloc-global",
             },
         )
 

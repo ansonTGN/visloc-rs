@@ -14,10 +14,10 @@ dependency surface that matches their deployment.
 | `gpu-matcher` | Tier 2 hardware-gated | No CI gate; built and exercised locally on CUDA-capable hosts | Rust 1.83 | Adds `GpuDescriptorMatcher`, an exact nearest-neighbour matcher backed by a runtime-loaded CUDA top-2 kernel (`scripts/build_descriptor_gemm_kernels.ps1`). A missing kernel library falls back to the CPU matcher, so the feature is safe to enable without a GPU. |
 | `gpu` | Tier 2 hardware-gated | No CI gate; built and exercised locally on a wgpu-capable GPU (DX12/Vulkan/Metal) | Not part of the Rust 1.83 MSRV guarantee (wgpu needs Rust 1.85+) | Enables the wgpu SIFT extractor, batched GPU matcher and GPU bundle adjustment (`visloc-sift-gpu`, `visloc-ba-gpu`) behind opt-in flags in the SfM examples (`colmap`, `unordered_sfm_demo`); the CPU paths are unchanged when the flags are off. |
 
-`basalt-timing-breakdown` and `basalt-lm-workspace-reuse` are internal, narrowly-scoped
-opt-in switches on `visloc-basalt` (a timing/instrumentation sidecar and a capacity-only
-LM workspace-buffer reuse toggle, respectively; see their doc comments in the root
-`Cargo.toml`). They are intentionally excluded from this Tier 1/Tier 2 support-surface
+`basalt-timing-breakdown`, `basalt-lm-workspace-reuse` and `mimalloc-global` are
+internal, narrowly-scoped opt-in switches (a timing/instrumentation sidecar, a capacity-only
+LM workspace-buffer reuse toggle, and a global-allocator swap for the real-time VI-SLAM
+demo, respectively; see their doc comments in the root `Cargo.toml`). They are intentionally excluded from this Tier 1/Tier 2 support-surface
 table — `tests/test_feature_matrix.py` tracks them separately from the documented matrix
 below so this table stays a map of *user-facing* build profiles.
 
