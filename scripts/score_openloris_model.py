@@ -30,6 +30,10 @@ class ScoreError(RuntimeError):
     """An OpenLORIS input or reconstruction cannot be scored."""
 
 
+class InsufficientGroundTruthError(ScoreError):
+    """A component has too few GT-scored images to Sim(3)-align (skippable)."""
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -251,7 +255,9 @@ def score_component(
         raise ScoreError(f"image aliases collapse multiple model names in {path}")
     common = sorted(set(query) & set(reference))
     if len(common) < 3:
-        raise ScoreError(f"model {path} has only {len(common)} GT-scored images")
+        raise InsufficientGroundTruthError(
+            f"model {path} has only {len(common)} GT-scored images (need >= 3 to Sim(3)-align)"
+        )
     source = np.asarray([query[name] for name in common])
     destination = np.asarray([reference[name] for name in common])
     scale, rotation, translation = umeyama(source, destination)
@@ -324,6 +330,7 @@ def score(
     )
     aliases = load_colmap_aliases(alias_path) if alias_path else None
     components, all_errors, scored_errors, registered_names = [], [], [], set()
+    skipped_components: list[dict[str, Any]] = []
     for path in model_paths:
         raw_names = set(load_model_centres(path))
         names = {aliases.get(name, name) if aliases else name for name in raw_names}
@@ -333,7 +340,18 @@ def score(
         if duplicates:
             raise ScoreError(f"images occur in multiple models; first duplicate={min(duplicates)!r}")
         registered_names.update(names)
-        component, errors, scored_names = score_component(path, reference, aliases)
+        try:
+            component, errors, scored_names = score_component(path, reference, aliases)
+        except InsufficientGroundTruthError as exc:
+            skipped_components.append(
+                {
+                    "images_txt": str(path.resolve()),
+                    "images_txt_sha256": sha256_file(path),
+                    "registered": len(raw_names),
+                    "reason": str(exc),
+                }
+            )
+            continue
         component["trajectory_segments"] = temporal_error_segments(
             list(zip(scored_names, (float(value) for value in errors))), manifest
         )
@@ -341,7 +359,12 @@ def score(
         all_errors.append(errors)
         scored_errors.extend(zip(scored_names, (float(value) for value in errors)))
     if not components:
-        raise ScoreError("no COLMAP text models were supplied")
+        if not model_paths:
+            raise ScoreError("no COLMAP text models were supplied")
+        raise ScoreError(
+            f"no component had >= 3 GT-scored images out of {len(model_paths)} supplied "
+            f"({len(skipped_components)} skipped for insufficient GT overlap)"
+        )
     errors = np.concatenate(all_errors)
     return {
         "schema": "visloc_openloris_model_score_v1",
@@ -361,12 +384,15 @@ def score(
         "registered_images": len(registered_names),
         "gt_scored_images": int(len(errors)),
         "models": len(components),
+        "models_supplied": len(model_paths),
+        "models_skipped_insufficient_gt": len(skipped_components),
         "component_weighted_rmse_m": float(np.sqrt(np.mean(errors**2))),
         "component_weighted_median_m": float(np.median(errors)),
         "component_weighted_p95_m": float(np.percentile(errors, 95)),
         "component_weighted_max_m": float(np.max(errors)),
         "trajectory_segments": temporal_error_segments(scored_errors, manifest),
         "components": components,
+        "skipped_components": skipped_components,
         "ground_truth_used_only_for_post_mapping_score": True,
     }
 
@@ -396,6 +422,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.output_json:
             args.output_json.parent.mkdir(parents=True, exist_ok=True)
             args.output_json.write_text(payload, encoding="utf-8")
+        for skipped in result.get("skipped_components", []):
+            print(
+                f"warning: skipped {skipped['images_txt']} "
+                f"({skipped['registered']} registered images): {skipped['reason']}",
+                file=sys.stderr,
+            )
         print(payload, end="")
         return 0
     except (OSError, ValueError, ScoreError) as exc:

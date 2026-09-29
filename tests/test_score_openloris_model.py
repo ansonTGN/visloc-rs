@@ -100,6 +100,63 @@ class ScoreOpenLorisModelTests(unittest.TestCase):
             self.assertTrue(np.all(errors < 1e-12))
             self.assertEqual(scored_names, names)
 
+    def test_component_score_raises_insufficient_gt_for_sparse_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "images.txt"
+            query = np.asarray([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+            names = [f"cam1_{index:06d}.png" for index in range(len(query))]
+            rows = []
+            for image_id, (name, centre) in enumerate(zip(names, query), 1):
+                translation = -centre
+                rows.extend(
+                    [
+                        f"{image_id} 1 0 0 0 {translation[0]} {translation[1]} {translation[2]} 1 {name}",
+                        "",
+                    ]
+                )
+            path.write_text("\n".join(rows), encoding="utf-8")
+            reference = {name: centre for name, centre in zip(names, query)}
+            with self.assertRaises(score.InsufficientGroundTruthError):
+                score.score_component(path, reference)
+
+    def test_score_skips_component_with_insufficient_gt_overlap_and_reports_it(self) -> None:
+        names = [f"image-{index}" for index in range(5)]
+        manifest = {name: (1, float(index)) for index, name in enumerate(names)}
+        reference = {name: np.zeros(3) for name in names}
+        good_component = ({"rmse_m": 0.0, "p95_m": 0.0}, np.zeros(3), names[:3])
+        sparse_error = score.InsufficientGroundTruthError(
+            "model component-b has only 2 GT-scored images (need >= 3 to Sim(3)-align)"
+        )
+        with (
+            mock.patch.object(score, "load_manifest", return_value=manifest),
+            mock.patch.object(score, "load_ground_truth", return_value=None),
+            mock.patch.object(score, "load_camera_extrinsics", return_value=None),
+            mock.patch.object(score, "interpolate_camera_centres", return_value=reference),
+            mock.patch.object(
+                score, "load_model_centres",
+                side_effect=[
+                    {name: reference[name] for name in names[:3]},
+                    {name: reference[name] for name in names[3:]},
+                ],
+            ),
+            mock.patch.object(score, "score_component", side_effect=[good_component, sparse_error]),
+            mock.patch.object(score, "sha256_file", return_value="fixture-only"),
+        ):
+            result = score.score(
+                [Path("component-a"), Path("component-b")],
+                Path("manifest"), Path("ground-truth"), Path("transforms"),
+            )
+        self.assertEqual(result["models"], 1)
+        self.assertEqual(result["models_supplied"], 2)
+        self.assertEqual(result["models_skipped_insufficient_gt"], 1)
+        self.assertEqual(len(result["skipped_components"]), 1)
+        self.assertIn("component-b", result["skipped_components"][0]["images_txt"])
+        self.assertIn("2 GT-scored images", result["skipped_components"][0]["reason"])
+        # The registered-image count still includes the skipped component's images,
+        # but the scored aggregate does not.
+        self.assertEqual(result["registered_images"], 5)
+        self.assertEqual(result["gt_scored_images"], 3)
+
     def test_load_camera_extrinsics_composes_second_camera(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "trans_matrix.yaml"
