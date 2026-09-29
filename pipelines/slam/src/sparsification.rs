@@ -65,7 +65,7 @@ pub fn sparsify_chow_liu(
     block_dim: usize,
 ) -> Option<SparsifiedPrior> {
     let n = lambda.nrows();
-    if block_dim == 0 || lambda.ncols() != n || eta.len() != n || n % block_dim != 0 {
+    if block_dim == 0 || lambda.ncols() != n || eta.len() != n || !n.is_multiple_of(block_dim) {
         return None;
     }
     let num_nodes = n / block_dim;
@@ -180,7 +180,7 @@ pub fn sparsify_diagonal(
     block_dim: usize,
 ) -> Option<SparsifiedPrior> {
     let n = lambda.nrows();
-    if block_dim == 0 || lambda.ncols() != n || eta.len() != n || n % block_dim != 0 {
+    if block_dim == 0 || lambda.ncols() != n || eta.len() != n || !n.is_multiple_of(block_dim) {
         return None;
     }
     let num_nodes = n / block_dim;

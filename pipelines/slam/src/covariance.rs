@@ -195,7 +195,7 @@ pub fn marginal_block_covariances(
     block: usize,
 ) -> Option<Vec<DMatrix<f64>>> {
     let n = lambda.nrows();
-    if block == 0 || n % block != 0 {
+    if block == 0 || !n.is_multiple_of(block) {
         return None;
     }
     let sigma = sparse_inverse(lambda, 0.0)?;

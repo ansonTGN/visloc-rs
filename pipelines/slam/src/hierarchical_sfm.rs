@@ -1191,7 +1191,7 @@ fn landmark_frame_locus(submap: &LocalSubmap) -> HashMap<u64, f64> {
                 f64::NAN
             } else {
                 let middle = ids.len() / 2;
-                if ids.len() % 2 == 0 {
+                if ids.len().is_multiple_of(2) {
                     (ids[middle - 1] + ids[middle]) * 0.5
                 } else {
                     ids[middle]
@@ -1208,7 +1208,7 @@ fn median_f64(mut values: Vec<f64>) -> f64 {
     }
     values.sort_by(f64::total_cmp);
     let middle = values.len() / 2;
-    if values.len() % 2 == 0 {
+    if values.len().is_multiple_of(2) {
         (values[middle - 1] + values[middle]) * 0.5
     } else {
         values[middle]

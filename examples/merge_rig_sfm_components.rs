@@ -111,7 +111,7 @@ fn parse_images_txt_with_names(contents: &str) -> Result<Vec<ImageRow>, Box<dyn 
 
         let points_line = lines.next().unwrap_or("");
         let point_tokens: Vec<&str> = points_line.split_whitespace().collect();
-        if point_tokens.len() % 3 != 0 {
+        if !point_tokens.len().is_multiple_of(3) {
             return Err(format!("malformed images.txt points row for {name}").into());
         }
         let mut points = Vec::with_capacity(point_tokens.len() / 3);
@@ -140,7 +140,7 @@ fn parse_points3d_txt_with_tracks(contents: &str) -> Result<Vec<Point3DRow>, Box
             continue;
         }
         let tokens: Vec<&str> = line.split_whitespace().collect();
-        if tokens.len() < 8 || (tokens.len() - 8) % 2 != 0 {
+        if tokens.len() < 8 || !(tokens.len() - 8).is_multiple_of(2) {
             return Err(format!("malformed points3D.txt row: {line}").into());
         }
         let id: u64 = tokens[0].parse()?;

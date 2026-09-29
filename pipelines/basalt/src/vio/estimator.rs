@@ -4773,7 +4773,11 @@ fn eigen_weighted_gram_accumulate_f32(
             .and_then(|value| value.parse::<usize>().ok())
             .unwrap_or(2);
         if call < limit {
-            let kind = if call % 2 == 0 { "accel" } else { "gyro" };
+            let kind = if call.is_multiple_of(2) {
+                "accel"
+            } else {
+                "gyro"
+            };
             eprintln!(
                 "RUST_M7HD_ASSIGN call={} kind={} variance={} noise={} term={}",
                 call,

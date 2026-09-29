@@ -219,7 +219,7 @@ where
         // first window. This avoids back-to-back triggers and gives a
         // predictable cadence.
         let frames_since_first_window = n - self.config.window_size;
-        if frames_since_first_window % self.config.trigger_every_frames != 0 {
+        if !frames_since_first_window.is_multiple_of(self.config.trigger_every_frames) {
             return;
         }
         let start = n - self.config.window_size;

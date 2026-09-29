@@ -15756,7 +15756,11 @@ mod tests {
         // products.
         let fixture_value = |index: usize| {
             let mantissa = ((index.wrapping_mul(0x01f1_2345) + 0x2a5) & 0x007f_ffff) as u32;
-            let sign: u32 = if index % 3 == 0 { 0x8000_0000 } else { 0 };
+            let sign: u32 = if index.is_multiple_of(3) {
+                0x8000_0000
+            } else {
+                0
+            };
             f32::from_bits(sign | 0x3e80_0000 | mantissa)
         };
         let expected = [

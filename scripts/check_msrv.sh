@@ -6,7 +6,7 @@ if ! command -v cargo >/dev/null 2>&1 && [ -d "$HOME/.cargo/bin" ]; then
     export PATH
 fi
 
-# The 1.83 MSRV guarantee covers the core library and the `image-io` demo path.
+# The 1.88 MSRV guarantee covers the core library and the `image-io` demo path.
 #
 # It deliberately does NOT cover the opt-in `onnx-inference` feature: that pulls
 # the `ort` ONNX runtime, whose build dependency `ureq`/`ureq-proto` requires
@@ -21,4 +21,4 @@ fi
 # GPU renderer with `--features gpu` on a current stable toolchain.
 # `visloc-gsplat-train/gpu`, `visloc-sift-gpu/gpu` and `visloc-ba-gpu/gpu` are
 # the same opt-in wgpu boundary.
-cargo +1.83.0 check --workspace --all-targets --features image-io
+cargo +1.88.0 check --workspace --all-targets --features image-io

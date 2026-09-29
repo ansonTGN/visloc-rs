@@ -664,7 +664,7 @@ impl LibstdcxxUnorderedOrder {
         loop {
             let mut divisor = 2usize;
             while divisor.saturating_mul(divisor) <= candidate {
-                if candidate % divisor == 0 {
+                if candidate.is_multiple_of(divisor) {
                     break;
                 }
                 divisor += 1;
