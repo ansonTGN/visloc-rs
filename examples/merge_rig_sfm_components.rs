@@ -408,6 +408,7 @@ struct Args {
     max_scale_deviation: f64,
     seed: u64,
     refine: bool,
+    rig_manifest: Option<PathBuf>,
     ba_max_iterations: usize,
     ba_max_reprojection_error_px: f64,
     report_json: Option<PathBuf>,
@@ -426,6 +427,7 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
     let mut max_scale_deviation = 0.3f64;
     let mut seed = 1u64;
     let mut refine = false;
+    let mut rig_manifest = None;
     let mut ba_max_iterations = 20usize;
     let mut ba_max_reprojection_error_px = 8.0f64;
     let mut report_json = None;
@@ -445,6 +447,7 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
             "--max-scale-deviation" => max_scale_deviation = args.next().ok_or("--max-scale-deviation requires F")?.parse()?,
             "--seed" => seed = args.next().ok_or("--seed requires U64")?.parse()?,
             "--refine" => refine = true,
+            "--rig-manifest" => rig_manifest = Some(PathBuf::from(args.next().ok_or("--rig-manifest requires PATH")?)),
             "--ba-max-iterations" => ba_max_iterations = args.next().ok_or("--ba-max-iterations requires N")?.parse()?,
             "--ba-max-reprojection-error-px" => ba_max_reprojection_error_px = args.next().ok_or("--ba-max-reprojection-error-px requires F")?.parse()?,
             "--report-json" => report_json = Some(PathBuf::from(args.next().ok_or("--report-json requires PATH")?)),
@@ -464,10 +467,75 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
         max_scale_deviation,
         seed,
         refine,
+        rig_manifest,
         ba_max_iterations,
         ba_max_reprojection_error_px,
         report_json,
     })
+}
+
+/// Parsed `generalized-rig-manifest-v1` calibration: per-sensor intrinsics/
+/// extrinsics plus the image-name -> (rig frame id, sensor index) table.
+/// This is the metric ground truth the original mapper used (the T265
+/// stereo baseline is a hard-constrained ~6.4 cm translation on sensor 1),
+/// so re-deriving per-image poses from a shared rig-frame pose plus this
+/// extrinsic is what lets a refinement BA actually recover/correct scale,
+/// unlike treating every image as an independently-posed monocular camera.
+struct RigCalibration {
+    /// sensor_index -> (camera_id, sensor_from_rig).
+    sensors: Vec<(u64, SE3)>,
+    /// image name -> (frame_id, sensor_index).
+    frame_of: HashMap<String, (u64, usize)>,
+}
+
+fn parse_rig_manifest(path: &Path) -> Result<RigCalibration, Box<dyn Error>> {
+    let contents = fs::read_to_string(path)?;
+    let mut sensors: Vec<(u64, SE3)> = Vec::new();
+    let mut frame_of = HashMap::new();
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        match tokens.first().copied() {
+            Some("S") => {
+                // S index camera_id width height fx fy cx cy qw qx qy qz tx ty tz
+                if tokens.len() < 16 {
+                    return Err(format!("malformed rig manifest S row: {line}").into());
+                }
+                let index: usize = tokens[1].parse()?;
+                let camera_id: u64 = tokens[2].parse()?;
+                let qw: f64 = tokens[9].parse()?;
+                let qx: f64 = tokens[10].parse()?;
+                let qy: f64 = tokens[11].parse()?;
+                let qz: f64 = tokens[12].parse()?;
+                let tx: f64 = tokens[13].parse()?;
+                let ty: f64 = tokens[14].parse()?;
+                let tz: f64 = tokens[15].parse()?;
+                let sensor_from_rig = SE3::new(
+                    UnitQuaternion::from_quaternion(Quaternion::new(qw, qx, qy, qz)),
+                    Vector3::new(tx, ty, tz),
+                );
+                while sensors.len() <= index {
+                    sensors.push((0, SE3::identity()));
+                }
+                sensors[index] = (camera_id, sensor_from_rig);
+            }
+            Some("F") => {
+                // F frame_id image_name sensor_index
+                if tokens.len() < 4 {
+                    return Err(format!("malformed rig manifest F row: {line}").into());
+                }
+                let frame_id: u64 = tokens[1].parse()?;
+                let name = tokens[2].to_owned();
+                let sensor_index: usize = tokens[3].parse()?;
+                frame_of.insert(name, (frame_id, sensor_index));
+            }
+            _ => {}
+        }
+    }
+    Ok(RigCalibration { sensors, frame_of })
 }
 
 struct EdgeResult {
@@ -486,6 +554,13 @@ struct EdgeResult {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = parse_args()?;
+    let rig_calibration = match &args.rig_manifest {
+        Some(path) => Some(parse_rig_manifest(path)?),
+        None => None,
+    };
+    if args.refine && rig_calibration.is_none() {
+        eprintln!("warning: --refine without --rig-manifest falls back to independent per-image BA (cannot recover metric scale)");
+    }
 
     let mut component_dirs: Vec<PathBuf> = fs::read_dir(&args.components_dir)?
         .filter_map(|entry| entry.ok())
@@ -902,9 +977,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             points3d: merged_points,
         };
 
-        if args.refine && ordered_members.len() > 1 {
+        if args.refine {
             eprintln!("  refining {cluster_name} with rig-aware joint BA ...");
-            refine_cluster(&mut merged, &args)?;
+            if let Some(rig) = &rig_calibration {
+                refine_cluster_rig_coupled(&mut merged, rig, &args)?;
+            } else {
+                refine_cluster(&mut merged, &args)?;
+            }
         }
 
         total_images_out += merged.images.len();
@@ -943,6 +1022,155 @@ fn main() -> Result<(), Box<dyn Error>> {
         fs::write(report_path, json)?;
     }
 
+    Ok(())
+}
+
+/// Rig-coupled joint BA: one pose per rig frame (not per image), with each
+/// image's observation carrying the real `sensor_from_rig` extrinsic from
+/// the calibration (cam2's ~6.4 cm stereo baseline off cam1). This is the
+/// metric constraint the original incremental mapper had and the
+/// independent-per-image `refine_cluster` above does not: a hard-known
+/// baseline between two simultaneous views is what makes absolute scale
+/// observable to a bundle adjustment at all. Applied to every cluster,
+/// including untouched singleton components, so it can also correct
+/// internal per-component drift, not just merge seams.
+fn refine_cluster_rig_coupled(
+    model: &mut ComponentModel,
+    rig: &RigCalibration,
+    args: &Args,
+) -> Result<(), Box<dyn Error>> {
+    let camera_by_id: HashMap<u64, Camera> = model.cameras.iter().map(|c| (c.id, c.clone())).collect();
+    let image_by_local: HashMap<u64, &ImageRow> = model.images.iter().map(|r| (r.local_id, r)).collect();
+
+    // Group this model's images by rig frame id, and remember each image's
+    // sensor index for its observation's extrinsic.
+    let mut frame_images: HashMap<u64, Vec<u64>> = HashMap::new();
+    let mut image_sensor_index: HashMap<u64, usize> = HashMap::new();
+    let mut unresolved = 0usize;
+    for row in &model.images {
+        match rig.frame_of.get(&row.name) {
+            Some(&(frame_id, sensor_index)) => {
+                frame_images.entry(frame_id).or_default().push(row.local_id);
+                image_sensor_index.insert(row.local_id, sensor_index);
+            }
+            None => unresolved += 1,
+        }
+    }
+    if unresolved > 0 {
+        eprintln!("    {unresolved} image(s) not found in the rig manifest, excluded from rig-coupled BA");
+    }
+    if frame_images.is_empty() {
+        eprintln!("    no images resolve against the rig manifest, skipping rig-coupled BA");
+        return Ok(());
+    }
+
+    // Seed one Pose (T_rig<-world) per frame, from whichever sensor's image
+    // is present, preferring the lowest sensor index (index 0 is the
+    // reference sensor with an identity extrinsic in this calibration).
+    let mut problem = BundleAdjustment::new(model.cameras[0].clone());
+    let mut frame_observation_count: HashMap<u64, usize> = HashMap::new();
+    for (&frame_id, members) in &frame_images {
+        let Some(&seed_local_id) = members
+            .iter()
+            .min_by_key(|&&local_id| image_sensor_index.get(&local_id).copied().unwrap_or(usize::MAX))
+        else {
+            continue;
+        };
+        let Some(&sensor_index) = image_sensor_index.get(&seed_local_id) else { continue };
+        let Some((_, sensor_from_rig)) = rig.sensors.get(sensor_index) else { continue };
+        let Some(row) = image_by_local.get(&seed_local_id) else { continue };
+        let pose_cam = SE3::new(row.q, row.t);
+        // pose_cam = sensor_from_rig ∘ pose_rig  =>  pose_rig = sensor_from_rig^-1 ∘ pose_cam
+        let pose_rig = sensor_from_rig.inverse().compose(&pose_cam);
+        problem.add_pose(frame_id, Pose { world_to_camera: pose_rig });
+    }
+
+    // Anchor the rig-frame with the most resolved images/observations.
+    let anchor = frame_images
+        .iter()
+        .max_by_key(|(_, members)| members.len())
+        .map(|(&frame_id, _)| frame_id);
+    if let Some(anchor) = anchor {
+        problem.fix_pose(anchor);
+    }
+
+    let mut used_points = 0usize;
+    let mut used_observations = 0usize;
+    for point in &model.points3d {
+        if point.track.len() < 2 {
+            continue;
+        }
+        let mut observations = Vec::new();
+        for &(image_id, keypoint) in &point.track {
+            let Some(row) = image_by_local.get(&image_id) else { continue };
+            let Some(&(frame_id, sensor_index)) = rig.frame_of.get(&row.name) else { continue };
+            if !problem.poses.contains_key(&frame_id) {
+                continue;
+            }
+            let Some(&(x, y, _)) = row.points.get(keypoint as usize) else { continue };
+            let Some(camera) = camera_by_id.get(&row.camera_id) else { continue };
+            let Some((_, sensor_from_rig)) = rig.sensors.get(sensor_index) else { continue };
+            observations.push(BaRigObservation {
+                keyframe_id: frame_id,
+                landmark_id: point.id,
+                xy: nalgebra::Point2::new(x, y),
+                camera: camera.clone(),
+                sensor_from_rig: sensor_from_rig.clone(),
+            });
+            *frame_observation_count.entry(frame_id).or_insert(0) += 1;
+        }
+        if observations.len() < 2 {
+            continue;
+        }
+        problem.add_landmark(point.id, point.xyz);
+        used_points += 1;
+        used_observations += observations.len();
+        for observation in observations {
+            problem.add_rig_observation(observation);
+        }
+    }
+    eprintln!(
+        "    rig-coupled BA problem: {} rig-frame poses, {} landmarks, {} observations",
+        problem.poses.len(),
+        used_points,
+        used_observations,
+    );
+    if used_points == 0 {
+        eprintln!("    no usable landmarks with >=2 observations, skipping BA");
+        return Ok(());
+    }
+
+    let config = BaConfig {
+        max_iterations: args.ba_max_iterations,
+        linear_solver: LinearSolver::Sparse,
+        robust_kernel: RobustKernel::Huber {
+            delta: args.ba_max_reprojection_error_px,
+        },
+        ..BaConfig::default()
+    };
+    let result = problem.optimize(&config)?;
+    eprintln!(
+        "    BA done: cost {:.6} -> {:.6} in {} iterations",
+        result.initial_cost,
+        result.final_cost,
+        result.iterations.len(),
+    );
+
+    // Re-derive each image's own absolute pose from its (optimized) rig
+    // frame pose composed with its sensor's fixed extrinsic.
+    for row in &mut model.images {
+        let Some(&(frame_id, sensor_index)) = rig.frame_of.get(&row.name) else { continue };
+        let Some(pose_rig) = problem.poses.get(&frame_id) else { continue };
+        let Some((_, sensor_from_rig)) = rig.sensors.get(sensor_index) else { continue };
+        let pose_cam = sensor_from_rig.compose(&pose_rig.world_to_camera);
+        row.q = pose_cam.rotation;
+        row.t = pose_cam.translation;
+    }
+    for point in &mut model.points3d {
+        if let Some(&xyz) = problem.landmarks.get(&point.id) {
+            point.xyz = xyz;
+        }
+    }
     Ok(())
 }
 
