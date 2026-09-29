@@ -40,6 +40,7 @@ pub mod patch;
 pub mod pattern;
 pub mod provenance;
 pub mod pyramid;
+pub mod rt_priority;
 pub mod stream;
 pub mod streaming;
 pub mod time;

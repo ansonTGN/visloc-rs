@@ -1580,45 +1580,71 @@ impl OnlineNfrMapper {
         let min_num_obs = self.config.headless.min_num_obs;
         self.last_optimize_started_at = Some(Instant::now());
         self.pending_optimizer = Some(std::thread::spawn(move || {
-            let total_start = Instant::now();
-            let start = Instant::now();
-            let _ = snapshot.build_tracks();
-            let build_tracks_seconds = start.elapsed().as_secs_f64();
+            // Best-effort below-normal OS priority (see `crate::rt_priority`)
+            // for this dedicated per-pass thread, same rationale as
+            // `run_mapper_thread`'s: this pass must not win scheduling
+            // contention against the real-time frontend/estimator threads.
+            crate::rt_priority::set_current_thread_priority_below_normal_best_effort();
+            // Run the whole periodic sequence inside a small, dedicated rayon
+            // pool instead of the process-wide one. This pass's
+            // `linearize_vision`/landmark-reduction `par_iter` work would
+            // otherwise contend with the live VIO thread's own `--threads`
+            // pool for cores; capping this background thread's own
+            // parallelism keeps it from taking them, matching the joint VI-BA
+            // background pass's fix for the same failure mode (uncapped, a
+            // periodic background pass regressed VIO wall time 25-45% in
+            // real runs -- see `docs/vi_slam_global_consistency_plan.md`
+            // section 1.8 and the joint VI-BA background-thread commit
+            // message). `1` leaves every other core to the real-time threads.
+            const BACKGROUND_OPTIMIZE_THREADS: usize = 1;
+            let run_pass = move || {
+                let total_start = Instant::now();
+                let start = Instant::now();
+                let _ = snapshot.build_tracks();
+                let build_tracks_seconds = start.elapsed().as_secs_f64();
 
-            let start = Instant::now();
-            // Calibration is always present on an online mapper (checked in
-            // `OnlineNfrMapper::new`'s callers); a missing-calibration error
-            // here would mean the snapshot itself is malformed, which
-            // `ingest_packet` already could not have produced.
-            let _ = snapshot.setup_opt();
-            let setup_opt_seconds = start.elapsed().as_secs_f64();
+                let start = Instant::now();
+                // Calibration is always present on an online mapper (checked in
+                // `OnlineNfrMapper::new`'s callers); a missing-calibration error
+                // here would mean the snapshot itself is malformed, which
+                // `ingest_packet` already could not have produced.
+                let _ = snapshot.setup_opt();
+                let setup_opt_seconds = start.elapsed().as_secs_f64();
 
-            let start = Instant::now();
-            let _ = snapshot.optimize(periodic_iterations);
-            let optimize1_seconds = start.elapsed().as_secs_f64();
+                let start = Instant::now();
+                let _ = snapshot.optimize(periodic_iterations);
+                let optimize1_seconds = start.elapsed().as_secs_f64();
 
-            let start = Instant::now();
-            let _ = snapshot.filter_outliers(outlier_threshold, min_num_obs);
-            let filter_seconds = start.elapsed().as_secs_f64();
+                let start = Instant::now();
+                let _ = snapshot.filter_outliers(outlier_threshold, min_num_obs);
+                let filter_seconds = start.elapsed().as_secs_f64();
 
-            let start = Instant::now();
-            let _ = snapshot.optimize(periodic_iterations);
-            let optimize2_seconds = start.elapsed().as_secs_f64();
+                let start = Instant::now();
+                let _ = snapshot.optimize(periodic_iterations);
+                let optimize2_seconds = start.elapsed().as_secs_f64();
 
-            BackgroundOptimizeResult {
-                poses: snapshot.frame_poses,
-                optimizer_state: snapshot.optimizer_state,
-                feature_tracks: snapshot.feature_tracks,
-                lmdb: snapshot.lmdb,
-                breakdown: BackgroundOptimizeBreakdown {
-                    build_tracks_seconds,
-                    setup_opt_seconds,
-                    optimize1_seconds,
-                    filter_seconds,
-                    optimize2_seconds,
-                    total_seconds: total_start.elapsed().as_secs_f64(),
-                },
+                BackgroundOptimizeResult {
+                    poses: snapshot.frame_poses,
+                    optimizer_state: snapshot.optimizer_state,
+                    feature_tracks: snapshot.feature_tracks,
+                    lmdb: snapshot.lmdb,
+                    breakdown: BackgroundOptimizeBreakdown {
+                        build_tracks_seconds,
+                        setup_opt_seconds,
+                        optimize1_seconds,
+                        filter_seconds,
+                        optimize2_seconds,
+                        total_seconds: total_start.elapsed().as_secs_f64(),
+                    },
+                }
+            };
+            if let Ok(pool) = rayon::ThreadPoolBuilder::new()
+                .num_threads(BACKGROUND_OPTIMIZE_THREADS)
+                .build()
+            {
+                return pool.install(run_pass);
             }
+            run_pass()
         }));
     }
 }
@@ -1642,6 +1668,16 @@ pub enum MapperThreadStopReason {
 /// `on_packet` is called with each packet's [`OnlineIngestReport`] as it
 /// completes (for live queue-lag/RTF instrumentation in the caller); it must
 /// not block, since it runs on the mapper thread between packets.
+///
+/// Sets this thread's OS priority to below-normal (best-effort, see
+/// `crate::rt_priority`) for the whole lifetime of the function -- so the
+/// mapper's periodic background optimize pass (already capped to one rayon
+/// thread, see `spawn_background_optimize`) does not also win scheduling
+/// contention against the real-time frontend/estimator threads on a busy
+/// machine. The caller's own `finalize()` call (made after joining this
+/// thread, per its own doc comment) runs on whichever thread calls it and is
+/// unaffected by this. Purely a scheduler hint: it cannot change any
+/// packet's ingested result.
 pub fn run_mapper_thread(
     mut mapper: OnlineNfrMapper,
     receiver: Receiver<MargData>,
@@ -1652,6 +1688,7 @@ pub fn run_mapper_thread(
     MapperThreadStopReason,
     Vec<OnlineMapperError>,
 ) {
+    crate::rt_priority::set_current_thread_priority_below_normal_best_effort();
     let mut errors = Vec::new();
     loop {
         match receiver.recv_timeout(Duration::from_secs(3600)) {

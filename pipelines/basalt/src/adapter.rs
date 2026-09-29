@@ -398,6 +398,11 @@ fn run_pipeline_decode_worker(
     next_index: &std::sync::atomic::AtomicUsize,
     sender: &mpsc::SyncSender<(usize, Result<EurocSensorFrame, BasaltAdapterError>)>,
 ) -> TimingBreakdown {
+    // Best-effort above-normal OS priority (see `crate::rt_priority`): this
+    // thread sits on the real-time critical path (disk I/O + PNG decode
+    // ahead of the frontend), so it must win scheduling contention on a busy
+    // machine the same way the frontend/estimator threads do.
+    crate::rt_priority::set_current_thread_priority_above_normal_best_effort();
     let mut timing = TimingBreakdown::from_env();
     loop {
         let index = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -435,6 +440,9 @@ fn run_pipeline_frontend(
     retain_marg_data: bool,
     sender: &mpsc::SyncSender<Result<PipelineFrontendPacket, BasaltAdapterError>>,
 ) -> (TimingBreakdown, Result<(), BasaltAdapterError>) {
+    // Best-effort above-normal OS priority (see `crate::rt_priority`): this
+    // is the real-time frontend/producer thread.
+    crate::rt_priority::set_current_thread_priority_above_normal_best_effort();
     let mut timing = TimingBreakdown::from_env();
     let mut pending: std::collections::HashMap<
         usize,
@@ -535,6 +543,10 @@ fn pipeline_of_images(frame: &EurocSensorFrame) -> Result<Vec<OfImageData>, Basa
 /// `on_output`, in the frame order the channel delivers -- which is frame
 /// order, since the producer sends strictly in `0..frame_count` order into a
 /// FIFO channel.
+///
+/// Sets the calling thread's OS priority to above-normal (best-effort, see
+/// `crate::rt_priority`) on entry: this is the real-time estimator thread,
+/// called once (not per-frame) from [`BasaltVioEstimatorAdapter::process_euroc_stream_pipelined`].
 fn run_pipeline_estimator<F>(
     estimator: &mut BasaltVioEstimator,
     receiver: &mpsc::Receiver<Result<PipelineFrontendPacket, BasaltAdapterError>>,
@@ -545,6 +557,7 @@ fn run_pipeline_estimator<F>(
 where
     F: FnMut(BasaltAdapterOutput, &mut TimingBreakdown) -> Result<(), BasaltAdapterError>,
 {
+    crate::rt_priority::set_current_thread_priority_above_normal_best_effort();
     let mut timing = TimingBreakdown::from_env();
     while let Ok(message) = receiver.recv() {
         let packet = match message {

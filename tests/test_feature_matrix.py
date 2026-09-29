@@ -30,6 +30,7 @@ class FeatureMatrixTests(unittest.TestCase):
                 "basalt-timing-breakdown",
                 "basalt-lm-workspace-reuse",
                 "mimalloc-global",
+                "basalt-rt-priority",
             },
         )
 
