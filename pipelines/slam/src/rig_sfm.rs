@@ -8,6 +8,18 @@
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
+use std::time::Instant;
+
+/// Coarse stage/progress timing for `incremental_rig_sfm`, opt-in via
+/// `VISLOC_RIG_SFM_TIMING=1`. Prints wall-clock elapsed time and problem-size
+/// counters at track construction, every local-BA checkpoint (registration
+/// count, cumulative triangulation/PnP attempts), conflict recovery, pose
+/// repair passes, and final BA -- enough to localize which stage a stalled
+/// run is spending time in without the very verbose per-attempt
+/// `VISLOC_SFM_DEBUG` stream.
+fn rig_timing_enabled() -> bool {
+    std::env::var_os("VISLOC_RIG_SFM_TIMING").is_some()
+}
 
 use nalgebra::{Matrix3, Point2, Point3, SMatrix, UnitQuaternion, Vector2, Vector3};
 use thiserror::Error;
@@ -138,6 +150,36 @@ pub struct RigSfmConfig {
     /// for graph A/B tests where added edges must not silently change the
     /// initialization frame.
     pub seed_frame: Option<usize>,
+    /// Cap how many support-descending seed candidates the initial-frame
+    /// search tries before giving up with `InsufficientSeedStructure`. `0`
+    /// means unbounded (search every candidate, matching the historical
+    /// behavior). On a heavily conflict-fragmented graph (many aliased,
+    /// near-duplicate frames that all yield a plausible-looking but
+    /// under-landmarked two-view seed) the candidate list can run to
+    /// thousands of entries; each failed attempt is now cheap (only the
+    /// touched tracks/images are reset, not the whole track/pose arrays), but
+    /// this cap still bounds worst-case wall time and gives a faster, more
+    /// legible `InsufficientSeedStructure` report. Candidates are tried in
+    /// descending support order, so a nonzero cap never skips a
+    /// stronger-looking candidate in favor of a weaker one.
+    pub max_seed_attempts: usize,
+    /// Skip triangulation entirely for any track whose raw observation count
+    /// exceeds this many entries (`0` means unbounded, matching historical
+    /// behavior). A genuine 3-D landmark cannot physically be seen in
+    /// thousands of a rig's images; a track that large is a union-find
+    /// conflict blob produced by heavy visual aliasing (e.g. a long
+    /// repetitive corridor) that happened not to collide two observations
+    /// from the *same* image, so it was never split into
+    /// `conflicting_components`. Left unbounded, `triangulate_frontier`
+    /// re-scans that track's full observation list (building per-observation
+    /// bearing rays) every single time *any* of the thousands of images
+    /// touching it gets registered, before ever reaching the (already
+    /// bounded) widest-baseline ray-pair search -- an O(registrations x
+    /// track size) blowup. The check is a cheap `O(1)` length read before
+    /// that scan, so setting this is unconditionally safe; it defaults to
+    /// `0` (off) purely so existing byte-identical-output tests are
+    /// unaffected by a cap they never needed.
+    pub max_track_observations_for_triangulation: usize,
     /// Minimum number of distinct rig sensors contributing 2D-3D
     /// correspondences to a frame registration. One is geometrically valid
     /// because the calibrated sensor-to-rig transform is fixed.
@@ -287,6 +329,8 @@ impl Default for RigSfmConfig {
             pnp_max_iterations: 512,
             ransac_seed: 7,
             seed_frame: None,
+            max_seed_attempts: 0,
+            max_track_observations_for_triangulation: 0,
             min_pnp_sensors: 2,
             direct_stereo_pnp_max_frame_gap: 0,
             direct_stereo_min_pnp_sensors: None,
@@ -881,6 +925,8 @@ pub fn incremental_rig_sfm(
         return incremental_rig_sfm_dynamic(rig, frames, features, pairwise, config);
     }
 
+    let rig_timing = rig_timing_enabled();
+    let rig_timing_started = Instant::now();
     let trace_registration = std::env::var_os("VISLOC_SFM_TRACE_REGISTRATION").is_some();
     let image_assignment = image_assignment(frames, features.len());
     let temporal_support_bin_frames = temporal_support_bin_frames_from_env();
@@ -896,10 +942,33 @@ pub fn incremental_rig_sfm(
     let retriangulation_pairwise = config
         .deferred_retriangulation_pair_prefix
         .map_or(deferred_pairwise, |prefix| &pairwise[prefix..]);
+    if rig_timing {
+        eprintln!(
+            "rig-timing: track-build-start frames={} images={} pairs={} matches={}",
+            frames.len(),
+            features.len(),
+            mapping_pairwise.len(),
+            mapping_pairwise.iter().map(|p| p.matches.len()).sum::<usize>(),
+        );
+    }
+    let track_build_started = Instant::now();
     let track_output =
         build_rig_track_output(features, mapping_pairwise, &image_assignment, config);
     let track_build_stats = track_output.stats;
     let conflicting_components = track_output.conflicting_components;
+    if rig_timing {
+        let largest_conflict = conflicting_components.iter().map(Vec::len).max().unwrap_or(0);
+        let total_conflict_obs: usize = conflicting_components.iter().map(Vec::len).sum();
+        eprintln!(
+            "rig-timing: track-build-done elapsed={:.3}s tracks={} conflicting_components={} \
+             conflicting_observations={} largest_conflicting_component={}",
+            track_build_started.elapsed().as_secs_f64(),
+            track_output.tracks.len(),
+            conflicting_components.len(),
+            total_conflict_obs,
+            largest_conflict,
+        );
+    }
     let raw_tracks = track_output.tracks;
     if let Some(bin_frames) = temporal_support_bin_frames {
         log_temporal_track_support(
@@ -967,18 +1036,77 @@ pub fn incremental_rig_sfm(
         0usize,
     );
     let mut accepted_seed = None;
-    for seed_frame_index in seed_candidates {
-        let tracks_before_seed = config.robust_triangulation_pruning.then(|| tracks.clone());
-        for track in &mut tracks {
-            track.position = None;
+    // Undo only what the *previous* failed attempt actually touched (its own
+    // triangulated landmarks and its own seed frame's images), instead of an
+    // O(#tracks) full rescan of `tracks` plus an O(#images) `image_poses.fill`
+    // on every single candidate. On a heavily conflict-fragmented graph
+    // (many near-duplicate/aliased frames yield a plausible two-view seed
+    // that still falls short of `required_seed_landmarks`) the candidate list
+    // can run to thousands of entries, turning the old blanket reset into an
+    // O(candidates x tracks) blowup. `triangulate_frontier` only ever sets a
+    // *new* `Some` position for a track already `None` (it skips tracks whose
+    // position is already `Some`), and only for tracks reachable from this
+    // seed frame's own frontier, so tracking exactly the returned `landmarks`
+    // list is sufficient to undo it byte-for-byte -- this changes nothing
+    // observable when `robust_triangulation_pruning` is off (the default):
+    // it resets the same fields to the same values, just without touching
+    // tracks/images the previous attempt never wrote to. When pruning is on,
+    // it can also mutate existing observations beyond just `position`, so
+    // that opt-in path keeps the original full clone/restore for
+    // correctness.
+    let mut previous_touched_tracks: Vec<usize> = Vec::new();
+    let mut previous_touched_images: Vec<usize> = Vec::new();
+    let seed_search_started = if rig_timing { Some(Instant::now()) } else { None };
+    let mut seed_search_last_tick = Instant::now();
+    let candidate_count = seed_candidates.len();
+    let seed_iter: Box<dyn Iterator<Item = usize>> = if config.max_seed_attempts > 0 {
+        Box::new(seed_candidates.into_iter().take(config.max_seed_attempts))
+    } else {
+        Box::new(seed_candidates.into_iter())
+    };
+    let mut seed_attempts_tried = 0usize;
+    for seed_frame_index in seed_iter {
+        seed_attempts_tried += 1;
+        if let Some(started) = seed_search_started {
+            if seed_search_last_tick.elapsed().as_secs_f64() >= 5.0 {
+                eprintln!(
+                    "rig-timing: seed-search-tick elapsed={:.3}s attempts={}/{} \
+                     best_failed_landmarks={} required={}",
+                    started.elapsed().as_secs_f64(),
+                    seed_attempts_tried,
+                    candidate_count,
+                    best_failed_seed.1,
+                    required_seed_landmarks,
+                );
+                seed_search_last_tick = Instant::now();
+            }
         }
-        image_poses.fill(None);
+        let tracks_before_seed = config.robust_triangulation_pruning.then(|| tracks.clone());
+        if tracks_before_seed.is_some() {
+            for track in &mut tracks {
+                track.position = None;
+            }
+        } else {
+            for &track_index in &previous_touched_tracks {
+                tracks[track_index].position = None;
+            }
+        }
+        previous_touched_tracks.clear();
+        for &image_index in &previous_touched_images {
+            image_poses[image_index] = None;
+        }
+        previous_touched_images.clear();
         install_image_poses(
             rig,
             &frames[seed_frame_index],
             &Pose::identity(),
             &mut image_poses,
         );
+        previous_touched_images = frames[seed_frame_index]
+            .images
+            .iter()
+            .map(|image| image.image_index)
+            .collect();
         let seed_frontier = frames[seed_frame_index]
             .images
             .iter()
@@ -997,6 +1125,7 @@ pub fn incremental_rig_sfm(
             &mut tracks,
             seed_frontier,
         );
+        previous_touched_tracks = triangulation.landmarks.clone();
         total_seed_attempts += triangulation.attempts;
         total_seed_robust_tracks += triangulation.robust_tracks;
         total_seed_pruned_observations += triangulation.pruned_observations;
@@ -1011,7 +1140,17 @@ pub fn incremental_rig_sfm(
         }
         if let Some(tracks_before_seed) = tracks_before_seed {
             tracks = tracks_before_seed;
+            previous_touched_tracks.clear();
         }
+    }
+    if let Some(started) = seed_search_started {
+        eprintln!(
+            "rig-timing: seed-search-done elapsed={:.3}s attempts={}/{} accepted={}",
+            started.elapsed().as_secs_f64(),
+            seed_attempts_tried,
+            candidate_count,
+            accepted_seed.is_some(),
+        );
     }
     let Some((seed_frame_index, seed_landmarks)) = accepted_seed else {
         return Err(RigSfmError::InsufficientSeedStructure {
@@ -1055,6 +1194,19 @@ pub fn incremental_rig_sfm(
     // Each landmark enters each observing frame's cache exactly once. Heap
     // versions make stale support counts cheap to discard, avoiding the
     // all-unregistered-frame rescan that becomes quadratic at 10k scale.
+    macro_rules! rig_step {
+        ($label:expr, $started:expr) => {
+            if rig_timing {
+                eprintln!(
+                    "rig-timing: setup-step {}={:.3}s total_elapsed={:.3}s",
+                    $label,
+                    $started.elapsed().as_secs_f64(),
+                    rig_timing_started.elapsed().as_secs_f64(),
+                );
+            }
+        };
+    }
+    let step_started = Instant::now();
     let mut frame_correspondences: Vec<Vec<CachedRigCorrespondence>> =
         vec![Vec::new(); frames.len()];
     let mut frame_versions = vec![0usize; frames.len()];
@@ -1067,6 +1219,15 @@ pub fn incremental_rig_sfm(
         robust_triangulation_majority_rejections: seed_triangulation.majority_rejections,
         ..RigSfmWorkStats::default()
     };
+    rig_step!("alloc-frame-caches", step_started);
+    if rig_timing {
+        eprintln!(
+            "rig-timing: setup-step-start append-landmark-correspondences \
+             seed_landmarks={}",
+            seed_triangulation.landmarks.len(),
+        );
+    }
+    let step_started = Instant::now();
     work.correspondence_cache_insertions += append_landmark_correspondences(
         &seed_triangulation.landmarks,
         &tracks,
@@ -1076,25 +1237,80 @@ pub fn incremental_rig_sfm(
         &mut frame_versions,
         &mut candidate_heap,
     );
+    rig_step!(
+        format!(
+            "append-landmark-correspondences insertions={}",
+            work.correspondence_cache_insertions
+        ),
+        step_started
+    );
     // A deferred pair is forbidden from changing the established track
     // structure, but it is still valid input to the opt-in direct bridge:
     // direct points are temporary source-stereo triangulations consumed by
     // robust PnP and never enter union-find or BA. This lets low-support local
     // edges cross a registration gap without letting them corrupt the map.
+    let step_started = Instant::now();
     let stereo_links = (config.direct_stereo_pnp_max_frame_gap > 0)
         .then(|| build_verified_stereo_links(pairwise, &image_assignment));
+    rig_step!("build-stereo-links", step_started);
+    let step_started = Instant::now();
     let direct_pair_adjacency = (config.direct_stereo_pnp_max_frame_gap > 0)
         .then(|| build_frame_pair_adjacency(pairwise, &image_assignment, frames.len()));
+    rig_step!("build-direct-pair-adjacency", step_started);
+    let step_started = Instant::now();
     let motion_pair_adjacency = (config.motion_bridge_max_frame_gap > 0)
         .then(|| build_frame_pair_adjacency(mapping_pairwise, &image_assignment, frames.len()));
+    rig_step!("build-motion-pair-adjacency", step_started);
+    let step_started = Instant::now();
     let mut direct_pairs_visited = vec![false; pairwise.len()];
     let mut direct_target_observations = vec![HashSet::new(); frames.len()];
     let mut direct_source_queue = registration_order.clone();
     let mut motion_pairs_visited = vec![false; mapping_pairwise.len()];
     let mut motion_source_queue = registration_order.clone();
     let mut motion_pending = Vec::new();
+    rig_step!("alloc-bridge-state", step_started);
+    if rig_timing {
+        eprintln!(
+            "rig-timing: setup-done total_elapsed={:.3}s entering-growth-loop",
+            rig_timing_started.elapsed().as_secs_f64(),
+        );
+    }
+    let mut rig_timing_last_tick = Instant::now();
+    let mut rig_timing_outer_iterations = 0u64;
     loop {
+        rig_timing_outer_iterations += 1;
+        if rig_timing && rig_timing_last_tick.elapsed().as_secs_f64() >= 5.0 {
+            eprintln!(
+                "rig-timing: growth-tick elapsed={:.3}s outer_iterations={} heap_len={} \
+                 registered={} pnp_attempts={} triangulation_attempts={} \
+                 direct_bridge_pair_visits={} motion_bridge_pair_visits={} \
+                 deferred_pair_visits={}",
+                rig_timing_started.elapsed().as_secs_f64(),
+                rig_timing_outer_iterations,
+                candidate_heap.len(),
+                registration_order.len(),
+                work.pnp_attempts,
+                work.triangulation_attempts,
+                work.direct_bridge_pair_visits,
+                work.motion_bridge_pair_visits,
+                work.deferred_pair_visits,
+            );
+            rig_timing_last_tick = Instant::now();
+        }
+        let mut rig_timing_heap_pops = 0u64;
         while let Some((support, Reverse(frame), version)) = candidate_heap.pop() {
+            rig_timing_heap_pops += 1;
+            if rig_timing && rig_timing_heap_pops % 200_000 == 0 {
+                eprintln!(
+                    "rig-timing: heap-pop-progress elapsed={:.3}s heap_pops_this_outer_iter={} \
+                     heap_len={} registered={} pnp_attempts={}",
+                    rig_timing_started.elapsed().as_secs_f64(),
+                    rig_timing_heap_pops,
+                    candidate_heap.len(),
+                    registration_order.len(),
+                    work.pnp_attempts,
+                );
+            }
             if frame_poses[frame].is_some()
                 || frame_versions[frame] != version
                 || frame_correspondences[frame].len() != support
@@ -1105,6 +1321,16 @@ pub fn incremental_rig_sfm(
             }
             attempted_versions[frame] = Some(version);
             work.pnp_attempts += 1;
+            if rig_timing && work.pnp_attempts % 500 == 0 {
+                eprintln!(
+                    "rig-timing: pnp-progress elapsed={:.3}s pnp_attempts={} registered={} \
+                     heap_len={}",
+                    rig_timing_started.elapsed().as_secs_f64(),
+                    work.pnp_attempts,
+                    registration_order.len(),
+                    candidate_heap.len(),
+                );
+            }
             let used_direct_bridge = frame_correspondences[frame]
                 .iter()
                 .any(|cached| cached.direct_point3d.is_some());
@@ -1145,7 +1371,27 @@ pub fn incremental_rig_sfm(
                 }
                 continue;
             }
-            let Some(report) = pnp.estimate(rig, &correspondences) else {
+            if rig_timing {
+                eprintln!(
+                    "rig-timing: pnp-estimate-start frame={frame} correspondences={} \
+                     pnp_attempts={} registered={}",
+                    correspondences.len(),
+                    work.pnp_attempts,
+                    registration_order.len(),
+                );
+            }
+            let rig_timing_pnp_estimate_started = if rig_timing { Some(Instant::now()) } else { None };
+            let pnp_report = pnp.estimate(rig, &correspondences);
+            if let Some(started) = rig_timing_pnp_estimate_started {
+                eprintln!(
+                    "rig-timing: pnp-estimate-done frame={frame} elapsed={:.3}s \
+                     correspondences={} succeeded={}",
+                    started.elapsed().as_secs_f64(),
+                    correspondences.len(),
+                    pnp_report.is_some(),
+                );
+            }
+            let Some(report) = pnp_report else {
                 work.pnp_estimation_failures += 1;
                 if std::env::var_os("VISLOC_SFM_DEBUG").is_some() {
                     eprintln!(
@@ -1200,6 +1446,15 @@ pub fn incremental_rig_sfm(
                         .map(|(_, track)| *track)
                 })
                 .collect::<HashSet<_>>();
+            let rig_timing_frontier_len = frontier.len();
+            if rig_timing {
+                eprintln!(
+                    "rig-timing: triangulate-frontier-start frame={frame} \
+                     frontier_len={rig_timing_frontier_len} registered={}",
+                    registration_order.len(),
+                );
+            }
+            let rig_timing_triangulate_started = if rig_timing { Some(Instant::now()) } else { None };
             let triangulation = triangulate_frontier(
                 rig,
                 features,
@@ -1209,6 +1464,20 @@ pub fn incremental_rig_sfm(
                 &mut tracks,
                 frontier,
             );
+            if let Some(started) = rig_timing_triangulate_started {
+                let elapsed = started.elapsed().as_secs_f64();
+                if elapsed >= 0.5 {
+                    eprintln!(
+                        "rig-timing: slow-triangulate-frontier elapsed={:.3}s frame={frame} \
+                         frontier_len={rig_timing_frontier_len} attempts={} \
+                         total_elapsed={:.3}s pnp_attempts={}",
+                        elapsed,
+                        triangulation.attempts,
+                        rig_timing_started.elapsed().as_secs_f64(),
+                        work.pnp_attempts,
+                    );
+                }
+            }
             work.triangulation_attempts += triangulation.attempts;
             work.robust_triangulation_tracks += triangulation.robust_tracks;
             work.robust_triangulation_pruned_observations += triangulation.pruned_observations;
@@ -1226,6 +1495,15 @@ pub fn incremental_rig_sfm(
                 && config.local_ba_window_size >= 2
                 && registration_order.len() % config.local_ba_every == 0
             {
+                if rig_timing {
+                    eprintln!(
+                        "rig-timing: local-ba-start registration_count={} \
+                         total_elapsed={:.3}s",
+                        registration_order.len(),
+                        rig_timing_started.elapsed().as_secs_f64(),
+                    );
+                }
+                let local_ba_step_started = Instant::now();
                 let (active_frames, anchor) = select_local_ba_frames(
                     rig,
                     frames,
@@ -1237,12 +1515,23 @@ pub fn incremental_rig_sfm(
                     &registration_order,
                     config,
                 );
+                if rig_timing {
+                    eprintln!(
+                        "rig-timing: select-local-ba-frames-done elapsed={:.3}s \
+                         active_frames={}",
+                        local_ba_step_started.elapsed().as_secs_f64(),
+                        active_frames.len(),
+                    );
+                }
                 let local_ba_config = BaConfig {
                     max_iterations: config.local_ba_iterations,
                     ..config.ba_config
                 };
-                if !active_frames.is_empty()
-                    && run_rig_bundle_adjustment(
+                let local_ba_solve_started = Instant::now();
+                let local_ba_result = if active_frames.is_empty() {
+                    None
+                } else {
+                    run_rig_bundle_adjustment(
                         rig,
                         features,
                         &image_assignment,
@@ -1257,8 +1546,17 @@ pub fn incremental_rig_sfm(
                         &mut image_poses,
                         &mut tracks,
                     )?
-                    .is_some()
-                {
+                };
+                if rig_timing {
+                    eprintln!(
+                        "rig-timing: local-ba-solve-done elapsed={:.3}s active_frames={} \
+                         total_elapsed={:.3}s",
+                        local_ba_solve_started.elapsed().as_secs_f64(),
+                        active_frames.len(),
+                        rig_timing_started.elapsed().as_secs_f64(),
+                    );
+                }
+                if local_ba_result.is_some() {
                     work.local_ba_runs += 1;
                     if config.ba_metric_tracks_only {
                         let affected_tracks = active_frames
@@ -1418,8 +1716,20 @@ pub fn incremental_rig_sfm(
             work.unregistered_below_sensor_frames += 1;
         }
     }
+    if rig_timing {
+        eprintln!(
+            "rig-timing: growth-loop-done elapsed={:.3}s registered_frames={} pnp_attempts={} \
+             triangulation_attempts={} local_ba_runs={}",
+            rig_timing_started.elapsed().as_secs_f64(),
+            registration_order.len(),
+            work.pnp_attempts,
+            work.triangulation_attempts,
+            work.local_ba_runs,
+        );
+    }
 
     if config.recover_metric_conflict_tracks && !conflicting_components.is_empty() {
+        let conflict_recovery_started = Instant::now();
         let recovered = recover_metric_conflict_tracks(
             rig,
             features,
@@ -1433,6 +1743,17 @@ pub fn incremental_rig_sfm(
         work.geometry_recovered_observations =
             recovered.iter().map(|track| track.observations.len()).sum();
         tracks.extend(recovered);
+        if rig_timing {
+            eprintln!(
+                "rig-timing: conflict-recovery-done elapsed={:.3}s components={} recovered_tracks={} \
+                 recovered_observations={} max_hypotheses={}",
+                conflict_recovery_started.elapsed().as_secs_f64(),
+                conflicting_components.len(),
+                work.geometry_recovered_tracks,
+                work.geometry_recovered_observations,
+                config.conflict_recovery_max_hypotheses,
+            );
+        }
     }
 
     // Correct a short, mutually-cancelling pose jump before final BA can
@@ -1442,6 +1763,7 @@ pub fn incremental_rig_sfm(
     // discontinuity into ordinary local motion, and keeps the two detectors'
     // decisions deterministic.
     if config.repair_paired_pose_jumps {
+        let repair_started = Instant::now();
         let repair = repair_paired_pose_jumps(
             rig,
             frames,
@@ -1455,12 +1777,21 @@ pub fn incremental_rig_sfm(
         );
         work.paired_pose_jump_repairs += repair.repairs;
         work.paired_pose_jump_repaired_frames += repair.repaired_frames;
+        if rig_timing {
+            eprintln!(
+                "rig-timing: paired-pose-jump-repair-done elapsed={:.3}s repairs={} repaired_frames={}",
+                repair_started.elapsed().as_secs_f64(),
+                repair.repairs,
+                repair.repaired_frames,
+            );
+        }
     }
 
     // Correct an unmistakable low-support PnP detour before final BA can
     // deliberately freeze that pose through `final_ba_min_pose_observations`.
     // A second pass after deferred registration handles poses added later.
     if config.repair_isolated_pose_outliers {
+        let repair_started = Instant::now();
         let repair = repair_isolated_pose_outliers(
             rig,
             frames,
@@ -1473,8 +1804,17 @@ pub fn incremental_rig_sfm(
         );
         work.isolated_pose_repair_passes += repair.passes;
         work.isolated_pose_repairs += repair.repairs;
+        if rig_timing {
+            eprintln!(
+                "rig-timing: isolated-pose-repair-done elapsed={:.3}s passes={} repairs={}",
+                repair_started.elapsed().as_secs_f64(),
+                repair.passes,
+                repair.repairs,
+            );
+        }
     }
 
+    let final_ba_started = Instant::now();
     let mut bundle_adjustment = if config.final_bundle_adjustment && config.final_ba_passes > 0 {
         run_windowed_final_ba(
             rig,
@@ -1488,7 +1828,15 @@ pub fn incremental_rig_sfm(
     } else {
         None
     };
+    if rig_timing {
+        eprintln!(
+            "rig-timing: final-ba-done elapsed={:.3}s passes={}",
+            final_ba_started.elapsed().as_secs_f64(),
+            config.final_ba_passes,
+        );
+    }
 
+    let structure_refine_started = Instant::now();
     work.structure_refined_tracks = refine_rig_structure(
         rig,
         features,
@@ -1497,6 +1845,14 @@ pub fn incremental_rig_sfm(
         config,
         &mut tracks,
     );
+    if rig_timing {
+        eprintln!(
+            "rig-timing: structure-refine-done elapsed={:.3}s refined_tracks={} total_elapsed={:.3}s",
+            structure_refine_started.elapsed().as_secs_f64(),
+            work.structure_refined_tracks,
+            rig_timing_started.elapsed().as_secs_f64(),
+        );
+    }
 
     if !deferred_pairwise.is_empty() {
         let deferred_stereo_links = build_relevant_verified_stereo_links(
@@ -7310,9 +7666,35 @@ fn triangulate_frontier(
     // RANSAC samples, so canonicalize it before any numeric work.
     let mut frontier = frontier.into_iter().collect::<Vec<_>>();
     frontier.sort_unstable();
+    let rig_timing = rig_timing_enabled();
     for track_index in frontier {
         if tracks[track_index].position.is_some() {
             continue;
+        }
+        let observation_count = tracks[track_index].observations.len();
+        if config.max_track_observations_for_triangulation > 0
+            && observation_count > config.max_track_observations_for_triangulation
+        {
+            // A real landmark cannot be seen in this many of a rig's images;
+            // this is a union-find conflict blob from visual aliasing that
+            // never collided two observations from the same image (so it
+            // was never split into `conflicting_components`). Skip it in
+            // O(1) rather than re-scanning its whole observation list -- see
+            // the field doc on `max_track_observations_for_triangulation`.
+            if rig_timing {
+                eprintln!(
+                    "rig-timing: skip-oversized-track track={track_index} \
+                     observations={observation_count} cap={}",
+                    config.max_track_observations_for_triangulation,
+                );
+            }
+            continue;
+        }
+        if rig_timing && observation_count >= 1_000 {
+            eprintln!(
+                "rig-timing: large-track-triangulate-start track={track_index} \
+                 observations={observation_count}",
+            );
         }
         update.attempts += 1;
         let rays = tracks[track_index]

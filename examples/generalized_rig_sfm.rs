@@ -105,6 +105,8 @@ struct Args {
     final_filter_refinement_passes: usize,
     ransac_seed: u64,
     seed_frame: Option<usize>,
+    max_seed_attempts: usize,
+    max_track_observations_for_triangulation: usize,
     track_builder: RigTrackBuilder,
     recover_metric_conflict_tracks: bool,
     conflict_recovery_max_hypotheses: usize,
@@ -230,6 +232,9 @@ fn parse_args() -> Result<Args, String> {
     let mut final_filter_refinement_passes = defaults.final_filter_refinement_passes;
     let mut ransac_seed = defaults.ransac_seed;
     let mut seed_frame = defaults.seed_frame;
+    let mut max_seed_attempts = defaults.max_seed_attempts;
+    let mut max_track_observations_for_triangulation =
+        defaults.max_track_observations_for_triangulation;
     let mut track_builder = defaults.track_builder;
     let mut recover_metric_conflict_tracks = defaults.recover_metric_conflict_tracks;
     let mut conflict_recovery_max_hypotheses = defaults.conflict_recovery_max_hypotheses;
@@ -484,6 +489,13 @@ fn parse_args() -> Result<Args, String> {
             }
             "--seed-frame" => {
                 seed_frame = Some(value()?.parse().map_err(|error| format!("{error}"))?)
+            }
+            "--max-seed-attempts" => {
+                max_seed_attempts = value()?.parse().map_err(|error| format!("{error}"))?
+            }
+            "--max-track-observations-for-triangulation" => {
+                max_track_observations_for_triangulation =
+                    value()?.parse().map_err(|error| format!("{error}"))?
             }
             "--conflict-preserving-tracks" => track_builder = RigTrackBuilder::ConflictPreserving,
             "--stream-order-conflict-preserving-tracks" => {
@@ -923,6 +935,8 @@ fn parse_args() -> Result<Args, String> {
         final_filter_refinement_passes,
         ransac_seed,
         seed_frame,
+        max_seed_attempts,
+        max_track_observations_for_triangulation,
         track_builder,
         recover_metric_conflict_tracks,
         conflict_recovery_max_hypotheses,
@@ -1707,6 +1721,8 @@ fn mapper_config(args: &Args) -> RigSfmConfig {
         final_filter_refinement_passes: args.final_filter_refinement_passes,
         ransac_seed: args.ransac_seed,
         seed_frame: args.seed_frame,
+        max_seed_attempts: args.max_seed_attempts,
+        max_track_observations_for_triangulation: args.max_track_observations_for_triangulation,
         track_builder: args.track_builder,
         recover_metric_conflict_tracks: args.recover_metric_conflict_tracks,
         conflict_recovery_max_hypotheses: args.conflict_recovery_max_hypotheses,
@@ -1985,6 +2001,13 @@ fn map_remaining_models(
             config.repair_isolated_pose_outliers = false;
             config.repair_paired_pose_jumps = false;
         }
+        if std::env::var_os("VISLOC_RIG_SFM_TIMING").is_some() {
+            eprintln!(
+                "rig-timing: rank-start rank={rank} supplied_frames={supplied_frames} \
+                 supplied_images={supplied_images} verified_pairs={verified_pairs}",
+            );
+        }
+        let rank_started = Instant::now();
         let mut result = match incremental_rig_sfm(
             rig,
             &input.frames,
@@ -1992,7 +2015,16 @@ fn map_remaining_models(
             &input.pairs,
             &config,
         ) {
-            Ok(result) => result,
+            Ok(result) => {
+                if std::env::var_os("VISLOC_RIG_SFM_TIMING").is_some() {
+                    eprintln!(
+                        "rig-timing: rank-done rank={rank} elapsed={:.3}s registered_frames={}",
+                        rank_started.elapsed().as_secs_f64(),
+                        result.registered_frames,
+                    );
+                }
+                result
+            }
             Err(
                 error @ (RigSfmError::NoMetricSeed | RigSfmError::InsufficientSeedStructure { .. }),
             ) if rank > 0 => {
