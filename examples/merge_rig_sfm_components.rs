@@ -66,6 +66,13 @@ struct Point3DRow {
     track: Vec<(u64, u64)>,
 }
 
+/// An unordered pair of component indices, `(min, max)`.
+type ComponentPairKey = (usize, usize);
+/// 3D-3D correspondences between two components' gauges: `(point in the
+/// smaller-index component's frame, point in the larger-index component's
+/// frame)`.
+type CorrespondenceMap = HashMap<ComponentPairKey, Vec<(Point3<f64>, Point3<f64>)>>;
+
 #[derive(Debug, Clone)]
 struct ComponentModel {
     /// Directory name, e.g. "component-000".
@@ -137,11 +144,7 @@ fn parse_points3d_txt_with_tracks(contents: &str) -> Result<Vec<Point3DRow>, Box
             return Err(format!("malformed points3D.txt row: {line}").into());
         }
         let id: u64 = tokens[0].parse()?;
-        let xyz = Point3::new(
-            tokens[1].parse()?,
-            tokens[2].parse()?,
-            tokens[3].parse()?,
-        );
+        let xyz = Point3::new(tokens[1].parse()?, tokens[2].parse()?, tokens[3].parse()?);
         let rgb = (tokens[4].parse()?, tokens[5].parse()?, tokens[6].parse()?);
         let error: f64 = tokens[7].parse()?;
         let mut track = Vec::new();
@@ -255,14 +258,17 @@ fn write_component(dir: &Path, model: &ComponentModel) -> Result<(), Box<dyn Err
     Ok(())
 }
 
-
 /// Apply a Sim(3) to a world-to-camera pose: `X_cam_new = s * X_cam_old` when
 /// re-expressed against a world rescaled/rotated/translated by `sim`
 /// (`X_world_new = s * R * X_world_old + t`). Derivation (also cross-checked
 /// via the camera-center form `C_new = sim.transform_point(C_old)`):
 ///   R_wc_new = R_wc_old * R_sim^{-1}
 ///   t_wc_new = s * t_wc_old - R_wc_new * t_sim
-fn transform_pose(sim: &Sim3, q_old: &UnitQuaternion<f64>, t_old: &Vector3<f64>) -> (UnitQuaternion<f64>, Vector3<f64>) {
+fn transform_pose(
+    sim: &Sim3,
+    q_old: &UnitQuaternion<f64>,
+    t_old: &Vector3<f64>,
+) -> (UnitQuaternion<f64>, Vector3<f64>) {
     let q_new = q_old * sim.rotation.inverse();
     let t_new = sim.scale * t_old - q_new.transform_vector(&sim.translation);
     (q_new, t_new)
@@ -351,8 +357,7 @@ fn ransac_sim3(
         };
         let source: Vec<Point3<f64>> = sample.iter().map(|&i| correspondences[i].0).collect();
         let target: Vec<Point3<f64>> = sample.iter().map(|&i| correspondences[i].1).collect();
-        let Some(transform) =
-            visloc_rs::umeyama_similarity_transform(&source, &target, true)
+        let Some(transform) = visloc_rs::umeyama_similarity_transform(&source, &target, true)
         else {
             continue;
         };
@@ -435,22 +440,78 @@ fn parse_args() -> Result<Args, Box<dyn Error>> {
     let mut args = env::args().skip(1);
     while let Some(flag) = args.next() {
         match flag.as_str() {
-            "--components-dir" => components_dir = Some(PathBuf::from(args.next().ok_or("--components-dir requires PATH")?)),
-            "--snapshot" => snapshot = Some(PathBuf::from(args.next().ok_or("--snapshot requires PATH")?)),
-            "--output-dir" => output_dir = Some(PathBuf::from(args.next().ok_or("--output-dir requires PATH")?)),
-            "--min-cross-pairs" => min_cross_pairs = args.next().ok_or("--min-cross-pairs requires N")?.parse()?,
-            "--min-correspondences" => min_correspondences = args.next().ok_or("--min-correspondences requires N")?.parse()?,
-            "--min-inliers" => min_inliers = args.next().ok_or("--min-inliers requires N")?.parse()?,
-            "--min-inlier-ratio" => min_inlier_ratio = args.next().ok_or("--min-inlier-ratio requires F")?.parse()?,
-            "--ransac-iters" => ransac_iters = args.next().ok_or("--ransac-iters requires N")?.parse()?,
-            "--inlier-threshold-m" => inlier_threshold_m = args.next().ok_or("--inlier-threshold-m requires F")?.parse()?,
-            "--max-scale-deviation" => max_scale_deviation = args.next().ok_or("--max-scale-deviation requires F")?.parse()?,
+            "--components-dir" => {
+                components_dir = Some(PathBuf::from(
+                    args.next().ok_or("--components-dir requires PATH")?,
+                ))
+            }
+            "--snapshot" => {
+                snapshot = Some(PathBuf::from(
+                    args.next().ok_or("--snapshot requires PATH")?,
+                ))
+            }
+            "--output-dir" => {
+                output_dir = Some(PathBuf::from(
+                    args.next().ok_or("--output-dir requires PATH")?,
+                ))
+            }
+            "--min-cross-pairs" => {
+                min_cross_pairs = args.next().ok_or("--min-cross-pairs requires N")?.parse()?
+            }
+            "--min-correspondences" => {
+                min_correspondences = args
+                    .next()
+                    .ok_or("--min-correspondences requires N")?
+                    .parse()?
+            }
+            "--min-inliers" => {
+                min_inliers = args.next().ok_or("--min-inliers requires N")?.parse()?
+            }
+            "--min-inlier-ratio" => {
+                min_inlier_ratio = args
+                    .next()
+                    .ok_or("--min-inlier-ratio requires F")?
+                    .parse()?
+            }
+            "--ransac-iters" => {
+                ransac_iters = args.next().ok_or("--ransac-iters requires N")?.parse()?
+            }
+            "--inlier-threshold-m" => {
+                inlier_threshold_m = args
+                    .next()
+                    .ok_or("--inlier-threshold-m requires F")?
+                    .parse()?
+            }
+            "--max-scale-deviation" => {
+                max_scale_deviation = args
+                    .next()
+                    .ok_or("--max-scale-deviation requires F")?
+                    .parse()?
+            }
             "--seed" => seed = args.next().ok_or("--seed requires U64")?.parse()?,
             "--refine" => refine = true,
-            "--rig-manifest" => rig_manifest = Some(PathBuf::from(args.next().ok_or("--rig-manifest requires PATH")?)),
-            "--ba-max-iterations" => ba_max_iterations = args.next().ok_or("--ba-max-iterations requires N")?.parse()?,
-            "--ba-max-reprojection-error-px" => ba_max_reprojection_error_px = args.next().ok_or("--ba-max-reprojection-error-px requires F")?.parse()?,
-            "--report-json" => report_json = Some(PathBuf::from(args.next().ok_or("--report-json requires PATH")?)),
+            "--rig-manifest" => {
+                rig_manifest = Some(PathBuf::from(
+                    args.next().ok_or("--rig-manifest requires PATH")?,
+                ))
+            }
+            "--ba-max-iterations" => {
+                ba_max_iterations = args
+                    .next()
+                    .ok_or("--ba-max-iterations requires N")?
+                    .parse()?
+            }
+            "--ba-max-reprojection-error-px" => {
+                ba_max_reprojection_error_px = args
+                    .next()
+                    .ok_or("--ba-max-reprojection-error-px requires F")?
+                    .parse()?
+            }
+            "--report-json" => {
+                report_json = Some(PathBuf::from(
+                    args.next().ok_or("--report-json requires PATH")?,
+                ))
+            }
             other => return Err(format!("unknown flag: {other}").into()),
         }
     }
@@ -569,7 +630,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .collect();
     component_dirs.sort();
     if component_dirs.is_empty() {
-        return Err(format!("no component directories under {}", args.components_dir.display()).into());
+        return Err(format!(
+            "no component directories under {}",
+            args.components_dir.display()
+        )
+        .into());
     }
     eprintln!("loading {} components ...", component_dirs.len());
     let components: Vec<ComponentModel> = component_dirs
@@ -577,25 +642,40 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|dir| parse_component(dir))
         .collect::<Result<_, _>>()?;
     for c in &components {
-        eprintln!("  {} images={} points3d={}", c.name, c.images.len(), c.points3d.len());
+        eprintln!(
+            "  {} images={} points3d={}",
+            c.name,
+            c.images.len(),
+            c.points3d.len()
+        );
     }
 
     eprintln!("loading verified-pairs snapshot (mapper-compact) ...");
     let snapshot = verified_pair_snapshot::read_mapper_compact(&args.snapshot)?;
-    eprintln!("snapshot: {} images, {} pairs", snapshot.image_names.len(), snapshot.pairs.len());
+    eprintln!(
+        "snapshot: {} images, {} pairs",
+        snapshot.image_names.len(),
+        snapshot.pairs.len()
+    );
 
     // name -> (component index, local image id)
     let mut name_to_component: HashMap<&str, (usize, u64)> = HashMap::new();
     for (comp_idx, comp) in components.iter().enumerate() {
         for row in &comp.images {
-            if name_to_component.insert(&row.name, (comp_idx, row.local_id)).is_some() {
-                return Err(format!("image name {} appears in more than one component", row.name).into());
+            if name_to_component
+                .insert(&row.name, (comp_idx, row.local_id))
+                .is_some()
+            {
+                return Err(
+                    format!("image name {} appears in more than one component", row.name).into(),
+                );
             }
         }
     }
 
     // (local_image_id, keypoint_idx) -> point3d_id, and point3d_id -> position, per component.
-    let mut keypoint_to_point3d: Vec<HashMap<(u64, u64), u64>> = Vec::with_capacity(components.len());
+    let mut keypoint_to_point3d: Vec<HashMap<(u64, u64), u64>> =
+        Vec::with_capacity(components.len());
     let mut point3d_position: Vec<HashMap<u64, Point3<f64>>> = Vec::with_capacity(components.len());
     for comp in &components {
         let mut kp_map = HashMap::new();
@@ -612,13 +692,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Single pass over the snapshot: bucket cross-component correspondences.
-    let mut cross_pair_count: HashMap<(usize, usize), usize> = HashMap::new();
-    let mut correspondence_set: HashMap<(usize, usize), HashSet<(u64, u64)>> = HashMap::new();
-    let mut correspondences: HashMap<(usize, usize), Vec<(Point3<f64>, Point3<f64>)>> = HashMap::new();
+    let mut cross_pair_count: HashMap<ComponentPairKey, usize> = HashMap::new();
+    let mut correspondence_set: HashMap<ComponentPairKey, HashSet<(u64, u64)>> = HashMap::new();
+    let mut correspondences: CorrespondenceMap = HashMap::new();
     // Parallel to `correspondences`: the underlying (point3d_id_in_a,
     // point3d_id_in_b) pair each correspondence came from, so accepted
     // RANSAC inliers can be turned into landmark fusions later.
-    let mut correspondence_points: HashMap<(usize, usize), Vec<(u64, u64)>> = HashMap::new();
+    let mut correspondence_points: HashMap<ComponentPairKey, Vec<(u64, u64)>> = HashMap::new();
     for pair in &snapshot.pairs {
         let name_i = snapshot
             .image_names
@@ -668,11 +748,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             let pos_b = point3d_position[comp_b][&point_b];
             // source = b's gauge, target = a's gauge (sim maps b -> a).
             correspondences.entry(key).or_default().push((pos_b, pos_a));
-            correspondence_points.entry(key).or_default().push((point_a, point_b));
+            correspondence_points
+                .entry(key)
+                .or_default()
+                .push((point_a, point_b));
         }
     }
 
-    eprintln!("\ncomponent-pair edges (cross_pairs >= {}):", args.min_cross_pairs);
+    eprintln!(
+        "\ncomponent-pair edges (cross_pairs >= {}):",
+        args.min_cross_pairs
+    );
     let mut edges: Vec<EdgeResult> = Vec::new();
     let mut edge_keys: Vec<&(usize, usize)> = cross_pair_count.keys().collect();
     edge_keys.sort();
@@ -685,14 +771,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         if corr.len() < args.min_correspondences {
             eprintln!(
                 "  {} <-> {}: cross_pairs={cp} correspondences={} (< min {}) SKIP",
-                components[a].name, components[b].name, corr.len(), args.min_correspondences
+                components[a].name,
+                components[b].name,
+                corr.len(),
+                args.min_correspondences
             );
             continue;
         }
-        let Some((sim_b_to_a, inliers)) = ransac_sim3(&corr, args.ransac_iters, args.inlier_threshold_m, args.seed) else {
+        let Some((sim_b_to_a, inliers)) =
+            ransac_sim3(&corr, args.ransac_iters, args.inlier_threshold_m, args.seed)
+        else {
             eprintln!(
                 "  {} <-> {}: cross_pairs={cp} correspondences={} RANSAC FAILED",
-                components[a].name, components[b].name, corr.len()
+                components[a].name,
+                components[b].name,
+                corr.len()
             );
             continue;
         };
@@ -728,7 +821,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         if !accept {
             continue;
         }
-        let point_ids = correspondence_points.get(&(a, b)).cloned().unwrap_or_default();
+        let point_ids = correspondence_points
+            .get(&(a, b))
+            .cloned()
+            .unwrap_or_default();
         let fused_landmark_pairs = inliers.iter().map(|&i| point_ids[i]).collect();
         edges.push(EdgeResult {
             a,
@@ -793,8 +889,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
     for edge in &edges {
         for &(point_a, point_b) in &edge.fused_landmark_pairs {
-            let ia = uf_id_for((edge.a, point_a), &mut landmark_uf_index, &mut landmark_uf_parent);
-            let ib = uf_id_for((edge.b, point_b), &mut landmark_uf_index, &mut landmark_uf_parent);
+            let ia = uf_id_for(
+                (edge.a, point_a),
+                &mut landmark_uf_index,
+                &mut landmark_uf_parent,
+            );
+            let ib = uf_id_for(
+                (edge.b, point_b),
+                &mut landmark_uf_index,
+                &mut landmark_uf_parent,
+            );
             let ra = find(&mut landmark_uf_parent, ia);
             let rb = find(&mut landmark_uf_parent, ib);
             if ra != rb {
@@ -802,8 +906,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
-    let total_fused_landmarks = edges.iter().map(|e| e.fused_landmark_pairs.len()).sum::<usize>();
-    eprintln!("landmark fusion: {total_fused_landmarks} inlier correspondences feed {} union-find nodes", landmark_uf_parent.len());
+    let total_fused_landmarks = edges
+        .iter()
+        .map(|e| e.fused_landmark_pairs.len())
+        .sum::<usize>();
+    eprintln!(
+        "landmark fusion: {total_fused_landmarks} inlier correspondences feed {} union-find nodes",
+        landmark_uf_parent.len()
+    );
 
     fs::create_dir_all(&args.output_dir)?;
     let mut cluster_indices: Vec<&usize> = clusters.keys().collect();
@@ -866,13 +976,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .get(&member_idx)
                 .cloned()
                 .unwrap_or_else(Sim3::identity);
-            let transformed = if sim.scale == 1.0 && sim.translation.norm() == 0.0 && sim.rotation.angle() == 0.0 {
-                components[member_idx].clone()
-            } else {
-                transform_component(&components[member_idx], &sim)
-            };
+            let transformed =
+                if sim.scale == 1.0 && sim.translation.norm() == 0.0 && sim.rotation.angle() == 0.0
+                {
+                    components[member_idx].clone()
+                } else {
+                    transform_component(&components[member_idx], &sim)
+                };
             for camera in &transformed.cameras {
-                if !merged_cameras.iter().any(|existing| existing.id == camera.id) {
+                if !merged_cameras
+                    .iter()
+                    .any(|existing| existing.id == camera.id)
+                {
                     merged_cameras.push(camera.clone());
                 }
             }
@@ -901,7 +1016,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .track
                     .iter()
                     .filter_map(|&(image_id, keypoint)| {
-                        local_to_new.get(&image_id).map(|&new_image_id| (new_image_id, keypoint))
+                        local_to_new
+                            .get(&image_id)
+                            .map(|&new_image_id| (new_image_id, keypoint))
                     })
                     .collect();
                 let fusion_root = landmark_uf_index
@@ -923,14 +1040,22 @@ fn main() -> Result<(), Box<dyn Error>> {
                     }
                     let new_id = next_point_id;
                     next_point_id += 1;
-                    merged_points.push(Point3DRow { id: new_id, track: remapped_track, ..point.clone() });
+                    merged_points.push(Point3DRow {
+                        id: new_id,
+                        track: remapped_track,
+                        ..point.clone()
+                    });
                     contributor_count.push(1);
                     fusion_root_to_index.insert(root, merged_points.len() - 1);
                     continue;
                 }
                 let new_id = next_point_id;
                 next_point_id += 1;
-                merged_points.push(Point3DRow { id: new_id, track: remapped_track, ..point.clone() });
+                merged_points.push(Point3DRow {
+                    id: new_id,
+                    track: remapped_track,
+                    ..point.clone()
+                });
                 contributor_count.push(1);
             }
         }
@@ -955,7 +1080,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         let cluster_name = format!("cluster-{cluster_out_idx:03}");
-        let member_names: Vec<&str> = ordered_members.iter().map(|&idx| components[idx].name.as_str()).collect();
+        let member_names: Vec<&str> = ordered_members
+            .iter()
+            .map(|&idx| components[idx].name.as_str())
+            .collect();
         eprintln!(
             "{cluster_name}: {} component(s) -> {} images, {} points  members=[{}]",
             ordered_members.len(),
@@ -965,7 +1093,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
         report_lines.push(format!(
             "{{\"cluster\":\"{cluster_name}\",\"members\":[{}],\"images\":{},\"points3d\":{}}}",
-            member_names.iter().map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(","),
+            member_names
+                .iter()
+                .map(|n| format!("\"{n}\""))
+                .collect::<Vec<_>>()
+                .join(","),
             merged_images.len(),
             merged_points.len(),
         ));
@@ -1039,8 +1171,10 @@ fn refine_cluster_rig_coupled(
     rig: &RigCalibration,
     args: &Args,
 ) -> Result<(), Box<dyn Error>> {
-    let camera_by_id: HashMap<u64, Camera> = model.cameras.iter().map(|c| (c.id, c.clone())).collect();
-    let image_by_local: HashMap<u64, &ImageRow> = model.images.iter().map(|r| (r.local_id, r)).collect();
+    let camera_by_id: HashMap<u64, Camera> =
+        model.cameras.iter().map(|c| (c.id, c.clone())).collect();
+    let image_by_local: HashMap<u64, &ImageRow> =
+        model.images.iter().map(|r| (r.local_id, r)).collect();
 
     // Group this model's images by rig frame id, and remember each image's
     // sensor index for its observation's extrinsic.
@@ -1057,7 +1191,9 @@ fn refine_cluster_rig_coupled(
         }
     }
     if unresolved > 0 {
-        eprintln!("    {unresolved} image(s) not found in the rig manifest, excluded from rig-coupled BA");
+        eprintln!(
+            "    {unresolved} image(s) not found in the rig manifest, excluded from rig-coupled BA"
+        );
     }
     if frame_images.is_empty() {
         eprintln!("    no images resolve against the rig manifest, skipping rig-coupled BA");
@@ -1070,19 +1206,32 @@ fn refine_cluster_rig_coupled(
     let mut problem = BundleAdjustment::new(model.cameras[0].clone());
     let mut frame_observation_count: HashMap<u64, usize> = HashMap::new();
     for (&frame_id, members) in &frame_images {
-        let Some(&seed_local_id) = members
-            .iter()
-            .min_by_key(|&&local_id| image_sensor_index.get(&local_id).copied().unwrap_or(usize::MAX))
-        else {
+        let Some(&seed_local_id) = members.iter().min_by_key(|&&local_id| {
+            image_sensor_index
+                .get(&local_id)
+                .copied()
+                .unwrap_or(usize::MAX)
+        }) else {
             continue;
         };
-        let Some(&sensor_index) = image_sensor_index.get(&seed_local_id) else { continue };
-        let Some((_, sensor_from_rig)) = rig.sensors.get(sensor_index) else { continue };
-        let Some(row) = image_by_local.get(&seed_local_id) else { continue };
+        let Some(&sensor_index) = image_sensor_index.get(&seed_local_id) else {
+            continue;
+        };
+        let Some((_, sensor_from_rig)) = rig.sensors.get(sensor_index) else {
+            continue;
+        };
+        let Some(row) = image_by_local.get(&seed_local_id) else {
+            continue;
+        };
         let pose_cam = SE3::new(row.q, row.t);
         // pose_cam = sensor_from_rig ∘ pose_rig  =>  pose_rig = sensor_from_rig^-1 ∘ pose_cam
         let pose_rig = sensor_from_rig.inverse().compose(&pose_cam);
-        problem.add_pose(frame_id, Pose { world_to_camera: pose_rig });
+        problem.add_pose(
+            frame_id,
+            Pose {
+                world_to_camera: pose_rig,
+            },
+        );
     }
 
     // Anchor the rig-frame with the most resolved images/observations.
@@ -1102,14 +1251,24 @@ fn refine_cluster_rig_coupled(
         }
         let mut observations = Vec::new();
         for &(image_id, keypoint) in &point.track {
-            let Some(row) = image_by_local.get(&image_id) else { continue };
-            let Some(&(frame_id, sensor_index)) = rig.frame_of.get(&row.name) else { continue };
+            let Some(row) = image_by_local.get(&image_id) else {
+                continue;
+            };
+            let Some(&(frame_id, sensor_index)) = rig.frame_of.get(&row.name) else {
+                continue;
+            };
             if !problem.poses.contains_key(&frame_id) {
                 continue;
             }
-            let Some(&(x, y, _)) = row.points.get(keypoint as usize) else { continue };
-            let Some(camera) = camera_by_id.get(&row.camera_id) else { continue };
-            let Some((_, sensor_from_rig)) = rig.sensors.get(sensor_index) else { continue };
+            let Some(&(x, y, _)) = row.points.get(keypoint as usize) else {
+                continue;
+            };
+            let Some(camera) = camera_by_id.get(&row.camera_id) else {
+                continue;
+            };
+            let Some((_, sensor_from_rig)) = rig.sensors.get(sensor_index) else {
+                continue;
+            };
             observations.push(BaRigObservation {
                 keyframe_id: frame_id,
                 landmark_id: point.id,
@@ -1159,9 +1318,15 @@ fn refine_cluster_rig_coupled(
     // Re-derive each image's own absolute pose from its (optimized) rig
     // frame pose composed with its sensor's fixed extrinsic.
     for row in &mut model.images {
-        let Some(&(frame_id, sensor_index)) = rig.frame_of.get(&row.name) else { continue };
-        let Some(pose_rig) = problem.poses.get(&frame_id) else { continue };
-        let Some((_, sensor_from_rig)) = rig.sensors.get(sensor_index) else { continue };
+        let Some(&(frame_id, sensor_index)) = rig.frame_of.get(&row.name) else {
+            continue;
+        };
+        let Some(pose_rig) = problem.poses.get(&frame_id) else {
+            continue;
+        };
+        let Some((_, sensor_from_rig)) = rig.sensors.get(sensor_index) else {
+            continue;
+        };
         let pose_cam = sensor_from_rig.compose(&pose_rig.world_to_camera);
         row.q = pose_cam.rotation;
         row.t = pose_cam.translation;
@@ -1175,7 +1340,8 @@ fn refine_cluster_rig_coupled(
 }
 
 fn refine_cluster(model: &mut ComponentModel, args: &Args) -> Result<(), Box<dyn Error>> {
-    let camera_by_id: HashMap<u64, Camera> = model.cameras.iter().map(|c| (c.id, c.clone())).collect();
+    let camera_by_id: HashMap<u64, Camera> =
+        model.cameras.iter().map(|c| (c.id, c.clone())).collect();
     let mut problem = BundleAdjustment::new(model.cameras[0].clone());
     for row in &model.images {
         let pose = Pose::from_world_to_camera(row.q, row.t);
@@ -1194,7 +1360,8 @@ fn refine_cluster(model: &mut ComponentModel, args: &Args) -> Result<(), Box<dyn
         problem.fix_pose(anchor);
     }
 
-    let image_by_local: HashMap<u64, &ImageRow> = model.images.iter().map(|r| (r.local_id, r)).collect();
+    let image_by_local: HashMap<u64, &ImageRow> =
+        model.images.iter().map(|r| (r.local_id, r)).collect();
     let mut used_points = 0usize;
     let mut used_observations = 0usize;
     for point in &model.points3d {
@@ -1203,9 +1370,15 @@ fn refine_cluster(model: &mut ComponentModel, args: &Args) -> Result<(), Box<dyn
         }
         let mut observations = Vec::new();
         for &(image_id, keypoint) in &point.track {
-            let Some(row) = image_by_local.get(&image_id) else { continue };
-            let Some(&(x, y, _)) = row.points.get(keypoint as usize) else { continue };
-            let Some(camera) = camera_by_id.get(&row.camera_id) else { continue };
+            let Some(row) = image_by_local.get(&image_id) else {
+                continue;
+            };
+            let Some(&(x, y, _)) = row.points.get(keypoint as usize) else {
+                continue;
+            };
+            let Some(camera) = camera_by_id.get(&row.camera_id) else {
+                continue;
+            };
             observations.push(BaRigObservation {
                 keyframe_id: image_id,
                 landmark_id: point.id,

@@ -267,9 +267,7 @@ fn real_quartic_roots(a4: f64, a3: f64, a2: f64, a1: f64, a0: f64) -> Option<Vec
     // unbounded `Schur::new` (`max_niter=0`, loops forever if it never sees
     // convergence, which a non-finite entry guarantees); see the longer note
     // on the analogous fix in `gp3p.rs::real_roots_of_degree_le_8`.
-    let Some(schur) = Schur::try_new(companion, f64::EPSILON, 10_000) else {
-        return None;
-    };
+    let schur = Schur::try_new(companion, f64::EPSILON, 10_000)?;
     let eigen = schur.complex_eigenvalues();
     let mut roots = Vec::new();
     for e in eigen.iter() {

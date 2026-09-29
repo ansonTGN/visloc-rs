@@ -1259,7 +1259,7 @@ fn solve_gr6p_polynomial(
     if !action.iter().all(|value| value.is_finite()) {
         return Ok(Vec::new());
     }
-    let Some(schur) = Schur::try_new(action.clone(), f64::EPSILON, 10_000) else {
+    let Some(schur) = Schur::try_new(action, f64::EPSILON, 10_000) else {
         return Ok(Vec::new());
     };
     let eigenvalues = schur.complex_eigenvalues();

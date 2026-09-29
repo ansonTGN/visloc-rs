@@ -208,7 +208,8 @@ impl EssentialMatrixEstimator for EightPointEssentialMatrixEstimator {
         );
 
         // Project E_normalized onto the essential manifold.
-        let essential_norm_svd = essential_normalized.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
+        let essential_norm_svd =
+            essential_normalized.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
         let u_n = essential_norm_svd.u?;
         let v_t_n = essential_norm_svd.v_t?;
         let s_n =

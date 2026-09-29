@@ -948,7 +948,10 @@ pub fn incremental_rig_sfm(
             frames.len(),
             features.len(),
             mapping_pairwise.len(),
-            mapping_pairwise.iter().map(|p| p.matches.len()).sum::<usize>(),
+            mapping_pairwise
+                .iter()
+                .map(|p| p.matches.len())
+                .sum::<usize>(),
         );
     }
     let track_build_started = Instant::now();
@@ -957,7 +960,11 @@ pub fn incremental_rig_sfm(
     let track_build_stats = track_output.stats;
     let conflicting_components = track_output.conflicting_components;
     if rig_timing {
-        let largest_conflict = conflicting_components.iter().map(Vec::len).max().unwrap_or(0);
+        let largest_conflict = conflicting_components
+            .iter()
+            .map(Vec::len)
+            .max()
+            .unwrap_or(0);
         let total_conflict_obs: usize = conflicting_components.iter().map(Vec::len).sum();
         eprintln!(
             "rig-timing: track-build-done elapsed={:.3}s tracks={} conflicting_components={} \
@@ -1056,7 +1063,11 @@ pub fn incremental_rig_sfm(
     // correctness.
     let mut previous_touched_tracks: Vec<usize> = Vec::new();
     let mut previous_touched_images: Vec<usize> = Vec::new();
-    let seed_search_started = if rig_timing { Some(Instant::now()) } else { None };
+    let seed_search_started = if rig_timing {
+        Some(Instant::now())
+    } else {
+        None
+    };
     let mut seed_search_last_tick = Instant::now();
     let candidate_count = seed_candidates.len();
     let seed_iter: Box<dyn Iterator<Item = usize>> = if config.max_seed_attempts > 0 {
@@ -1380,7 +1391,11 @@ pub fn incremental_rig_sfm(
                     registration_order.len(),
                 );
             }
-            let rig_timing_pnp_estimate_started = if rig_timing { Some(Instant::now()) } else { None };
+            let rig_timing_pnp_estimate_started = if rig_timing {
+                Some(Instant::now())
+            } else {
+                None
+            };
             let pnp_report = pnp.estimate(rig, &correspondences);
             if let Some(started) = rig_timing_pnp_estimate_started {
                 eprintln!(
@@ -1454,7 +1469,11 @@ pub fn incremental_rig_sfm(
                     registration_order.len(),
                 );
             }
-            let rig_timing_triangulate_started = if rig_timing { Some(Instant::now()) } else { None };
+            let rig_timing_triangulate_started = if rig_timing {
+                Some(Instant::now())
+            } else {
+                None
+            };
             let triangulation = triangulate_frontier(
                 rig,
                 features,
