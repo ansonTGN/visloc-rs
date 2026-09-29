@@ -57,7 +57,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use visloc_core::geometry::SE3;
+use visloc_core::geometry::{reproject, SE3};
 use visloc_vision::pnp::{
     Correspondence2D3D, GaussNewtonPoseRefiner, GeneralizedCameraRig,
     GeneralizedCorrespondence2D3D, GeneralizedPnPRansac, MinimalSolver, P3PGrunert, RigSensor,
@@ -519,14 +519,73 @@ impl IncrementalMapper {
             confidence: None,
         };
         let Some(report) = ransac.estimate(&correspondences, &camera) else {
+            if std::env::var_os("VISLOC_DEBUG_REG_FAIL").is_some() {
+                eprintln!(
+                    "REG_FAIL frame={} image={} correspondences={} reason=no_pose",
+                    recon.image(image_id).frame_id,
+                    image_id,
+                    correspondences.len()
+                );
+            }
             return false;
         };
         if report.inliers.len() < options.abs_pose_min_num_inliers {
+            if std::env::var_os("VISLOC_DEBUG_REG_FAIL").is_some() {
+                eprintln!(
+                    "REG_FAIL frame={} image={} correspondences={} inliers={} reason=too_few_inliers",
+                    recon.image(image_id).frame_id,
+                    image_id,
+                    correspondences.len(),
+                    report.inliers.len()
+                );
+            }
+            if std::env::var("VISLOC_DEBUG_REG_FAIL_DUMP")
+                .ok()
+                .and_then(|v| v.parse::<ImageT>().ok())
+                == Some(image_id)
+            {
+                let inlier_set: BTreeSet<usize> = report.inliers.iter().copied().collect();
+                for (i, (point2d_idx, point3d_id)) in tri_corrs.iter().enumerate() {
+                    let corr = &correspondences[i];
+                    let is_inlier = inlier_set.contains(&i);
+                    let track_len = recon.point3d(*point3d_id).track.len();
+                    let xyz = recon.point3d(*point3d_id).xyz;
+                    let residual = reproject(&camera, &report.pose, &corr.point3d)
+                        .map(|p| (p - corr.point2d).norm());
+                    eprintln!(
+                        "REG_FAIL_DUMP frame={} image={} i={} point2d_idx={} point3d_id={} track_len={} xyz=({:.6},{:.6},{:.6}) px2d=({:.3},{:.3}) residual_px={} inlier={}",
+                        recon.image(image_id).frame_id,
+                        image_id,
+                        i,
+                        point2d_idx,
+                        point3d_id,
+                        track_len,
+                        xyz.x,
+                        xyz.y,
+                        xyz.z,
+                        corr.point2d.x,
+                        corr.point2d.y,
+                        residual
+                            .map(|r| format!("{r:.3}"))
+                            .unwrap_or_else(|| "nan".to_string()),
+                        is_inlier
+                    );
+                }
+            }
             return false;
         }
         if (report.inliers.len() as f64) / (correspondences.len() as f64)
             < options.abs_pose_min_inlier_ratio
         {
+            if std::env::var_os("VISLOC_DEBUG_REG_FAIL").is_some() {
+                eprintln!(
+                    "REG_FAIL frame={} image={} correspondences={} inliers={} reason=low_ratio",
+                    recon.image(image_id).frame_id,
+                    image_id,
+                    correspondences.len(),
+                    report.inliers.len()
+                );
+            }
             return false;
         }
 

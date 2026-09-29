@@ -21,17 +21,18 @@
 
 use std::collections::BTreeMap;
 
-use nalgebra::{Matrix2, Matrix3, Point2, Vector2};
+use nalgebra::{Matrix2, Matrix3, Point2, Point3, UnitQuaternion, Vector2, Vector3};
 use rayon::prelude::*;
 use thiserror::Error;
 
 use crate::{
     calibration::BasaltCalibration,
+    camera::DoubleSphereCamera,
     fast::{GridFastConfig, GridFastDetector},
     patch::{MeanNormalizedPatch51, PatchResidualError},
     pyramid::{ImageError, RawU16Pyramid},
     timing::{TimingBreakdown, TimingBucket},
-    types::{BasaltFrame, FrameId, TrackId, TrackObservation},
+    types::{BasaltFrame, FrameId, ImuSample, TrackId, TrackObservation},
     update::{AffineCompact2f, Se2UpdateError},
 };
 
@@ -43,6 +44,8 @@ pub struct DirectKltConfig {
     pub fb_squared_threshold: f32,
     pub essential_residual_threshold: f64,
     pub fast: GridFastConfig,
+    /// Opt-in raw-gyro rotation initialization for temporal cam0 KLT.
+    pub imu_seed_rotation: bool,
 }
 
 impl Default for DirectKltConfig {
@@ -53,6 +56,7 @@ impl Default for DirectKltConfig {
             fb_squared_threshold: 0.04,
             essential_residual_threshold: 0.005,
             fast: GridFastConfig::default(),
+            imu_seed_rotation: false,
         }
     }
 }
@@ -283,6 +287,32 @@ impl DirectKltStream {
         frame: StereoFrame,
         timing: &mut TimingBreakdown,
     ) -> Result<TrackFrameOutput, StreamError> {
+        self.process_frame_with_timing_impl(frame, &[], Vector3::zeros(), timing)
+    }
+
+    /// Processes a stereo frame with raw IMU samples for optional rotation
+    /// seeding. `gyro_bias` is the estimator's most recently available
+    /// gyro-bias estimate (IMU frame, rad/s; pass `Vector3::zeros()` when
+    /// unavailable, e.g. the pipelined frontend thread, which does not share
+    /// live estimator state with the frontend thread) -- it is subtracted
+    /// from each raw gyro sample before integration.
+    pub fn process_frame_with_timing_imu(
+        &mut self,
+        frame: StereoFrame,
+        imu: &[ImuSample],
+        gyro_bias: Vector3<f64>,
+        timing: &mut TimingBreakdown,
+    ) -> Result<TrackFrameOutput, StreamError> {
+        self.process_frame_with_timing_impl(frame, imu, gyro_bias, timing)
+    }
+
+    fn process_frame_with_timing_impl(
+        &mut self,
+        frame: StereoFrame,
+        imu: &[ImuSample],
+        gyro_bias: Vector3<f64>,
+        timing: &mut TimingBreakdown,
+    ) -> Result<TrackFrameOutput, StreamError> {
         if let Some(previous_frame) = self.previous_frame {
             if frame.frame_id <= previous_frame.frame_id
                 || frame.timestamp_ns <= previous_frame.timestamp_ns
@@ -364,10 +394,30 @@ impl DirectKltStream {
             // this is bit-identical for any thread count.
             let entries: Vec<(TrackId, ActiveTrack)> =
                 old_tracks.iter().map(|(&id, &track)| (id, track)).collect();
+            let theta_cam0 = if self.config.imu_seed_rotation {
+                self.calibration.t_imu_cam.first().and_then(|t_imu_cam0| {
+                    integrate_gyro_imu_frame(imu, gyro_bias).map(|theta_imu| {
+                        // T_imu_cam maps camera vectors into the IMU frame; its
+                        // inverse rotation maps raw gyro rotation into cam0.
+                        (t_imu_cam0.rotation.inverse() * theta_imu).cast::<f32>()
+                    })
+                })
+            } else {
+                None
+            };
+            let camera0 = self.calibration.camera(0);
             let results: Vec<TemporalTrackResult> = entries
                 .par_iter()
                 .map(|&(track_id, old_track)| {
-                    temporal_track_update(track_id, old_track, previous, &current, &self.config)
+                    temporal_track_update(
+                        track_id,
+                        old_track,
+                        previous,
+                        &current,
+                        &self.config,
+                        camera0,
+                        theta_cam0,
+                    )
                 })
                 .collect();
             for result in results {
@@ -569,6 +619,52 @@ struct TemporalTrackResult {
     cam1_reject: Option<RejectReason>,
 }
 
+/// Integrates raw gyro samples in the IMU frame using rectangular integration
+/// between consecutive timestamps: sum (gyro[k] - bias) * dt[k, k+1]. Returns
+/// None with fewer than two samples. `bias` is the estimator's most recently
+/// available gyro-bias estimate (zero when unavailable); subtracting it
+/// matters here because this integration has no other bias-observability
+/// mechanism the way the estimator's own preintegration does -- an
+/// uncorrected EuRoC-scale gyro bias (order 1e-2 rad/s) integrated over one
+/// frame interval (order 1/20 s) is a non-negligible fraction of a typical
+/// per-frame rotation on the fast/blurred sequences this seed targets.
+fn integrate_gyro_imu_frame(imu: &[ImuSample], bias: Vector3<f64>) -> Option<Vector3<f64>> {
+    if imu.len() < 2 {
+        return None;
+    }
+    let mut theta = Vector3::<f64>::zeros();
+    for pair in imu.windows(2) {
+        let dt = (pair[1].timestamp_ns - pair[0].timestamp_ns) as f64 * 1e-9;
+        if dt > 0.0 {
+            theta += (pair[0].gyro_rad_s - bias) * dt;
+        }
+    }
+    Some(theta)
+}
+
+/// Predicts the current pixel from the previous pixel and the camera's own
+/// integrated rotation (camera-frame axis-angle in radians).
+///
+/// Derivation, matching this codebase's own IMU-preintegration convention
+/// (`pipelines/basalt/src/vio/estimator.rs`: `predicted.imu_to_world.rotation
+/// *= delta.delta_rotation`, i.e. `R(t2) = R(t1) * exp([theta]_x)` for
+/// `imu_to_world` R and integrated gyro `theta`, the standard Forster-style
+/// preintegration delta applied on the right): a world-fixed point's bearing
+/// in the IMU/camera frame is `b(t) = R(t)^T * direction`, so `b(t2) =
+/// R(t2)^T R(t1) b(t1) = exp([theta]_x)^T b(t1) = exp(-[theta]_x) b(t1)` --
+/// rotate the OLD bearing by the NEGATED integrated rotation vector.
+fn rotation_seeded_pixel(
+    camera: &DoubleSphereCamera,
+    old_pixel: Vector2<f32>,
+    theta_cam: Vector3<f32>,
+) -> Option<Vector2<f32>> {
+    let bearing = camera.unproject_f32(&Point2::new(old_pixel.x, old_pixel.y))?;
+    let rotation = UnitQuaternion::from_scaled_axis(-theta_cam);
+    let rotated = rotation * bearing;
+    let projected = camera.project_f32(&Point3::new(rotated.x, rotated.y, rotated.z))?;
+    Some(Vector2::new(projected.x, projected.y))
+}
+
 /// Pure, side-effect-free per-track temporal KLT update: forward/backward
 /// cam0 tracking plus its FB^2 gate, and independently, forward/backward
 /// cam1 tracking plus its FB^2 gate. Reads only `previous`/`current`
@@ -581,13 +677,36 @@ fn temporal_track_update(
     previous: &FramePyramids,
     current: &FramePyramids,
     config: &DirectKltConfig,
+    camera0: Option<&DoubleSphereCamera>,
+    theta_cam0: Option<Vector3<f32>>,
 ) -> TemporalTrackResult {
     // `FrameToFrameOpticalFlow::trackPoints` runs once for each camera map.
     // Do not gate the cam1 search on cam0 success.
     let mut cam0_classification = None;
     let cam0 = old_track.cam0.and_then(|old_cam0| {
-        let frame_transform = match track_direction(&previous.cam0, &current.cam0, old_cam0, config)
-        {
+        // `source_position` anchors the reference patch sampled from the OLD
+        // image and must stay at the point's true previous-frame pixel; only
+        // the NEW-frame search seed (`initial_transform`'s translation) is
+        // replaced with the rotation-predicted position. When
+        // `camera0`/`theta_cam0` is `None` (feature off, or fewer than two
+        // IMU samples this frame), `predicted_position` falls back to
+        // `*old_cam0.translation()`, so `seeded_initial == old_cam0` and this
+        // is byte-identical to the unseeded `track_direction(&previous.cam0,
+        // &current.cam0, old_cam0, config)` call it replaces.
+        let predicted_position = camera0
+            .zip(theta_cam0)
+            .and_then(|(camera, theta)| {
+                rotation_seeded_pixel(camera, *old_cam0.translation(), theta)
+            })
+            .unwrap_or(*old_cam0.translation());
+        let seeded_initial = AffineCompact2f::new(*old_cam0.linear(), predicted_position);
+        let frame_transform = match track_direction_from_seed(
+            &previous.cam0,
+            &current.cam0,
+            *old_cam0.translation(),
+            seeded_initial,
+            config,
+        ) {
             Ok(transform) => transform,
             Err(failure) => {
                 cam0_classification = Some(Cam0Classification::Rejected(
@@ -849,6 +968,47 @@ mod tests {
 
     use super::*;
     use crate::{camera::DoubleSphereCamera, types::BasaltNavState};
+
+    #[test]
+    fn gyro_integration_uses_left_samples_and_positive_intervals() {
+        let sample = |timestamp_ns, gyro_rad_s| ImuSample {
+            timestamp_ns,
+            gyro_rad_s,
+            accel_m_s2: Vector3::zeros(),
+        };
+        let imu = [
+            sample(0, Vector3::new(1.0, 2.0, 3.0)),
+            sample(10_000_000, Vector3::new(4.0, 5.0, 6.0)),
+            sample(10_000_000, Vector3::new(7.0, 8.0, 9.0)),
+            sample(5_000_000, Vector3::new(10.0, 11.0, 12.0)),
+            sample(25_000_000, Vector3::repeat(999.0)),
+        ];
+        let zero_bias = Vector3::zeros();
+        assert_eq!(integrate_gyro_imu_frame(&[], zero_bias), None);
+        assert_eq!(integrate_gyro_imu_frame(&imu[..1], zero_bias), None);
+        let expected = Vector3::new(0.21, 0.24, 0.27);
+        assert!((integrate_gyro_imu_frame(&imu, zero_bias).unwrap() - expected).norm() < 1e-12);
+
+        // Bias is subtracted from each leading sample before integration:
+        // the two positive-dt intervals used above (0.01 s and 0.02 s) sum
+        // to 0.03 s, so a constant bias offset should subtract `bias * 0.03`.
+        let bias = Vector3::new(1.0, 1.0, 1.0);
+        let expected_biased = expected - bias * 0.03;
+        assert!((integrate_gyro_imu_frame(&imu, bias).unwrap() - expected_biased).norm() < 1e-12);
+    }
+
+    #[test]
+    fn rotation_seeded_pixel_matches_independently_rotated_bearing() {
+        let camera = DoubleSphereCamera::new(40.0, 40.0, 48.0, 48.0, 0.0, 0.5, 96, 96).unwrap();
+        let old_pixel = Vector2::new(53.0, 45.0);
+        let b0 = camera.unproject_f32(&Point2::from(old_pixel)).unwrap();
+        let axis = Vector3::new(0.0, 0.05, 0.0);
+        let r = UnitQuaternion::from_scaled_axis(axis).to_rotation_matrix();
+        let b_expected = r * b0;
+        let p_expected = camera.project_f32(&Point3::from(b_expected)).unwrap();
+        let actual = rotation_seeded_pixel(&camera, old_pixel, -axis).unwrap();
+        assert!((actual - p_expected.coords).norm() < 1e-3);
+    }
 
     #[test]
     fn reject_reason_counters_are_stage_specific_and_deterministic() {

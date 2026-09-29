@@ -41,7 +41,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -54,6 +54,7 @@ use crate::{
     calibration::BasaltCalibration,
     pyramid::{ImageError, RawU16Image},
     vio::margdata::{MargData, OfImageData},
+    ImuSample,
 };
 
 use crate::mapper::{
@@ -137,8 +138,27 @@ pub enum OnlineMapperError {
 /// ([`OnlineNfrMapper::finalize`]) runs the full unbounded
 /// `headless.num_opt_iter` budget -- literally `run_headless`'s tail, not a
 /// capped approximation of it.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct OnlineMapperConfig {
+    /// Full sorted raw IMU stream, used only when `imu_preintegration_weight > 0.0`.
+    /// Empty by default; no sample copies or scans when unused.
+    pub imu_samples: Arc<[ImuSample]>,
+    /// Scalar weight for preintegrated-IMU factors between consecutive keyframes.
+    /// <= 0.0 (the default) disables retention, keyframe scans and IMU integration.
+    pub imu_preintegration_weight: f64,
+    /// Scalar weight for the joint visual-inertial global BA (`mapper::imu_ba`):
+    /// preintegrated-IMU relative-state factors and bias random-walk factors
+    /// between consecutive keyframes, solved *jointly* with pose (full
+    /// 15-dof-per-keyframe navigation state), gravity fixed in world. This is
+    /// a different, more expensive lever than `imu_preintegration_weight`
+    /// (which folds a *frozen*-velocity IMU delta into the existing pose-only
+    /// solver as a plain relative-pose factor); see
+    /// `docs/vi_slam_global_consistency_plan.md` section 1.8 for why the
+    /// frozen-velocity variants could not move MH_04/MH_05. `<= 0.0` (the
+    /// default) disables it -- no raw-delta retention, no extra
+    /// linearization, and `optimize_pass`/`spawn_background_optimize` keep
+    /// calling the unmodified pose-only `NfrMapper::optimize` path.
+    pub joint_vi_ba_weight: f64,
     /// Run a periodic `build_tracks -> setup_opt -> optimize ->
     /// filter -> optimize` pass (capped at `periodic_iterations` LM
     /// iterations per `optimize` call) after this many newly accepted
@@ -275,6 +295,9 @@ pub struct OnlineMapperConfig {
 impl Default for OnlineMapperConfig {
     fn default() -> Self {
         Self {
+            imu_samples: Arc::from([]),
+            imu_preintegration_weight: 0.0,
+            joint_vi_ba_weight: 0.0,
             optimize_every_k: 100,
             periodic_iterations: 4,
             loop_gap_keyframes: 30,
@@ -360,6 +383,20 @@ pub struct OnlineFinalReport {
 pub struct OnlineNfrMapper {
     mapper: NfrMapper,
     config: OnlineMapperConfig,
+    last_imu_factor_keyframe: Option<u64>,
+    // Cumulative history; poses are looked up afresh at each optimize pass.
+    imu_pairs: Vec<(u64, u64, crate::mapper::imu_factor::CorrectedDelta)>,
+    /// Same cadence/bookkeeping as `last_imu_factor_keyframe`/`imu_pairs`,
+    /// but for the joint VI-BA solver: retains the *raw* preintegrated delta
+    /// (bias Jacobians + covariance) instead of `imu_pairs`'s already
+    /// bias-corrected, covariance-free `CorrectedDelta`, since the joint
+    /// solver relinearizes around the current bias estimate at every LM
+    /// iteration (see `mapper::imu_ba`). Independent of `imu_pairs`/
+    /// `imu_preintegration_weight`: the two features are gated by separate
+    /// config knobs and can be enabled independently (though only one is
+    /// meant to be on at a time in practice).
+    last_imu_ba_factor_keyframe: Option<u64>,
+    imu_ba_pairs: Vec<(u64, u64, crate::imu::ImuPreintegratedDelta)>,
     keyframes_since_optimize: usize,
     total_accepted_loops: usize,
     total_optimize_passes: usize,
@@ -430,6 +467,12 @@ struct BackgroundOptimizeResult {
     /// projection-based re-observation to use.
     feature_tracks: FeatureTracks,
     lmdb: NfrMapperLandmarkDb,
+    /// Joint-VI-BA-refined velocity/gyro-bias/accel-bias, carried back the
+    /// same way `poses` is. Empty (and ignored by `merge_background_result`)
+    /// whenever the joint solver did not run this pass.
+    velocities: std::collections::BTreeMap<u64, Vector3<f64>>,
+    gyro_biases: std::collections::BTreeMap<u64, Vector3<f64>>,
+    accel_biases: std::collections::BTreeMap<u64, Vector3<f64>>,
     breakdown: BackgroundOptimizeBreakdown,
 }
 
@@ -447,6 +490,10 @@ impl OnlineNfrMapper {
         Self {
             mapper,
             config,
+            last_imu_factor_keyframe: None,
+            imu_pairs: Vec::new(),
+            last_imu_ba_factor_keyframe: None,
+            imu_ba_pairs: Vec::new(),
             keyframes_since_optimize: 0,
             total_accepted_loops: 0,
             total_optimize_passes: 0,
@@ -515,9 +562,105 @@ impl OnlineNfrMapper {
         );
 
         mapper_trace!("ingest_packet: add_marg_data start");
+        let retain_velocity_bias =
+            self.config.imu_preintegration_weight > 0.0 || self.config.joint_vi_ba_weight > 0.0;
         self.mapper
-            .add_marg_data(data)
+            .add_marg_data_with_velocity_bias(data, retain_velocity_bias)
             .map_err(OnlineMapperError::Ingest)?;
+        if self.config.imu_preintegration_weight > 0.0 {
+            use std::ops::Bound::{Excluded, Unbounded};
+            // An unbounded initial range includes the legitimate frame ID zero.
+            let lower = self.last_imu_factor_keyframe.map_or(Unbounded, Excluded);
+            let new_ids = self
+                .mapper
+                .frame_poses
+                .range((lower, Unbounded))
+                .map(|(&id, _)| id)
+                .collect::<Vec<_>>();
+            let ids = self
+                .last_imu_factor_keyframe
+                .iter()
+                .copied()
+                .chain(new_ids.iter().copied())
+                .collect::<Vec<_>>();
+            for pair in ids.windows(2) {
+                let (prev_id, cur_id) = (pair[0], pair[1]);
+                let (Some(&start), Some(&end), Some(&(_, bg, ba))) = (
+                    self.mapper.frame_timestamps.get(&prev_id),
+                    self.mapper.frame_timestamps.get(&cur_id),
+                    self.mapper.frame_velocity_bias.get(&prev_id),
+                ) else {
+                    continue;
+                };
+                if end <= start {
+                    continue;
+                }
+                let samples = &self.config.imu_samples;
+                let first = samples.partition_point(|sample| sample.timestamp_ns <= start);
+                let last = samples.partition_point(|sample| sample.timestamp_ns <= end);
+                if let Some(delta) = crate::mapper::imu_factor::preintegrate_corrected_delta(
+                    bg,
+                    ba,
+                    start,
+                    end,
+                    &samples[first..last],
+                ) {
+                    self.imu_pairs.push((prev_id, cur_id, delta));
+                }
+            }
+            if let Some(&last) = new_ids.last() {
+                self.last_imu_factor_keyframe = Some(last);
+            }
+        }
+        if self.config.joint_vi_ba_weight > 0.0 {
+            if let Some(calibration) = self.mapper.calibration.clone() {
+                let noise = crate::mapper::imu_ba::imu_noise_model_from_calibration(&calibration);
+                use std::ops::Bound::{Excluded, Unbounded};
+                let lower = self.last_imu_ba_factor_keyframe.map_or(Unbounded, Excluded);
+                let new_ids = self
+                    .mapper
+                    .frame_poses
+                    .range((lower, Unbounded))
+                    .map(|(&id, _)| id)
+                    .collect::<Vec<_>>();
+                let ids = self
+                    .last_imu_ba_factor_keyframe
+                    .iter()
+                    .copied()
+                    .chain(new_ids.iter().copied())
+                    .collect::<Vec<_>>();
+                for pair in ids.windows(2) {
+                    let (prev_id, cur_id) = (pair[0], pair[1]);
+                    let (Some(&start), Some(&end), Some(&(_, bg, ba))) = (
+                        self.mapper.frame_timestamps.get(&prev_id),
+                        self.mapper.frame_timestamps.get(&cur_id),
+                        self.mapper.frame_velocity_bias.get(&prev_id),
+                    ) else {
+                        continue;
+                    };
+                    if end <= start {
+                        continue;
+                    }
+                    let samples = &self.config.imu_samples;
+                    let first = samples.partition_point(|sample| sample.timestamp_ns <= start);
+                    let last = samples.partition_point(|sample| sample.timestamp_ns <= end);
+                    if let Some(delta) = crate::mapper::imu_ba::preintegrate_delta_for_joint_ba(
+                        bg,
+                        ba,
+                        start,
+                        end,
+                        &samples[first..last],
+                        noise,
+                    ) {
+                        self.imu_ba_pairs.push((prev_id, cur_id, delta));
+                    }
+                }
+                if let Some(&last) = new_ids.last() {
+                    self.last_imu_ba_factor_keyframe = Some(last);
+                }
+            }
+        }
+
         mapper_trace!("ingest_packet: add_marg_data done");
         let calibration = self
             .mapper
@@ -1432,6 +1575,106 @@ impl OnlineNfrMapper {
         factors
     }
 
+    /// Cumulative refinement uses current poses, including background BA merges.
+    /// Bound the dense 3N solve (quadratic storage, cubic worst-case work).
+    fn refresh_imu_factors(&mut self) {
+        if self.config.imu_preintegration_weight > 0.0 && !self.imu_pairs.is_empty() {
+            const MAX_IMU_PAIRS: usize = 2000;
+            if self.imu_pairs.len() > MAX_IMU_PAIRS {
+                mapper_trace!(
+                    "imu velocity refresh skipped: {} pairs",
+                    self.imu_pairs.len()
+                );
+                return;
+            }
+            let pairs = self
+                .imu_pairs
+                .iter()
+                .filter_map(|(from, to, delta)| {
+                    Some((
+                        *from,
+                        *to,
+                        self.mapper.frame_poses.get(from)?.clone(),
+                        self.mapper.frame_poses.get(to)?.clone(),
+                        delta.dt,
+                        delta.position,
+                        delta.velocity,
+                    ))
+                })
+                .collect::<Vec<_>>();
+            self.mapper.frame_velocities = crate::mapper::imu_factor::refine_pair_velocities(
+                &pairs,
+                &self.mapper.frame_velocities,
+            );
+            self.mapper.factors.imu_relative_pose = self
+                .imu_pairs
+                .iter()
+                .filter_map(|(from, to, delta)| {
+                    self.mapper.frame_poses.get(to)?;
+                    crate::mapper::imu_factor::relative_pose_factor_from_delta(
+                        *from,
+                        *to,
+                        self.mapper.frame_poses.get(from)?.clone(),
+                        *self.mapper.frame_velocities.get(from)?,
+                        delta,
+                        self.config.imu_preintegration_weight,
+                    )
+                })
+                .collect();
+        }
+    }
+
+    /// Build the joint solver's transient factor lists from `imu_ba_pairs`,
+    /// or two empty `Vec`s if joint VI-BA is disabled, calibration is
+    /// missing, or the pair count exceeds the same bound
+    /// `refresh_imu_factors` uses for the frozen-velocity path (bounding the
+    /// per-pass cost of a very long uninterrupted sequence). Callers use an
+    /// empty result as the signal to keep calling the unmodified pose-only
+    /// `NfrMapper::optimize`/`optimize_with_extra_factors`, so this method
+    /// alone gates every bit of extra joint-solver cost.
+    fn build_joint_imu_factors(
+        &self,
+    ) -> (
+        Vec<crate::mapper::imu_ba::ImuPreintegratedFactor>,
+        Vec<crate::mapper::imu_ba::BiasRandomWalkFactor>,
+    ) {
+        if self.config.joint_vi_ba_weight <= 0.0 || self.imu_ba_pairs.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        const MAX_IMU_BA_PAIRS: usize = 2000;
+        if self.imu_ba_pairs.len() > MAX_IMU_BA_PAIRS {
+            mapper_trace!(
+                "joint VI-BA factor build skipped: {} pairs",
+                self.imu_ba_pairs.len()
+            );
+            return (Vec::new(), Vec::new());
+        }
+        let Some(calibration) = self.mapper.calibration.as_ref() else {
+            return (Vec::new(), Vec::new());
+        };
+        let bias_noise =
+            crate::mapper::imu_ba::bias_random_walk_noise_from_calibration(calibration);
+        let weight = self.config.joint_vi_ba_weight;
+        let mut imu_factors = Vec::with_capacity(self.imu_ba_pairs.len());
+        let mut bias_factors = Vec::with_capacity(self.imu_ba_pairs.len());
+        for (from, to, delta) in &self.imu_ba_pairs {
+            imu_factors.push(crate::mapper::imu_ba::ImuPreintegratedFactor {
+                from: *from,
+                to: *to,
+                delta: delta.clone(),
+                weight,
+            });
+            bias_factors.push(crate::mapper::imu_ba::BiasRandomWalkFactor {
+                from: *from,
+                to: *to,
+                dt: delta.delta_time,
+                noise: bias_noise,
+                weight,
+            });
+        }
+        (imu_factors, bias_factors)
+    }
+
     fn optimize_pass(
         &mut self,
         num_opt_iter: usize,
@@ -1452,10 +1695,23 @@ impl OnlineNfrMapper {
         // consistent with the current landmark positions rather than stale
         // snapshots from when the loop was first matched.
         let loop_factors = self.rebuild_loop_factors();
-        let first_optimize = self
-            .mapper
-            .optimize_with_extra_factors(&loop_factors, num_opt_iter)
-            .map_err(|_| OnlineMapperError::MissingCalibration)?;
+        self.refresh_imu_factors();
+        let (imu_factors, bias_factors) = self.build_joint_imu_factors();
+        let use_joint = !imu_factors.is_empty() || !bias_factors.is_empty();
+        let gravity_world = crate::mapper::imu_factor::gravity_world();
+        let first_optimize = if use_joint {
+            self.mapper.optimize_joint_with_extra_factors(
+                &loop_factors,
+                &imu_factors,
+                &bias_factors,
+                gravity_world,
+                num_opt_iter,
+            )
+        } else {
+            self.mapper
+                .optimize_with_extra_factors(&loop_factors, num_opt_iter)
+        }
+        .map_err(|_| OnlineMapperError::MissingCalibration)?;
         let filter = self
             .mapper
             .filter_outliers(
@@ -1463,10 +1719,19 @@ impl OnlineNfrMapper {
                 self.config.headless.min_num_obs,
             )
             .map_err(|_| OnlineMapperError::MissingCalibration)?;
-        let second_optimize = self
-            .mapper
-            .optimize_with_extra_factors(&loop_factors, num_opt_iter)
-            .map_err(|_| OnlineMapperError::MissingCalibration)?;
+        let second_optimize = if use_joint {
+            self.mapper.optimize_joint_with_extra_factors(
+                &loop_factors,
+                &imu_factors,
+                &bias_factors,
+                gravity_world,
+                num_opt_iter,
+            )
+        } else {
+            self.mapper
+                .optimize_with_extra_factors(&loop_factors, num_opt_iter)
+        }
+        .map_err(|_| OnlineMapperError::MissingCalibration)?;
         if self.config.local_ba_window > 0 {
             let local = self
                 .mapper
@@ -1547,6 +1812,19 @@ impl OnlineNfrMapper {
         for (frame_id, pose) in result.poses {
             self.mapper.frame_poses.insert(frame_id, pose);
         }
+        // Joint-VI-BA-refined state (a no-op merge when the joint solver did
+        // not run this pass: `optimizer_snapshot` seeds these three maps
+        // from the same live values, so an unrun joint pass merges each
+        // entry back onto itself).
+        for (frame_id, velocity) in result.velocities {
+            self.mapper.frame_velocities.insert(frame_id, velocity);
+        }
+        for (frame_id, bias) in result.gyro_biases {
+            self.mapper.frame_gyro_bias.insert(frame_id, bias);
+        }
+        for (frame_id, bias) in result.accel_biases {
+            self.mapper.frame_accel_bias.insert(frame_id, bias);
+        }
         // Surface the persistent track graph and landmark database on the live
         // mapper.  The snapshot was cloned from the live mapper and then
         // advanced by `build_tracks`/`setup_opt`/`filter_outliers`, so its
@@ -1574,6 +1852,10 @@ impl OnlineNfrMapper {
     /// [`Self::poll_pending_optimizer`] or [`Self::finalize`] merges the
     /// result back.
     fn spawn_background_optimize(&mut self) {
+        self.refresh_imu_factors();
+        let (imu_factors, bias_factors) = self.build_joint_imu_factors();
+        let use_joint = !imu_factors.is_empty() || !bias_factors.is_empty();
+        let gravity_world = crate::mapper::imu_factor::gravity_world();
         let mut snapshot = self.mapper.optimizer_snapshot();
         let periodic_iterations = self.config.periodic_iterations;
         let outlier_threshold = self.config.headless.outlier_threshold;
@@ -1612,7 +1894,17 @@ impl OnlineNfrMapper {
                 let setup_opt_seconds = start.elapsed().as_secs_f64();
 
                 let start = Instant::now();
-                let _ = snapshot.optimize(periodic_iterations);
+                if use_joint {
+                    let _ = snapshot.optimize_joint_with_extra_factors(
+                        &[],
+                        &imu_factors,
+                        &bias_factors,
+                        gravity_world,
+                        periodic_iterations,
+                    );
+                } else {
+                    let _ = snapshot.optimize(periodic_iterations);
+                }
                 let optimize1_seconds = start.elapsed().as_secs_f64();
 
                 let start = Instant::now();
@@ -1620,7 +1912,17 @@ impl OnlineNfrMapper {
                 let filter_seconds = start.elapsed().as_secs_f64();
 
                 let start = Instant::now();
-                let _ = snapshot.optimize(periodic_iterations);
+                if use_joint {
+                    let _ = snapshot.optimize_joint_with_extra_factors(
+                        &[],
+                        &imu_factors,
+                        &bias_factors,
+                        gravity_world,
+                        periodic_iterations,
+                    );
+                } else {
+                    let _ = snapshot.optimize(periodic_iterations);
+                }
                 let optimize2_seconds = start.elapsed().as_secs_f64();
 
                 BackgroundOptimizeResult {
@@ -1628,6 +1930,9 @@ impl OnlineNfrMapper {
                     optimizer_state: snapshot.optimizer_state,
                     feature_tracks: snapshot.feature_tracks,
                     lmdb: snapshot.lmdb,
+                    velocities: snapshot.frame_velocities,
+                    gyro_biases: snapshot.frame_gyro_bias,
+                    accel_biases: snapshot.frame_accel_bias,
                     breakdown: BackgroundOptimizeBreakdown {
                         build_tracks_seconds,
                         setup_opt_seconds,
@@ -2228,6 +2533,312 @@ mod tests {
     /// every time -- the exact bug an MH_01 smoke run caught (every packet
     /// reporting `new_key_count=16`, the full window, with per-packet match
     /// cost growing monotonically as a result).
+    #[test]
+    fn imu_ingestion_retains_navigation_states_before_pose_conversion() {
+        let mut packet = fixture_packet();
+        let states = packet
+            .frame_states
+            .iter()
+            .filter(|state| packet.kfs_all.contains(&state.frame_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(!states.is_empty());
+        let mut mapper = NfrMapper::new(MapperConfig::default());
+        let mut repeated_packet = packet.clone();
+        assert!(mapper.add_marg_data(&mut packet).unwrap().accepted);
+        for state in &states {
+            assert_eq!(
+                mapper.frame_velocities[&state.frame_id],
+                Vector3::from(state.velocity)
+            );
+            assert!(!packet
+                .frame_states
+                .iter()
+                .any(|s| s.frame_id == state.frame_id));
+            assert_eq!(
+                mapper.frame_velocity_bias[&state.frame_id],
+                (
+                    Vector3::from(state.velocity),
+                    Vector3::from(state.gyro_bias),
+                    Vector3::from(state.accel_bias)
+                )
+            );
+        }
+        let refined = Vector3::new(123.0, 456.0, 789.0);
+        mapper.frame_velocities.insert(states[0].frame_id, refined);
+        mapper.add_marg_data(&mut repeated_packet).unwrap();
+        assert_eq!(mapper.frame_velocities[&states[0].frame_id], refined);
+        mapper.calibration = Some(feature_calibration());
+        // `frame_velocity_bias` (the frozen original VIO estimate) is dead
+        // weight in every snapshot and stays empty. `frame_velocities` used
+        // to be dropped too, back when only the pose-only frozen-velocity
+        // IMU factor existed (it bakes the live velocity into a relative-pose
+        // factor *before* the snapshot is taken, so the snapshot's own
+        // `optimize()` call never reads it). The joint VI-BA solver
+        // (`optimize_joint_with_extra_factors`) optimizes velocity as
+        // first-class state instead, so it now needs the live value carried
+        // into the snapshot; see `optimizer_snapshot`'s doc comment.
+        let snapshot = mapper.optimizer_snapshot();
+        assert!(snapshot.frame_velocity_bias.is_empty());
+        assert_eq!(snapshot.frame_velocities[&states[0].frame_id], refined);
+    }
+
+    #[test]
+    fn imu_ingestion_connects_packets_once_and_is_disabled_by_default() {
+        let mut base = fixture_packet();
+        // Supplement pose-only fixture entries with navigation estimates as if
+        // retained from earlier VIO packets, including frame ID zero.
+        base.frame_poses.push(FramePoseData {
+            frame_id: 0,
+            timestamp_ns: 0,
+            pose: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            is_keyframe: true,
+        });
+        base.kfs_all.push(0);
+        let mut all_ids = base.kfs_all.clone();
+        all_ids.sort_unstable();
+        all_ids.dedup();
+        let last = *all_ids.last().unwrap();
+        let mut next = base.clone();
+        next.frame_poses.push(FramePoseData {
+            frame_id: last + 1,
+            timestamp_ns: last as i64 + 1_000_000_000,
+            pose: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            is_keyframe: true,
+        });
+        next.kfs_all.push(last + 1);
+        let samples: Arc<[ImuSample]> = all_ids
+            .iter()
+            .skip(1)
+            .map(|&id| ImuSample::new(id as i64, Vector3::zeros(), Vector3::zeros()))
+            .chain(std::iter::once(ImuSample::new(
+                last as i64 + 1_000_000_000,
+                Vector3::zeros(),
+                Vector3::zeros(),
+            )))
+            .collect::<Vec<_>>()
+            .into();
+        for weight in [0.0, 7.0] {
+            let mut online = OnlineNfrMapper::new(
+                MapperConfig::default(),
+                feature_calibration(),
+                OfflineMapperConfig::default(),
+                GlobalBaConfig::default(),
+                OnlineMapperConfig {
+                    imu_samples: samples.clone(),
+                    imu_preintegration_weight: weight,
+                    optimize_every_k: usize::MAX,
+                    ..OnlineMapperConfig::default()
+                },
+            );
+            if weight > 0.0 {
+                // Pose-only entries have already lost their navigation fields;
+                // model the history retained from their original VIO packets.
+                for &id in &all_ids {
+                    online
+                        .mapper
+                        .frame_velocity_bias
+                        .insert(id, (Vector3::zeros(), Vector3::zeros(), Vector3::zeros()));
+                }
+            }
+            online
+                .ingest_packet(&mut base.clone(), Some(TEST_SEED))
+                .unwrap();
+            online
+                .ingest_packet(&mut next.clone(), Some(TEST_SEED))
+                .unwrap();
+            online
+                .ingest_packet(&mut next.clone(), Some(TEST_SEED))
+                .unwrap();
+            assert!(online.mapper.factors.imu_relative_pose.is_empty());
+            online.refresh_imu_factors();
+            let pairs = online
+                .mapper
+                .factors
+                .imu_relative_pose
+                .iter()
+                .filter(|f| f.weight == 7.0)
+                .map(|f| (f.from, f.to))
+                .collect::<Vec<_>>();
+            if weight == 0.0 {
+                assert!(pairs.is_empty());
+                assert!(online.mapper.frame_velocity_bias.is_empty());
+                assert!(online.mapper.frame_velocities.is_empty());
+                assert!(online.imu_pairs.is_empty());
+                assert_eq!(online.last_imu_factor_keyframe, None);
+            } else {
+                let mut expected = all_ids
+                    .windows(2)
+                    .map(|ids| (ids[0], ids[1]))
+                    .collect::<Vec<_>>();
+                expected.push((last, last + 1));
+                assert_eq!(pairs, expected);
+                let original = online.mapper.factors.imu_relative_pose.clone();
+                // A later pass must rebuild old pairs from the latest poses,
+                // not append duplicate factors or reuse ingestion-time poses.
+                online
+                    .mapper
+                    .frame_poses
+                    .get_mut(&(last + 1))
+                    .unwrap()
+                    .translation
+                    .x += 1.0;
+                online.refresh_imu_factors();
+                assert_eq!(
+                    online.mapper.factors.imu_relative_pose.len(),
+                    expected.len()
+                );
+                assert_ne!(online.mapper.factors.imu_relative_pose, original);
+                let snapshot = online.mapper.optimizer_snapshot();
+                assert_eq!(
+                    snapshot.factors.imu_relative_pose,
+                    online.mapper.factors.imu_relative_pose
+                );
+                // `frame_velocities` is now carried into every snapshot (see
+                // `optimizer_snapshot`'s doc comment): the joint VI-BA solver
+                // needs it as first-class state, and carrying it is harmless
+                // for this pose-only frozen-velocity factor path, which never
+                // reads it back off the snapshot.
+                assert_eq!(snapshot.frame_velocities, online.mapper.frame_velocities);
+            }
+        }
+    }
+
+    /// Mirrors `imu_ingestion_connects_packets_once_and_is_disabled_by_default`
+    /// for the joint VI-BA path: `joint_vi_ba_weight <= 0.0` (the default)
+    /// must retain zero `imu_ba_pairs` and build zero joint factors, while a
+    /// positive weight builds one `imu_ba_pairs` entry per consecutive
+    /// keyframe pair and non-empty, equal-length preintegrated/bias-walk
+    /// factor lists from `build_joint_imu_factors`.
+    #[test]
+    fn joint_vi_ba_ingestion_is_disabled_by_default_and_builds_pairs_when_enabled() {
+        let mut base = fixture_packet();
+        base.frame_poses.push(FramePoseData {
+            frame_id: 0,
+            timestamp_ns: 0,
+            pose: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            is_keyframe: true,
+        });
+        base.kfs_all.push(0);
+        let mut all_ids = base.kfs_all.clone();
+        all_ids.sort_unstable();
+        all_ids.dedup();
+        let last = *all_ids.last().unwrap();
+        let mut next = base.clone();
+        next.frame_poses.push(FramePoseData {
+            frame_id: last + 1,
+            timestamp_ns: last as i64 + 1_000_000_000,
+            pose: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+            is_keyframe: true,
+        });
+        next.kfs_all.push(last + 1);
+        let samples: Arc<[ImuSample]> = all_ids
+            .iter()
+            .skip(1)
+            .map(|&id| ImuSample::new(id as i64, Vector3::zeros(), Vector3::zeros()))
+            .chain(std::iter::once(ImuSample::new(
+                last as i64 + 1_000_000_000,
+                Vector3::zeros(),
+                Vector3::zeros(),
+            )))
+            .collect::<Vec<_>>()
+            .into();
+        for weight in [0.0, 3.0] {
+            let mut online = OnlineNfrMapper::new(
+                MapperConfig::default(),
+                feature_calibration(),
+                OfflineMapperConfig::default(),
+                GlobalBaConfig::default(),
+                OnlineMapperConfig {
+                    imu_samples: samples.clone(),
+                    joint_vi_ba_weight: weight,
+                    optimize_every_k: usize::MAX,
+                    ..OnlineMapperConfig::default()
+                },
+            );
+            if weight > 0.0 {
+                for &id in &all_ids {
+                    online
+                        .mapper
+                        .frame_velocity_bias
+                        .insert(id, (Vector3::zeros(), Vector3::zeros(), Vector3::zeros()));
+                }
+            }
+            online
+                .ingest_packet(&mut base.clone(), Some(TEST_SEED))
+                .unwrap();
+            online
+                .ingest_packet(&mut next.clone(), Some(TEST_SEED))
+                .unwrap();
+            online
+                .ingest_packet(&mut next.clone(), Some(TEST_SEED))
+                .unwrap();
+            let (imu_factors, bias_factors) = online.build_joint_imu_factors();
+            if weight == 0.0 {
+                assert!(online.imu_ba_pairs.is_empty());
+                assert_eq!(online.last_imu_ba_factor_keyframe, None);
+                assert!(imu_factors.is_empty());
+                assert!(bias_factors.is_empty());
+                // Disabled joint mode must never touch the frozen-velocity
+                // feature's own state.
+                assert!(online.imu_pairs.is_empty());
+            } else {
+                let mut expected = all_ids
+                    .windows(2)
+                    .map(|ids| (ids[0], ids[1]))
+                    .collect::<Vec<_>>();
+                expected.push((last, last + 1));
+                let pairs = online
+                    .imu_ba_pairs
+                    .iter()
+                    .map(|(from, to, _)| (*from, *to))
+                    .collect::<Vec<_>>();
+                assert_eq!(pairs, expected);
+                assert_eq!(imu_factors.len(), expected.len());
+                assert_eq!(bias_factors.len(), expected.len());
+                assert!(imu_factors.iter().all(|f| f.weight == 3.0));
+                assert!(bias_factors.iter().all(|f| f.weight == 3.0));
+                assert!(online.imu_pairs.is_empty());
+            }
+        }
+    }
+
+    /// Direct regression test for a real bug caught while running the joint
+    /// solver online: `ingest_packet` only retained navigation states
+    /// (`frame_velocity_bias`) when `imu_preintegration_weight > 0.0`, so
+    /// `joint_vi_ba_weight`-only mode built zero `imu_ba_pairs` (the ingest
+    /// block's `self.mapper.frame_velocity_bias.get(&prev_id)` was always
+    /// `None`) despite loading raw IMU samples and appearing to run
+    /// normally -- a silent no-op, not a crash, which the manual
+    /// `frame_velocity_bias` pre-seed in the test above did not catch since
+    /// it bypassed real ingestion. This test does not pre-seed anything: it
+    /// only checks that `ingest_packet` itself populates
+    /// `mapper.frame_velocity_bias` when only `joint_vi_ba_weight` is set.
+    #[test]
+    fn joint_vi_ba_only_mode_retains_velocity_bias_at_ingest() {
+        let mut packet = fixture_packet();
+        let calibration = feature_calibration();
+        let mut online = OnlineNfrMapper::new(
+            MapperConfig::default(),
+            calibration,
+            OfflineMapperConfig::default(),
+            GlobalBaConfig::default(),
+            OnlineMapperConfig {
+                imu_samples: Arc::from([]),
+                imu_preintegration_weight: 0.0,
+                joint_vi_ba_weight: 5.0,
+                ..OnlineMapperConfig::default()
+            },
+        );
+        assert!(online.mapper.frame_velocity_bias.is_empty());
+        online.ingest_packet(&mut packet, Some(TEST_SEED)).unwrap();
+        assert!(
+            !online.mapper.frame_velocity_bias.is_empty(),
+            "joint_vi_ba_weight-only ingest must retain navigation states, \
+             the same way imu_preintegration_weight-only ingest does"
+        );
+    }
+
     #[test]
     fn overlapping_packet_window_only_processes_new_images() {
         let (mut packet_one, mut packet_two) = overlapping_packets_with_images();

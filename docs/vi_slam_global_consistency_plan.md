@@ -45,6 +45,38 @@ structural fragility to any VIO-numerics change (via the mapper's
 live-threaded optimizer-trigger timing) is a candidate root cause worth
 investigating separately if further accuracy-gated speed levers are
 wanted later.
+**Update 2026-09-29 (Stage 5, branch `vio/frontend-robust`):** measured where
+the frontend actually struggles on MH_04/MH_05 (per-frame reject-reason
+correlation with RPE — see §1.8) and found it is track *churn* under
+motion blur (forward-backward KLT rejections), not point starvation, which
+ruled out an adaptive-replenish lever before it was built. The winning
+lever found instead — `optical_flow_levels` 3->4 (more KLT pyramid
+coarse-to-fine range) — cuts MH_04 ATE 0.0702->0.0619 m (**-11.8%**) and
+MH_05 0.0633->0.0569 m (**-10.1%**), narrowing the ORB-SLAM3 gap from
+64%/16% to 45%/4% respectively, while holding **9/11 wins** (same as
+today's shipped config; V2_03/V1_02/several others also improved, V1_03
+regressed +16.7% by 3-run median but stays a decisive win, V2_01 regressed
++14.4% but stays a decisive win). This is a real, validated improvement but
+does **not** clear the Stage 6 bar (>9/11): MH_04/MH_05 stay losses, just
+much closer ones. An IMU/gyro-rotation-seeded KLT initialization lever was
+also tried (predict each track's new-frame position from integrated
+gyro instead of assuming zero motion) and is an honest negative after three
+careful variants (sign convention verified against this codebase's own
+preintegration convention, extrinsic conjugation verified numerically
+against the real ~90°-rotated EuRoC cam0/IMU extrinsic, gyro-bias
+correction added) — all three still regressed at least one of the two
+target sequences. Full detail, numbers, and the frontend diagnosis
+methodology: §1.8 below and
+[the VI-SLAM benchmark details](vi_slam_benchmarks.md). A definitive
+alternating baseline-vs-`levels4` gate across all 11 sequences (same exe,
+back-to-back per sequence, 15s-watchdog-verified) reproduced the 9/11-wins
+ATE result but found RTF below 1.0 on 6/11 sequences for *both* configs in
+this session (root-caused mostly to a concurrent process on this shared
+machine, plus one unexplained outlier) — not a clean measurement, so real
+time on all 11 is not yet demonstrated either way. The
+`euroc_config_levels4.json` variant is committed as an available, validated
+option; the checked-in default config is unchanged pending both a lever
+that clears >9/11 and a clean RTF measurement.
 Owner goal: beat existing OSS visual-inertial SLAM on EuRoC — ORB-SLAM3
 stereo-inertial first, VINS-Mono second — while keeping the Basalt Rust
 port's runtime/memory edge.
@@ -442,6 +474,382 @@ each periodic optimize on a cloned snapshot in its own thread so ingestion
 is never blocked by it. See the `feat/basalt-online-mapper` branch history
 for the measured before/after evidence on each.
 
+### 1.8 Stage 5 result 2026-09-29: frontend measurement, `optical_flow_levels`
+### 4 wins, IMU-seed KLT is an honest negative (branch `vio/frontend-robust`)
+
+**Measurement.** Added an opt-in `--frontend-stats-csv <path>` flag to
+`basalt_euroc_online_slam_demo` (zero cost/output when absent) that dumps,
+per processed frame: `num_observations`/`num_created`/`num_retained`/
+`num_rejected` plus every `RejectReason` bucket from
+`pipelines/basalt/src/stream.rs`'s `TrackFrameOutput::reject_counters`.
+Correlated this against per-frame consecutive-pose RPE (translation error
+between frame *k-1* and *k* vs. ground truth — local, independent of
+accumulated drift, unlike the headline ATE) on raw `trajectory_vio.tum` for
+MH_04/MH_05. Result on both sequences: `num_observations` has essentially
+zero correlation with RPE (MH_04 r=-0.032, MH_05 r=-0.011; both stay well
+above the ~135-point single-frame grid-capacity floor throughout, and
+`FastNoCandidate` — FAST finding no corner even at the minimum threshold —
+fires under 40 times total per ~2000-frame sequence), while `num_created`
+and `RejectReason::FrameFbSquared` (temporal forward-backward KLT
+inconsistency) both rise monotonically across RPE deciles (MH_04 fb_sq
+0->24, MH_05 0->22.5 from decile 0 to 9) and roughly double in the few
+contiguous high-RPE "bad windows" found (RPE > 3x the sequence median for
+>=5 consecutive frames). **Conclusion: the frontend is not point-starved on
+MH_04/MH_05 — corners are always found — the problem is track *churn*: KLT
+locks onto points during fast-motion/blur bursts but its forward-backward
+round-trip increasingly fails, so points get dropped and replaced faster.**
+This directly contradicts the natural "raise FAST count on low-confidence
+frames" reading of Stage 5 lever (a) and matches §1.7's earlier, coarser
+400-frame-prefix finding that MH_04's frontend was "healthy" by track count.
+
+**Lever: `optical_flow_levels` 3->4 (config-only, WINS).** More KLT pyramid
+levels widen the coarse-to-fine search range for large inter-frame
+displacement, directly targeting the FB-failure mechanism above without
+touching any faithful-port algorithm code. Measured (this session's
+same-machine, same-binary numbers; see
+[the benchmark doc](vi_slam_benchmarks.md) for the full table and 3-run
+medians on the fragile sequences):
+
+| Sequence | Baseline ATE | `levels4` ATE | Change | vs ORB-SLAM3 |
+| --- | ---: | ---: | ---: | :---: |
+| MH_04_difficult | 0.0702 | 0.0619 | **-11.8%** | loss, gap 64%->45% |
+| MH_05_difficult | 0.0633 | 0.0569 | **-10.1%** | loss, gap 16%->4% |
+| V2_03_difficult (3-run median) | 0.0445 | 0.0379 | -14.8% | win, larger margin |
+| V1_02_medium | 0.0139 | 0.0119 | -14.4% | win, larger margin |
+| V1_03_difficult (3-run median) | 0.0210 | 0.0245 | **+16.7%** | win, smaller margin |
+| V2_01_easy | 0.0153 | 0.0175 | **+14.4%** | win, smaller margin |
+
+**9/11 wins held** (identical win/loss pattern to the shipped config — only
+MH_04/MH_05 lose). `optical_flow_levels=5` was also tried: better on MH_04
+(0.0533, -24.1%) but worse than `levels4` on MH_05 (0.0595, -6.0%) — a real
+trade-off, not a strictly-dominant further win, so `levels4` is the
+recommended variant.
+
+**Definitive alternating-run gate (2026-09-29, same exe, all 11 sequences,
+baseline immediately followed by `levels4` per sequence, 15s-interval
+process-activity watchdog held for the whole run — full table in
+[the benchmark doc](vi_slam_benchmarks.md)):** ATE numbers reproduce the
+above (9/11 wins held for both configs). **RTF does not clear the gate's
+"`>= 1.0` on all 11" bar for either config** — baseline itself is below 1.0
+on 6/11 sequences in this run, well under the historically documented
+1.06-1.68x. The watchdog traced part of this to a recurring low-footprint
+`cargo.exe`/`rustc.exe` cycle in Windows Session 0 (not the console session
+the already-waited-out OpenLORIS build used) overlapping 4 of the 22
+individual runs — likely another agent's own Codex CLI cargo checks on
+this shared machine — plus one unexplained severe outlier (MH_02 baseline,
+RTF 0.309, no detected external process). Because baseline and `levels4`
+shared conditions per sequence, the relative comparison (ATE, and both
+configs degrading together) stays informative, but the absolute RTF column
+is not a clean, final answer — a re-run on a machine independently verified
+idle throughout (not just checked once at the start) is needed. Per the
+gate rule, `levels4` stays a variant and the checked-in default config is
+unchanged. Two intermittent crashes (`exit code 1`, no panic/error message
+in stderr) were also observed on `levels4` runs during an earlier gate
+attempt this session and initially looked lever-specific, but coincided in
+time with another concurrent agent's session on this shared machine
+(`vio/joint-vi-ba`, independently confirmed to have been killing its own
+long-running same-named processes around that window); re-runs after that
+agent's session ended, and the full alternating gate above, completed with
+zero failures — attributed to external process termination, not a
+`levels4` bug.
+
+`euroc_config_levels4.json` is committed as an available variant
+(`configs/basalt/variants/official_euroc_ds/`); the checked-in default
+config is unchanged, both because 9/11 (not >9/11) does not clear the Stage
+6 accuracy bar and because RTF >= 1.0 on all 11 was not demonstrated for
+either config in this session's measurements.
+
+**Lever: IMU/gyro-rotation-seeded KLT initialization (honest negative).**
+Basalt's frame-to-frame KLT seeds its search at the *same pixel* as the
+previous frame (zero-motion assumption); this lever instead predicts each
+cam0 track's new-frame position by integrating raw gyro over the frame's
+IMU interval and rotating the point's old bearing (via the Double Sphere
+camera model) by the camera-frame delta rotation, replacing only the
+search seed (the KLT reference patch stays anchored at the true old
+pixel — Codex CLI's first draft caught this distinction before writing the
+wrong version). Implemented as `--imu-seed-klt` /
+`config.optical_flow_imu_seed_rotation`, default off, verified
+byte-identical (`trajectory_vio.tum` SHA-256 match) against the pre-change
+binary when disabled, full existing test suite green throughout. Three
+variants tested on MH_04/MH_05 (baseline 0.0702/0.0633):
+
+1. Original sign (bearing rotated by the *negated* integrated gyro vector,
+   matching `R(t2)=R(t1)*exp([theta]_x)`, this codebase's own
+   preintegration convention found in `vio/estimator.rs`), no bias
+   correction: 0.0836/0.0694 — both worse.
+2. Flipped sign, no bias correction: 0.0787/0.0584 — mixed (MH_05 would be
+   a win alone, MH_04 worse).
+3. Original sign + gyro-bias correction (added
+   `BasaltVioEstimatorAdapter::last_gyro_bias`, the estimator's bias
+   estimate as of the previous frame, subtracted from each raw gyro sample
+   before integration; serial path only — the pipelined frontend thread has
+   no live access to estimator state): 0.0862/0.0697 — both worse, the
+   worst of the three.
+
+The camera-frame conjugation was independently verified numerically against
+the real EuRoC cam0/IMU extrinsic (`T_imu_cam` rotation quaternion
+`qx=-0.0077, qy=0.0105, qz=0.7018, qw=0.7123`, i.e. almost exactly 90° about
+one axis — not a near-identity extrinsic that could mask a frame bug): a
+Python check comparing the code's vector-rotation shortcut
+(`theta_cam = R_ci * theta_imu`) against the explicit matrix conjugation
+`R_ci * exp([theta_imu]_x) * R_ci^-1` for this exact extrinsic gave a
+max absolute difference of 2.2e-16 (machine epsilon) — the two are the same
+operation, so the conjugation was applied correctly, not skipped. With sign,
+frame convention, and bias correction all checked and still regressing,
+this is closed as a genuine negative rather than a remaining bug: raw
+2-5-sample gyro integration over one ~20-50ms frame interval is apparently
+too noisy a rotation estimate on these sequences to beat the zero-motion
+seed once projected through the wide-FOV Double Sphere model. Code stays in
+the tree (default off, zero cost, fully tested) as a documented negative.
+
+### 1.8b Result 2026-09-29: IMU-derived global-BA factors do not flip MH_04/MH_05 (honest negative), and the free-velocity variant regresses VIO wall time
+
+Branch `vio/mapper-imu-factors` (worktree `E:/visloc-rs-runs/vio_imu_wt`, off
+`perf/basalt-vio-rt` / PR #236's release-rt + mimalloc-global profile).
+Baseline reproduced on this exe: MH_04 SE3 0.0704 m, MH_05 SE3 0.0631 m /
+Sim3 ~0.0415 m (matches the 0.0702/0.0633 cited in the task almost exactly),
+RTF 1.12-1.35, confirming the build/protocol match. Goal was §2's "Global BA
+does not bite ... marginalisation-derived relative factors ... to keep
+VIO-grade local precision and gravity" — three variants were tried, all
+evaluated on MH_04_difficult/MH_05_difficult with
+`scripts/run_basalt_online_all11_rt.py`-style driver,
+`configs/basalt/variants/official_euroc_ds/` + the repo's `euroc_config_maxiter5.json`
+override, `--optimize-every-k 100 --periodic-iterations 4`:
+
+1. **Reweight the NFR marginalization-derived factors already in the mapper**
+   (`MapperFactors::relative_pose`/`roll_pitch`, recovered from every
+   `MargData` packet's marginalization covariance in
+   `extract_nonlinear_factors` — this is real IMU-informed information (gated
+   on `data.used_imu`), already wired into the global BA at
+   `MapperConfig::default()` weight 1.0, just never exposed as a CLI knob).
+   Added `--relative-pose-weight`/`--roll-pitch-weight` to
+   `basalt_euroc_online_slam_demo`. Swept 0.2x-10x, combined and decoupled:
+   MH_04 never moved more than ~3% (0.0704 → 0.0686 best case, at 10x, already
+   plateaued between 5x and 10x); MH_05 got *worse* with more weight (SE3
+   0.0631 → 0.064, Sim3 0.0415 → 0.044 at 2x-10x) and only marginally better
+   with *less* weight (0.2x: SE3 0.0616, Sim3 0.0398 — best result of this
+   family, still an 11-13% gap from ORB's 0.0546/0.0428, not close to a flip).
+   Diagnosis: these edges connect temporally *adjacent* marginalized
+   keyframes and are built from that same local window's own marginalization
+   Hessian, so their information is self-consistent with the VIO's own
+   (already-biased) short-baseline answer — amplifying them just reinforces
+   VIO's local answer against the vision/loop terms that pull toward a
+   different, more globally-corrected scale. Negative; option abandoned.
+
+2. **New preintegrated-IMU relative-pose factor, frozen velocity/bias.**
+   Added `pipelines/basalt/src/mapper/imu_factor.rs`:
+   `imu_preintegration_relative_pose_factor` double-integrates real
+   accel/gyro (reusing the existing, already-tested
+   `pipelines/basalt/src/imu::preintegration::ImuPreintegrator`, sample
+   convention copied from `vio::estimator::fallback_integrate`) between
+   consecutive *mapper* keyframes and folds the result into a
+   `RelativePoseFactor` measurement fed through the mapper's unmodified
+   pose-only BA residual/Jacobian (`rel_pose_error`/`linearize_factors`) —
+   zero new solver code. `from_velocity_world`/bias were FROZEN at the VIO's
+   own per-keyframe estimate (`NfrMapper::frame_velocity_bias`, populated
+   from `MargData`'s `FrameStateData`, previously dropped by the mapper).
+   Gated behind `--imu-preintegration-weight` (unset = fully disabled, zero
+   extra cost). Swept 1/10/100/1000: MH_04 and MH_05 stayed flat (within
+   noise of baseline) across three orders of magnitude of weight. A sanity
+   check at 1e6/1e8 confirmed the factor *is* live (1e8 made MH_04 much
+   *worse*, 0.166 m) — not a wiring bug, but the residual is ~zero at any
+   sane weight: frozen velocity carries the VIO's own scale, so `p_j - p_i -
+   v_i*dt - 0.5*g*dt^2` is satisfied almost exactly by construction at
+   adjacent-keyframe spacing, regardless of where the global BA has moved
+   the poses to. Negative.
+
+3. **Free velocity, alternating refinement (Δv/Δp residual), periodic-only.**
+   Per-request bounded-risk design: rather than expanding the core
+   `PoseBlockHessian`/`Matrix6`/`POSE_DOF` dense pose solver to jointly
+   optimize velocity (the "proper" fix, touches every BA function, high risk
+   to the 9/11 existing wins), added a second, purely additive
+   `MapperFactors::imu_relative_pose: Vec<RelativePoseFactor>` field with
+   duplicate (not shared) loops in `linearize_factors`/`evaluate_costs`, and
+   a mapper-owned `NfrMapper::frame_velocities` state seeded from VIO and
+   then refined *outside* the pose solver: `imu_factor::refine_pair_velocities`
+   solves a dense normal-equations position+velocity-continuity system
+   (world-frame reformulation so rotation cancels: `J_p = dt*I`, `J_v =
+   [-I, I]`) over the cumulative keyframe-pair chain (capped at 2000 pairs;
+   measured 0.61 s at 700 keyframes / 17.8 s at 2001 keyframes,
+   release-rt), with poses held fixed. Runs only at periodic/final optimize
+   passes (`OnlineNfrMapper::refresh_imu_factors`, called from
+   `optimize_pass`/`spawn_background_optimize`), never per-packet. Result:
+   accuracy stayed just as flat as variant 2 (MH_04 0.070-0.071, MH_05
+   0.0627-0.0633 across weight 1/10/100) — likely because
+   `optimize_trigger_count` is only ~3 for a sequence like MH_04, so the
+   pose↔velocity alternation gets very few outer iterations to pull the
+   fit away from self-consistency with whatever the vision-dominated
+   solution already is. Worse, it **regressed `vio_wall_seconds` 25-45%**
+   (MH_04 ~75-79s → 96-109s, MH_05 ~85-86s → 118-127s; RTF dropped below 1.0
+   on most runs) — the dense per-pass velocity solve on the mapper's
+   background thread competes for CPU with the VIO thread on this machine,
+   exactly the failure mode flagged before implementing it. Negative, and
+   fails the wall-time gate at any tested weight; a default-off run
+   (`--imu-preintegration-weight` unset) on MH_02/V1_02 confirmed the
+   feature is fully inert when disabled (all three variants' new code is
+   gated behind the CLI flag / `imu_preintegration_weight > 0.0`; MH_02/V1_02
+   with it unset showed no behavior change from before this session's code
+   — the one default-off timing sample taken was itself contention-affected
+   (RTF 0.81 on MH_02), consistent with this being a shared, loaded machine
+   rather than a regression, since the changed code paths are unreachable
+   when the flag is unset).
+
+**Conclusion:** all three MargData/marginalization-adjacent and
+adjacent-mapper-keyframe IMU levers are exhausted — they only ever supply
+*local* (adjacent-keyframe) consistency information, which cannot correct
+the *global* scale/drift error diagnosed in §1.7/the parent task (MH_05's
+34% Sim3-vs-SE3 gap, MH_04's uniform 1.4-2x drift). Getting real
+scale-correcting information into the global BA needs either (a) a properly
+*jointly* solved VI global BA — per-keyframe `[pose, velocity, bias]` states,
+preintegrated residual with bias Jacobians, bias random-walk between
+keyframes, gravity fixed in world frame, actually expanding the dense
+pose-block solver (`PoseBlockHessian`/`Matrix6`) to carry velocity/bias as
+first-class optimized state rather than an externally-alternated
+approximation — or (b) far more frequent periodic global-optimize triggers
+so an alternating scheme like variant 3 gets enough outer iterations to
+converge, which has its own wall-time cost to manage. Both are materially
+larger, higher-risk undertakings than anything else in §4's stage list;
+not started this session. Branch `vio/mapper-imu-factors` (commit history:
+add `--relative-pose-weight`/`--roll-pitch-weight`/`--imu-preintegration-weight`
+CLI flags, `pipelines/basalt/src/mapper/imu_factor.rs`, `NfrMapper` velocity/bias
+state, `MapperFactors::imu_relative_pose`) is committed locally, not merged;
+all new code is off by default and should be safe to build on for a future
+full-VI-BA attempt, but does not by itself change the 9/11 result.
+
+### 1.9 Result 2026-09-29: proper joint VI global BA implemented and validated, MH_04 small real gain, MH_05 a wash at the tested weight
+
+Branch `vio/joint-vi-ba` (worktree `E:/visloc-rs-runs/vio_viba_wt`, off
+`vio/mapper-imu-factors`). §1.8 closed with "getting real scale-correcting
+information into the global BA needs ... a properly *jointly* solved VI
+global BA" -- this session built exactly that, rather than another
+externally-alternated approximation.
+
+**Design.** Per-keyframe state extended from pose (6 dof) to the full
+navigation state `[pose(6), velocity(3), gyro_bias(3), accel_bias(3)]`
+(15 dof, matching the existing `NAV_STATE_DOF` constant used by the M8a
+marginalization reduction). New module `pipelines/basalt/src/mapper/imu_ba.rs`
+adds preintegrated-IMU relative-state factors and bias random-walk factors
+between consecutive keyframes, gravity fixed in world. Rather than
+re-deriving the preintegration residual/Jacobian, it reuses the VIO
+estimator's own already bit-exact-tested factor
+(`crate::imu::whitened_preintegration_factor`/`whitened_bias_random_walk_factor`,
+production code in `vio/window.rs`) and embeds its 9x30/6x30 Jacobian
+directly into the joint system's Hessian/gradient blocks -- verified no sign
+adaptation is needed, since both the VIO's own state trial and the mapper's
+existing `apply_pose_solve` are Gauss-Newton steps against the same forward
+retraction.
+
+The solver itself (`global_ba_with_state_joint`, `mapper/mod.rs`) is a new,
+fully additive entry point: a new block-sparse `NavBlockHessian` (15x15
+blocks) carries the joint system; the *existing, unmodified*
+`linearize_vision`/`linearize_factors` embed into the top-left 6x6 of each
+block (vision and the existing relative-pose/roll-pitch factors never touch
+velocity/bias); IMU-factor blocks touch the full 15x15. The existing
+pose-only `global_ba_impl_in_place` and everything it calls is untouched --
+zero regression risk to the 9/11-win path from this addition by
+construction, confirmed by `joint_solver_matches_pose_only_solver_when_imu_factors_are_empty`
+(matches the pose-only solver to <1e-9 with empty IMU factor lists) and by
+every accuracy run below reproducing the documented baseline before the
+feature is enabled.
+
+**Unit tests** (`mapper::imu_ba::tests`, `mapper::joint_ba_tests`): assembled
+gradient vs. central-difference of the whitened cost; a Gauss-Newton step
+from the assembled system strictly decreases cost and converges; the
+explicit task target -- a chain of preintegrated IMU + bias-walk factors
+alone (no vision) corrects a 15% synthetic position/velocity scale error to
+near-zero ATE, given a genuine (non-constant-velocity) acceleration segment
+and both chain endpoints pinned (constant-velocity motion is an *exact*
+symmetry of the preintegration residual under uniform position+velocity
+scaling -- gravity's known magnitude only constrains scale where there is
+real acceleration to compare it against, which is why the earlier
+frozen-velocity variants in §1.8 could never see it either); a combined
+vision+IMU integration test. Full crate suite 415/415 passing throughout.
+
+**A real bug, caught the same way §1.8's own liveness check works.**
+`ingest_packet` only retained per-keyframe velocity/bias state
+(`frame_velocity_bias`) when `imu_preintegration_weight > 0.0`, so
+`joint_vi_ba_weight`-only mode silently built zero IMU factors every
+packet -- the run completed normally, at any weight (1.0 through 1e6),
+producing a trajectory identical to the feature-disabled baseline. Caught
+by exactly the weight-sweep-to-extreme-values sanity check §1.8 itself used
+("a sanity check at 1e6/1e8 confirmed the factor is live"): unlike a wiring
+bug that changes the trajectory, this one changed *nothing* at any weight,
+which was the tell. Fixed (commit `cb40039`) with a direct regression test
+that does not pre-seed state, unlike the existing ingestion test that
+happened not to catch this.
+
+**Real-time / CPU contention.** With the periodic background joint pass on
+a 4-thread rayon pool, `vio_wall_seconds` regressed 43% on MH_04 at weight
+10 (80.97s -> 115.91s) -- the same CPU-contention failure mode as §1.8's
+alternating-velocity variant. Isolated the cause by also running with
+periodic passes disabled (joint only in `finalize`'s one-shot pass):
+`vio_wall_seconds` stayed at baseline even before any cap existed, so the
+contention is specifically the periodic *background* pass, not the joint
+math. Capping the background pass to 1 rayon thread (commit `7cf60d6`) fully
+resolves it: `vio_wall_seconds` 81.46s (+0.6%) at weight 10, well within the
+~3% budget.
+
+**Covariance/weight-scale check.** A realistic EuRoC/ADIS16448 calibration
+over a 0.2s interval gives preintegrated position std 0.83mm, matching an
+independent continuous-noise estimate (`sigma_c^2 * T^3 / 3`) closely -- the
+per-factor information is not mis-scaled by a units/rate bug. A live MH_04
+trace (new `JointGlobalBaSummary.initial_pose_factor_cost`/
+`initial_imu_factor_cost`, `BASALT_ONLINE_MAPPER_TRACE`-gated) instead shows
+a *structural* cause for needing weight > 1: once the map has roughly
+converged, pose-factor cost (vision + relative-pose + roll-pitch) runs
+140K-1M vs. IMU-factor cost ~4.5-4.7K, a 30-300x gap, because each keyframe
+carries hundreds of vision observations against only 1-2 IMU factors (MH_04:
+671072 total observations). The same reason `relative_pose_weight`/
+`roll_pitch_weight` already exist as tunable multipliers for this
+codebase's other one-per-edge factors.
+
+**Accuracy, `--optimize-every-k 100 --periodic-iterations 4` (the standard
+protocol), official calibration, one run each unless noted:**
+
+| Sequence | Config | SE3 ATE | Sim3 ATE | vs. baseline |
+| --- | --- | ---: | ---: | ---: |
+| MH_04_difficult | baseline (feature off) | 0.07006 | 0.06729 | -- |
+| MH_04_difficult | joint w=10, 1-thread cap | 0.06964 | 0.06554 | SE3 -0.6%, Sim3 -2.6% |
+| MH_05_difficult | baseline (feature off) | 0.06307 | 0.04167 | -- |
+| MH_05_difficult | joint w=10, 1-thread cap | 0.06412 | 0.04163 | SE3 +1.7%, Sim3 -0.1% (noise-level) |
+
+An earlier MH_04 w=10 run before the thread cap (4 threads, real-time-unsafe,
+accuracy-only comparison) showed a larger SE3 -1.8%/Sim3 -3.9%, and an
+isolated "does the joint term help at all" test on MH_05 (periodic disabled
+both sides: pose-only-final-only 0.06550/0.04456 vs. joint-final-only w=10
+0.06463/0.04205) confirms the joint factor genuinely helps in isolation
+(-1.3%/-5.6%) -- but periodic pose-only passes already recover more accuracy
+on their own (0.06307/0.04167) than one large final joint pass does, so the
+net effect in the realistic periodic protocol is small. Weight 100 (1-thread
+cap) was tried on MH_04 and killed after 50+ minutes without the `finalize`
+pass converging -- LM increasingly rejects trials as the IMU term's pull
+fights vision harder, so very high weight is not a practical lever with this
+simple global-multiplier approach.
+
+**Honest status.** The joint solver is real, correctly implemented (multiple
+independent test classes passing, including a from-scratch synthetic
+scale-correction proof), real-time-safe at weight 10, and gives a small,
+genuine improvement on MH_04. On MH_05 it is roughly a wash at the same
+weight in the realistic protocol, and neither sequence is close to flipping
+to a win against ORB-SLAM3 (MH_04 0.0696 vs. ORB 0.0428; MH_05 0.0641 vs.
+ORB 0.0546) -- the gap that matters is 35-60%, not the 1-5% this lever moved.
+Full 11-sequence gate run not completed this session (time budget); a
+regression spot-check on V1_01_easy (a currently-winning sequence) with the
+feature on is in
+`E:\visloc-rs-runs\vio_viba_runs\v101_baseline`/`v101_joint_w10`.
+Plausible next levers, not yet tried: (a) an ORB-SLAM3-style *inertial-only*
+pre-optimization pass over the accumulated keyframe chain (ignoring vision)
+to get velocity/bias/local-scale close before the joint vision+IMU solve,
+rather than relying on a single global weight multiplier to arbitrate the
+30-300x cost imbalance; (b) more periodic iterations specifically for joint
+mode (the periodic pass's `periodic_iterations=4` budget may simply be too
+few for a harder 15-dof problem, distinct from the weight question); (c) a
+weight schedule informed directly by the measured pose/imu cost ratio
+(`initial_pose_factor_cost`/`initial_imu_factor_cost`, now surfaced) instead
+of a fixed constant. Everything is committed locally on `vio/joint-vi-ba`
+(commits `86aad0c`..`7cf60d6`), default off (`--joint-vi-ba-weight` unset),
+zero risk to the shipped 9/11 result.
+
 ## 2. Diagnosis
 
 | Symptom | Evidence | What is missing |
@@ -531,7 +939,7 @@ same-protocol measurements in §1.1; every claim cites an artifact path.
 | 0 (done, 3/11) | Native Basalt mapper on all 11, upstream calibration | — | superseded by the calibration fix, §1.3/§1.4 |
 | 1 (paused, ≈ Stage 0) | Custom L1 (persistent map) + L2 (global BA) offline post-process | — | roughly matched, did not beat, the simpler native-mapper path; paused pending evidence the gap is elsewhere |
 | 1c (done, 8/11) | Official-calibration VIO input (GT-free conversion) + unchanged native mapper, all 11 | Beats ORB-SLAM3 on ≥ 6/11 | — passed; this is the shipped PR #147 result |
-| 5 | **VIO tracking robustness on MH_04/MH_05 (fast motion / motion blur) and V2_03 (dark, fast)**: (a) raise FAST-9 corner count and lower the grid non-max-suppression radius specifically where flow confidence drops; (b) extend patch lifetime / reduce the window's forced-marginalization rate so fewer landmarks are lost mid-difficult-segment; (c) SuperPoint descriptors for frame-to-frame association in place of the Pattern51 patch tracker on these sequences, reusing the repository's existing SP-ONNX frontend; (d) relocalisation inside the mapper (or as a VIO-side fallback) when the tracker loses the window entirely, instead of only forward-marginalizing through a bad segment | Each of MH_04, MH_05, V2_03 VIO ATE improves without regressing the 8 already-winning sequences | A lever that does not move the failing three within its own sequence is dropped before trying the next; if all four (a–d) fail, the honest conclusion is that these three need a different frontend, not a differently-tuned Basalt one |
+| 5 (in progress, see §1.8) | **VIO tracking robustness on MH_04/MH_05 (fast motion / motion blur) and V2_03 (dark, fast)**: (a) raise FAST-9 corner count and lower the grid non-max-suppression radius specifically where flow confidence drops; (b) extend patch lifetime / reduce the window's forced-marginalization rate so fewer landmarks are lost mid-difficult-segment; (c) SuperPoint descriptors for frame-to-frame association in place of the Pattern51 patch tracker on these sequences, reusing the repository's existing SP-ONNX frontend; (d) relocalisation inside the mapper (or as a VIO-side fallback) when the tracker loses the window entirely, instead of only forward-marginalizing through a bad segment | Each of MH_04, MH_05, V2_03 VIO ATE improves without regressing the 8 already-winning sequences | A lever that does not move the failing three within its own sequence is dropped before trying the next; if all four (a–d) fail, the honest conclusion is that these three need a different frontend, not a differently-tuned Basalt one — 2026-09-29: measurement (§1.8) found MH_04/MH_05's problem is FB-rejection churn under blur, not point scarcity, ruling out (a) in its naive form before it was built; `optical_flow_levels` 3->4 (not one of the original a–d list, found via the measurement instead) cut MH_04/MH_05 ATE 11.8%/10.1% and held 9/11 wins but did not flip either to a win; an IMU-seed KLT variant of (a)/(b)'s "reduce forced churn" spirit is a verified honest negative (§1.8); V2_03 already wins and was not separately targeted; (c)/(d) not yet attempted |
 | 6 | Re-run the official-calibration + mapper sweep on all 11 with whatever Stage 5 levers passed | ≥ 9/11 wins vs ORB-SLAM3 measured | < 8/11 (regression from PR #147) → revert the Stage 5 change that caused it |
 | 7 (done, owner override — see §1.5) | Online: mapper in a background thread behind the live VIO, incremental solve — this is the same online-mapping goal as the original plan's Stage 3, run now (owner-approved override) directly on the existing 8/11 PR #147 result instead of after Stage 5/6's VIO-robustness work | Accuracy within ~10 % of the offline mapper's result, mapper keeps up with the VIO (whole-system wall ≈ VIO-alone wall) | — passed on all 11 (§1.5); Stage 5/6 (VIO tracking robustness on MH_04/MH_05/V2_03) remain open, unaffected by this stage |
 | 7b (done, see §1.6) | **VIO speed:** compact `lean_marg_data` LM path — skip per-trial diagnostic landmark re-factorization and the duplicate pre-solve linearization while keeping the MargData factor snapshot | Byte-identical trajectory and MargData; material wall-time reduction on MH_03 | — passed: 3.2x total VIO, 4.2x LM, RTF 0.128 -> 0.349; diagnostic path preserved behind `--retained-marg-diagnostics` |

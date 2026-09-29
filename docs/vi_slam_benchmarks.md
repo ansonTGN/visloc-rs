@@ -363,6 +363,78 @@ fast/motion-blurred sequences, not mapper or calibration limits — see
 [`vi_slam_global_consistency_plan.md`](vi_slam_global_consistency_plan.md)
 for next steps.
 
+### VIO accuracy: frontend robustness on MH_04/MH_05 (2026-09-29)
+
+Per-frame frontend diagnostics (`--frontend-stats-csv`, new opt-in flag on
+`basalt_euroc_online_slam_demo`) correlated against per-frame consecutive-pose
+RPE showed MH_04/MH_05's accuracy gap is driven by track *churn* under
+motion blur (rising `RejectReason::FrameFbSquared` — forward-backward KLT
+inconsistency — and replacement-track creation during fast-motion bursts),
+not by point starvation (`num_observations` stays well above grid capacity
+throughout; `FastNoCandidate`, FAST finding no corner anywhere, fires under
+40 times total per ~2000-frame sequence). Full diagnosis methodology and
+numbers: [the global-consistency plan §1.8](vi_slam_global_consistency_plan.md).
+
+**`optical_flow_levels` 3 -> 4 (config-only)** targets this directly by
+widening the KLT pyramid's coarse-to-fine displacement range. Definitive
+measurement (same exe, all 11 sequences, baseline immediately followed by
+`levels4` per sequence so both share the same machine conditions;
+`E:\visloc-rs-runs\vio_fe_runs\gate_baseline_vs_levels4_all11\summary.json`):
+
+| Sequence | Baseline ATE | `levels4` ATE | ATE change | Baseline RTF | `levels4` RTF | vs ORB-SLAM3 |
+| --- | ---: | ---: | ---: | ---: | ---: | :---: |
+| MH_01_easy | 0.0154 | 0.0138 | -10.4% | 0.947 | 0.879 | WIN / WIN |
+| MH_02_easy | 0.0256 | 0.0233 | -8.8% | 0.309* | 1.030 | WIN / WIN |
+| MH_03_medium | 0.0255 | 0.0237 | -6.9% | 0.646 | 0.587 | WIN / WIN |
+| MH_04_difficult | 0.0702 | 0.0618 | **-12.0%** | 1.037 | 1.095 | LOSS / LOSS (gap 64%->44%) |
+| MH_05_difficult | 0.0632 | 0.0570 | **-9.7%** | 1.006 | 1.036 | LOSS / LOSS (gap 16%->4%) |
+| V1_01_easy | 0.0354 | 0.0361 | +1.7% | 0.990 | 0.838† | WIN / WIN |
+| V1_02_medium | 0.0138 | 0.0120 | -13.1% | 1.021 | 1.084 | WIN / WIN |
+| V1_03_difficult | 0.0215 | 0.0244 | +13.6% | 0.849 | 0.904 | WIN / WIN |
+| V2_01_easy | 0.0165 | 0.0173 | +4.3% | 1.093† | 0.813 | WIN / WIN |
+| V2_02_medium | 0.0119 | 0.0107 | -10.0% | 0.783 | 0.647 | WIN / WIN |
+| V2_03_difficult | 0.0447 | 0.0380 | -15.0% | 1.092 | 1.009 | WIN / WIN |
+
+**9/11 wins held for both configs, identical pattern** (only MH_04/MH_05
+lose) — both loss margins narrow substantially (64%->44%, 16%->4%) but
+neither flips, so this does not clear the ">9/11" bar and the checked-in
+default config is unchanged; `levels4` stays an available variant
+(`configs/basalt/variants/official_euroc_ds/euroc_config_levels4.json`).
+
+**RTF is not clean in this measurement and the gate's real-time bar
+("RTF >= 1.0 on all 11") is not met by *either* config**: baseline itself
+is below 1.0 on 6/11 sequences here, well under the historically documented
+1.06-1.68x clean table. Root-caused to two distinct sources, both logged by
+a 15-second-interval process-activity watchdog held for the whole run: (1)
+a marked at † above ran fully or partly concurrent with a recurring,
+low-footprint `cargo.exe`/`rustc.exe` build cycle in Windows Session 0
+(services context, not the console session either this work or the
+already-waited-out OpenLORIS build used) that appeared repeatedly
+throughout the run and was not caught by the initial pre-run check alone —
+likely another agent's own Codex CLI-driven `cargo check`/test cycle on
+this shared machine; (2) the entry marked `*` (MH_02 baseline, RTF 0.309)
+shows no watchdog-detected external process at all and is unexplained —
+general session/machine slowness beyond what was tracked. Because baseline
+and `levels4` shared the same run-to-run conditions per sequence (immediate
+back-to-back), the *relative* comparison above (ATE and the ~similar RTF
+degradation pattern on both configs) is still informative, but the
+*absolute* RTF column should not be read as a clean, final answer on
+whether `levels4` costs real time — a dedicated re-run on a verified-idle
+machine (not just checked once before starting) is needed to settle that
+question. `optical_flow_levels=5` was also tried in an earlier, separate
+measurement: MH_04 improves further (0.0533, -24.1%) but MH_05 is worse
+than `levels4` (0.0595, -6.0% vs. baseline) — a real trade-off, not a
+strict further win, so `levels4` remains the better single fixed config of
+the two.
+
+An IMU/gyro-rotation-seeded KLT initialization lever (`--imu-seed-klt`,
+predicting each track's new-frame search position from integrated gyro
+instead of a zero-motion seed) was also tried and is a verified honest
+negative after three variants (sign, extrinsic frame convention, and gyro
+bias correction were each checked against this codebase's own conventions
+and the real EuRoC calibration, not just re-derived) — see §1.8 of the
+plan doc for the full investigation.
+
 ## Pipeline
 
 ```mermaid

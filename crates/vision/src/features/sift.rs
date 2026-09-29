@@ -153,6 +153,27 @@ pub struct SiftConfig {
     /// opt-in makes the contract testable without changing the legacy or the
     /// existing compatible-detector defaults.
     pub vlfeat_compatible_output_order: bool,
+    /// Fix the legacy octave-0 doubling's coordinate bias: `double_up`
+    /// (and the `sift-gpu` `upsample2x` kernel it mirrors) index the source
+    /// image with `sx = (x+1).div_ceil(2)`, an asymmetric nearest-neighbour
+    /// map that puts source pixel `i` at doubled indices `{2i-2, 2i-1}`
+    /// instead of `{2i, 2i+1}`. The keypoint-coordinate formula
+    /// (`x_orig = x_doubled * upsample`) assumes the unbiased alignment, so
+    /// every legacy-path detection (all octaves, since higher octaves are
+    /// built by exact decimation of the doubled image) is reported roughly
+    /// 0.7 original-image pixels short of its true location — confirmed by
+    /// comparing against COLMAP's keypoints on EuRoC V2_01/V2_03
+    /// (`docs/euroc_gpu_sfm_vs_colmap.md`, 2026-09-28). When true, octave 0
+    /// is built with align-corners bilinear upsampling instead
+    /// (`double_up_vlfeat`'s formula, reused here and in the GPU
+    /// `upsample2x_aligned` kernel), eliminating the bias. Default false
+    /// keeps the historical detector byte-for-byte.
+    pub aligned_octave0_upsample: bool,
+    /// Enable VLFeat/Lowe-style iterative 3D (x, y, scale) quadratic Newton
+    /// refinement of DoG extrema to subpixel/subscale precision. Currently
+    /// implemented only by the GPU path (`visloc_sift_gpu::SiftGpu`);
+    /// the CPU path ignores this flag. Default false.
+    pub subpixel_localization: bool,
 }
 
 /// How the 128-D SIFT histogram is normalized after pooling.
@@ -193,6 +214,8 @@ impl Default for SiftConfig {
             vlfeat_compatible_detector: false,
             vlfeat_bilinear_orientations: false,
             vlfeat_compatible_output_order: false,
+            aligned_octave0_upsample: false,
+            subpixel_localization: false,
         }
     }
 }
@@ -986,7 +1009,11 @@ pub fn extract_sift(
         height: image.height,
         data: image.pixels.iter().map(|&p| p as f64).collect(),
     };
-    let mut octave = double_up(&base);
+    let mut octave = if config.aligned_octave0_upsample {
+        double_up_vlfeat(&base)
+    } else {
+        double_up(&base)
+    };
     octave = blur(
         &octave,
         (config.sigma_base * config.sigma_base - (2.0 * config.sigma_input).powi(2))
@@ -1971,6 +1998,7 @@ fn detect_extremum(
     out: &mut Vec<SiftKeypoint>,
 ) {
     let value = mid.get(x, y);
+    // TODO: subpixel_localization is currently implemented only on the GPU path.
     if value.abs() < config.contrast_threshold {
         return;
     }

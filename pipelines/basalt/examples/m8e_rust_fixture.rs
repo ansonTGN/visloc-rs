@@ -146,6 +146,7 @@ fn main() {
         });
     }
     let factors = MapperFactors {
+        imu_relative_pose: Vec::new(),
         provenance_version: "m8a-m8e-pinned".into(),
         relative_pose,
         roll_pitch,

@@ -33,6 +33,7 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     env, fs,
+    io::{BufWriter, Write},
     path::PathBuf,
     process,
     sync::{mpsc, Arc, Mutex},
@@ -47,7 +48,7 @@ use visloc_basalt::{
     },
     vio::MargData,
     BasaltAdapterError, BasaltAdapterOutput, BasaltVioEstimatorAdapter, EurocSensorDataset,
-    TimingBreakdown,
+    RejectReason, TimingBreakdown,
 };
 use visloc_core::geometry::SE3;
 
@@ -65,6 +66,8 @@ struct Args {
     calibration: PathBuf,
     config: PathBuf,
     out_dir: PathBuf,
+    /// Optional per-frame frontend tracking diagnostics CSV.
+    frontend_stats_csv: Option<PathBuf>,
     max_frames: Option<usize>,
     optimize_every_k: usize,
     periodic_iterations: usize,
@@ -85,6 +88,7 @@ struct Args {
     threads: Option<usize>,
     mapper_queue_capacity: usize,
     no_urgent_keyframes: bool,
+    imu_seed_klt: bool,
     /// Restores the legacy diagnostic MargData LM path (per-trial landmark
     /// re-factorization + pre-solve diagnostic linearization).  Off by default:
     /// the compact path is byte-identical in trajectory and MargData bytes, so
@@ -94,6 +98,9 @@ struct Args {
     /// (`NfrMapperHeadlessConfig::num_opt_iter`).  Defaults to the mapper
     /// contract's 10.
     num_opt_iter: usize,
+    /// Loop/temporal-match candidate count per new keyframe query override
+    /// (None keeps the mapper default, `OnlineMapperConfig::match_top_k`).
+    match_top_k: Option<usize>,
     /// Enable L1 projection-based persistent-landmark re-observation.
     projection_rematch: bool,
     /// Enable incremental local mapping (per-keyframe triangulation into the
@@ -120,6 +127,30 @@ struct Args {
     local_ba_window: usize,
     /// LM iterations for the local windowed BA.
     local_ba_iterations: usize,
+    /// Scalar multiplier on the marginalisation-derived (IMU-informed)
+    /// relative-pose factors the NFR mapper already recovers from each
+    /// `MargData` packet (`MapperFactors::relative_pose`,
+    /// `pipelines/basalt/src/mapper/mod.rs::extract_nonlinear_factors`).
+    /// `None` keeps `MapperConfig::default()`'s weight of `1.0` (unchanged
+    /// behavior). These edges carry the VIO window's own covariance
+    /// (position + yaw), so raising this weight strengthens the global BA's
+    /// metric-scale/drift constraint relative to its vision-only reprojection
+    /// and loop-closure terms without adding any per-frame VIO cost.
+    relative_pose_weight: Option<f64>,
+    /// Weight for raw preintegrated-IMU mapper edges; None means disabled (0.0).
+    imu_preintegration_weight: Option<f64>,
+    /// Weight for the joint visual-inertial global BA (full 15-dof-per-
+    /// keyframe navigation state: pose + velocity + gyro/accel bias, solved
+    /// jointly with preintegrated-IMU and bias-random-walk factors between
+    /// consecutive keyframes; see `mapper::imu_ba`). A materially different,
+    /// more expensive lever than `imu_preintegration_weight`'s frozen-
+    /// velocity edges; None means disabled (0.0).
+    joint_vi_ba_weight: Option<f64>,
+    /// Scalar multiplier on the marginalisation-derived roll/pitch
+    /// (gravity-direction) factors (`MapperFactors::roll_pitch`, only
+    /// emitted when the source `MargData` used IMU). `None` keeps
+    /// `MapperConfig::default()`'s weight of `1.0`.
+    roll_pitch_weight: Option<f64>,
 }
 
 /// Default bound on the VIO-to-mapper `MargData` channel (see
@@ -235,6 +266,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // (V2_03 −17%, MH_04 −16%), left 3 unchanged and cost MH_02 +5%. Config
     // values win; `--no-urgent-keyframes` restores the upstream decision.
     let mut vio_config = dataset.config().clone();
+    if args.imu_seed_klt {
+        vio_config.values.insert(
+            "config.optical_flow_imu_seed_rotation".to_string(),
+            json!(true),
+        );
+    }
     if !args.no_urgent_keyframes {
         for (key, value) in [
             ("config.vio_urgent_kf_keypoints_thresh", json!(0.5)),
@@ -258,22 +295,40 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err("EuRoC cam0 manifest has no frames".into());
     }
 
-    let mapper_config = dataset.config().mapper_config()?;
+    let mut mapper_config = dataset.config().mapper_config()?;
+    if let Some(weight) = args.relative_pose_weight {
+        mapper_config.relative_pose_weight = weight;
+    }
+    if let Some(weight) = args.roll_pitch_weight {
+        mapper_config.roll_pitch_weight = weight;
+    }
     let feature_config = dataset.config().offline_mapper_config()?;
     let optimize_config = dataset.config().mapper_global_ba_config()?;
     let headless = visloc_basalt::mapper::NfrMapperHeadlessConfig {
         num_opt_iter: args.num_opt_iter,
         ..visloc_basalt::mapper::NfrMapperHeadlessConfig::default()
     };
+    let imu_samples_for_mapper =
+        if args.imu_preintegration_weight.is_some() || args.joint_vi_ba_weight.is_some() {
+            std::sync::Arc::from(dataset.imu_samples())
+        } else {
+            std::sync::Arc::from([])
+        };
     let online_mapper = OnlineNfrMapper::new(
         mapper_config,
         dataset.calibration().clone(),
         feature_config,
         optimize_config,
         OnlineMapperConfig {
+            imu_samples: imu_samples_for_mapper,
+            imu_preintegration_weight: args.imu_preintegration_weight.unwrap_or(0.0),
+            joint_vi_ba_weight: args.joint_vi_ba_weight.unwrap_or(0.0),
             optimize_every_k: args.optimize_every_k,
             periodic_iterations: args.periodic_iterations,
             headless,
+            match_top_k: args
+                .match_top_k
+                .unwrap_or(OnlineMapperConfig::default().match_top_k),
             projection_rematch: args.projection_rematch,
             incremental_local_mapping: args.incremental_local_mapping,
             projection_host_window: args
@@ -373,6 +428,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // every frame (see `propagate_to_all_frames` below) -- the same rigid
     // spanning-tree convention as scripts/propagate_basalt_mapper_corrections.py.
     let mut vio_trajectory: BTreeMap<u64, (i64, SE3)> = BTreeMap::new();
+    let mut frontend_stats_csv = args
+        .frontend_stats_csv
+        .as_ref()
+        .map(|path| fs::File::create(path).map(BufWriter::new))
+        .transpose()?;
     let vio_start = Instant::now();
 
     // Shared per-frame handler for both the serial loop and the `--pipeline`
@@ -423,6 +483,62 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "frame={} timestamp_ns={} mapper_packets={} imu={}",
                 output.tracks.frame.frame_id, timestamp_ns, mapper_packet_count, total_imu,
             );
+        }
+        if let Some(writer) = frontend_stats_csv.as_mut() {
+            if demo_index == 0 {
+                writeln!(
+                    writer,
+                    "frame_index,frame_id,timestamp_ns,num_observations,num_created,num_retained,num_rejected,\
+                     reject_frame_forward,reject_frame_backward,reject_frame_fb_squared,\
+                     reject_existing_stereo_forward,reject_existing_stereo_backward,reject_existing_stereo_fb_squared,\
+                     reject_fast_no_candidate,reject_stereo_forward,reject_stereo_backward,\
+                     reject_stereo_fb_squared,reject_stereo_bearing_invalid,reject_stereo_essential_residual"
+                )
+                .map_err(|error| BasaltAdapterError::Output(error.to_string()))?;
+            }
+            let mut frame_forward = 0usize;
+            let mut frame_backward = 0usize;
+            let mut frame_fb_squared = 0usize;
+            let mut existing_stereo_forward = 0usize;
+            let mut existing_stereo_backward = 0usize;
+            let mut existing_stereo_fb_squared = 0usize;
+            let mut fast_no_candidate = 0usize;
+            let mut stereo_forward = 0usize;
+            let mut stereo_backward = 0usize;
+            let mut stereo_fb_squared = 0usize;
+            let mut stereo_bearing_invalid = 0usize;
+            let mut stereo_essential_residual = 0usize;
+            for (reason, count) in output.tracks.reject_counters.iter() {
+                let bucket = match reason {
+                    RejectReason::FrameForward(..) => &mut frame_forward,
+                    RejectReason::FrameBackward(..) => &mut frame_backward,
+                    RejectReason::FrameFbSquared => &mut frame_fb_squared,
+                    RejectReason::ExistingStereoForward(..) => &mut existing_stereo_forward,
+                    RejectReason::ExistingStereoBackward(..) => &mut existing_stereo_backward,
+                    RejectReason::ExistingStereoFbSquared => &mut existing_stereo_fb_squared,
+                    RejectReason::FastNoCandidate => &mut fast_no_candidate,
+                    RejectReason::StereoForward(..) => &mut stereo_forward,
+                    RejectReason::StereoBackward(..) => &mut stereo_backward,
+                    RejectReason::StereoFbSquared => &mut stereo_fb_squared,
+                    RejectReason::StereoBearingInvalid => &mut stereo_bearing_invalid,
+                    RejectReason::StereoEssentialResidual => &mut stereo_essential_residual,
+                };
+                *bucket += *count;
+            }
+            writeln!(
+                writer,
+                "{demo_index},{},{timestamp_ns},{},{},{},{},\
+                 {frame_forward},{frame_backward},{frame_fb_squared},\
+                 {existing_stereo_forward},{existing_stereo_backward},{existing_stereo_fb_squared},\
+                 {fast_no_candidate},{stereo_forward},{stereo_backward},\
+                 {stereo_fb_squared},{stereo_bearing_invalid},{stereo_essential_residual}",
+                output.tracks.frame.frame_id,
+                output.tracks.observations.len(),
+                output.tracks.created_track_ids.len(),
+                output.tracks.retained_track_ids.len(),
+                output.tracks.rejected_track_ids.len(),
+            )
+            .map_err(|error| BasaltAdapterError::Output(error.to_string()))?;
         }
         demo_index += 1;
         Ok(())
@@ -640,6 +756,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // ATE compared with the piecewise-constant propagation, which is kept as
     // `trajectory_online_nearest.tum`. `trajectory_vio.tum` is the
     // uncorrected VIO, for reference.
+    if let Some(writer) = frontend_stats_csv.as_mut() {
+        writer.flush()?;
+    }
     fs::write(
         args.out_dir.join("trajectory_online.tum"),
         &interpolated_trajectory_tum,
@@ -888,6 +1007,7 @@ impl Args {
         let mut calibration = None;
         let mut config = PathBuf::from("configs/basalt/euroc_config.json");
         let mut out_dir = PathBuf::from("target/basalt_euroc_online_slam_demo");
+        let mut frontend_stats_csv = None;
         let mut max_frames = None;
         let mut optimize_every_k = OnlineMapperConfig::default().optimize_every_k;
         let mut periodic_iterations = OnlineMapperConfig::default().periodic_iterations;
@@ -905,8 +1025,10 @@ impl Args {
         let mut threads = None;
         let mut mapper_queue_capacity = DEFAULT_MAPPER_QUEUE_CAPACITY;
         let mut no_urgent_keyframes = false;
+        let mut imu_seed_klt = false;
         let mut retained_marg_diagnostics = false;
         let mut num_opt_iter = 10usize;
+        let mut match_top_k = None;
         let mut projection_rematch = false;
         let mut incremental_local_mapping = false;
         let mut projection_host_window = None;
@@ -921,6 +1043,10 @@ impl Args {
             OnlineMapperConfig::default().loop_closure_max_rotation_error_deg;
         let mut local_ba_window = OnlineMapperConfig::default().local_ba_window;
         let mut local_ba_iterations = OnlineMapperConfig::default().local_ba_iterations;
+        let mut imu_preintegration_weight = None;
+        let mut joint_vi_ba_weight = None;
+        let mut relative_pose_weight = None;
+        let mut roll_pitch_weight = None;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             let option = argument.to_string_lossy().into_owned();
@@ -932,6 +1058,9 @@ impl Args {
                 }
                 "--config" => config = PathBuf::from(next(&mut arguments, &option)?),
                 "--out-dir" => out_dir = PathBuf::from(next(&mut arguments, &option)?),
+                "--frontend-stats-csv" => {
+                    frontend_stats_csv = Some(PathBuf::from(next(&mut arguments, &option)?))
+                }
                 "--max-frames" => {
                     max_frames = Some(
                         next(&mut arguments, &option)?
@@ -963,6 +1092,7 @@ impl Args {
                     pipeline_explicit = true;
                 }
                 "--no-urgent-keyframes" => no_urgent_keyframes = true,
+                "--imu-seed-klt" => imu_seed_klt = true,
                 "--pipeline-capacity" => {
                     pipeline_capacity = next(&mut arguments, &option)?
                         .to_string_lossy()
@@ -1040,6 +1170,48 @@ impl Args {
                         .parse::<f64>()
                         .map_err(|error| format!("invalid --loop-closure-weight: {error}"))?;
                 }
+                "--match-top-k" => {
+                    match_top_k = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<usize>()
+                            .map_err(|error| format!("invalid --match-top-k: {error}"))?,
+                    );
+                }
+                "--imu-preintegration-weight" => {
+                    imu_preintegration_weight = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<f64>()
+                            .map_err(|error| {
+                                format!("invalid --imu-preintegration-weight: {error}")
+                            })?,
+                    );
+                }
+                "--joint-vi-ba-weight" => {
+                    joint_vi_ba_weight = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<f64>()
+                            .map_err(|error| format!("invalid --joint-vi-ba-weight: {error}"))?,
+                    );
+                }
+                "--relative-pose-weight" => {
+                    relative_pose_weight = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<f64>()
+                            .map_err(|error| format!("invalid --relative-pose-weight: {error}"))?,
+                    );
+                }
+                "--roll-pitch-weight" => {
+                    roll_pitch_weight = Some(
+                        next(&mut arguments, &option)?
+                            .to_string_lossy()
+                            .parse::<f64>()
+                            .map_err(|error| format!("invalid --roll-pitch-weight: {error}"))?,
+                    );
+                }
                 "--projection-host-window" => {
                     projection_host_window = Some(
                         next(&mut arguments, &option)?
@@ -1077,6 +1249,7 @@ impl Args {
                 .ok_or_else(|| format!("--calibration is required\n\n{}", Self::usage()))?,
             config,
             out_dir,
+            frontend_stats_csv,
             max_frames,
             optimize_every_k,
             periodic_iterations,
@@ -1088,8 +1261,10 @@ impl Args {
             threads,
             mapper_queue_capacity,
             no_urgent_keyframes,
+            imu_seed_klt,
             retained_marg_diagnostics,
             num_opt_iter,
+            match_top_k,
             projection_rematch,
             incremental_local_mapping,
             projection_host_window,
@@ -1102,6 +1277,10 @@ impl Args {
             loop_closure_max_rotation_error_deg,
             local_ba_window,
             local_ba_iterations,
+            imu_preintegration_weight,
+            joint_vi_ba_weight,
+            relative_pose_weight,
+            roll_pitch_weight,
         })
     }
 
@@ -1111,10 +1290,13 @@ impl Args {
          [--periodic-iterations N] [--realtime | --as-fast-as-possible] \
          [--pipeline | --no-pipeline] [--pipeline-capacity N] [--decode-threads N] [--threads N] \
          [--mapper-queue-capacity N] [--retained-marg-diagnostics] [--num-opt-iter N] \
-         [--projection-rematch] [--local-mapping] \
+         [--match-top-k N] [--frontend-stats-csv <path>] \
+         [--projection-rematch] [--local-mapping] [--imu-seed-klt] \
          [--projection-host-window N] [--projection-radius PX] \
          [--loop-closure-factors] [--loop-closure-min-corr N] [--loop-closure-weight W] \
-         [--loop-closure-max-rot-error DEG] [--local-ba-window N] [--local-ba-iterations N]"
+         [--loop-closure-max-rot-error DEG] [--local-ba-window N] [--local-ba-iterations N] \
+         [--relative-pose-weight W] [--roll-pitch-weight W] [--imu-preintegration-weight W] \
+         [--joint-vi-ba-weight W]"
             .into()
     }
 }
@@ -1143,6 +1325,7 @@ mod tests {
         let args = Args::parse(["--euroc-dir", "d", "--calibration", "c.json"].map(Into::into))
             .expect("parses");
         assert!(!args.realtime);
+        assert_eq!(args.frontend_stats_csv, None);
         assert_eq!(
             args.optimize_every_k,
             OnlineMapperConfig::default().optimize_every_k
@@ -1151,6 +1334,91 @@ mod tests {
             args.periodic_iterations,
             OnlineMapperConfig::default().periodic_iterations
         );
+        assert_eq!(args.imu_preintegration_weight, None);
+        assert_eq!(args.joint_vi_ba_weight, None);
+        assert_eq!(args.relative_pose_weight, None);
+        assert_eq!(args.roll_pitch_weight, None);
+    }
+
+    #[test]
+    fn parser_accepts_imu_preintegration_weight() {
+        let args = Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--imu-preintegration-weight",
+                "3.5",
+            ]
+            .map(Into::into),
+        )
+        .expect("parses");
+        assert_eq!(args.imu_preintegration_weight, Some(3.5));
+    }
+
+    #[test]
+    fn parser_accepts_joint_vi_ba_weight() {
+        let args = Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--joint-vi-ba-weight",
+                "2.5",
+            ]
+            .map(Into::into),
+        )
+        .expect("parses");
+        assert_eq!(args.joint_vi_ba_weight, Some(2.5));
+    }
+
+    #[test]
+    fn parser_accepts_relative_pose_and_roll_pitch_weight() {
+        let args = Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--relative-pose-weight",
+                "4",
+                "--roll-pitch-weight",
+                "2.5",
+            ]
+            .map(Into::into),
+        )
+        .expect("parses");
+        assert_eq!(args.relative_pose_weight, Some(4.0));
+        assert_eq!(args.roll_pitch_weight, Some(2.5));
+    }
+
+    #[test]
+    fn imu_seed_klt_defaults_off_and_can_be_enabled() {
+        let base = ["--euroc-dir", "d", "--calibration", "c.json"];
+        let args = Args::parse(base.map(Into::into)).expect("parses");
+        assert!(!args.imu_seed_klt);
+        let args = Args::parse(base.into_iter().chain(["--imu-seed-klt"]).map(Into::into))
+            .expect("parses");
+        assert!(args.imu_seed_klt);
+    }
+
+    #[test]
+    fn parser_accepts_frontend_stats_csv() {
+        let args = Args::parse(
+            [
+                "--euroc-dir",
+                "d",
+                "--calibration",
+                "c.json",
+                "--frontend-stats-csv",
+                "foo.csv",
+            ]
+            .map(Into::into),
+        )
+        .expect("parses");
+        assert_eq!(args.frontend_stats_csv, Some(PathBuf::from("foo.csv")));
     }
 
     #[test]

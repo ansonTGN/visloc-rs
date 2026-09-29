@@ -201,6 +201,505 @@ possible through `--import-features`:
 The remaining gap is accuracy on the blurred sequences and V2_01's scale
 drift.
 
+### Hybrid SP bridge / SP-seeded SIFT refinement (2026-09-28)
+
+The idea: use SuperPoint only to *connect* the blur break (topology), keep
+SIFT as the *geometry* everywhere else, hoping to get SP's connectivity at
+SIFT's accuracy. Two designs, both opt-in flags on `gsplat_euroc`, iterated
+on V2_03 and V1_03 (the fast, clearly-split sequences) before deciding.
+Both are honest negatives; the flags and code were removed.
+
+- **SP bridge correspondences, SIFT geometry.** For candidate pairs the
+  SIFT-only colmap-port mapper's own split shows it needs (probed with one
+  extra mapper run, then matched only for pairs crossing a model boundary or
+  touching an unregistered frame), match+verify SuperPoint too and merge the
+  result into the pair's SIFT matches as extra keypoints/tracks.
+  - **Targeted (boundary pairs only), V2_03:** 2-74 of a few hundred
+    boundary candidates verified, 3-42 frames gained SP keypoints — but the
+    mapper's own split never changed (`[118, 56]` before and after), so ATE
+    and registration were unchanged (3.37 cm, 118/200). The SP correspondences
+    it finds at the actual break are too few for the port's registration
+    threshold (`abs_pose_min_num_inliers=30`) to grow through, matching the
+    doc's earlier note that only ~4 pairs with ≤41 matches cross V2_03's
+    break.
+  - **Blanket (any window pair below a SIFT-match threshold), V2_03:**
+    connects into one model (`[176]` at threshold 50, `[172]`ish scale) but
+    wrecks accuracy: 8.03 cm at 176/200 (threshold 50), 13.78 cm at 174/200
+    (threshold 100), 16.08 cm at 118/200 in 2 models (threshold 30). Only an
+    almost-no-op threshold (1: only pairs SIFT verified zero matches for)
+    left accuracy untouched (3.90 cm) — and also left the split unchanged
+    (117+67 frames, no merge).
+  - V1_03 (targeted): the mapper's own 4-model split (`[67, 65, 31, 19]`)
+    did not consolidate either; bridging *added* a 5th model
+    (`[67, 65, 31, 29, 19]`) with the largest unchanged at 67/200, 2.08 cm
+    (SIFT baseline: 2.17 cm, noise-level difference).
+- **SP-seeded SIFT refinement.** Seed the colmap-port mapper's
+  `Reconstruction` directly from a single-model SuperPoint run's poses
+  (`init_sp_*.txt`, generated once from `--import-features` + `--mapper
+  colmap-port`) instead of incremental registration, triangulate the *SIFT*
+  correspondence graph through those fixed poses, then run global bundle
+  adjustment (several filter/re-adjust rounds, then
+  `iterative_global_refinement`) so SIFT's precision can correct SP's looser
+  localisation. Needed making `colmap_incremental::pipeline::reconstruction_from_cache`
+  `pub` (reverted with everything else).
+  - V2_03: 172/200 registered (matches the SP seed's own topology; COLMAP:
+    180, SIFT-only largest model: 118), but ATE only reaches 4.56-4.60 cm —
+    barely different from feeding SuperPoint's own keypoints straight into
+    the mapper (4.37 cm, see above) and well short of SIFT-only's 3.37 cm or
+    COLMAP's 2.85 cm. Three rounds of filter+re-adjust before the final
+    refinement changed almost nothing (4.60 -> 4.56 cm).
+  - V1_03: 118/200 registered (SP topology; COLMAP: 80, SIFT-only: 67), ATE
+    8.90 cm — same ballpark as SuperPoint-only (8.74 cm), far worse than
+    SIFT-only (2.17 cm) or COLMAP (1.98 cm).
+  - Conclusion: SuperPoint's own incremental solve apparently bakes pose
+    error into the seed that one (gauge-fixed, monocular-scale-free) global
+    BA pass does not fully correct, even when every observation driving that
+    BA is SIFT-precision. Re-triangulating SIFT through SP's poses recovers
+    SP's own accuracy level, not SIFT's — the connectivity SP provides and
+    the precision SIFT provides don't compose by this route.
+
+Both routes confirm the earlier finding stands: SuperPoint can reach the
+frames SIFT's mapper leaves split or unregistered, but nothing tried so far
+carries SIFT's precision across that bridge. The remaining gap on V1_03,
+V2_03 and V2_01 is still open.
+
+### Bisecting the gap: mapper vs. frontend (2026-09-28)
+
+To localize where V2_01, V1_03 and V2_03's remaining gap lives, COLMAP's own
+keypoints and verified two-view matches (from its `db.db`) were fed straight
+into the colmap-port mapper two ways: **A1** (COLMAP features *and* COLMAP
+matches, via `--import-colmap`, bypassing our matching/verification
+entirely) and **A2** (COLMAP features, but our own matching/verification,
+via `--import-features`), compared against **A3** (our full pipeline,
+i.e. the table above).
+
+| Sequence | A3 (ours) | A1 (COLMAP feat+match → our mapper) | A2 (COLMAP feat + our matching) | COLMAP |
+| --- | ---: | ---: | ---: | ---: |
+| V2_01 | 199/200, 3.30 cm | 198/200, **1.00 cm** | 196/200, 1.20 cm | 200/200, 1.00 cm |
+| V1_03 | 67/200, 2.17 cm | 62/200, 2.96 cm | 60/200, 12.40 cm | 80/200, 1.98 cm |
+| V2_03 | 118/200, 3.37 cm | 126/200, 6.95 cm | 176/200, **3.22 cm** | 180/200, 2.85 cm |
+
+- **V2_01 and V2_03: the mapper is not the problem.** A1 on V2_01 ties
+  COLMAP's own ATE almost exactly (1.00 vs 1.00 cm) using our mapper on
+  COLMAP's exact features and matches. A2 on V2_03 (COLMAP's features
+  through our own matching) nearly matches COLMAP's registration and
+  accuracy (176/200 at 3.22 cm vs COLMAP's 180/200 at 2.85 cm). On both
+  sequences the gap is SIFT feature quality: our GPU SIFT's own keypoints,
+  not the mapper or the matcher, are what cost accuracy.
+- **V1_03: the mapper itself is short of COLMAP.** A1 gives the port mapper
+  the *exact same* features and matches COLMAP used (756 verified pairs) and
+  it still only registers 62/200 at 2.96 cm, against COLMAP's 80/200 at 1.98
+  cm on that identical input. This is a real mapper-vs-mapper gap (growth/
+  registration-order/recovery), independent of the frontend. A2 makes it
+  much worse (60/200, 12.40 cm) — our own matching on COLMAP's features
+  introduces bad correspondences the verified-COLMAP-matches in A1 don't
+  have. Not investigated further this round; the next step is diffing the
+  port's register-next-image loop (registration trials per image, local BA
+  after each registration, init-pair retries, `min_num_matches`,
+  re-registration after global BA) against COLMAP's
+  `incremental_pipeline.cc`/`incremental_mapper.cc` on the A1 inputs.
+
+  A first diagnostic pass on A1 (COLMAP's own features and matches, so the
+  input is byte-identical to what COLMAP itself grew to 80/200 in one
+  model): the colmap-port mapper produces **4 separate models, sizes
+  `[62, 60, 49, 25]`**, against COLMAP's single 80-frame model spanning
+  frames 0-122 (continuously 0-59, then 63-69, 69-90, 119-122 — COLMAP
+  itself leaves 60-62, 70-81 and 91-118 unregistered, so even COLMAP
+  doesn't reach every frame, it just keeps growing *one* model through the
+  gaps instead of abandoning it and starting over). So the gap isn't
+  "our mapper can't register frame X" in isolation — several of COLMAP's
+  registered frames do get registered by our port, just split across four
+  separate reconstructions instead of accumulating into one. That points
+  at the mapper's stall/restart behavior: once `find_next_images`'s
+  candidate pool empties (every remaining unregistered image has either
+  `< abs_pose_min_num_inliers` visible points or has exhausted
+  `max_reg_trials`), `reconstruct_sub_model` ends and `run()` starts a
+  fresh model from a new seed pair rather than ever revisiting the
+  abandoned frontier. Whether COLMAP's own mapper hits the same stall
+  condition but recovers (e.g. a different filtering/BA schedule leaves
+  more points visible per candidate, so fewer images exhaust their trial
+  budget before clearing 30 inliers) is the open question — it needs
+  frame-by-frame visibility-count instrumentation on both sides, which
+  wasn't done this round.
+
+### GPU SIFT subpixel localization (2026-09-28)
+
+Given A1/A2 point at feature quality on V2_01/V2_03, the GPU SIFT extrema
+detector was audited against COLMAP's. Neither our CPU "legacy" DoG detector
+(`detect_extremum` in `crates/vision/src/features/sift.rs`) nor its GPU port
+(`crates/sift-gpu`) do any subpixel refinement — extrema stay on the
+integer pixel/octave grid. COLMAP's SiftGPU (and VLFeat, which COLMAP's CPU
+SIFT is based on) refine each extremum to subpixel (x, y, scale) precision
+with a quadratic Newton fit, iterating into a neighbouring sample when the
+fitted offset exceeds half a pixel. This is a real, previously-unexamined
+gap, not on the earlier negative-lever list.
+
+Implemented as an opt-in `--sift-opt subpixel_localization=1` flag (default
+off, verified bit-identical to the existing GPU SIFT output when off) and
+tried three variants on V2_01/V1_03/V2_03, all reverted after the results
+below (the flag no longer exists in the tree):
+
+| Variant | V2_01 ATE (reg.) | V1_03 ATE (reg.) | V2_03 ATE (reg.) |
+| --- | ---: | ---: | ---: |
+| Baseline (A3, no refinement) | 3.30 cm (199) | 2.17 cm (67) | 3.37 cm (118) |
+| 2D (x,y) single-shot, clamp offset to ±0.6 | 1.53 cm (197) | 2.99 cm (99) | 16.56 cm (118) |
+| 2D (x,y) single-shot, reject if offset > 0.5 | 3.91 cm (198) | **1.19 cm (62)** | 12.78 cm (118) |
+| Full 3D (x,y,scale) iterative, VLFeat/Lowe-style (5 iters, neighbour-shift, refined contrast/edge retest) | 2.76 cm (197) | 2.89 cm (86) | 11.91 cm (119) |
+| Full 3D + refine only extrema with `|v| > 2×contrast` | 2.75 cm (197) | 2.89 cm (86) | 11.91 cm (119) |
+
+- **V2_01 improves under every variant** (3.30 → 1.53–3.91 cm; best with the
+  permissive clamp policy), consistent with A1's finding that V2_01's gap is
+  feature-localization quality — but no variant reaches COLMAP's 1.00 cm.
+- **V2_03 regresses badly under every variant** (3.37 → 11.9–16.6 cm), even
+  the theoretically-correct full iterative version with edge/contrast
+  retests at the converged location, and even after gating refinement to
+  only comfortably-above-threshold extrema (which changed nothing —
+  ruling out marginal-contrast points as the cause). Four independent
+  implementations landing in the same place is strong evidence this is a
+  real property of V2_03's blur interacting with subpixel correction, not
+  an implementation bug: refining keypoint positions on already-ambiguous,
+  motion-blurred DoG surfaces moves points in ways that hurt the mapper's
+  BA more than the integer-grid position did.
+- **V1_03 is mixed**: worse under the clamp and iterative-3D variants,
+  clearly better under the plain reject policy (2.17 → 1.19 cm, though at
+  fewer registered frames, 67 → 62).
+- No variant flips any of the three losing sequences into a win, and the
+  best V2_01 result still trades off a large V2_03 regression under the
+  same flag — the gate requires one fixed config across all 8 sequences, so
+  none of these are adoptable as-is. Honest negative; recorded here, code
+  reverted.
+
+The remaining gap on V2_01 and V2_03 is confirmed to be GPU SIFT feature
+quality (not the mapper or matcher), but subpixel localization alone isn't
+the fix — something about it interacts badly with blur. V1_03 is a
+separate, mapper-side gap.
+
+### V1_03's 4-model split: not a mapper-logic bug (2026-09-28/29)
+
+Followed up the previous round's open question — does COLMAP hit the same
+stall on A1 (COLMAP's own features+matches) but recover? — with instrumented
+event diffing on both sides (`VISLOC_DEBUG_BOUNDARY_FRAMES`/
+`VISLOC_DEBUG_REG_FAIL` env-gated logging added to `pipeline.rs`/`mapper.rs`;
+COLMAP re-run with its own verbose `LOG(INFO)` registration trace against the
+identical A1 database).
+
+- **The frontier stall is real but symmetric.** After registering frames
+  0-59, both the port and COLMAP's own mapper fail to register frames 60/61/62
+  (visible 3D points 21/12/0, all under `abs_pose_min_num_inliers=30`) —
+  COLMAP's log shows the *same* three frames permanently unregistered in its
+  final model. COLMAP's own sequential matcher adds long-range "skip" pairs
+  (e.g. `58↔122`, 35 raw matches — quadratic-overlap bridge pairs, not just
+  the window-10 neighbours), and COLMAP's mapper log shows it registers
+  frame 122 next (not 60/61/62), then 121/120/119, then 82-90, then 63-69 —
+  bridging the gap sideways through a different frame cluster it had not
+  touched yet, all *inside the same reconstruction*.
+- **The port's `find_next_images` finds the identical bridge candidate.**
+  At the exact point the port's frontier stalls, image 122 is ranked the
+  #1 (and only) candidate, with 31 visible points — matching COLMAP's own
+  reported 32 at the equivalent point almost exactly. So `find_next_images`,
+  the multi-model retry loop in `pipeline.rs`, and the visibility-propagation
+  machinery in `observation_manager.rs` are correct, faithful ports; nothing
+  here "abandons the frontier" via a control-flow bug. The stall triggers
+  `reconstruct_sub_model`'s ordinary 2-consecutive-failure exit (also a
+  faithful port of `incremental_pipeline.cc:628`), and `run()` correctly
+  starts a fresh model from a new seed, same as COLMAP would if a *different*
+  candidate had failed there.
+- **The actual gap is in `RegisterNextImage`'s RANSAC, on that one marginal
+  candidate.** `VISLOC_DEBUG_REG_FAIL` shows the port's P3P RANSAC finds only
+  20/31 geometric inliers for image 122 (needs 30) where COLMAP succeeds.
+  COLMAP's `EstimateAbsolutePose` uses `LORANSAC<P3PEstimator, EPnPEstimator>`
+  (`optim/loransac.h`): once a P3P sample beats the running best, it
+  recursively re-fits on the *growing* inlier set (up to 10 rounds) before
+  scoring — our port did a single post-hoc refine only. Implemented COLMAP's
+  loop in `crates/vision/src/ransac/mod.rs`'s `PnPRansac::search_best_pose`.
+  First attempt reused the project's `DltPnP` as the non-minimal local
+  refit step (COLMAP uses EPnP); this was a **real regression**, not
+  neutral: `DltPnP`'s own module doc already warns it is "degenerate on
+  coplanar points", and refitting on a locally-planar inlier window
+  corrupted poses badly enough that Sim(3) ATE alignment failed outright
+  (`ATE n/a`) on every EuRoC sequence tried. Re-tried using the existing
+  `GaussNewtonPoseRefiner` (nonlinear, seeded from the current best pose)
+  for the growing-inlier-set refit instead — numerically safe, all 22
+  `ransac` unit tests still pass — but it **did not change V1_03's model
+  split** (`[62, 60, 49, 25]` before and after): image 122 still tops out
+  around 20/31 inliers even with iterative local optimization. It also
+  measurably *hurt* accuracy on the untouched 62-frame block that both
+  versions register identically (ATE 2.96 → 7.22 cm, same exact frame set),
+  so **the LO-RANSAC change was reverted** (`ransac/mod.rs` is back to the
+  original single-shot-refine behaviour; confirmed byte-identical output
+  after revert: `[62, 60, 49, 25]`, ATE 2.96 cm, 2118 points).
+- **Conclusion:** the ~35% "outlier" rate on image 122's correspondence set
+  is not a RANSAC-robustness/marginal-recovery gap (COLMAP's own more
+  powerful local optimizer doesn't close it either, going by our port's
+  attempt at replicating it) — it points at the *correspondence set itself*
+  (triangulated 3D point accuracy for the 0-59 block, or the specific 2D
+  features on frame 122) being measurably worse than COLMAP's, i.e. the same
+  family as the already-documented SIFT/triangulation-quality gap on
+  blurred/transitional frames, not a mapper defect. Not closed this round;
+  next steps for whoever picks this up: dump per-correspondence reprojection
+  residuals for image 122 (is it a clean bimodal 20-good/11-bad split, or a
+  smeared distribution suggesting systematic BA drift on the 0-59 block?),
+  and compare the Sim(3)-aligned 3D positions of those tracks against
+  COLMAP's own triangulation for the same points.
+- **Debug logging kept** (env-gated, off by default, harmless):
+  `VISLOC_DEBUG_REG_FAIL=1` prints the correspondence/inlier counts and
+  reason for every failed `RegisterNextImage` attempt in
+  `colmap_incremental/mapper.rs`.
+
+### Frame 122's 31 correspondences: a real triangulation-precision gap, not RANSAC or the correspondence graph (2026-09-28)
+
+Picked up the previous round's "next steps": dumped the per-correspondence
+detail behind the `20/31 inliers` number and compared the underlying 3D
+points against COLMAP's own triangulation for the identical tracks.
+
+- **New debug hook**: `VISLOC_DEBUG_REG_FAIL_DUMP=<image_id>` (added next to
+  `VISLOC_DEBUG_REG_FAIL`, same env-gated/off-by-default/harmless shape)
+  prints, for every correspondence considered when that specific image's
+  registration attempt fails on `too_few_inliers`, the 2D point index, 3D
+  point id, track length, current XYZ, the observed pixel, the reprojection
+  residual at the RANSAC report's best pose, and inlier/outlier status
+  (`REG_FAIL_DUMP` lines in `colmap_incremental/mapper.rs`).
+- **The 31 correspondences are not a clean bimodal split.** Residuals for
+  the 11 rejected ones cluster 9.9-15.4 px (comfortably over the 12 px
+  gate); residuals for the 20 accepted ones are mostly under 3 px but
+  include a few right at the edge (8.5-11.8 px). There's a visible gap in
+  image-x between the two groups (roughly x<498 fails, x>540 passes,
+  nothing observed in between), i.e. the two groups occupy different parts
+  of the frame rather than being randomly interleaved.
+- **Sim(3)-aligning our 0-59 block to COLMAP's 80-frame model (via the 60
+  shared camera centers) isolates the fault to the 3D points, not the
+  poses.** Camera-center RMSE after alignment is 11.7 cm (max 82 cm) over
+  those 60 frames — small relative to the scene. But the 26 of 31
+  correspondences whose 3D point survives to the final (abandoned) model
+  and has a same-point2D-index match in COLMAP's own reconstruction land
+  0.25-5.49 m from COLMAP's position after the same alignment (mean 1.98 m,
+  median 1.13 m) — an order of magnitude bigger than the pose error, at a
+  scene depth of roughly 8 units in COLMAP's own (arbitrary monocular)
+  scale. This directly answers the previous round's question: it's
+  triangulated-point accuracy, not camera pose.
+- **Instability between the failed attempt and the model's final state.**
+  Comparing the dump-time XYZ (captured the instant `RegisterNextImage`
+  rejected frame 122) against the same point ids' XYZ in the final exported
+  sub-model shows several points moving by multiple metres (e.g. point id
+  49 moves 3.2 units in X) while their tracks *shrink* — some drastically
+  (83→25, 58→4, 59→33 observations) — during the local/global BA and
+  filter passes that run on later registration attempts before the model
+  is abandoned. The points that end up worst (5+ m from COLMAP's position)
+  cluster in a second, spatially-incoherent group (X≈-6 to -11 in our
+  scale, vs. the coherent main cloud's X≈1-9) — a signature of a
+  poorly-conditioned/low-parallax triangulation that a few extra
+  observations pull further from truth rather than correcting, since
+  `FilterPoints3DWithLargeReprojectionError` only prunes individual bad
+  *observations* against the point's current position; it never
+  re-triangulates, so a bad point stays bad (or gets worse) until the next
+  full bundle adjustment, and by the last iteration of
+  `IterativeGlobalRefinement` there isn't always another one.
+- **Not a merge-tracks bug.** The initial suspect — two different point3d
+  ids sharing near-identical XYZ mid-registration (e.g. ids 48/49 both at
+  `(5.118123, -5.426774, 28.248629)` to 6 decimals) — turned out to be
+  expected COLMAP behaviour, not a divergence: COLMAP's own 80-frame model
+  has the *same* pattern at the matching correspondences (point ids 20/21
+  both at `(0.702, -0.61x, 7.95x)`). `Merge`'s all-track-elements-must-fit
+  rule (`merge_max_reproj_error=4px`, checked against every observation of
+  *both* tracks) legitimately rejects merging when either track has one
+  observation that doesn't fit the weighted-average position — COLMAP
+  keeps them as two points too. Our `try_merge_once`
+  (`incremental_triangulator.rs`) matches COLMAP's `Merge` line for line:
+  same canonical merge-trial key, same weighted average, same
+  all-track-elements check, same threshold.
+- **Not a `TriangulateTrack`/`EstimateTriangulation` implementation bug**,
+  as far as a careful re-read against `colmap_src/incremental_triangulator.cc`
+  can tell: `estimate_triangulation`'s LORANSAC loop (exhaustive
+  `CombinationSampler` below `EXHAUSTIVE_SAMPLING_THRESHOLD=15`, the same
+  `TRIANGULATION_{MIN_INLIER_RATIO,CONFIDENCE,MAX_NUM_TRIALS}` constants,
+  the same dynamic-trial-count shrink, the same local-optimization refit
+  loop in `local_optimize_triangulation`/`estimate_multiview_triangulation`)
+  reproduces COLMAP's `Create`/`TriangulateTrack` faithfully; all 33
+  `colmap_incremental` unit tests (including
+  `triangulate_image_recovers_synthetic_points`,
+  `create_recursive_remainder_terminates_and_creates_two_points`) still
+  pass.
+- **Conclusion: this is a genuine triangulation-precision gap on
+  low-parallax/marginal tracks in the 0-59 block**, confirmed by direct
+  3D comparison against COLMAP rather than inferred from registration
+  counts — not a coding defect in registration RANSAC (already ruled out
+  last round via the LO-RANSAC port), the correspondence graph (identical
+  by A1's construction), or merge-tracks/triangulation-estimator logic
+  (both read faithful against `colmap_src/` this round). No fix was found
+  this round that doesn't amount to re-deriving COLMAP's exact
+  floating-point BA/retriangulation trajectory; nothing was changed in the
+  default pipeline. The one artifact kept is the debug dump itself
+  (env-gated, off by default).
+- **For whoever picks this up next**: the two live leads are (1) whether
+  COLMAP's `IterativeGlobalRefinement` gets one more BA pass than ours
+  after the last `FilterPoints` call in some configuration (would need an
+  iteration-by-iteration counter compare, not just the final point
+  count), and (2) instrumenting *when* (which frame index) the
+  worst-offending points (e.g. point ids 97, 81, 82, 267, 100 in this
+  run) first get created vs. last get re-triangulated, to see whether
+  their initial 2-view seed pair was already poorly conditioned.
+### A real GPU SIFT coordinate bug, its fix, and a second subpixel attempt (2026-09-29)
+
+A direct feature-level comparison (our GPU SIFT keypoints vs COLMAP's own
+`db.db` keypoints, decoded from its 6-column affine format
+`scale = sqrt(|a11*a22-a12*a21|)`, `orientation = atan2(a21,a11)`, matched
+by mutual nearest neighbour within 2 px & a 2x scale-ratio gate, on V2_01
+and V2_03 frames) found a systematic **-0.70 to -0.75 px bias in both x
+and y**, nearly constant across octaves 0-2 (not scaling with `2^octave`),
+present on both sequences.
+
+**Root cause**: `crates/sift-gpu/src/shaders/image.wgsl`'s `upsample2x`
+(bit-identical to the CPU `double_up` in
+`crates/vision/src/features/sift.rs`) builds octave 0's doubled image with
+`sx = (x+2)/2` (integer division) — an asymmetric nearest-neighbour map
+that places source pixel `i` at doubled indices `{2i-2, 2i-1}` instead of
+the `{2i, 2i+1}` the keypoint-coordinate formula
+(`x_orig = x_doubled * upsample`) assumes. Because every higher octave is
+built by exact decimation of octave 0's (already shifted) pyramid, the
+bias is a near-constant absolute offset across all octaves, not a
+per-octave-scaled one.
+
+**Fix**: a new opt-in `SiftConfig::aligned_octave0_upsample` flag
+(`--sift-opt aligned_octave0_upsample=1`), default `false` and verified
+bit-identical to today's output when off. When on, octave 0 is built with
+align-corners bilinear upsampling instead — a new GPU kernel
+`upsample2x_aligned` in `image.wgsl` (mirroring the math of the existing,
+previously-unused CPU `double_up_vlfeat` helper), plus the CPU path
+reusing `double_up_vlfeat` directly. Re-running the feature-level
+comparison with the flag on: the bias collapses to **+0.00 to +0.03 px**
+across all octaves on both sequences — confirmed fixed.
+
+**Subpixel/subscale refinement, re-implemented from scratch**: the earlier
+subpixel work (the 2026-09-28 section above) was fully reverted, so a new
+opt-in `SiftConfig::subpixel_localization` flag
+(`--sift-opt subpixel_localization=1`) was implemented: the full
+VLFeat/Lowe-style iterative 3D (x, y, scale) Newton refinement of DoG
+extrema in `crates/sift-gpu/src/shaders/detect.wgsl`'s `extrema()` (5
+iterations, closed-form 3x3 Cramer's-rule solve, a singular-Hessian
+fallback that keeps the original integer-grid detection rather than
+discarding it, a re-check of the Lowe edge test at the converged locus,
+and the refined scale offset feeding both `hist_sigma` and the reported
+`sigma`). Default `false`, and the default-disabled path is guarded
+explicitly (`select_keypoints` only takes the `powf`-based scale formula
+when the refined offset is nonzero, otherwise keeps the exact original
+`powi` call) so GPU SIFT output is bit-identical to today's when off —
+`cargo test -p visloc-sift-gpu --features gpu` passes unchanged. A second
+feature-level comparison (aligned + subpixel together vs COLMAP, V2_01,
+V2_03, V1_02) found **no reintroduced bias** (all three within ±0.005 px
+mean, all octaves) and a *tighter* spread than the aligned-only fix alone
+(std ≈0.07-0.13 px vs ≈0.27-0.28 px) — subpixel refinement is doing
+exactly what it should positionally.
+
+**End-to-end, one fixed config each time** (doc's exact bench command,
+`--keypoints 4000` unless noted):
+
+| Sequence | Today's baseline | `aligned_octave0_upsample` alone | + `subpixel_localization` |
+| --- | ---: | ---: | ---: |
+| V1_02_medium | 1.76 cm (198/200) | 2.48 cm (200/200) | 2.69 cm (200/200) |
+| V2_03_difficult | 3.37 cm (118/200) | 3.94 cm (120/200) | **2.25 cm (119/200)** |
+| V2_01_easy | 3.30 cm (199/200) | 2.98 cm (199/200) | **2.24 cm (198/200)** |
+| V1_03_difficult | 2.17 cm (67/200) | 5.81 cm (69/200, 5 models) | **2.12 cm (62/200)** |
+| MH_01_easy | 0.35 cm (182/200) | — | 0.38 cm (172/200) |
+| MH_03_medium | 1.32 cm (166/200) | — | **1.17 cm (161/200)** |
+| MH_05_difficult | 2.58 cm (194/200) | — | **2.37 cm (197/200)** |
+| V1_01_easy | 2.40 cm (199/200) | — | 2.61 cm (191/200) |
+
+The coordinate fix alone is a mixed bag (helps V2_01, hurts V1_02/V2_03/
+V1_03), but subpixel refinement on top recovers almost all of it on
+V1_03/V2_03 (V2_03 now beats COLMAP's 2.85 cm) and further improves V2_01,
+while **V1_02 stays regressed** (1.76 → 2.69 cm) — a real, reproducible
+issue (identical ATE across repeated runs), not noise.
+
+**A per-frame diagnosis on V1_02** (Sim(3)-aligned position error computed
+per frame, since the mapper doesn't dump this) ruled out the two obvious
+culprits: the 2 frames the fix newly registers (frames 9, 14) have *low*
+error (1.6 cm) and excluding them from the RMSE changes nothing. Instead
+the regression is a broad, systematic error increase (median 1.4→2.0 cm,
+mean 1.6→2.2 cm across the 193 common frames) concentrated in the *same*
+segment (frames ≈157-176) that was already the baseline's weakest spot —
+the fix amplifies an existing weak segment rather than creating a new
+failure mode.
+
+**A principal-point convention dead end.** Given the fix's own timing
+(constant bias correction with a sequence-dependent side effect), a
+half-pixel corner-vs-centre origin convention mismatch downstream was a
+natural suspect. A thorough code trace (undistortion, the feature export/
+import round trip through `crates/gsplat-train/src/euroc.rs` and
+`pipelines/slam/src/colmap_incremental/database_cache.rs`, the two-view
+verifier, the mapper's BA/PnP) found **no convention-mismatch literal
+anywhere** — the whole pipeline consistently uses EuRoC's raw
+(pixel-centre-origin) `cx`/`cy` for undistortion, verification, PnP, BA
+and the mapper alike. Empirically, though, shifting the camera model's
+`cx`/`cy` by +0.5 px (geometry only, or at the source so undistortion
+shifts too — the two gave byte-identical results, ruling out the
+undistortion grid as a factor) recovered most of V1_02's regression
+(2.69 → 1.85 cm) but cost V2_03 21 registered frames (119 → 98) for either
+sign of shift. To settle it, COLMAP's own `bundle_adjuster
+--BundleAdjustment.refine_principal_point 1 --refine_focal_length 0` was
+run on our exported (unshifted) V1_02/MH_03/V2_01 reconstructions
+(`<work>/port/model0`, a self-consistent COLMAP-format export with no
+`+0.5` anywhere): the refined `cx` scattered across sign
+(+0.34, -0.45, -0.58 px) with barely any cost improvement (fourth-decimal
+place; MH_03 didn't even converge) — **no evidence of a shared convention
+offset**, so the cx/cy shift was dropped as a dead end rather than shipped
+as an unexplained tuning knob.
+
+**A retune sweep**, since the rest of the bench config
+(`descriptor_magnification=3`, `verify-min-inliers 15`, `keypoints 4000`,
+default contrast threshold) was tuned against the old biased features.
+Tested on V1_02/V2_03/MH_01 (`aligned_octave0_upsample` +
+`subpixel_localization` held on):
+
+| Change | V1_02 | V2_03 | MH_01 |
+| --- | ---: | ---: | ---: |
+| (none, baseline for this sweep) | 2.69 cm (200) | 2.25 cm (119) | 0.38 cm (172) |
+| `verify-min-inliers 30` | 2.00 cm (199) | 2.64 cm (**87**) | 0.38 cm (**161**) |
+| `descriptor_magnification=4` | 2.08 cm (197) | **3.90 cm (97)** | 0.38 cm (168) |
+| `keypoints 6000` | **1.96 cm (198)** | 2.30 cm (98) | **0.35 cm (195)** |
+| `contrast_threshold=0.00667` (COLMAP's) | 2.47 cm (199) | 2.24 cm (119) | — |
+
+`contrast_threshold` is a near no-op here (the 4000/6000-keypoint cap with
+`prefer_larger_scale` already saturates, so a lower peak threshold barely
+changes which keypoints survive truncation). The other three levers all
+trade V1_02 accuracy for V2_03 registration completeness to varying
+degrees; `keypoints=6000` was the best all-rounder (best V1_02 number,
+ties/beats the *original* baseline on MH_01 with *more* frames than either
+prior config), so it was carried to the full 8-sequence gate:
+
+| Sequence | Today's baseline | `aligned`+`subpixel` | + `keypoints=6000` | COLMAP |
+| --- | ---: | ---: | ---: | ---: |
+| MH_01_easy | 0.35 cm (182/200) | 0.38 cm (172/200) | **0.35 cm (195/200)** | 0.35 cm (200/200) |
+| MH_03_medium | 1.32 cm (166/200) | 1.17 cm (161/200) | 1.21 cm (170/200) | 2.61 cm (200/200) |
+| MH_05_difficult | 2.58 cm (194/200) | 2.37 cm (197/200) | 2.43 cm (199/200) | 193.66 cm (200/200) |
+| V1_01_easy | 2.40 cm (199/200) | 2.61 cm (191/200) | 2.55 cm (197/200) | 2.75 cm (200/200) |
+| V1_02_medium | 1.76 cm (198/200) | 2.69 cm (200/200) | 1.96 cm (198/200) | 1.83 cm (200/200) |
+| V2_01_easy | 3.30 cm (199/200) | 2.24 cm (198/200) | 2.22 cm (198/200) | 1.00 cm (200/200) |
+| V1_03_difficult | 2.17 cm (67/200) | 2.12 cm (62/200) | 2.96 cm (63/200) | 1.98 cm (80/200) |
+| V2_03_difficult | 3.37 cm (118/200) | 2.25 cm (119/200) | 2.30 cm (98/200) | 2.85 cm (180/200) |
+
+`keypoints=6000` gets MH_01 back to an exact tie with COLMAP (with *more*
+registered frames than either prior config) and closes most of V1_02's
+gap (1.96 vs COLMAP's 1.83 cm) — but does not close it. Win/loss count
+against COLMAP is unchanged from the plain `aligned`+`subpixel` config:
+wins MH_03/MH_05/V1_01/V2_03 (4) + ties MH_01, loses V1_02/V2_01/V1_03
+(3) — the same net win count as today, with V1_02 still flipped from a
+win to a loss. **The gate ("keep MH_03/MH_05/V1_01/V1_02 wins + MH_01 tie,
+add V2_03, no regression beyond noise") is not met by any tested config.**
+
+**Decision: both flags ship as opt-in, default off.** The coordinate fix
+and subpixel refinement are real, verified, substantial improvements
+(confirmed at the feature level against COLMAP's own ground truth, not
+just end-to-end ATE) — they close V2_01/V2_03/V1_03's regressions and
+tie MH_01 exactly, and V1_02's remaining gap is small (0.13 cm) compared
+to where it started. But because they still regress V1_02 from a win to a
+loss against COLMAP under every configuration tried (base, retuned, or
+with a since-abandoned cx/cy shift), they don't clear the bar to become
+the new default `gsplat_euroc` command documented in the README. The
+default pipeline, its numbers and the README are unchanged.
+`--sift-opt aligned_octave0_upsample=1 --sift-opt subpixel_localization=1`
+remain available for anyone who wants V2_01/V2_03/V1_03's better numbers
+and can accept V1_02's small regression.
+
 ## Reproduce
 
 ```text
