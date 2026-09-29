@@ -221,7 +221,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             )
             .map_err(|error| BasaltAdapterError::Output(error.to_string()))?;
 
-        if demo_index == 0 || (demo_index + 1) % 10 == 0 || demo_index + 1 == frame_limit {
+        if demo_index == 0 || (demo_index + 1).is_multiple_of(10) || demo_index + 1 == frame_limit {
             eprintln!(
                 "frame={} timestamp_ns={} observations={} imu={} created={} retained={} rejected={}",
                 output.tracks.frame.frame_id,

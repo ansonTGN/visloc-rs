@@ -197,7 +197,7 @@ mod imp {
                 e.2 += 1;
             }
             frames_used += 1;
-            if frames_used % 10 == 0 {
+            if frames_used.is_multiple_of(10) {
                 println!(
                     "  fused {frames_used} frames, {} voxels, {raw_points} raw points",
                     voxels.len()

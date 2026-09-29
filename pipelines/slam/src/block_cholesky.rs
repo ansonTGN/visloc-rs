@@ -667,7 +667,7 @@ pub(crate) fn analyze(
     block_size: usize,
 ) -> BlockSymbolic {
     assert!(
-        dim % block_size == 0,
+        dim.is_multiple_of(block_size),
         "dim must be a multiple of the block size"
     );
     let n = dim / block_size;

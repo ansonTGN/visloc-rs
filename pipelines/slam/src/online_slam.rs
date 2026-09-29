@@ -764,7 +764,7 @@ fn median_positive_depth_for_landmarks(
     }
     depths.sort_by(|left, right| left.total_cmp(right));
     let mid = depths.len() / 2;
-    if depths.len() % 2 == 0 {
+    if depths.len().is_multiple_of(2) {
         Some((depths[mid - 1] + depths[mid]) * 0.5)
     } else {
         Some(depths[mid])
@@ -4894,7 +4894,7 @@ where
         }
 
         let trigger_every = config.trigger_every_new_keyframes.max(1);
-        if map_keyframe_count % trigger_every != 0 {
+        if !map_keyframe_count.is_multiple_of(trigger_every) {
             return None;
         }
 

@@ -1710,7 +1710,7 @@ fn estimate_cross_submap_scale(
 
 fn median_sorted(values: &[f64]) -> f64 {
     let middle = values.len() / 2;
-    if values.len() % 2 == 0 {
+    if values.len().is_multiple_of(2) {
         (values[middle - 1] + values[middle]) * 0.5
     } else {
         values[middle]

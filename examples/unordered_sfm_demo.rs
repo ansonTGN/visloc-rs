@@ -1025,7 +1025,7 @@ fn parse_colmap_track_membership(
             format!("cannot read COLMAP images.txt line {points_line_number}: {error}")
         })?;
         let point_tokens: Vec<&str> = points_line.split_whitespace().collect();
-        if point_tokens.len() % 3 != 0 {
+        if !point_tokens.len().is_multiple_of(3) {
             return Err(format!(
                 "COLMAP images.txt POINTS2D row after IMAGE_ID {image_id} has {} fields, not a multiple of 3",
                 point_tokens.len()
@@ -1114,7 +1114,7 @@ fn parse_colmap_track_membership(
             continue;
         }
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        if parts.len() < 8 || (parts.len() - 8) % 2 != 0 {
+        if parts.len() < 8 || !(parts.len() - 8).is_multiple_of(2) {
             return Err(format!(
                 "COLMAP points3D line {} has malformed TRACK[] fields",
                 line_index + 1
@@ -10098,7 +10098,7 @@ fn stream_vlad_globals_from_feature_files(
             .into());
         }
         for descriptor in feature_set.descriptors {
-            if global_row % stride == 0 {
+            if global_row.is_multiple_of(stride) {
                 sample.push(descriptor);
             }
             global_row += 1;
@@ -13908,7 +13908,7 @@ fn model_cross_validation_is_held_out_for_pixels(
             hash = hash.wrapping_mul(0x100000001b3u64);
         }
     }
-    hash % 5 == 0
+    hash.is_multiple_of(5)
 }
 
 #[derive(Debug, Default)]

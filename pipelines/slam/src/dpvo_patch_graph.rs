@@ -980,7 +980,7 @@ impl DpvoPatchGraph {
 
         let seen_before = self.inactive_edges_archived_seen;
         self.inactive_edges_archived_seen += 1;
-        if seen_before % self.inactive_edge_retention_stride != 0 {
+        if !seen_before.is_multiple_of(self.inactive_edge_retention_stride) {
             // Decimated out by the current sampling rate — never retained at
             // all (still counted as "lost to the retention policy").
             self.inactive_edges_evicted += 1;

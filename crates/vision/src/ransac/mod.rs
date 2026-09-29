@@ -490,7 +490,7 @@ fn reprojection_stats(errors: &[f64]) -> (f64, f64, f64) {
     let mean = errors.iter().sum::<f64>() / errors.len() as f64;
     let mut sorted = errors.to_vec();
     sorted.sort_by(f64::total_cmp);
-    let median = if sorted.len() % 2 == 0 {
+    let median = if sorted.len().is_multiple_of(2) {
         let upper = sorted.len() / 2;
         (sorted[upper - 1] + sorted[upper]) * 0.5
     } else {

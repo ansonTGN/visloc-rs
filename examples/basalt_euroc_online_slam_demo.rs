@@ -478,7 +478,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             mapper_packet_count += 1;
         }
 
-        if demo_index == 0 || (demo_index + 1) % 50 == 0 || demo_index + 1 == frame_limit {
+        if demo_index == 0 || (demo_index + 1).is_multiple_of(50) || demo_index + 1 == frame_limit {
             eprintln!(
                 "frame={} timestamp_ns={} mapper_packets={} imu={}",
                 output.tracks.frame.frame_id, timestamp_ns, mapper_packet_count, total_imu,

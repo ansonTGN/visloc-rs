@@ -53,7 +53,7 @@ pub enum SplatError {
 
 /// Decode a `.splat` blob into records.
 pub fn parse_splat(bytes: &[u8]) -> Result<Vec<SplatRecord>, SplatError> {
-    if bytes.len() % SplatRecord::BYTES != 0 {
+    if !bytes.len().is_multiple_of(SplatRecord::BYTES) {
         return Err(SplatError::BadLength { len: bytes.len() });
     }
     let mut out = Vec::with_capacity(bytes.len() / SplatRecord::BYTES);

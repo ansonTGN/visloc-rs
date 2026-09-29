@@ -1311,7 +1311,7 @@ pub fn incremental_rig_sfm(
         let mut rig_timing_heap_pops = 0u64;
         while let Some((support, Reverse(frame), version)) = candidate_heap.pop() {
             rig_timing_heap_pops += 1;
-            if rig_timing && rig_timing_heap_pops % 200_000 == 0 {
+            if rig_timing && rig_timing_heap_pops.is_multiple_of(200_000) {
                 eprintln!(
                     "rig-timing: heap-pop-progress elapsed={:.3}s heap_pops_this_outer_iter={} \
                      heap_len={} registered={} pnp_attempts={}",
@@ -1332,7 +1332,7 @@ pub fn incremental_rig_sfm(
             }
             attempted_versions[frame] = Some(version);
             work.pnp_attempts += 1;
-            if rig_timing && work.pnp_attempts % 500 == 0 {
+            if rig_timing && work.pnp_attempts.is_multiple_of(500) {
                 eprintln!(
                     "rig-timing: pnp-progress elapsed={:.3}s pnp_attempts={} registered={} \
                      heap_len={}",
@@ -3276,7 +3276,9 @@ fn dynamic_grow_from_seed(
 
         if config.local_ba_every > 0
             && config.local_ba_window_size >= 2
-            && registration_order.len() % config.local_ba_every == 0
+            && registration_order
+                .len()
+                .is_multiple_of(config.local_ba_every)
         {
             let (active_frames, anchor) = select_local_ba_frames(
                 rig,

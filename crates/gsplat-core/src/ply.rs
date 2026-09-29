@@ -147,7 +147,7 @@ pub fn scene_from_ply(bytes: &[u8]) -> Result<Scene, PlyError> {
         k += 1;
     }
     let rest_total = rest_indices.len();
-    if rest_total % 3 != 0 {
+    if !rest_total.is_multiple_of(3) {
         return Err(PlyError::MissingProperty("f_rest_*".to_owned()));
     }
     let coeffs_per_channel = rest_total / 3;

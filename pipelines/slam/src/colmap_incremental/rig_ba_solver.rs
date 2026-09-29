@@ -1925,7 +1925,7 @@ mod tests {
         for &(i1, i2) in &scene.images_per_frame {
             for &iid in &[i1, i2] {
                 for j in 0..scene.ground_truth_points.len() {
-                    if obs_idx % 10 == 0 {
+                    if obs_idx.is_multiple_of(10) {
                         let image = recon.image_mut(iid);
                         image.points2d[j].xy.x += 400.0;
                         image.points2d[j].xy.y -= 320.0;

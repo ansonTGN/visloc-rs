@@ -96,7 +96,7 @@ impl Reordering {
     ) -> Self {
         debug_assert!(block_size >= 1, "block_size must be positive");
         debug_assert!(
-            dim % block_size == 0,
+            dim.is_multiple_of(block_size),
             "dim ({dim}) must be a multiple of block_size ({block_size})"
         );
         let n = dim / block_size;
@@ -767,7 +767,7 @@ mod tests {
         let mut sets: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); n];
         for a in 0..n {
             for b in (a + 1)..n {
-                if (next() as usize) % density == 0 {
+                if (next() as usize).is_multiple_of(density) {
                     sets[a].insert(b);
                     sets[b].insert(a);
                 }

@@ -7353,7 +7353,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             atlas.replace_submap_map(active_submap_id, slam.map().clone())?;
             atlas_merge_attempts += 1;
             let max_source_keyframes = if args.atlas_broader_recovery_max_source_keyframes > 1
-                && atlas_merge_attempts % args.atlas_broader_recovery_interval_attempts == 0
+                && atlas_merge_attempts
+                    .is_multiple_of(args.atlas_broader_recovery_interval_attempts)
             {
                 atlas_broader_recovery_cycles += 1;
                 args.atlas_broader_recovery_max_source_keyframes
