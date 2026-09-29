@@ -201,7 +201,9 @@ pub struct BaCovisibilityFactor {
 pub struct MapperFactors {
     pub provenance_version: String,
     pub relative_pose: Vec<RelativePoseFactor>,
-    #[serde(default)]
+    // Omitted when empty so default-off runs serialize byte-identically to
+    // builds without the opt-in IMU factors.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub imu_relative_pose: Vec<RelativePoseFactor>,
     pub roll_pitch: Vec<RollPitchFactor>,
     pub ba_covisibility: Vec<BaCovisibilityFactor>,
