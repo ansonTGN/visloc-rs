@@ -74,6 +74,7 @@
 //!   geometric problem (central absolute pose from 3 bearings) rather than
 //!   porting a second, algebraically unrelated quartic solver.
 
+use nalgebra::linalg::Schur;
 use nalgebra::{DMatrix, Matrix3, Point3, SMatrix, UnitQuaternion, Vector3, Vector4};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -458,6 +459,19 @@ fn monomial_transform_10x10(a4: &SMatrix<f64, 3, 4>) -> SMatrix<f64, 10, 10> {
 /// deviation for why this replaces PoseLib's Sturm-sequence bisection
 /// (`sturm::bisect_sturm<8>`, `re3q3.cc:372`).
 fn real_roots_of_degree_le_8(c: &[f64; 9]) -> Vec<f64> {
+    if !c.iter().all(|v| v.is_finite()) {
+        // A degenerate/near-singular minimal sample (collinear or duplicate
+        // points, a zero-length bearing ray, ...) can produce a NaN/Inf
+        // resultant coefficient upstream. Reject it as "no roots" here
+        // rather than letting it reach the companion-matrix eigenvalue
+        // solve below: nalgebra's `Matrix::complex_eigenvalues()` calls the
+        // unbounded `Schur::new` (`max_niter=0` = "continue indefinitely
+        // until convergence" per its own doc comment), and a NaN entry can
+        // never satisfy that convergence check, hanging the caller forever.
+        // This was a real bug: a single degenerate RANSAC minimal sample
+        // could hang the whole mapper (see `gp3p_hang_regression` test).
+        return Vec::new();
+    }
     let scale = c.iter().map(|v| v.abs()).fold(0.0, f64::max);
     if scale <= 0.0 {
         return Vec::new();
@@ -477,10 +491,27 @@ fn real_roots_of_degree_le_8(c: &[f64; 9]) -> Vec<f64> {
     for i in 1..deg {
         companion[(i, i - 1)] = 1.0;
     }
-    let eig = companion.complex_eigenvalues();
+    if !companion.iter().all(|v| v.is_finite()) {
+        // `lead` was finite and (by the trimming loop above) not
+        // negligible relative to `scale`, so this is only reachable from
+        // an extreme dynamic range between coefficients; still guarded
+        // explicitly rather than relying on that argument at a distance.
+        return Vec::new();
+    }
+    // Bounded Schur decomposition: `try_new`'s `max_niter` is a hard cap
+    // (returns `None` on non-convergence) instead of `complex_eigenvalues`'s
+    // unbounded default. 10,000 iterations is a hard cap (well-conditioned
+    // cases converge in a handful; near-repeated-singular-value cases can
+    // need noticeably more, per an observed regression at a tighter 500-
+    // iteration cap) while still returning in well under a millisecond on a
+    // genuinely pathological (NaN-producing) input.
+    let Some(schur) = Schur::try_new(companion, f64::EPSILON, 10_000) else {
+        return Vec::new();
+    };
+    let eig = schur.complex_eigenvalues();
     let mut roots: Vec<f64> = eig
         .iter()
-        .filter(|e| e.im.abs() < 1.0e-7 * (1.0 + e.re.abs()))
+        .filter(|e| e.re.is_finite() && e.im.abs() < 1.0e-7 * (1.0 + e.re.abs()))
         .map(|e| e.re)
         .collect();
     roots.sort_by(|a, b| a.total_cmp(b));
@@ -1319,5 +1350,47 @@ mod tests {
             });
             assert!(found, "seed {seed}: ground truth not recovered");
         }
+    }
+
+    /// Regression test for a real hang: a degenerate resultant polynomial
+    /// (here, coefficients containing NaN, the way a collinear/duplicate
+    /// minimal sample can produce upstream) used to make
+    /// `real_roots_of_degree_le_8` call nalgebra's unbounded
+    /// `Matrix::complex_eigenvalues()` (`Schur::new`, `max_niter=0` = "loop
+    /// until convergence"), which never converges on a NaN entry and hangs
+    /// forever. It must now return no roots instead, and return promptly
+    /// (the test itself has no explicit timeout, but a regression back to
+    /// the old behavior would hang this test binary rather than fail it
+    /// cleanly -- CI's own test-runner timeout is the backstop).
+    #[test]
+    fn real_roots_of_degree_le_8_rejects_non_finite_coefficients() {
+        let with_nan = [1.0, 2.0, f64::NAN, 4.0, 5.0, 6.0, 7.0, 8.0, 1.0];
+        assert!(real_roots_of_degree_le_8(&with_nan).is_empty());
+        let with_inf = [1.0, 2.0, 3.0, f64::INFINITY, 5.0, 6.0, 7.0, 8.0, 1.0];
+        assert!(real_roots_of_degree_le_8(&with_inf).is_empty());
+    }
+
+    /// End-to-end regression: three *identical* correspondences are a
+    /// maximally degenerate minimal sample (zero baseline between the
+    /// "three" rays). This used to be able to drive a NaN into the
+    /// `re3q3`/companion-matrix path and hang; it must now return promptly,
+    /// with an empty or non-hanging result either way (the geometry is
+    /// genuinely unsolvable, so an empty candidate list is the correct
+    /// answer, not just an accident of the guard).
+    #[test]
+    fn gp3p_solve_does_not_hang_on_degenerate_duplicate_sample() {
+        let truth = truth_pose();
+        let (origins, bearings, world_points) = synthetic_triple(&truth);
+        let degenerate_origins = [origins[0], origins[0], origins[0]];
+        let degenerate_bearings = [bearings[0], bearings[0], bearings[0]];
+        let degenerate_points = [world_points[0], world_points[0], world_points[0]];
+        // Regression assertion is really just "this call returns" -- reaching
+        // this line at all is the point of the test.
+        let _ = gp3p_solve(
+            &degenerate_origins,
+            &degenerate_bearings,
+            &degenerate_points,
+            42,
+        );
     }
 }

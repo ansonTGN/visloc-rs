@@ -194,7 +194,13 @@ impl EssentialMatrixEstimator for EightPointEssentialMatrixEstimator {
         // inputs drops the last right singular vector — the very direction we
         // want. Multiply by A^T A so the SVD always operates on a 9x9 matrix.
         let ata = a.transpose() * a;
-        let svd = ata.svd(true, true);
+        // Bounded SVD: `.svd(..)` calls the unbounded `SVD::new_unordered`
+        // (`max_niter=0`, hangs forever on non-finite input, same class of
+        // bug as `pnp/gp3p.rs::real_roots_of_degree_le_8`). A degenerate
+        // minimal/near-minimal correspondence sample can produce a
+        // non-finite `ata`, so use the bounded variant and let the existing
+        // `?` reject the sample like any other SVD failure.
+        let svd = ata.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
         let v_t = svd.v_t?;
         let last = v_t.row(v_t.nrows() - 1);
         let mut essential_normalized = Matrix3::new(
@@ -202,7 +208,7 @@ impl EssentialMatrixEstimator for EightPointEssentialMatrixEstimator {
         );
 
         // Project E_normalized onto the essential manifold.
-        let essential_norm_svd = essential_normalized.svd(true, true);
+        let essential_norm_svd = essential_normalized.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
         let u_n = essential_norm_svd.u?;
         let v_t_n = essential_norm_svd.v_t?;
         let s_n =
@@ -725,7 +731,7 @@ pub fn recover_relative_pose_with_options(
     inliers: &[usize],
     options: &CheiralityOptions,
 ) -> Option<RelativePoseRecovery> {
-    let svd = essential.svd(true, true);
+    let svd = essential.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
     let u = svd.u?;
     let v_t = svd.v_t?;
 
@@ -821,7 +827,7 @@ fn triangulate_in_front(
         a[(2, column)] = curr.x * p_curr[(2, column)] - p_curr[(0, column)];
         a[(3, column)] = curr.y * p_curr[(2, column)] - p_curr[(1, column)];
     }
-    let svd = a.svd(true, true);
+    let svd = a.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
     let v_t = svd.v_t?;
     let solution = v_t.row(3);
     let w = solution[3];
@@ -849,7 +855,9 @@ fn all_in_front_for_some_pose(
     if correspondences.is_empty() {
         return false;
     }
-    let svd = essential.svd(true, true);
+    let Some(svd) = essential.try_svd(true, true, f64::EPSILON * 5.0, 10_000) else {
+        return false;
+    };
     let (Some(u), Some(v_t)) = (svd.u, svd.v_t) else {
         return false;
     };

@@ -759,7 +759,7 @@ fn kabsch_n(samples: &[&StereoPairCorrespondence]) -> Option<Pose> {
         let b = c.b.coords - centroid_b;
         h += a * b.transpose();
     }
-    let svd = h.svd(true, true);
+    let svd = h.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
     let u = svd.u?;
     let v_t = svd.v_t?;
     let v = v_t.transpose();

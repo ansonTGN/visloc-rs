@@ -63,7 +63,7 @@ pub fn estimate_fundamental_dlt(correspondences: &[TwoViewCorrespondence]) -> Op
     // Same A^T A product; the 9x9 SVD runs on a fixed-size matrix (same
     // algorithm and operation order as the former DMatrix path, no heap).
     let ata = nalgebra::SMatrix::<f64, 9, 9>::from_iterator((a.transpose() * a).iter().copied());
-    let svd = ata.svd(true, true);
+    let svd = ata.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
     let v_t = svd.v_t?;
     let last = v_t.row(v_t.nrows() - 1);
     let f_normalized = Matrix3::new(
@@ -72,7 +72,7 @@ pub fn estimate_fundamental_dlt(correspondences: &[TwoViewCorrespondence]) -> Op
 
     // Rank-2 projection: zero the smallest singular value only (no equal-
     // singular-value constraint — see module doc).
-    let f_svd = f_normalized.svd(true, true);
+    let f_svd = f_normalized.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
     let u = f_svd.u?;
     let v_t2 = f_svd.v_t?;
     let mut singular_values = f_svd.singular_values;

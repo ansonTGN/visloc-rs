@@ -451,7 +451,7 @@ pub fn triangulate_two_view_left_frame(
         a[(3, column)] = y_r * p3[column] - p2[column];
     }
 
-    let svd = a.svd(false, true);
+    let svd = a.try_svd(false, true, f64::EPSILON * 5.0, 10_000)?;
     let v_t = svd.v_t?;
     let homogeneous = v_t.row(v_t.nrows() - 1);
     let w = homogeneous[3];

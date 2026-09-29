@@ -30,6 +30,7 @@
 // generalized-relative-pose six-point solver:
 // https://github.com/PoseLib/PoseLib/blob/master/PoseLib/solvers/gen_relpose_6pt.cc
 
+use nalgebra::linalg::Schur;
 use nalgebra::{DMatrix, Matrix3, Matrix6, Quaternion, SMatrix, SVector, UnitQuaternion, Vector3};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -1248,10 +1249,23 @@ fn solve_gr6p_polynomial(
     action[(62, 63)] = 1.0;
     set_negative_row(&mut action, 63, &c12, 98);
 
-    let eigenvalues = action.complex_eigenvalues();
+    // Same class of bug as `pnp/gp3p.rs::real_roots_of_degree_le_8` and
+    // `pnp/p3p.rs::real_quartic_roots`: `Matrix::complex_eigenvalues()` calls
+    // the unbounded `Schur::new` (`max_niter=0`, loops forever on an input
+    // that never converges, which a NaN/Inf entry from a degenerate
+    // six-correspondence minimal sample guarantees). Bound it, and reject a
+    // non-finite `action` matrix outright rather than even attempting the
+    // decomposition.
+    if !action.iter().all(|value| value.is_finite()) {
+        return Ok(Vec::new());
+    }
+    let Some(schur) = Schur::try_new(action.clone(), f64::EPSILON, 10_000) else {
+        return Ok(Vec::new());
+    };
+    let eigenvalues = schur.complex_eigenvalues();
     let real_eigenvalues: Vec<f64> = eigenvalues
         .iter()
-        .filter_map(|value| (value.im.abs() < 1.0e-6).then_some(value.re))
+        .filter_map(|value| (value.re.is_finite() && value.im.abs() < 1.0e-6).then_some(value.re))
         .collect();
     let mut solutions = SMatrix::<f64, 3, 64>::zeros();
     fast_eigenvector_solver(&real_eigenvalues, &action, &mut solutions);

@@ -131,7 +131,7 @@ impl PoseEstimator for DltPnP {
             a[(row + 1, 11)] = y;
         }
 
-        let svd = a.svd(true, true);
+        let svd = a.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
         let v_t = svd.v_t?;
         let last_row = v_t.row(v_t.nrows() - 1);
 
@@ -180,7 +180,7 @@ impl PoseEstimator for DltPnP {
         m /= row_scale;
         translation /= row_scale;
 
-        let rotation_svd = m.svd(true, true);
+        let rotation_svd = m.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
         let u = rotation_svd.u?;
         let v_t = rotation_svd.v_t?;
         let mut rotation = u * v_t;

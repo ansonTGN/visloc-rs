@@ -17,6 +17,7 @@
 //! yields up to four candidate poses; the extra correspondence(s) in the RANSAC
 //! sample disambiguate by reprojection.
 
+use nalgebra::linalg::Schur;
 use nalgebra::{Matrix3, Matrix4, Point3, UnitQuaternion, Vector3};
 use visloc_core::geometry::Pose;
 use visloc_core::types::Camera;
@@ -248,10 +249,13 @@ pub(crate) fn solve_grunert(
 /// eigenvalues of the monic polynomial. Returns `None` if the quartic
 /// degenerates (leading coefficient ~0) or no eigenvalue is real.
 fn real_quartic_roots(a4: f64, a3: f64, a2: f64, a1: f64, a0: f64) -> Option<Vec<f64>> {
-    if a4.abs() <= f64::EPSILON {
+    if a4.abs() <= f64::EPSILON || ![a3, a2, a1, a0].iter().all(|v| v.is_finite()) {
         return None;
     }
     let (c3, c2, c1, c0) = (a3 / a4, a2 / a4, a1 / a4, a0 / a4);
+    if ![c3, c2, c1, c0].iter().all(|v| v.is_finite()) {
+        return None;
+    }
     // Companion matrix of x⁴ + c3 x³ + c2 x² + c1 x + c0.
     let companion = Matrix4::new(
         -c3, -c2, -c1, -c0, //
@@ -259,10 +263,17 @@ fn real_quartic_roots(a4: f64, a3: f64, a2: f64, a1: f64, a0: f64) -> Option<Vec
         0.0, 1.0, 0.0, 0.0, //
         0.0, 0.0, 1.0, 0.0,
     );
-    let eigen = companion.complex_eigenvalues();
+    // Bounded Schur decomposition -- `complex_eigenvalues()` would call the
+    // unbounded `Schur::new` (`max_niter=0`, loops forever if it never sees
+    // convergence, which a non-finite entry guarantees); see the longer note
+    // on the analogous fix in `gp3p.rs::real_roots_of_degree_le_8`.
+    let Some(schur) = Schur::try_new(companion, f64::EPSILON, 10_000) else {
+        return None;
+    };
+    let eigen = schur.complex_eigenvalues();
     let mut roots = Vec::new();
     for e in eigen.iter() {
-        if e.im.abs() < 1.0e-9 * (1.0 + e.re.abs()) {
+        if e.re.is_finite() && e.im.abs() < 1.0e-9 * (1.0 + e.re.abs()) {
             roots.push(e.re);
         }
     }
@@ -285,7 +296,7 @@ fn kabsch_three(world: &[Point3<f64>; 3], camera: &[Point3<f64>; 3]) -> Option<P
         let q = camera[i].coords - cc;
         h += w * q.transpose();
     }
-    let svd = h.svd(true, true);
+    let svd = h.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
     let u = svd.u?;
     let v_t = svd.v_t?;
     let v = v_t.transpose();

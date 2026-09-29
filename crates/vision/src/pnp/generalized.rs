@@ -225,7 +225,7 @@ impl GeneralizedDltPoseEstimator {
             }
         }
 
-        let svd = design.svd(true, true);
+        let svd = design.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
         let solution = svd.solve(&rhs, 1.0e-12).ok()?;
         if solution.len() != 12 || !solution.iter().all(|value| value.is_finite()) {
             return None;
@@ -241,7 +241,7 @@ impl GeneralizedDltPoseEstimator {
             solution[7],
             solution[8],
         );
-        let rotation_svd = scaled_rotation.svd(true, true);
+        let rotation_svd = scaled_rotation.try_svd(true, true, f64::EPSILON * 5.0, 10_000)?;
         let singular = rotation_svd.singular_values;
         let rotation_scale = singular.iter().sum::<f64>() / 3.0;
         if !rotation_scale.is_finite() || rotation_scale <= 1.0e-12 {
@@ -586,12 +586,29 @@ impl GeneralizedPnPRansac {
         let mut best_score = pose_prior.map_or_else(GeneralizedScore::empty, |pose| {
             score_pose(rig, pose, correspondences, self.reprojection_threshold)
         });
+        let rig_timing_debug = std::env::var_os("VISLOC_RIG_SFM_TIMING").is_some();
+        let rig_timing_estimate_started = if rig_timing_debug {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let mut rng = SmallRng::seed_from_u64(self.seed);
         let mut indices = (0..correspondences.len()).collect::<Vec<_>>();
         let mut required_iterations = self.iterations;
         let mut dlt_hypotheses = 0usize;
         let mut central_hypotheses = 0usize;
         for iteration in 0..self.iterations {
+            if let Some(started) = rig_timing_estimate_started {
+                if iteration % 10 == 0 {
+                    eprintln!(
+                        "rig-timing: ransac-iter iteration={iteration}/{} elapsed={:.3}s \
+                         correspondences={}",
+                        self.iterations,
+                        started.elapsed().as_secs_f64(),
+                        correspondences.len(),
+                    );
+                }
+            }
             indices.shuffle(&mut rng);
             let hypotheses: Vec<Pose> = match self.minimal_solver {
                 MinimalSolver::Dlt6pt => {
