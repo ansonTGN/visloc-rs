@@ -67,10 +67,16 @@ against the real ~90°-rotated EuRoC cam0/IMU extrinsic, gyro-bias
 correction added) — all three still regressed at least one of the two
 target sequences. Full detail, numbers, and the frontend diagnosis
 methodology: §1.8 below and
-[the VI-SLAM benchmark details](vi_slam_benchmarks.md). The
-`euroc_config_levels4.json` variant is committed as an available,
-validated option; the checked-in default config is unchanged pending a
-lever that actually clears >9/11.
+[the VI-SLAM benchmark details](vi_slam_benchmarks.md). A definitive
+alternating baseline-vs-`levels4` gate across all 11 sequences (same exe,
+back-to-back per sequence, 15s-watchdog-verified) reproduced the 9/11-wins
+ATE result but found RTF below 1.0 on 6/11 sequences for *both* configs in
+this session (root-caused mostly to a concurrent process on this shared
+machine, plus one unexplained outlier) — not a clean measurement, so real
+time on all 11 is not yet demonstrated either way. The
+`euroc_config_levels4.json` variant is committed as an available, validated
+option; the checked-in default config is unchanged pending both a lever
+that clears >9/11 and a clean RTF measurement.
 Owner goal: beat existing OSS visual-inertial SLAM on EuRoC — ORB-SLAM3
 stereo-inertial first, VINS-Mono second — while keeping the Basalt Rust
 port's runtime/memory edge.
@@ -517,29 +523,41 @@ medians on the fragile sequences):
 MH_04/MH_05 lose). `optical_flow_levels=5` was also tried: better on MH_04
 (0.0533, -24.1%) but worse than `levels4` on MH_05 (0.0595, -6.0%) — a real
 trade-off, not a strictly-dominant further win, so `levels4` is the
-recommended variant. RTF impact measured inconsistently across repeated
-same-session A/B pairs (e.g. MH_05 baseline vs. `levels4` back-to-back:
-1.249 vs. 1.252, no measurable cost; other pairs on V2_01/V2_02 showed
-`levels4` costing roughly 20-25% wall time relative to *that session's own*
-baseline) — this session's absolute RTF numbers were also generally lower
-than the historically documented clean table on sequences neither config
-touches (e.g. today's own baseline V2_01/V2_02 measured 0.919/0.854 vs. the
-documented 1.098/1.230), pointing at session/machine-level variance rather
-than a `levels4`-specific regression; a dedicated clean re-run is warranted
-before shipping. Two intermittent crashes (`exit code 1`, no panic/error
-message in stderr) were also observed on `levels4` runs during this
-session's gate and initially looked lever-specific, but coincided in time
-with another concurrent agent's session on this shared machine
-(`vio/joint-vi-ba`, which was independently confirmed to have been killing
-its own long-running same-named processes around the same window); re-runs
-after that agent's session ended completed with zero failures, so this is
-attributed to external process termination, not a `levels4` bug — flagged
-here rather than fully closed, since it was not reproduced under a
-controlled/isolated re-test.
+recommended variant.
+
+**Definitive alternating-run gate (2026-09-29, same exe, all 11 sequences,
+baseline immediately followed by `levels4` per sequence, 15s-interval
+process-activity watchdog held for the whole run — full table in
+[the benchmark doc](vi_slam_benchmarks.md)):** ATE numbers reproduce the
+above (9/11 wins held for both configs). **RTF does not clear the gate's
+"`>= 1.0` on all 11" bar for either config** — baseline itself is below 1.0
+on 6/11 sequences in this run, well under the historically documented
+1.06-1.68x. The watchdog traced part of this to a recurring low-footprint
+`cargo.exe`/`rustc.exe` cycle in Windows Session 0 (not the console session
+the already-waited-out OpenLORIS build used) overlapping 4 of the 22
+individual runs — likely another agent's own Codex CLI cargo checks on
+this shared machine — plus one unexplained severe outlier (MH_02 baseline,
+RTF 0.309, no detected external process). Because baseline and `levels4`
+shared conditions per sequence, the relative comparison (ATE, and both
+configs degrading together) stays informative, but the absolute RTF column
+is not a clean, final answer — a re-run on a machine independently verified
+idle throughout (not just checked once at the start) is needed. Per the
+gate rule, `levels4` stays a variant and the checked-in default config is
+unchanged. Two intermittent crashes (`exit code 1`, no panic/error message
+in stderr) were also observed on `levels4` runs during an earlier gate
+attempt this session and initially looked lever-specific, but coincided in
+time with another concurrent agent's session on this shared machine
+(`vio/joint-vi-ba`, independently confirmed to have been killing its own
+long-running same-named processes around that window); re-runs after that
+agent's session ended, and the full alternating gate above, completed with
+zero failures — attributed to external process termination, not a
+`levels4` bug.
 
 `euroc_config_levels4.json` is committed as an available variant
 (`configs/basalt/variants/official_euroc_ds/`); the checked-in default
-config is unchanged, since 9/11 (not >9/11) does not clear the Stage 6 bar.
+config is unchanged, both because 9/11 (not >9/11) does not clear the Stage
+6 accuracy bar and because RTF >= 1.0 on all 11 was not demonstrated for
+either config in this session's measurements.
 
 **Lever: IMU/gyro-rotation-seeded KLT initialization (honest negative).**
 Basalt's frame-to-frame KLT seeds its search at the *same pixel* as the
