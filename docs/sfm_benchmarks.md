@@ -41,6 +41,109 @@ cold-cache acceptance therefore remains open. See the
 and [native E2E evidence](../benchmarks/electro/m8-native-e2e-v1.json), plus the
 [experimental refinement evidence](../benchmarks/electro/m8-openloris-atlas-connected-filtered-ba-v1.json).
 
+### Windows-local reproduction: 7N-policy frontend + rig-aware mapper
+
+A separate, independent reproduction using the *current* tools
+(`unordered_sfm_demo` for feature/candidate/verification, `generalized_rig_sfm`
+for the rig-aware incremental mapper) rather than the atlas pipeline above.
+Staged from the official `corridor1-1` archive via
+`scripts/stage_openloris_corridor.py` (undistorted 848×800 PINHOLE images,
+verified against the archive's own SHA-256 hashes). The frontend recipe
+("7N policy", documented in [`docs/electro_m5_scale_validation.md`](electro_m5_scale_validation.md))
+uses temporal-pyramid candidates at offsets 1/2/4/8/16/32,
+`--candidate-budget 7*N` (a total-pair cap, not per-image top-K),
+`--match-ratio 0.8`, `--min-matches 12`; a plain `--retrieval-topk`-based
+candidate fill was tried first and catastrophically fragmented/corrupted
+tracks at scale, which is why the pyramid recipe is the one recorded here.
+Runs were local to a Windows workstation (not part of CI); the tier
+manifests and outputs are not committed (dataset is CC BY-ND 4.0 and is
+never committed).
+
+| Tier | Registered | ATE RMSE (visloc-rs) | ATE RMSE (COLMAP 4.1 CUDA) | Components |
+| --- | ---: | ---: | ---: | ---: |
+| 1,000 images | 1000/1000 | **0.0270 m** | 0.0280 m | 1 |
+| 5,000 images | 4628/5000 | 0.237 m | — (not run at this tier) | not recorded |
+| 10,000 images | 9362/10000 | 0.519 m (19/20 components GT-scored) | 0.3843 m (frozen control, see table above) | 20 |
+
+At 1k scale visloc-rs is both fully registered and slightly more accurate
+than COLMAP. At 10k scale the same recipe registers 93.6% of images but
+fragments into 20 independent-gauge components (COLMAP's control reaches
+2 components at this scale), and the pooled, image-count-weighted RMSE
+across the 19 GT-scored components (8,670 GT-scored images) is 0.519 m,
+short of the 0.3843 m control. `scripts/score_openloris_model.py` computes
+one Sim(3) alignment per component and pools GT-scored image errors; a
+component with fewer than 3 GT-scored images (component 28's images
+predate the ground-truth trajectory's start by ~1.2 s) is skipped and
+reported rather than failing the whole scoring run.
+
+**Fragmentation root cause and a merge attempt.** Cross-checking the
+already-computed verified-pairs snapshot showed that 17 of the 19
+component boundaries have near-zero temporal gaps (0.033-0.4 s) and
+already contain abundant cross-component verified matches (100+ pairs at
+several boundaries) that the incremental mapper never uses, since by the
+time growth reaches a boundary the neighboring frames were already
+claimed by an independent seed; only 2 boundaries are genuine multi-second
+gaps with no existing cross-component matches. A standalone tool
+(`examples/merge_rig_sfm_components.rs`) was built to resolve those
+existing cross-component matches into 3D-3D correspondences via each
+component's own triangulated tracks, RANSAC+Umeyama-fit a Sim(3) per
+accepted component-pair edge, union accepted edges into clusters, and fuse
+RANSAC-inlier landmark pairs into shared landmarks (rather than only
+stitching poses), optionally followed by a rig-aware joint bundle
+adjustment (one pose per rig frame, sharing the real, fixed ~6.4 cm cam1/
+cam2 stereo extrinsic instead of treating every image as an independently
+posed monocular camera).
+
+This reduced the component count (20 → 14 in the tested configuration) and
+several individual clusters matched or improved on their pre-merge
+per-component RMSE. However the pooled aggregate RMSE **regressed** to
+0.655 m, including after the rig-coupled BA pass. Root cause: two of the
+original components (`002`, 814 images; `008`, 1,950 images — the largest
+component in the run) already had substantial RMSE under their own
+independent per-component Sim(3) fit *before any merging* (0.969 m and
+0.850 m respectively, with fit scales of 0.658 and 1.130 — real internal
+drift, not a boundary artifact). Those two components alone accounted for
+roughly 93% of the squared error in the original 20-component baseline;
+independent per-component alignment was masking that drift by curve-
+fitting each component's own error away separately, and merging exposed
+it instead of fixing it. The rig-coupled BA (a real, hard-constrained
+stereo baseline per rig frame) did not correct it either, because a
+per-frame metric baseline anchors *local* scale at each individual frame
+— which the original incremental mapper already enforced while building
+these components — and does not constrain *long-track accumulated drift*
+across hundreds of frames. Per-segment error breakdowns show component 002
+oscillating between 0.40 m and 1.65 m across its own trajectory (a shape/
+heading distortion rather than a monotonic scale ramp) and the merged
+008-containing cluster spiking sharply in its last temporal segment near
+the merge boundary. The next lever for this specific gap — not yet
+attempted — is within-component loop closure (revisit/loop-closure edges,
+retriangulation, and a second global bundle adjustment), the same class of
+fix already used to beat COLMAP on EuRoC MH_03 (see the global-consistency
+notes); this was scoped and intentionally deferred rather than attempted,
+since OpenLORIS RMSE parity is a low-priority item and that playbook is a
+materially larger, historically multi-attempt effort.
+
+**Infrastructure fixes made along the way** (independent of the RMSE
+result above, and applicable beyond OpenLORIS): a genuine, previously
+unknown class of infinite-hang bug was found and fixed across the vision
+and tracking crates — nalgebra 0.33.3's convenience decomposition methods
+(`.svd()`, `.complex_eigenvalues()`, `.symmetric_eigen()`) call the
+underlying `try_new(m, default_epsilon(), 0)` with `max_niter=0`, which
+per nalgebra's own documentation means "continue indefinitely until
+convergence"; a NaN/Inf matrix entry from a degenerate RANSAC minimal
+sample (collinear points, a zero-length bearing) never converges and hangs
+forever. All reachable call sites (P3P/GP3P/GR6P minimal solvers, DLT PnP,
+five-point/eight-point two-view solvers, stereo bootstrap/VO, and the
+tracking crate's `umeyama_similarity_transform`) were switched to the
+bounded `try_new`/`try_svd` variants with nalgebra's own default epsilons
+and a finite `max_niter`, with regression tests and no change to the
+existing test suite's results. Separately, the rig-aware incremental
+mapper's seed-candidate search had an O(candidates × tracks) reset cost
+that made it stall for 80+ minutes at 10k scale with thousands of failing
+seed candidates; replaced with an O(1)-amortized targeted reset, plus new
+opt-in `max_seed_attempts` and `max_track_observations_for_triangulation`
+caps for future scale work.
+
 ## 10,008-image real-world SfM scale validation
 
 <p align="center">
