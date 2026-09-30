@@ -397,7 +397,16 @@ pub fn build_photo_dataset(
 
     // Mapper, then a global BA that also refines the intrinsics.
     let t0 = std::time::Instant::now();
-    let models = run_colmap_port(out_dir, &camera, width, height, &features, &pairwise, log)?;
+    let models = run_colmap_port(
+        out_dir,
+        &camera,
+        width,
+        height,
+        &features,
+        &pairwise,
+        &[],
+        log,
+    )?;
     let (mut poses, mut tracks, mut reproj) = models.into_iter().next().expect("non-empty");
     let mut cam = camera.clone();
     if cfg.refine_intrinsics {

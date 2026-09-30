@@ -174,6 +174,16 @@ pub struct SiftConfig {
     /// implemented only by the GPU path (`visloc_sift_gpu::SiftGpu`);
     /// the CPU path ignores this flag. Default false.
     pub subpixel_localization: bool,
+    /// With [`Self::subpixel_localization`] on: also let the joint 3D fit's
+    /// fractional scale offset (`ds`) refine the reported σ. When false, the
+    /// (x, y) subpixel offset and any integer octave-level jump the fit
+    /// makes are kept, but the fractional intra-level scale correction is
+    /// dropped (σ uses the exact `powi` formula on the settled integer
+    /// level, as if `ds` had converged to 0) — an A/B knob for whether
+    /// scale-axis refinement specifically is responsible for a regression,
+    /// see `docs/euroc_gpu_sfm_vs_colmap.md`'s V1_02 diagnosis. Default
+    /// true (no behavior change from plain `subpixel_localization`).
+    pub subpixel_scale_refine: bool,
 }
 
 /// How the 128-D SIFT histogram is normalized after pooling.
@@ -216,6 +226,7 @@ impl Default for SiftConfig {
             vlfeat_compatible_output_order: false,
             aligned_octave0_upsample: false,
             subpixel_localization: false,
+            subpixel_scale_refine: true,
         }
     }
 }
