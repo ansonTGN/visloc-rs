@@ -850,6 +850,129 @@ of a fixed constant. Everything is committed locally on `vio/joint-vi-ba`
 (commits `86aad0c`..`7cf60d6`), default off (`--joint-vi-ba-weight` unset),
 zero risk to the shipped 9/11 result.
 
+### 1.10 Result 2026-09-30: `optical_flow_epipolar_error` can flip MH_05 alone, but trades directly against V2_03 -- honest negative, no default change
+
+Branch `vio/mh05-win` (worktree `E:/visloc-rs-runs/mh05_wt`, off `main` at
+`e9806bc`, i.e. after PR #239's opt-in levers and the MSRV bump -- the
+`--joint-vi-ba-weight`/1-thread-cap code from §1.9 is already merged to
+`main` at this point, no separate build needed). Exe: `release-rt` +
+`basalt-lm-workspace-reuse,mimalloc-global,basalt-rt-priority`,
+`RUSTFLAGS="-C target-feature=+avx2,+fma"`. Goal: flip MH_05_difficult
+(baseline SE3 0.0631-0.0704 this session's exe, matching the documented
+0.0633) below ORB-SLAM3's 0.0546 without losing any of the 9/11 wins,
+building on §1.8's `optical_flow_levels` 3->4 lever (MH_05 0.0569-0.0571,
+gap already down to ~4%) and §1.8's own track-churn diagnosis (KLT
+forward-backward failures rise monotonically with per-frame RPE).
+
+**Screen on MH_04/MH_05 (single run each, all stacked on `levels4`):**
+
+| Lever (on top of `levels4`) | MH_04 SE3 | MH_05 SE3 | Note |
+| --- | ---: | ---: | --- |
+| (none, `levels4` alone) | 0.0621 | 0.0571 | reproduces §1.8 |
+| `vio_max_iterations` 5->6 | 0.0619 | 0.0565 | tiny gain, doesn't flip |
+| `optical_flow_max_recovered_dist2` 0.04->0.02 | 0.0681 | 0.0551 | MH_05 near-flip, MH_04 worse |
+| `optical_flow_max_recovered_dist2` 0.04->0.08 | 0.0796 | 0.0620 | worse both |
+| `vio_urgent_kf_keypoints_thresh/min_frames_after_kf` 0.6/3 (on top of the demo's own already-active 0.5/2 default) | 0.0648 | 0.0624 | worse than `levels4` alone |
+| same, 0.4/1 | 0.0661 | 0.0575 | worse than `levels4` alone |
+| `--joint-vi-ba-weight 10` (already merged, §1.9) | 0.0619 | 0.0577 | no better than `levels4` alone; RTF hit from background pass contention in this single-run screen |
+| `optical_flow_epipolar_error` 0.005->0.008 | 0.0670 | 0.0598 | worse both -- confirms direction |
+| same, ->0.003 | 0.0543 | 0.0563 | **big MH_04 gain**, MH_05 gap 4%->3% |
+| same, ->0.002 | 0.0585 | **0.0523** | **flips MH_05** (< ORB 0.0546) |
+| same, ->0.001 | 0.0510 | 0.0574 | best single MH_04 result, but MH_05 worse (overshoot) |
+
+`optical_flow_epipolar_error` (the forward-backward KLT epipolar-consistency
+gate) was the standout lever -- it attacks the exact track-churn mechanism
+§1.8 diagnosed, and tightening it dose-dependently improves both MH_04 and
+MH_05 up to a point, then overshoots on MH_05 past ~0.001-0.002.
+
+**The catch: V2_03_difficult.** `optical_flow_epipolar_error=0.002`
+(`euroc_config_levels4_epi002.json`) was carried to a 3-run-median gate
+after an interim full-11-sequence check (single run) surfaced a second
+sequence moving >5%: V2_03_difficult (an existing 9/11 win, baseline SE3
+0.0445-0.0451) jumped to 0.0607 in that single run -- worse than
+ORB-SLAM3's 0.0563. Confirmed real (not run-to-run noise) with 3-run
+medians on this exe, same build, `--optimize-every-k 100
+--periodic-iterations 4` protocol throughout:
+
+| Sequence | Baseline (3-run median) | `epi002` (3-4-run median) | vs ORB-SLAM3 |
+| --- | ---: | ---: | :---: |
+| MH_05_difficult | 0.0631 (1 run; historically 0.0633) | **0.0527** (4 runs: 0.0523/0.0527/0.0527/0.0529) | **flips to WIN** (0.0546) |
+| MH_04_difficult | 0.0704 (1 run) | 0.0581 (4 runs: 0.0578-0.0585) | stays a loss (0.0428), but -17% vs baseline |
+| V2_03_difficult | 0.0447 (3 runs: 0.0447/0.0447/0.0450) | **0.0607** (3 runs: 0.0605/0.0605/0.0609) | **flips to LOSS** (0.0563) -- breaks a current win |
+
+Both the MH_05 win and the V2_03 loss are tight, reproducible effects
+(each within a ~1% band across 3-4 runs), not noise -- `epi002` fails the
+"keep every current win" gate on its own.
+
+**Bisection: no value of this one knob clears both sequences at once.**
+Swept `optical_flow_epipolar_error` between the two anchors (all values
+checked on MH_04/MH_05/V2_03 together, single run unless noted):
+
+| `epipolar_error` | MH_04 | MH_05 | V2_03 | MH_05 vs 0.0546 | V2_03 vs 0.0563 |
+| ---: | ---: | ---: | ---: | :---: | :---: |
+| 0.002 (`epi002`) | 0.0581 (median) | **0.0527** (median) | 0.0607 (median) | WIN | **LOSS** |
+| 0.0022 | 0.0588 | 0.0554 | 0.0579 | loss | loss |
+| 0.0024 | 0.0592 | 0.0556 | 0.0550 | loss | win |
+| 0.0025 (`epi0025`) | 0.0586 (median) | 0.0554 (median) | **0.0537** (median) | loss | WIN |
+| 0.0028 | 0.0620 | 0.0555 | 0.0608 | loss | loss |
+| 0.003 | 0.0536-0.0543 | 0.0563-0.0566 | 0.0587 | loss | loss |
+| 0.0035 | 0.0540-0.0566 | 0.0609 | 0.0566 | loss | loss |
+
+Reading down: V2_03 fails everywhere except a narrow band at
+0.0024-0.0025 (its own baseline-adjacent region), and MH_05 only clears
+0.0546 at 0.002 or tighter -- the two sequences' safe zones do not
+overlap. `epi0025`'s MH_05 median (0.0554, from 3 runs: 0.0557/0.0554/
+0.0550) is consistently ~1.5% short of ORB, not noise either.
+
+**Rescue attempts on top of `epi0025` (keeps V2_03 safe) and `epi002`
+(keeps MH_05 safe), all on MH_04/MH_05/V2_03, single run:**
+
+| Stack | MH_04 | MH_05 | V2_03 |
+| --- | ---: | ---: | ---: |
+| `epi0025` + `vio_max_iterations` 6 | 0.0584 | 0.0552 | 0.0529 |
+| `epi0025` + `optical_flow_max_recovered_dist2` 0.03 | 0.0708 | 0.0616 | 0.0552 |
+| `epi0025` + same, 0.025 | 0.0656 | 0.0572 | 0.0571 |
+| `epi0025` + `optical_flow_max_iterations` (KLT inner iters) 5->7 | 0.0542 | 0.0571 | **0.0461** (big V2_03 gain, but MH_05 worse) |
+| `epi0025` + `optical_flow_detection_grid_size` 50->40 | 0.0623 | 0.0530 | 0.0776 (much worse) |
+| `epi002` + `optical_flow_max_iterations` 5->7 | 0.0600 | 0.0568 | 0.0597 (still a loss; the ofiter7 rescue seen at `epi0025` does not carry over) |
+| `epi002` + `optical_flow_max_iterations` 5->6 | 0.0662 | 0.0607 | 0.0721 (worse across the board) |
+
+None of these stacks puts both MH_05 (< 0.0546) and V2_03 (< 0.0563) on
+the winning side simultaneously. `optical_flow_max_iterations` (KLT inner
+refinement iterations) helps V2_03 a lot when paired with `epi0025` but
+not enough at `epi002`, and costs MH_05 either way; the other secondary
+knobs tried (extra vision-BA iterations, wider/narrower FB pixel-distance
+tolerance, denser detection grid) either do nothing or make things worse.
+
+**Conclusion.** `optical_flow_epipolar_error` is a real, high-leverage
+lever confirmed to move MH_04 and MH_05 in the same direction as
+`optical_flow_levels`, but MH_05_difficult and V2_03_difficult sit on
+opposite sides of its useful range: MH_05 needs a tighter FB-consistency
+gate than V2_03's fast-rotation, checkered-floor tracking can tolerate.
+No single scalar tightening of this knob, nor any of the six secondary
+knobs tried alongside it (`vio_max_iterations`,
+`optical_flow_max_recovered_dist2`, `vio_urgent_kf_keypoints_thresh`/
+`vio_urgent_min_frames_after_kf`, `--joint-vi-ba-weight`,
+`optical_flow_max_iterations`, `optical_flow_detection_grid_size`), clears
+the strict gate (MH_05 win, V2_03 kept, all in >=3-run medians). Per the
+gate rule, no default config change was made; the full-11-sequence run and
+the paired real-time check were not run to completion since neither
+`epi002` nor `epi0025` cleared the MH_05-and-V2_03 pre-condition on its
+own. Both anchor configs are committed as available variants
+(`configs/basalt/variants/official_euroc_ds/euroc_config_levels4_epi002.json`,
+`..._epi0025.json`), plus `..._levels4_iter6.json` (the mild,
+non-flipping `vio_max_iterations` 6 lever), for a future session that
+wants to decouple the two sequences -- e.g. a per-sequence-adaptive
+epipolar threshold, or a V2_03-specific fix for whatever makes its FB
+residual larger under genuine fast rotation (the `optical_flow_max_iterations`
+interaction above is the most promising lead: more KLT refinement
+iterations recovers V2_03 at `epi0025` almost for free, suggesting the
+V2_03 failures at tight epipolar thresholds are KLT convergence residual,
+not truly bad correspondences -- but the effect did not generalize to
+`epi002`'s tighter gate, so more inner iterations alone is not sufficient).
+Evidence: `E:\visloc-rs-runs\mh05_runs\sweep1..sweep10\` (raw run outputs,
+`ate.json` per sequence, `*.log` summaries).
+
 ## 2. Diagnosis
 
 | Symptom | Evidence | What is missing |
