@@ -47,6 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--ba-iterations" => sfm.ba_max_iterations = Some(next()?.parse()?),
             "--local-ba-rel-tol" => sfm.local_ba_relative_tolerance = Some(next()?.parse()?),
             "--sfm-opt" => sfm.sfm_overrides.push(next()?),
+            "--mapper-opt" => sfm.mapper_overrides.push(next()?),
             "--keep-planar" => sfm.keep_planar = true,
             "--no-panoramic" => sfm.keep_planar_no_panoramic = true,
             "--register-gated" => sfm.register_gated = true,

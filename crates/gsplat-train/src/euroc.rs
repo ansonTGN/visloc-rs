@@ -96,6 +96,10 @@ pub struct EurocSfmConfig {
     /// Near-static frames (e.g. before take-off) have no parallax and were
     /// registered metres off. `0` keeps every frame.
     pub min_keyframe_motion_px: f64,
+    /// `key=value` overrides of the COLMAP-port mapper's
+    /// `colmap_incremental::MapperOptions` (see [`apply_mapper_override`]),
+    /// applied only when `colmap_port_mapper` is set.
+    pub mapper_overrides: Vec<String>,
 }
 
 impl Default for EurocSfmConfig {
@@ -129,6 +133,7 @@ impl Default for EurocSfmConfig {
             sift_overrides: Vec::new(),
             import_features: None,
             min_keyframe_motion_px: 2.0,
+            mapper_overrides: Vec::new(),
         }
     }
 }
@@ -227,6 +232,7 @@ struct SfmOutcome {
 /// write its inputs (single-sensor rig manifest, keypoints, VISLOC-COLMAP-1
 /// pairs) under `out_dir/port`, run `colmap_incremental::pipeline::run`,
 /// and read the largest model back as poses + tracks.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_colmap_port(
     out_dir: &Path,
     camera: &Camera,
@@ -234,6 +240,7 @@ pub(crate) fn run_colmap_port(
     height: u32,
     features: &[FeatureSet],
     pairwise: &[PairwiseMatches],
+    mapper_overrides: &[String],
     log: &mut dyn FnMut(&str),
 ) -> Result<Vec<PortModel>, EurocError> {
     use std::io::Write;
@@ -309,6 +316,9 @@ pub(crate) fn run_colmap_port(
     // The port's default (8) is a rig-benchmark control override; use
     // COLMAP's own `Mapper.abs_pose_min_num_inliers` for single cameras.
     options.mapper.abs_pose_min_num_inliers = 30;
+    for o in mapper_overrides {
+        apply_mapper_override(&mut options.mapper, o).map_err(err)?;
+    }
     let run = pipeline::run(&options, &db);
     let _ = std::fs::write(dir.join("mapper.log"), run.log.join("\n"));
     let mut order: Vec<usize> = (0..run.models.len()).collect();
@@ -483,6 +493,7 @@ pub fn apply_sift_override(cfg: &mut SiftConfig, kv: &str) -> Result<(), String>
         "sigma_base" => cfg.sigma_base = num()?,
         "aligned_octave0_upsample" => cfg.aligned_octave0_upsample = flag(),
         "subpixel_localization" => cfg.subpixel_localization = flag(),
+        "subpixel_scale_refine" => cfg.subpixel_scale_refine = flag(),
         _ => return Err(format!("--sift-opt: unknown key {key}")),
     }
     Ok(())
@@ -539,6 +550,42 @@ pub fn apply_sfm_override(cfg: &mut IncrementalSfmConfig, kv: &str) -> Result<()
             }
         }
         _ => return Err(format!("--sfm-opt: unknown key {key}")),
+    }
+    Ok(())
+}
+
+/// Apply one `key=value` override to the COLMAP-port mapper's
+/// `colmap_incremental::MapperOptions`. Diagnostic knob for sweeping the
+/// mapper's registration/triangulation/filtering thresholds against
+/// `--mapper colmap-port`; see `docs/euroc_gpu_sfm_vs_colmap.md`'s
+/// "mapper-side robustness" experiments.
+pub fn apply_mapper_override(
+    cfg: &mut visloc_slam::colmap_incremental::MapperOptions,
+    kv: &str,
+) -> Result<(), String> {
+    let (key, value) = kv
+        .split_once('=')
+        .ok_or_else(|| format!("--mapper-opt {kv}: expected key=value"))?;
+    let num = || -> Result<f64, String> {
+        value
+            .parse::<f64>()
+            .map_err(|e| format!("--mapper-opt {key}: {e}"))
+    };
+    match key {
+        "init_min_num_inliers" => cfg.init_min_num_inliers = num()? as usize,
+        "init_max_error" => cfg.init_max_error = num()?,
+        "init_max_forward_motion" => cfg.init_max_forward_motion = num()?,
+        "init_min_tri_angle_deg" => cfg.init_min_tri_angle_deg = num()?,
+        "init_max_reg_trials" => cfg.init_max_reg_trials = num()? as usize,
+        "abs_pose_max_error" => cfg.abs_pose_max_error = num()?,
+        "abs_pose_min_num_inliers" => cfg.abs_pose_min_num_inliers = num()? as usize,
+        "abs_pose_min_inlier_ratio" => cfg.abs_pose_min_inlier_ratio = num()?,
+        "ba_local_num_images" => cfg.ba_local_num_images = num()? as usize,
+        "ba_local_min_tri_angle_deg" => cfg.ba_local_min_tri_angle_deg = num()?,
+        "filter_max_reproj_error" => cfg.filter_max_reproj_error = num()?,
+        "filter_min_tri_angle_deg" => cfg.filter_min_tri_angle_deg = num()?,
+        "max_reg_trials" => cfg.max_reg_trials = num()? as usize,
+        _ => return Err(format!("--mapper-opt: unknown key {key}")),
     }
     Ok(())
 }
@@ -1002,7 +1049,16 @@ pub fn build_euroc_dataset(
         None => None,
     };
     let result = if cfg.colmap_port_mapper {
-        let models = run_colmap_port(out_dir, &camera, width, height, &features, &pairwise, log)?;
+        let models = run_colmap_port(
+            out_dir,
+            &camera,
+            width,
+            height,
+            &features,
+            &pairwise,
+            &cfg.mapper_overrides,
+            log,
+        )?;
         let (poses, tracks, mean_reprojection_px) = models.into_iter().next().unwrap();
         SfmOutcome {
             poses,

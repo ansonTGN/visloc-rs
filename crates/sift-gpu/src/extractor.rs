@@ -725,7 +725,7 @@ fn select_keypoints(mut raw: Vec<RawKp>, config: &SiftConfig) -> Vec<SiftKeypoin
         .iter()
         .map(|r| {
             let upsample = (1usize << r.octave) as f64 / 2.0;
-            let sigma = if r.ds != 0.0 {
+            let sigma = if r.ds != 0.0 && config.subpixel_scale_refine {
                 config.sigma_base * k.powf(r.level as f64 + r.ds as f64) * upsample
             } else {
                 config.sigma_base * k.powi(r.level as i32) * upsample
