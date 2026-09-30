@@ -700,6 +700,149 @@ default pipeline, its numbers and the README are unchanged.
 remain available for anyone who wants V2_01/V2_03/V1_03's better numbers
 and can accept V1_02's small regression.
 
+### Chasing V1_02's last 0.13 cm: mapper thresholds, scale-only subpixel, and a correspondence check (2026-09-30)
+
+Goal for this round: keep every win the `aligned_octave0_upsample` +
+`subpixel_localization` + `keypoints=6000` config already has (MH_03,
+MH_05, V1_01, V2_03, tie MH_01) and additionally flip V1_02 from a loss
+(1.96 cm) to a win (COLMAP: 1.83 cm), without a fixed config that
+regresses anything else. All experiments below hold that three-flag
+config fixed and vary one more thing at a time, iterated on V1_02 first
+(the fast, isolated repro) before validating survivors on the full set.
+
+**New diagnostic tooling added** (both opt-in, default off, no behavior
+change when unused — this is the only code kept from this round):
+
+- `--mapper-opt key=value` on `gsplat_euroc` (`apply_mapper_override` in
+  `crates/gsplat-train/src/euroc.rs`), plumbed into `run_colmap_port`,
+  exposing the COLMAP-port mapper's `colmap_incremental::MapperOptions`
+  fields that had no CLI surface before this round
+  (`init_min_num_inliers`, `init_max_error`, `init_max_forward_motion`,
+  `init_min_tri_angle_deg`, `init_max_reg_trials`, `abs_pose_max_error`,
+  `abs_pose_min_num_inliers`, `abs_pose_min_inlier_ratio`,
+  `ba_local_num_images`, `ba_local_min_tri_angle_deg`,
+  `filter_max_reproj_error`, `filter_min_tri_angle_deg`,
+  `max_reg_trials`). Previously `--sfm-opt` only reached the old
+  `incremental_sfm` mapper's config, a no-op under `--mapper colmap-port`.
+- `--sift-opt subpixel_scale_refine=0`: with `subpixel_localization=1`,
+  keeps the joint 3D Newton fit's (x, y) position offset and any integer
+  octave-level jump, but drops the fractional scale offset `ds` from the
+  reported σ (uses the exact `powi` formula on the settled integer level,
+  as if `ds` had converged to 0) — isolates whether the *scale* axis of
+  subpixel refinement specifically drives V1_02's regression, independent
+  of the position axis. Default `true` (`ds` used, i.e. no change from
+  plain `subpixel_localization`).
+
+**Mapper-threshold sweep on V1_02** (baseline for this sweep: 1.96 cm,
+198/200):
+
+| `--mapper-opt` | V1_02 ATE (reg.) |
+| --- | ---: |
+| `filter_max_reproj_error=2.0` | 2.07 cm (197) |
+| `filter_max_reproj_error=6.0` | 2.44 cm (194) |
+| `abs_pose_max_error=6.0` | 1.98 cm (193) |
+| `filter_min_tri_angle_deg=2.0` | 2.41 cm (199) |
+| `filter_min_tri_angle_deg=2.5` | **1.89 cm (198)** |
+| `filter_min_tri_angle_deg=3.0` | 2.18 cm (192) |
+| `filter_min_tri_angle_deg=3.5` | 3.28 cm (197) |
+| `filter_min_tri_angle_deg=4.0` | 2.52 cm (199) |
+| `filter_min_tri_angle_deg=2.5` + `init_min_tri_angle_deg=20` | 1.95 cm (199) |
+| `ba_local_min_tri_angle_deg=3.0` | 3.21 cm (197) |
+| `max_reg_trials=6` | 1.96 cm (198, no-op) |
+
+`filter_min_tri_angle_deg` (the point-filtering minimum parallax, default
+1.5°) is the only lever that improved V1_02 at all, but non-monotonically
+and violently — 2.0° is *worse* than both 1.5° and 2.5°, 3.5° is far worse
+than 3.0° or 4.0°. This is not a smooth accuracy/completeness trade-off;
+it looks like a threshold that flips individual marginal points/tracks in
+and out of the optimization in a way that happens to land well at 2.5° on
+this one sequence. Validating `filter_min_tri_angle_deg=2.5` (the best
+value) on the full 8-sequence set confirms this is noise, not signal —
+**net negative**:
+
+| Sequence | Fixed config (today's candidate) | + `filter_min_tri_angle_deg=2.5` | COLMAP |
+| --- | ---: | ---: | ---: |
+| MH_01_easy | 0.35 cm (195/200) | 0.37 cm (**177/200**) | 0.35 cm (200) |
+| MH_03_medium | 1.21 cm (170) | 1.35 cm (166) | 2.61 cm |
+| MH_05_difficult | 2.43 cm (199) | 2.51 cm (193) | 193.66 cm |
+| V1_01_easy | 2.55 cm (197) | 2.58 cm (198) | 2.75 cm |
+| V1_02_medium | 1.96 cm (198) | 1.89 cm (198) | 1.83 cm |
+| V2_01_easy | 2.22 cm (198) | 2.30 cm (197) | 1.00 cm |
+| V1_03_difficult | 2.96 cm (63) | 2.97 cm (63) | 1.98 cm |
+| V2_03_difficult | **2.30 cm (98)** | **2.82 cm (98)** | 2.85 cm |
+
+It costs MH_01 18 registered frames (195 → 177, ATE still ties COLMAP) and
+shrinks V2_03's win margin from 0.55 cm to 0.03 cm, for a V1_02 gain
+(1.96 → 1.89 cm) that still falls short of COLMAP's 1.83 cm. Rejected;
+`--mapper-opt` stays available as a diagnostic knob, not part of any
+recommended config.
+
+**Scale-only subpixel disable, keypoint count, and orientation/scale
+re-check on V1_02** (idea from the brief: since fixed features are
+tighter-localized, re-check the other SIFT knobs):
+
+| Change | V1_02 ATE (reg.) |
+| --- | ---: |
+| `--sift-opt subpixel_scale_refine=0` | 2.02 cm (199) |
+| `--keypoints 5000` | 5.01 cm (196) |
+| `--keypoints 5500` | 2.06 cm (199) |
+| `--keypoints 7000` | 2.18 cm (196) |
+| `--sift-opt max_orientations=1` | 3.95 cm (199) |
+| `--sift-opt prefer_larger_scale=0` | 3.11 cm (199) |
+
+All worse than the `keypoints=6000` baseline; `keypoints=6000` is
+reconfirmed as a sharp local optimum (`5000` is dramatically worse, not
+just slightly), and disabling only the scale axis of subpixel refinement
+doesn't isolate a win either — the (x, y) and scale corrections aren't
+separable culprits, or the scale correction isn't the culprit at all.
+
+**`verify-min-inliers` re-sweep with `keypoints=6000` held on** (the
+existing doc's `verify-min-inliers 30` result predates `keypoints=6000`;
+retested together, plus the gap points 20/25):
+
+| `--verify-min-inliers` | V1_02 ATE (reg.) | V2_03 ATE (reg.) |
+| --- | ---: | ---: |
+| 15 (today's candidate) | 1.96 cm (198) | 2.30 cm (98) |
+| 20 | 2.10 cm (199) | 4.41 cm (98) |
+| 25 | 2.31 cm (198) | 2.49 cm (97) |
+| 30 | **1.86 cm (200)** | 2.84 cm (87) |
+
+Another non-monotonic surface (20 is worse than both 15 and 25 on V1_02;
+20 is far worse than every other value on V2_03). `30` gets V1_02 to
+1.86 cm — closer than any other lever this round, a 0.03 cm gap to
+COLMAP's 1.83 cm — but V2_03's win margin over COLMAP's 2.85 cm shrinks
+to 0.01 cm on 11 fewer registered frames (87 vs 98), i.e. within noise of
+flipping to a loss. Not adoptable as a reliable win on either sequence.
+
+**Correspondence-graph check (idea (d) from the brief): does the fix drop
+matches on V1_02's frames 157-176?** Dumped and diffed the exported
+`pairs.bin` (per-frame verified-pair and match counts) between the
+pre-fix baseline (`keypoints=4000`, no `aligned_octave0_upsample`/
+`subpixel_localization` — reproduced exactly, 1.76 cm/198/200, confirming
+the harness) and the fixed config (1616 vs 1595 total verified pairs).
+Frame-by-frame in the 150-185 range the two are within noise of each
+other (e.g. frame 176: 18 pairs/2439 matches pre-fix vs 17 pairs/2133
+matches fixed; frame 165: 22/4229 vs 22/4417) — **no correspondence-count
+drop in the weak segment**. This rules out the fix losing topology there;
+combined with the earlier per-frame ATE diagnosis (broad accuracy
+increase, not new-frame-specific), the regression is consistent with a
+feature-localization/triangulation-precision effect on already-marginal
+points, not a connectivity change — the same family of gap already
+diagnosed as intractable by simple thresholding in the 2026-09-28/29
+sections above.
+
+**Conclusion: no fixed-config lever found this round closes V1_02's last
+0.13 cm without a new, comparably-sized risk elsewhere** (MH_01
+registration count, or V2_03's win margin shrinking to noise level).
+Every threshold surface probed (`filter_min_tri_angle_deg`,
+`verify-min-inliers`, keypoint count) is sharply non-monotonic across
+plausible values, which is itself evidence that V1_02's remaining gap is
+close to the noise floor of this benchmark rather than a systematic,
+one-flag-away defect. Honest negative; the default `gsplat_euroc`
+pipeline, its numbers, and the README are unchanged. `--mapper-opt` and
+`--sift-opt subpixel_scale_refine` are kept as diagnostic tooling for
+whoever picks this up next.
+
 ## Reproduce
 
 ```text
